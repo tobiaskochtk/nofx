@@ -146,6 +146,10 @@ export const translations = {
     currentTraders: 'Current Traders',
     noTraders: 'No AI Traders',
     createFirstTrader: 'Create your first AI trader to get started',
+    dashboardEmptyTitle: 'No Traders Configured',
+    dashboardEmptyDescription:
+      "You haven't created any AI traders yet. Create your first trader to start automated trading.",
+    goToTradersPage: 'Go to Traders Page',
     configureModelsFirst: 'Please configure AI models first',
     configureExchangesFirst: 'Please configure exchanges first',
     configureModelsAndExchangesFirst:
@@ -276,6 +280,33 @@ export const translations = {
     altcoinLeverageValidation: 'Altcoin leverage must be between 1-20x',
     invalidSymbolFormat: 'Invalid symbol format: {symbol}, must end with USDT',
 
+    // System Prompt Templates
+    systemPromptTemplate: 'System Prompt Template',
+    promptTemplateDefault: 'Default Stable',
+    promptTemplateAdaptive: 'Conservative Strategy',
+    promptTemplateAdaptiveRelaxed: 'Aggressive Strategy',
+    promptTemplateHansen: 'Hansen Strategy',
+    promptTemplateNof1: 'NoF1 English Framework',
+    promptTemplateTaroLong: 'Taro Long Position',
+    promptDescDefault: '📊 Default Stable Strategy',
+    promptDescDefaultContent:
+      'Maximize Sharpe ratio, balanced risk-reward, suitable for beginners and stable long-term trading',
+    promptDescAdaptive: '🛡️ Conservative Strategy (v6.0.0)',
+    promptDescAdaptiveContent:
+      'Strict risk control, BTC mandatory confirmation, high win rate priority, suitable for conservative traders',
+    promptDescAdaptiveRelaxed: '⚡ Aggressive Strategy (v6.0.0)',
+    promptDescAdaptiveRelaxedContent:
+      'High-frequency trading, BTC optional confirmation, pursue trading opportunities, suitable for volatile markets',
+    promptDescHansen: '🎯 Hansen Strategy',
+    promptDescHansenContent:
+      'Hansen custom strategy, maximize Sharpe ratio, for professional traders',
+    promptDescNof1: '🌐 NoF1 English Framework',
+    promptDescNof1Content:
+      'Hyperliquid exchange specialist, English prompts, maximize risk-adjusted returns',
+    promptDescTaroLong: '📈 Taro Long Position Strategy',
+    promptDescTaroLongContent:
+      'Data-driven decisions, multi-dimensional validation, continuous learning evolution, long position specialist',
+
     // Loading & Error
     loading: 'Loading...',
     loadingError: '⚠️ Failed to load AI learning data',
@@ -364,12 +395,23 @@ export const translations = {
     // Login & Register
     login: 'Sign In',
     register: 'Sign Up',
+    username: 'Username',
     email: 'Email',
     password: 'Password',
     confirmPassword: 'Confirm Password',
+    usernamePlaceholder: 'your username',
     emailPlaceholder: 'your@email.com',
     passwordPlaceholder: 'Enter your password',
     confirmPasswordPlaceholder: 'Re-enter your password',
+    passwordRequirements: 'Password requirements',
+    passwordRuleMinLength: 'Minimum 8 characters',
+    passwordRuleUppercase: 'At least 1 uppercase letter',
+    passwordRuleLowercase: 'At least 1 lowercase letter',
+    passwordRuleNumber: 'At least 1 number',
+    passwordRuleSpecial: 'At least 1 special character (@#$%!&*?)',
+    passwordRuleMatch: 'Passwords match',
+    passwordNotMeetRequirements:
+      'Password does not meet the security requirements',
     otpPlaceholder: '000000',
     loginTitle: 'Sign in to your account',
     registerTitle: 'Create a new account',
@@ -419,6 +461,12 @@ export const translations = {
     registrationFailed: 'Registration failed',
     verificationFailed: 'OTP verification failed',
     invalidCredentials: 'Invalid email or password',
+    weak: 'Weak',
+    medium: 'Medium',
+    strong: 'Strong',
+    passwordStrength: 'Password strength',
+    passwordStrengthHint:
+      'Use at least 8 characters with mix of letters, numbers and symbols',
     passwordMismatch: 'Passwords do not match',
     emailRequired: 'Email is required',
     passwordRequired: 'Password is required',
@@ -898,6 +946,10 @@ export const translations = {
     currentTraders: '当前交易员',
     noTraders: '暂无AI交易员',
     createFirstTrader: '创建您的第一个AI交易员开始使用',
+    dashboardEmptyTitle: '暂无交易员',
+    dashboardEmptyDescription:
+      '您还未创建任何AI交易员，创建您的第一个交易员以开始自动化交易。',
+    goToTradersPage: '前往交易员页面',
     configureModelsFirst: '请先配置AI模型',
     configureExchangesFirst: '请先配置交易所',
     configureModelsAndExchangesFirst: '请先配置AI模型和交易所',
@@ -1018,6 +1070,29 @@ export const translations = {
     altcoinLeverageValidation: '山寨币杠杆必须在1-20倍之间',
     invalidSymbolFormat: '无效的币种格式：{symbol}，必须以USDT结尾',
 
+    // System Prompt Templates
+    systemPromptTemplate: '系统提示词模板',
+    promptTemplateDefault: '默认稳健',
+    promptTemplateAdaptive: '保守策略',
+    promptTemplateAdaptiveRelaxed: '激进策略',
+    promptTemplateHansen: 'Hansen 策略',
+    promptTemplateNof1: 'NoF1 英文框架',
+    promptTemplateTaroLong: 'Taro 长仓',
+    promptDescDefault: '📊 默认稳健策略',
+    promptDescDefaultContent: '最大化夏普比率，平衡风险收益，适合新手和长期稳定交易',
+    promptDescAdaptive: '🛡️ 保守策略 (v6.0.0)',
+    promptDescAdaptiveContent: '严格风控，BTC 强制确认，高胜率优先，适合保守型交易者',
+    promptDescAdaptiveRelaxed: '⚡ 激进策略 (v6.0.0)',
+    promptDescAdaptiveRelaxedContent:
+      '高频交易，BTC 可选确认，追求交易机会，适合波动市场',
+    promptDescHansen: '🎯 Hansen 策略',
+    promptDescHansenContent: 'Hansen 定制策略，最大化夏普比率，专业交易者专用',
+    promptDescNof1: '🌐 NoF1 英文框架',
+    promptDescNof1Content:
+      'Hyperliquid 交易所专用，英文提示词，风险调整回报最大化',
+    promptDescTaroLong: '📈 Taro 长仓策略',
+    promptDescTaroLongContent: '数据驱动决策，多维度验证，持续学习进化，长仓专用',
+
     // Loading & Error
     loading: '加载中...',
     loadingError: '⚠️ 加载AI学习数据失败',
@@ -1089,12 +1164,22 @@ export const translations = {
     // Login & Register
     login: '登录',
     register: '注册',
+    username: '用户名',
     email: '邮箱',
     password: '密码',
     confirmPassword: '确认密码',
+    usernamePlaceholder: '请输入用户名',
     emailPlaceholder: '请输入邮箱地址',
     passwordPlaceholder: '请输入密码（至少6位）',
     confirmPasswordPlaceholder: '请再次输入密码',
+    passwordRequirements: '密码要求',
+    passwordRuleMinLength: '至少 8 位',
+    passwordRuleUppercase: '至少 1 个大写字母',
+    passwordRuleLowercase: '至少 1 个小写字母',
+    passwordRuleNumber: '至少 1 个数字',
+    passwordRuleSpecial: '至少 1 个特殊字符（@#$%!&*?）',
+    passwordRuleMatch: '两次密码一致',
+    passwordNotMeetRequirements: '密码不符合安全要求',
     otpPlaceholder: '000000',
     loginTitle: '登录到您的账户',
     registerTitle: '创建新账户',
@@ -1140,6 +1225,11 @@ export const translations = {
     registrationFailed: '注册失败',
     verificationFailed: 'OTP验证失败',
     invalidCredentials: '邮箱或密码错误',
+    weak: '弱',
+    medium: '中',
+    strong: '强',
+    passwordStrength: '密码强度',
+    passwordStrengthHint: '建议至少8位，包含大小写、数字和符号',
     passwordMismatch: '两次输入的密码不一致',
     emailRequired: '请输入邮箱',
     passwordRequired: '请输入密码',
