@@ -1,21 +1,22 @@
 package trader
 
 import (
-    "encoding/json"
-    "fmt"
-    "log"
-    "math"
-    "os"
-    "strconv"
-    "nofx/config"
-    "nofx/decision"
-    "nofx/logger"
-    "nofx/market"
-    "nofx/mcp"
-    "nofx/pool"
+	"encoding/json"
+	"fmt"
+	"log"
+	"math"
+	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
+
+	"nofx/config"
+	"nofx/decision"
+	"nofx/logger"
+	"nofx/market"
+	"nofx/mcp"
+	"nofx/pool"
 )
 
 // AutoTraderConfig 自动交易配置（简化版 - AI全权决策）
@@ -118,6 +119,8 @@ type AutoTrader struct {
     lastDecisionJSON      string
     openDealIDs           map[string]int64   // symbol_side -> dealID
 }
+
+const manualDealCloseGrace = 2 * time.Minute
 
 // getEnvFloat 从环境变量读取浮点数（支持 .env 注入）
 func getEnvFloat(name string, def float64) float64 {
@@ -629,7 +632,7 @@ func (at *AutoTrader) buildTradingContext() (*decision.Context, error) {
 
 	for _, pos := range positions {
 		symbol := pos["symbol"].(string)
-		side := pos["side"].(string)
+		side := strings.ToLower(pos["side"].(string))
 		entryPrice := pos["entryPrice"].(float64)
 		markPrice := pos["markPrice"].(float64)
 		quantity := pos["positionAmt"].(float64)
@@ -692,6 +695,8 @@ func (at *AutoTrader) buildTradingContext() (*decision.Context, error) {
 			delete(at.positionFirstSeenTime, key)
 		}
 	}
+
+	at.reconcileDealsWithPositions(currentPositionKeys)
 
 	// 3. 获取交易员的候选币种池
 	candidateCoins, err := at.getCandidateCoins()
@@ -1093,69 +1098,10 @@ func (at *AutoTrader) executeCloseLongWithRecord(decision *decision.Decision, ac
 	}
 
 	log.Printf("  ✓ 平仓成功")
-
-	// 更新数据库中的deal（计算P/L）
-	if at.database != nil {
-		posKey := decision.Symbol + "_long"
-		dealID, has := at.openDealIDs[posKey]
-		if !has {
-			// fallback to DB query
-			if dbFind, ok := at.database.(interface{ FindOpenDeal(userID, traderID, symbol, side string) (*config.DealRecord, error) }); ok {
-				if rec, err := dbFind.FindOpenDeal(at.userID, at.id, decision.Symbol, "long"); err == nil && rec != nil {
-					dealID = rec.ID
-				}
-			}
-		}
-
-		if dealID != 0 {
-			// load open record for accurate calc
-			var openRec *config.DealRecord
-			if dbGet, ok := at.database.(interface{ GetDealByID(userID, traderID string, id int64) (*config.DealRecord, error) }); ok {
-				if rec, err := dbGet.GetDealByID(at.userID, at.id, dealID); err == nil {
-					openRec = rec
-				}
-			}
-			if openRec != nil {
-				open := openRec.OpenPrice
-				close := marketData.CurrentPrice
-				// 典型费率/滑点（.env 可配置）
-				slippageRate := getEnvFloat("NOFX_PNL_SLIPPAGE_RATE", 0.0005)
-				feeRate := getEnvFloat("NOFX_PNL_TAKER_FEE_RATE", 0.0004)
-				// 应用滑点（long: 开多价上调，平多价下调）
-				effOpen := open * (1 + slippageRate)
-				effClose := close * (1 - slippageRate)
-				priceChangePct := 0.0
-				if effOpen > 0 { priceChangePct = (effClose - effOpen) / effOpen }
-				positionValue := openRec.Quantity * effOpen
-				grossPnL := positionValue * priceChangePct * float64(openRec.Leverage)
-				// 手续费（开仓+平仓）
-				fees := (openRec.Quantity*effOpen + openRec.Quantity*effClose) * feeRate
-				realizedPnL := grossPnL - fees
-				marginUsed := 0.0
-				if openRec.Leverage > 0 { marginUsed = positionValue / float64(openRec.Leverage) }
-				realizedPnLPct := 0.0
-				if marginUsed > 0 { realizedPnLPct = (realizedPnL / marginUsed) * 100 }
-				duration := time.Since(openRec.OpenTime).Seconds()
-				closeOrderID := fmt.Sprintf("%v", order["orderId"])
-				if dbClose, ok := at.database.(interface{ CloseDeal(userID, traderID string, id int64, closePrice float64, closeOrderID string, realizedPnL, realizedPnLPct float64, durationSeconds int64, wasStopLoss bool) error }); ok {
-					if err := dbClose.CloseDeal(at.userID, at.id, dealID, close, closeOrderID, realizedPnL, realizedPnLPct, int64(duration), false); err != nil {
-						log.Printf("  ⚠️ 更新交易P/L失败: %v", err)
-					} else {
-						delete(at.openDealIDs, posKey)
-						log.Printf("  💾 已更新交易P/L (deal_id=%d)", dealID)
-					}
-				}
-				// 记录事件: close
-				if dbEvt, ok := at.database.(interface{ CreateDealEvent(event *config.DealEvent) error }); ok {
-					_ = dbEvt.CreateDealEvent(&config.DealEvent{UserID: at.userID, TraderID: at.id, DealID: dealID, Type: "close", Symbol: decision.Symbol, Side: "long", Price: close, OrderID: closeOrderID})
-				}
-			}
-		}
-	}
+	at.closeDealInternal(decision.Symbol, "long", marketData.CurrentPrice, fmt.Sprintf("%v", order["orderId"]), false, "ai_close_long")
 	return nil
 }
 
-// executeCloseShortWithRecord 执行平空仓并记录详细信息
 func (at *AutoTrader) executeCloseShortWithRecord(decision *decision.Decision, actionRecord *logger.DecisionAction) error {
 	log.Printf("  🔄 平空仓: %s", decision.Symbol)
 
@@ -1178,65 +1124,10 @@ func (at *AutoTrader) executeCloseShortWithRecord(decision *decision.Decision, a
 	}
 
 	log.Printf("  ✓ 平仓成功")
-
-	// 更新数据库中的deal（计算P/L）
-	if at.database != nil {
-		posKey := decision.Symbol + "_short"
-		dealID, has := at.openDealIDs[posKey]
-		if !has {
-			if dbFind, ok := at.database.(interface{ FindOpenDeal(userID, traderID, symbol, side string) (*config.DealRecord, error) }); ok {
-				if rec, err := dbFind.FindOpenDeal(at.userID, at.id, decision.Symbol, "short"); err == nil && rec != nil {
-					dealID = rec.ID
-				}
-			}
-		}
-		if dealID != 0 {
-			var openRec *config.DealRecord
-			if dbGet, ok := at.database.(interface{ GetDealByID(userID, traderID string, id int64) (*config.DealRecord, error) }); ok {
-				if rec, err := dbGet.GetDealByID(at.userID, at.id, dealID); err == nil {
-					openRec = rec
-				}
-			}
-			if openRec != nil {
-				open := openRec.OpenPrice
-				close := marketData.CurrentPrice
-				// 典型费率/滑点（.env 可配置）
-				slippageRate := getEnvFloat("NOFX_PNL_SLIPPAGE_RATE", 0.0005)
-				feeRate := getEnvFloat("NOFX_PNL_TAKER_FEE_RATE", 0.0004)
-				// 应用滑点（short: 开空价下调，平空价上调）
-				effOpen := open * (1 - slippageRate)
-				effClose := close * (1 + slippageRate)
-				priceChangePct := 0.0
-				if effOpen > 0 { priceChangePct = (effOpen - effClose) / effOpen }
-				positionValue := openRec.Quantity * effOpen
-				grossPnL := positionValue * priceChangePct * float64(openRec.Leverage)
-				fees := (openRec.Quantity*effOpen + openRec.Quantity*effClose) * feeRate
-				realizedPnL := grossPnL - fees
-				marginUsed := 0.0
-				if openRec.Leverage > 0 { marginUsed = positionValue / float64(openRec.Leverage) }
-				realizedPnLPct := 0.0
-				if marginUsed > 0 { realizedPnLPct = (realizedPnL / marginUsed) * 100 }
-				duration := time.Since(openRec.OpenTime).Seconds()
-				closeOrderID := fmt.Sprintf("%v", order["orderId"])
-				if dbClose, ok := at.database.(interface{ CloseDeal(userID, traderID string, id int64, closePrice float64, closeOrderID string, realizedPnL, realizedPnLPct float64, durationSeconds int64, wasStopLoss bool) error }); ok {
-					if err := dbClose.CloseDeal(at.userID, at.id, dealID, close, closeOrderID, realizedPnL, realizedPnLPct, int64(duration), false); err != nil {
-						log.Printf("  ⚠️ 更新交易P/L失败: %v", err)
-					} else {
-						delete(at.openDealIDs, posKey)
-						log.Printf("  💾 已更新交易P/L (deal_id=%d)", dealID)
-					}
-				}
-				// 记录事件: close
-				if dbEvt, ok := at.database.(interface{ CreateDealEvent(event *config.DealEvent) error }); ok {
-					_ = dbEvt.CreateDealEvent(&config.DealEvent{UserID: at.userID, TraderID: at.id, DealID: dealID, Type: "close", Symbol: decision.Symbol, Side: "short", Price: close, OrderID: closeOrderID})
-				}
-			}
-		}
-	}
+	at.closeDealInternal(decision.Symbol, "short", marketData.CurrentPrice, fmt.Sprintf("%v", order["orderId"]), false, "ai_close_short")
 	return nil
 }
 
-// executeUpdateStopLossWithRecord 执行调整止损并记录详细信息
 func (at *AutoTrader) executeUpdateStopLossWithRecord(decision *decision.Decision, actionRecord *logger.DecisionAction) error {
 	log.Printf("  🎯 调整止损: %s → %.2f", decision.Symbol, decision.NewStopLoss)
 
@@ -1530,6 +1421,153 @@ func (at *AutoTrader) executePartialCloseWithRecord(decision *decision.Decision,
 	}
 
 	return nil
+}
+
+func (at *AutoTrader) closeDealInternal(symbol, side string, closePrice float64, orderID string, wasStopLoss bool, reason string) {
+	dealID, openRec := at.getOpenDealRecord(symbol, side)
+	at.closeDealInternalWithRecord(symbol, side, dealID, openRec, closePrice, orderID, wasStopLoss, reason)
+}
+
+func (at *AutoTrader) closeDealInternalWithRecord(symbol, side string, dealID int64, openRec *config.DealRecord, closePrice float64, orderID string, wasStopLoss bool, reason string) {
+	if dealID == 0 || openRec == nil {
+		log.Printf("⚠️ [%s] 未找到可关闭的交易记录 (%s %s)", at.name, symbol, side)
+		return
+	}
+	if closePrice <= 0 {
+		closePrice = openRec.OpenPrice
+	}
+	realizedPnL, realizedPnLPct := at.computeDealPnL(openRec, closePrice)
+	duration := time.Since(openRec.OpenTime).Seconds()
+	if closer, ok := at.database.(interface {
+		CloseDeal(userID, traderID string, id int64, closePrice float64, closeOrderID string, realizedPnL, realizedPnLPct float64, durationSeconds int64, wasStopLoss bool) error
+	}); ok {
+		if err := closer.CloseDeal(at.userID, at.id, dealID, closePrice, orderID, realizedPnL, realizedPnLPct, int64(duration), wasStopLoss); err != nil {
+			log.Printf("⚠️ [%s] 更新交易P/L失败 (%s %s): %v", at.name, symbol, side, err)
+			return
+		}
+		posKey := fmt.Sprintf("%s_%s", symbol, strings.ToLower(side))
+		delete(at.openDealIDs, posKey)
+		log.Printf("💾 [%s] 已更新交易P/L (deal_id=%d, reason=%s)", at.name, dealID, reason)
+		if evt, ok := at.database.(interface {
+			CreateDealEvent(event *config.DealEvent) error
+		}); ok {
+			_ = evt.CreateDealEvent(&config.DealEvent{
+				UserID: at.userID, TraderID: at.id, DealID: dealID, Type: "close",
+				Symbol: symbol, Side: strings.ToLower(side), Price: closePrice, OrderID: orderID,
+			})
+		}
+	}
+}
+
+func (at *AutoTrader) getOpenDealRecord(symbol, side string) (int64, *config.DealRecord) {
+	side = strings.ToLower(side)
+	posKey := fmt.Sprintf("%s_%s", symbol, side)
+	if dealID, ok := at.openDealIDs[posKey]; ok {
+		if rec := at.getDealByID(dealID); rec != nil {
+			return dealID, rec
+		}
+	}
+	if finder, ok := at.database.(interface {
+		FindOpenDeal(userID, traderID, symbol, side string) (*config.DealRecord, error)
+	}); ok {
+		if rec, err := finder.FindOpenDeal(at.userID, at.id, symbol, side); err == nil && rec != nil {
+			at.openDealIDs[posKey] = rec.ID
+			return rec.ID, rec
+		}
+	}
+	return 0, nil
+}
+
+func (at *AutoTrader) getDealByID(id int64) *config.DealRecord {
+	if getter, ok := at.database.(interface {
+		GetDealByID(userID, traderID string, id int64) (*config.DealRecord, error)
+	}); ok {
+		if rec, err := getter.GetDealByID(at.userID, at.id, id); err == nil {
+			return rec
+		}
+	}
+	return nil
+}
+
+func (at *AutoTrader) computeDealPnL(openRec *config.DealRecord, closePrice float64) (float64, float64) {
+	if openRec == nil {
+		return 0, 0
+	}
+	side := strings.ToLower(openRec.Side)
+	open := openRec.OpenPrice
+	slippageRate := getEnvFloat("NOFX_PNL_SLIPPAGE_RATE", 0.0005)
+	feeRate := getEnvFloat("NOFX_PNL_TAKER_FEE_RATE", 0.0004)
+	effOpen := open
+	effClose := closePrice
+	if side == "long" {
+		effOpen = open * (1 + slippageRate)
+		effClose = closePrice * (1 - slippageRate)
+	} else {
+		effOpen = open * (1 - slippageRate)
+		effClose = closePrice * (1 + slippageRate)
+	}
+	priceChangePct := 0.0
+	if effOpen > 0 {
+		if side == "long" {
+			priceChangePct = (effClose - effOpen) / effOpen
+		} else {
+			priceChangePct = (effOpen - effClose) / effOpen
+		}
+	}
+	positionValue := openRec.Quantity * effOpen
+	grossPnL := positionValue * priceChangePct * float64(openRec.Leverage)
+	fees := (openRec.Quantity*effOpen + openRec.Quantity*effClose) * feeRate
+	realizedPnL := grossPnL - fees
+	marginUsed := 0.0
+	if openRec.Leverage > 0 {
+		marginUsed = positionValue / float64(openRec.Leverage)
+	}
+	realizedPnLPct := 0.0
+	if marginUsed > 0 {
+		realizedPnLPct = (realizedPnL / marginUsed) * 100
+	}
+	return realizedPnL, realizedPnLPct
+}
+
+func (at *AutoTrader) reconcileDealsWithPositions(current map[string]bool) {
+	for key := range at.openDealIDs {
+		if current[key] {
+			continue
+		}
+		symbol, side, ok := splitSymbolSide(key)
+		if !ok {
+			continue
+		}
+		dealID, openRec := at.getOpenDealRecord(symbol, side)
+		if openRec == nil {
+			continue
+		}
+		if time.Since(openRec.OpenTime) < manualDealCloseGrace {
+			continue
+		}
+		price := at.getLatestPrice(symbol)
+		if price <= 0 {
+			log.Printf("⚠️ [%s] 无法获取 %s 的最新价格以强制关闭交易", at.name, symbol)
+			continue
+		}
+		at.closeDealInternalWithRecord(symbol, side, dealID, openRec, price, "manual_close", false, "position_missing")
+	}
+}
+
+func splitSymbolSide(key string) (string, string, bool) {
+	idx := strings.LastIndex(key, "_")
+	if idx <= 0 || idx >= len(key)-1 {
+		return "", "", false
+	}
+	return key[:idx], key[idx+1:], true
+}
+
+func (at *AutoTrader) getLatestPrice(symbol string) float64 {
+	data, err := market.Get(symbol)
+	if err != nil || data == nil {
+		return 0
+	}
+	return data.CurrentPrice
 }
 
 // GetID 获取trader ID

@@ -964,11 +964,10 @@ func (tm *TraderManager) LoadTraderByID(database *config.Database, userID, trade
 	defaultCoinsStr, _ := database.GetSystemConfig("default_coins")
 
 	// 6. 查询用户信号源配置
-	var coinPoolURL, oiTopURL string
+	var oiSymbols string
 	if userSignalSource, err := database.GetUserSignalSource(userID); err == nil {
-		coinPoolURL = userSignalSource.CoinPoolURL
-		oiTopURL = userSignalSource.OITopURL
-		log.Printf("📡 加载用户 %s 的信号源配置: COIN POOL=%s, OI TOP=%s", userID, coinPoolURL, oiTopURL)
+		oiSymbols = userSignalSource.OISymbols
+		log.Printf("📡 加载用户 %s 的信号源配置: OI_SYMBOLS=%s", userID, oiSymbols)
 	} else {
 		log.Printf("🔍 用户 %s 暂未配置信号源", userID)
 	}
@@ -1004,8 +1003,7 @@ func (tm *TraderManager) LoadTraderByID(database *config.Database, userID, trade
 		traderCfg,
 		aiModelCfg,
 		exchangeCfg,
-		coinPoolURL,
-		oiTopURL,
+		oiSymbols,
 		maxDailyLoss,
 		maxDrawdown,
 		stopTradingMinutes,
