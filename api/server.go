@@ -1,17 +1,21 @@
 package api
 
 import (
-	"encoding/json"
-	"fmt"
-	"log"
-	"net"
-	"net/http"
+    "database/sql"
+    "encoding/json"
+    "fmt"
+    "log"
+    "net"
+    "net/http"
 	"nofx/auth"
 	"nofx/config"
 	"nofx/crypto"
 	"nofx/decision"
+	"nofx/logger"
 	"nofx/manager"
+	"nofx/market"
 	"nofx/trader"
+    "sort"
 	"strconv"
 	"strings"
 	"time"
@@ -89,6 +93,9 @@ func (s *Server) setupRoutes() {
 		// 系统配置（无需认证，用于前端判断是否管理员模式/注册是否开启）
 		api.GET("/config", s.handleGetSystemConfig)
 
+		// 市场数据接口（无需认证）
+		api.GET("/market/oi-ranking", s.handleOIRanking)
+
 		// 加密相关接口（无需认证）
 		api.GET("/crypto/public-key", s.cryptoHandler.HandleGetPublicKey)
 		api.POST("/crypto/decrypt", s.cryptoHandler.HandleDecryptSensitiveData)
@@ -128,6 +135,7 @@ func (s *Server) setupRoutes() {
 			protected.DELETE("/traders/:id", s.handleDeleteTrader)
 			protected.POST("/traders/:id/start", s.handleStartTrader)
 			protected.POST("/traders/:id/stop", s.handleStopTrader)
+			protected.GET("/traders/:id/balance", s.handleCheckTraderBalance)
 			protected.PUT("/traders/:id/prompt", s.handleUpdateTraderPrompt)
 			protected.POST("/traders/:id/sync-balance", s.handleSyncBalance)
 
@@ -138,6 +146,7 @@ func (s *Server) setupRoutes() {
 			// 交易所配置
 			protected.GET("/exchanges", s.handleGetExchangeConfigs)
 			protected.PUT("/exchanges", s.handleUpdateExchangeConfigs)
+			protected.PUT("/exchanges/encrypted", s.handleUpdateExchangeConfigsEncrypted)
 
 			// 用户信号源配置
 			protected.GET("/user/signal-sources", s.handleGetUserSignalSource)
@@ -151,6 +160,13 @@ func (s *Server) setupRoutes() {
 			protected.GET("/decisions/latest", s.handleLatestDecisions)
 			protected.GET("/statistics", s.handleStatistics)
 			protected.GET("/performance", s.handlePerformance)
+
+            // Deals API
+            protected.GET("/deals", s.handleListDeals)
+            protected.GET("/deals/count", s.handleCountDeals)
+            protected.GET("/deals/:id", s.handleGetDealByID)
+            protected.GET("/deals/export.csv", s.handleExportDealsCSV)
+            protected.GET("/deals/export.jsonl", s.handleExportDealsJSONL)
 		}
 	}
 }
@@ -413,9 +429,9 @@ type SafeExchangeConfig struct {
 	Type                  string `json:"type"` // "cex" or "dex"
 	Enabled               bool   `json:"enabled"`
 	Testnet               bool   `json:"testnet,omitempty"`
-	HyperliquidWalletAddr string `json:"hyperliquid_wallet_addr"` // Hyperliquid钱包地址（不敏感）
-	AsterUser             string `json:"aster_user"`              // Aster用户名（不敏感）
-	AsterSigner           string `json:"aster_signer"`            // Aster签名者（不敏感）
+	HyperliquidWalletAddr string `json:"hyperliquidWalletAddr"` // Hyperliquid钱包地址（不敏感）
+	AsterUser             string `json:"asterUser"`             // Aster用户名（不敏感）
+	AsterSigner           string `json:"asterSigner"`           // Aster签名者（不敏感）
 }
 
 type UpdateModelConfigRequest struct {
@@ -630,17 +646,18 @@ func (s *Server) handleCreateTrader(c *gin.Context) {
 
 // UpdateTraderRequest 更新交易员请求
 type UpdateTraderRequest struct {
-	Name                string  `json:"name" binding:"required"`
-	AIModelID           string  `json:"ai_model_id" binding:"required"`
-	ExchangeID          string  `json:"exchange_id" binding:"required"`
-	InitialBalance      float64 `json:"initial_balance"`
-	ScanIntervalMinutes int     `json:"scan_interval_minutes"`
-	BTCETHLeverage      int     `json:"btc_eth_leverage"`
-	AltcoinLeverage     int     `json:"altcoin_leverage"`
-	TradingSymbols      string  `json:"trading_symbols"`
-	CustomPrompt        string  `json:"custom_prompt"`
-	OverrideBasePrompt  bool    `json:"override_base_prompt"`
-	IsCrossMargin       *bool   `json:"is_cross_margin"`
+    Name                string  `json:"name" binding:"required"`
+    AIModelID           string  `json:"ai_model_id" binding:"required"`
+    ExchangeID          string  `json:"exchange_id" binding:"required"`
+    InitialBalance      float64 `json:"initial_balance"`
+    ScanIntervalMinutes int     `json:"scan_interval_minutes"`
+    BTCETHLeverage      int     `json:"btc_eth_leverage"`
+    AltcoinLeverage     int     `json:"altcoin_leverage"`
+    TradingSymbols      string  `json:"trading_symbols"`
+    CustomPrompt        string  `json:"custom_prompt"`
+    OverrideBasePrompt  bool    `json:"override_base_prompt"`
+    IsCrossMargin       *bool   `json:"is_cross_margin"`
+    SystemPromptTemplate string `json:"system_prompt_template"`
 }
 
 // handleUpdateTrader 更新交易员配置
@@ -649,10 +666,13 @@ func (s *Server) handleUpdateTrader(c *gin.Context) {
 	traderID := c.Param("id")
 
 	var req UpdateTraderRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-		return
-	}
+    if err := c.ShouldBindJSON(&req); err != nil {
+        c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+        return
+    }
+
+    // 调试日志：记录前端传入的模板名
+    log.Printf("📝 UpdateTrader req: system_prompt_template='%s'", req.SystemPromptTemplate)
 
 	// 检查交易员是否存在且属于当前用户
 	traders, err := s.database.GetTraders(userID)
@@ -698,24 +718,30 @@ func (s *Server) handleUpdateTrader(c *gin.Context) {
 		scanIntervalMinutes = 3
 	}
 
-	// 更新交易员配置
-	trader := &config.TraderRecord{
-		ID:                   traderID,
-		UserID:               userID,
-		Name:                 req.Name,
-		AIModelID:            req.AIModelID,
-		ExchangeID:           req.ExchangeID,
-		InitialBalance:       req.InitialBalance,
-		BTCETHLeverage:       btcEthLeverage,
-		AltcoinLeverage:      altcoinLeverage,
-		TradingSymbols:       req.TradingSymbols,
-		CustomPrompt:         req.CustomPrompt,
-		OverrideBasePrompt:   req.OverrideBasePrompt,
-		SystemPromptTemplate: existingTrader.SystemPromptTemplate, // 保持原值
-		IsCrossMargin:        isCrossMargin,
-		ScanIntervalMinutes:  scanIntervalMinutes,
-		IsRunning:            existingTrader.IsRunning, // 保持原值
-	}
+    // 处理系统提示词模板：如果请求中提供了非空值则更新，否则沿用原值
+    systemPromptTemplate := existingTrader.SystemPromptTemplate
+    if req.SystemPromptTemplate != "" {
+        systemPromptTemplate = req.SystemPromptTemplate
+    }
+
+    // 更新交易员配置
+    trader := &config.TraderRecord{
+        ID:                   traderID,
+        UserID:               userID,
+        Name:                 req.Name,
+        AIModelID:            req.AIModelID,
+        ExchangeID:           req.ExchangeID,
+        InitialBalance:       req.InitialBalance,
+        BTCETHLeverage:       btcEthLeverage,
+        AltcoinLeverage:      altcoinLeverage,
+        TradingSymbols:       req.TradingSymbols,
+        CustomPrompt:         req.CustomPrompt,
+        OverrideBasePrompt:   req.OverrideBasePrompt,
+        SystemPromptTemplate: systemPromptTemplate,
+        IsCrossMargin:        isCrossMargin,
+        ScanIntervalMinutes:  scanIntervalMinutes,
+        IsRunning:            existingTrader.IsRunning, // 保持原值
+    }
 
 	// 更新数据库
 	err = s.database.UpdateTrader(trader)
@@ -724,8 +750,21 @@ func (s *Server) handleUpdateTrader(c *gin.Context) {
 		return
 	}
 
-	// 重新加载交易员到内存
-	err = s.traderManager.LoadUserTraders(s.database, userID)
+	// 如果交易员已经在内存中，直接更新其可热更新的配置
+	if at, err := s.traderManager.GetTrader(traderID); err == nil {
+		at.SetSystemPromptTemplate(systemPromptTemplate)
+		at.SetCustomPrompt(req.CustomPrompt)
+		at.SetOverrideBasePrompt(req.OverrideBasePrompt)
+		log.Printf("✓ 已热更新交易员 %s 的提示词模板与自定义策略", at.GetName())
+	}
+
+    // 调试：从数据库读回校验
+    if after, _, _, err := s.database.GetTraderConfig(userID, traderID); err == nil {
+        log.Printf("🗄️  DB stored system_prompt_template='%s' (before='%s', req='%s')", after.SystemPromptTemplate, existingTrader.SystemPromptTemplate, systemPromptTemplate)
+    }
+
+    // 重新加载交易员到内存（如果未加载则加载）
+    err = s.traderManager.LoadUserTraders(s.database, userID)
 	if err != nil {
 		log.Printf("⚠️ 重新加载用户交易员到内存失败: %v", err)
 	}
@@ -790,6 +829,48 @@ func (s *Server) handleStartTrader(c *gin.Context) {
 		return
 	}
 
+	// 🔍 检查是否有余额（Balance Check）
+	balance, err := trader.GetBalance()
+	hasBalance := false
+	var balanceInfo map[string]interface{}
+	
+	if err == nil {
+		// 检查可用余额是否 > 0
+		availableBalance := 0.0
+		if val, ok := balance["availableBalance"].(float64); ok {
+			availableBalance = val
+		}
+		totalWalletBalance := 0.0
+		if val, ok := balance["totalWalletBalance"].(float64); ok {
+			totalWalletBalance = val
+		}
+		
+		hasBalance = availableBalance > 0 || totalWalletBalance > 0
+		
+		balanceInfo = map[string]interface{}{
+			"has_balance":          hasBalance,
+			"available_balance":    availableBalance,
+			"total_wallet_balance": totalWalletBalance,
+		}
+		
+		// Für Hyperliquid: Spot Balance separat anzeigen
+		if spotBalance, ok := balance["spotBalance"].(float64); ok {
+			balanceInfo["spot_balance"] = spotBalance
+		}
+		
+		if !hasBalance {
+			log.Printf("⚠️  警告: 交易员 %s 的账户余额为 0，无法进行交易", trader.GetName())
+		} else {
+			log.Printf("✓ 交易员 %s 账户余额检查通过: 可用余额 %.2f", trader.GetName(), availableBalance)
+		}
+	} else {
+		log.Printf("⚠️  无法获取交易员 %s 的账户余额: %v", trader.GetName(), err)
+		balanceInfo = map[string]interface{}{
+			"has_balance": false,
+			"error":       err.Error(),
+		}
+	}
+
 	// 启动交易员
 	go func() {
 		log.Printf("▶️  启动交易员 %s (%s)", traderID, trader.GetName())
@@ -805,7 +886,10 @@ func (s *Server) handleStartTrader(c *gin.Context) {
 	}
 
 	log.Printf("✓ 交易员 %s 已启动", trader.GetName())
-	c.JSON(http.StatusOK, gin.H{"message": "交易员已启动"})
+	c.JSON(http.StatusOK, gin.H{
+		"message":      "交易员已启动",
+		"balance_info": balanceInfo,
+	})
 }
 
 // handleStopTrader 停止交易员
@@ -844,6 +928,74 @@ func (s *Server) handleStopTrader(c *gin.Context) {
 
 	log.Printf("⏹  交易员 %s 已停止", trader.GetName())
 	c.JSON(http.StatusOK, gin.H{"message": "交易员已停止"})
+}
+
+// handleCheckTraderBalance 检查交易员账户余额
+func (s *Server) handleCheckTraderBalance(c *gin.Context) {
+	userID := c.GetString("user_id")
+	traderID := c.Param("id")
+
+	// 校验交易员是否属于当前用户
+	_, _, _, err := s.database.GetTraderConfig(userID, traderID)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "交易员不存在或无访问权限"})
+		return
+	}
+
+	trader, err := s.traderManager.GetTrader(traderID)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "交易员不存在"})
+		return
+	}
+
+	// 获取余额信息
+	balance, err := trader.GetBalance()
+	if err != nil {
+		log.Printf("❌ 无法获取交易员 %s 的账户余额: %v", trader.GetName(), err)
+		c.JSON(http.StatusOK, gin.H{
+			"has_balance": false,
+			"error":       fmt.Sprintf("无法获取账户余额: %v", err),
+		})
+		return
+	}
+
+	// 解析余额信息
+	availableBalance := 0.0
+	if val, ok := balance["availableBalance"].(float64); ok {
+		availableBalance = val
+	}
+	totalWalletBalance := 0.0
+	if val, ok := balance["totalWalletBalance"].(float64); ok {
+		totalWalletBalance = val
+	}
+	totalUnrealizedProfit := 0.0
+	if val, ok := balance["totalUnrealizedProfit"].(float64); ok {
+		totalUnrealizedProfit = val
+	}
+
+	hasBalance := availableBalance > 0 || totalWalletBalance > 0
+
+	result := gin.H{
+		"has_balance":             hasBalance,
+		"available_balance":       availableBalance,
+		"total_wallet_balance":    totalWalletBalance,
+		"total_unrealized_profit": totalUnrealizedProfit,
+	}
+
+	// Für Hyperliquid: Spot Balance separat anzeigen
+	if spotBalance, ok := balance["spotBalance"].(float64); ok {
+		result["spot_balance"] = spotBalance
+		if spotBalance > 0 && availableBalance == 0 {
+			result["warning"] = "Ihr USDC-Guthaben befindet sich im Spot-Account. Bitte transferieren Sie es zum Perpetuals-Account, um zu traden."
+		}
+	}
+
+	if !hasBalance {
+		result["warning"] = "Keine Balance auf dem Exchange gefunden. Bitte überprüfen Sie Ihre Wallet-Adresse und Exchange-Konfiguration."
+	}
+
+	log.Printf("✓ Balance-Check für %s: verfügbar=%.2f, gesamt=%.2f", trader.GetName(), availableBalance, totalWalletBalance)
+	c.JSON(http.StatusOK, result)
 }
 
 // handleUpdateTraderPrompt 更新交易员自定义Prompt
@@ -1102,6 +1254,53 @@ func (s *Server) handleUpdateExchangeConfigs(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "交易所配置已更新"})
 }
 
+// handleUpdateExchangeConfigsEncrypted 更新交易所配置（加密版本）
+func (s *Server) handleUpdateExchangeConfigsEncrypted(c *gin.Context) {
+	userID := c.GetString("user_id")
+	
+	// 解析加密的 payload
+	var encryptedPayload crypto.EncryptedPayload
+	if err := c.ShouldBindJSON(&encryptedPayload); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid encrypted payload"})
+		return
+	}
+
+	// 解密数据
+	decrypted, err := s.cryptoHandler.cryptoService.DecryptSensitiveData(&encryptedPayload)
+	if err != nil {
+		log.Printf("❌ 解密交易所配置失败: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "解密失败"})
+		return
+	}
+
+	// 解析解密后的 JSON
+	var req UpdateExchangeConfigRequest
+	if err := json.Unmarshal([]byte(decrypted), &req); err != nil {
+		log.Printf("❌ 解析交易所配置失败: %v", err)
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid exchange config"})
+		return
+	}
+
+	// 更新每个交易所的配置
+	for exchangeID, exchangeData := range req.Exchanges {
+		err := s.database.UpdateExchange(userID, exchangeID, exchangeData.Enabled, exchangeData.APIKey, exchangeData.SecretKey, exchangeData.Testnet, exchangeData.HyperliquidWalletAddr, exchangeData.AsterUser, exchangeData.AsterSigner, exchangeData.AsterPrivateKey)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("更新交易所 %s 失败: %v", exchangeID, err)})
+			return
+		}
+	}
+
+	// 重新加载该用户的所有交易员，使新配置立即生效
+	err = s.traderManager.LoadUserTraders(s.database, userID)
+	if err != nil {
+		log.Printf("⚠️ 重新加载用户交易员到内存失败: %v", err)
+		// 这里不返回错误，因为交易所配置已经成功更新到数据库
+	}
+
+	log.Printf("✓ 交易所配置已更新（加密传输）")
+	c.JSON(http.StatusOK, gin.H{"message": "交易所配置已更新"})
+}
+
 // handleGetUserSignalSource 获取用户信号源配置
 func (s *Server) handleGetUserSignalSource(c *gin.Context) {
 	userID := c.GetString("user_id")
@@ -1109,15 +1308,13 @@ func (s *Server) handleGetUserSignalSource(c *gin.Context) {
 	if err != nil {
 		// 如果配置不存在，返回空配置而不是404错误
 		c.JSON(http.StatusOK, gin.H{
-			"coin_pool_url": "",
-			"oi_top_url":    "",
+			"oi_symbols": "",
 		})
 		return
 	}
 
 	c.JSON(http.StatusOK, gin.H{
-		"coin_pool_url": source.CoinPoolURL,
-		"oi_top_url":    source.OITopURL,
+		"oi_symbols": source.OISymbols,
 	})
 }
 
@@ -1125,8 +1322,7 @@ func (s *Server) handleGetUserSignalSource(c *gin.Context) {
 func (s *Server) handleSaveUserSignalSource(c *gin.Context) {
 	userID := c.GetString("user_id")
 	var req struct {
-		CoinPoolURL string `json:"coin_pool_url"`
-		OITopURL    string `json:"oi_top_url"`
+		OISymbols string `json:"oi_symbols"`
 	}
 
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -1134,13 +1330,13 @@ func (s *Server) handleSaveUserSignalSource(c *gin.Context) {
 		return
 	}
 
-	err := s.database.CreateUserSignalSource(userID, req.CoinPoolURL, req.OITopURL)
+	err := s.database.CreateUserSignalSource(userID, req.OISymbols)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("保存用户信号源配置失败: %v", err)})
 		return
 	}
 
-	log.Printf("✓ 用户信号源配置已保存: user=%s, coin_pool=%s, oi_top=%s", userID, req.CoinPoolURL, req.OITopURL)
+	log.Printf("✓ 用户信号源配置已保存: user=%s, oi_symbols=%s", userID, req.OISymbols)
 	c.JSON(http.StatusOK, gin.H{"message": "用户信号源配置已保存"})
 }
 
@@ -1207,23 +1403,24 @@ func (s *Server) handleGetTraderConfig(c *gin.Context) {
 	// 返回完整的模型ID，不做转换，保持与前端模型列表一致
 	aiModelID := traderConfig.AIModelID
 
-	result := map[string]interface{}{
-		"trader_id":             traderConfig.ID,
-		"trader_name":           traderConfig.Name,
-		"ai_model":              aiModelID,
-		"exchange_id":           traderConfig.ExchangeID,
-		"initial_balance":       traderConfig.InitialBalance,
-		"scan_interval_minutes": traderConfig.ScanIntervalMinutes,
-		"btc_eth_leverage":      traderConfig.BTCETHLeverage,
-		"altcoin_leverage":      traderConfig.AltcoinLeverage,
-		"trading_symbols":       traderConfig.TradingSymbols,
-		"custom_prompt":         traderConfig.CustomPrompt,
-		"override_base_prompt":  traderConfig.OverrideBasePrompt,
-		"is_cross_margin":       traderConfig.IsCrossMargin,
-		"use_coin_pool":         traderConfig.UseCoinPool,
-		"use_oi_top":            traderConfig.UseOITop,
-		"is_running":            isRunning,
-	}
+    result := map[string]interface{}{
+        "trader_id":             traderConfig.ID,
+        "trader_name":           traderConfig.Name,
+        "ai_model":              aiModelID,
+        "exchange_id":           traderConfig.ExchangeID,
+        "initial_balance":       traderConfig.InitialBalance,
+        "scan_interval_minutes": traderConfig.ScanIntervalMinutes,
+        "btc_eth_leverage":      traderConfig.BTCETHLeverage,
+        "altcoin_leverage":      traderConfig.AltcoinLeverage,
+        "trading_symbols":       traderConfig.TradingSymbols,
+        "custom_prompt":         traderConfig.CustomPrompt,
+        "override_base_prompt":  traderConfig.OverrideBasePrompt,
+        "system_prompt_template": traderConfig.SystemPromptTemplate,
+        "is_cross_margin":       traderConfig.IsCrossMargin,
+        "use_coin_pool":         traderConfig.UseCoinPool,
+        "use_oi_top":            traderConfig.UseOITop,
+        "is_running":            isRunning,
+    }
 
 	c.JSON(http.StatusOK, result)
 }
@@ -1327,7 +1524,11 @@ func (s *Server) handleDecisions(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, records)
+    // Disable caching to ensure frontend always sees the latest decisions
+    c.Header("Cache-Control", "no-cache, no-store, must-revalidate")
+    c.Header("Pragma", "no-cache")
+    c.Header("Expires", "0")
+    c.JSON(http.StatusOK, records)
 }
 
 // handleLatestDecisions 最新决策日志（最近5条，最新的在前）
@@ -1344,21 +1545,26 @@ func (s *Server) handleLatestDecisions(c *gin.Context) {
 		return
 	}
 
-	records, err := trader.GetDecisionLogger().GetLatestRecords(5)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"error": fmt.Sprintf("获取决策日志失败: %v", err),
-		})
-		return
-	}
+    // 读取更大的窗口，再按时间降序取前5，避免因文件排序或周期重置导致遗漏
+    records, err := trader.GetDecisionLogger().GetLatestRecords(100)
+    if err != nil {
+        c.JSON(http.StatusInternalServerError, gin.H{
+            "error": fmt.Sprintf("获取决策日志失败: %v", err),
+        })
+        return
+    }
 
-	// 反转数组，让最新的在前面（用于列表显示）
-	// GetLatestRecords返回的是从旧到新（用于图表），这里需要从新到旧
-	for i, j := 0, len(records)-1; i < j; i, j = i+1, j-1 {
-		records[i], records[j] = records[j], records[i]
-	}
+    // 按时间降序排序，确保最新的在最上面
+    sort.Slice(records, func(i, j int) bool { return records[i].Timestamp.After(records[j].Timestamp) })
+    if len(records) > 5 {
+        records = records[:5]
+    }
 
-	c.JSON(http.StatusOK, records)
+    // Disable caching to ensure frontend always sees the latest decisions
+    c.Header("Cache-Control", "no-cache, no-store, must-revalidate")
+    c.Header("Pragma", "no-cache")
+    c.Header("Expires", "0")
+    c.JSON(http.StatusOK, records)
 }
 
 // handleStatistics 统计信息
@@ -1469,20 +1675,19 @@ func (s *Server) handleEquityHistory(c *gin.Context) {
 	for _, record := range records {
 		// TotalBalance字段实际存储的是TotalEquity
 		totalEquity := record.AccountState.TotalBalance
-		// TotalUnrealizedProfit字段实际存储的是TotalPnL（相对初始余额）
-		totalPnL := record.AccountState.TotalUnrealizedProfit
 
-		// 计算盈亏百分比
+		// 计算盈亏：从当前净值减去初始余额
+		actualTotalPnL := totalEquity - initialBalance
 		totalPnLPct := 0.0
 		if initialBalance > 0 {
-			totalPnLPct = (totalPnL / initialBalance) * 100
+			totalPnLPct = (actualTotalPnL / initialBalance) * 100
 		}
 
 		history = append(history, EquityPoint{
 			Timestamp:        record.Timestamp.Format("2006-01-02 15:04:05"),
 			TotalEquity:      totalEquity,
 			AvailableBalance: record.AccountState.AvailableBalance,
-			TotalPnL:         totalPnL,
+			TotalPnL:         actualTotalPnL,
 			TotalPnLPct:      totalPnLPct,
 			PositionCount:    record.AccountState.PositionCount,
 			MarginUsedPct:    record.AccountState.MarginUsedPct,
@@ -1495,6 +1700,7 @@ func (s *Server) handleEquityHistory(c *gin.Context) {
 
 // handlePerformance AI历史表现分析（用于展示AI学习和反思）
 func (s *Server) handlePerformance(c *gin.Context) {
+	userID := c.GetString("user_id")
 	_, traderID, err := s.getTraderFromQuery(c)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
@@ -1517,7 +1723,436 @@ func (s *Server) handlePerformance(c *gin.Context) {
 		return
 	}
 
+	// 回退：如果决策日志未形成完整的交易，但数据库已有已完成的deal，
+	// 使用数据库记录构建PerformanceAnalysis，确保前端有数据可展示。
+	if performance == nil || performance.TotalTrades == 0 {
+		deals, derr := s.database.ListDeals(userID, traderID, "closed", "", "", "", "", "", "", nil, nil, 200, 0)
+		if derr == nil && len(deals) > 0 {
+			perf := &logger.PerformanceAnalysis{
+				RecentTrades: make([]logger.TradeOutcome, 0),
+				SymbolStats:  make(map[string]*logger.SymbolPerformance),
+			}
+
+			var totalWinAmt float64
+			var totalLossAmt float64 // 负数累加
+
+			for _, d := range deals {
+				if d.Status != "closed" {
+					continue
+				}
+				perf.TotalTrades++
+
+				pnl := 0.0
+				if d.RealizedPnL.Valid { pnl = d.RealizedPnL.Float64 }
+				if pnl > 0 {
+					perf.WinningTrades++
+					perf.AvgWin += pnl
+					totalWinAmt += pnl
+				} else if pnl < 0 {
+					perf.LosingTrades++
+					perf.AvgLoss += pnl
+					totalLossAmt += pnl
+				}
+
+				openPrice := d.OpenPrice
+				closePrice := 0.0
+				if d.ClosePrice.Valid { closePrice = d.ClosePrice.Float64 }
+				positionValue := d.Quantity * openPrice
+				marginUsed := 0.0
+				if d.Leverage > 0 { marginUsed = positionValue / float64(d.Leverage) }
+				pnlPct := 0.0
+				if d.RealizedPnLPct.Valid {
+					pnlPct = d.RealizedPnLPct.Float64
+				} else if marginUsed > 0 {
+					pnlPct = (pnl / marginUsed) * 100
+				}
+				durStr := ""
+				if d.DurationSeconds.Valid {
+					durStr = (time.Duration(d.DurationSeconds.Int64) * time.Second).String()
+				}
+				openTime := d.OpenTime
+				closeTime := openTime
+				if d.CloseTime.Valid { closeTime = d.CloseTime.Time }
+
+				perf.RecentTrades = append(perf.RecentTrades, logger.TradeOutcome{
+					Symbol:        d.Symbol,
+					Side:          strings.ToLower(d.Side),
+					Quantity:      d.Quantity,
+					Leverage:      d.Leverage,
+					OpenPrice:     openPrice,
+					ClosePrice:    closePrice,
+					PositionValue: positionValue,
+					MarginUsed:    marginUsed,
+					PnL:           pnl,
+					PnLPct:        pnlPct,
+					Duration:      durStr,
+					OpenTime:      openTime,
+					CloseTime:     closeTime,
+					WasStopLoss:   d.WasStopLoss.Valid && d.WasStopLoss.Bool,
+				})
+
+				// 更新币种统计
+				st, ok := perf.SymbolStats[d.Symbol]
+				if !ok {
+					st = &logger.SymbolPerformance{Symbol: d.Symbol}
+					perf.SymbolStats[d.Symbol] = st
+				}
+				st.TotalTrades++
+				st.TotalPnL += pnl
+				if pnl > 0 { st.WinningTrades++ } else if pnl < 0 { st.LosingTrades++ }
+			}
+
+			if perf.WinningTrades > 0 { perf.AvgWin /= float64(perf.WinningTrades) }
+			if perf.LosingTrades > 0 { perf.AvgLoss /= float64(perf.LosingTrades) }
+			if totalLossAmt != 0 { perf.ProfitFactor = totalWinAmt / (-totalLossAmt) } else if totalWinAmt > 0 { perf.ProfitFactor = 999.0 }
+			if perf.TotalTrades > 0 { perf.WinRate = (float64(perf.WinningTrades) / float64(perf.TotalTrades)) * 100 }
+
+			// 币种胜率/均值 + 最优最差
+			bestPnL := -1e18
+			worstPnL := 1e18
+			for sym, st := range perf.SymbolStats {
+				if st.TotalTrades > 0 {
+					st.WinRate = (float64(st.WinningTrades) / float64(st.TotalTrades)) * 100
+					st.AvgPnL = st.TotalPnL / float64(st.TotalTrades)
+					if st.TotalPnL > float64(bestPnL) { bestPnL = st.TotalPnL; perf.BestSymbol = sym }
+					if st.TotalPnL < float64(worstPnL) { worstPnL = st.TotalPnL; perf.WorstSymbol = sym }
+				}
+			}
+
+			// 仅保留最近10笔（按关闭时间倒序）
+			sort.Slice(perf.RecentTrades, func(i, j int) bool { return perf.RecentTrades[i].CloseTime.After(perf.RecentTrades[j].CloseTime) })
+			if len(perf.RecentTrades) > 10 { perf.RecentTrades = perf.RecentTrades[:10] }
+
+				// Sharpe：若AnalyzePerformance已基于净值序列计算出Sharpe，即使无完整交易，也沿用其值
+				perf.SharpeRatio = performance.SharpeRatio
+				performance = perf
+			}
+		}
+
 	c.JSON(http.StatusOK, performance)
+}
+
+// handleListDeals 列出当前用户的交易记录（支持过滤和分页）
+func (s *Server) handleListDeals(c *gin.Context) {
+    userID := c.GetString("user_id")
+    traderID := strings.TrimSpace(c.Query("trader_id"))
+    status := strings.TrimSpace(c.Query("status"))
+    symbol := strings.TrimSpace(c.Query("symbol"))
+    side := strings.TrimSpace(c.Query("side"))
+    from := strings.TrimSpace(c.Query("from")) // e.g. 2025-01-01 00:00:00
+    to := strings.TrimSpace(c.Query("to"))
+    q := strings.TrimSpace(c.Query("q"))
+    pnl := strings.TrimSpace(c.Query("pnl")) // win|loss
+    pnlMinStr := strings.TrimSpace(c.Query("pnl_min"))
+    pnlMaxStr := strings.TrimSpace(c.Query("pnl_max"))
+    pnlMin, err := parseOptionalFloat(pnlMinStr)
+    if err != nil {
+        c.JSON(http.StatusBadRequest, gin.H{"error": "无效的 pnl_min"})
+        return
+    }
+    pnlMax, err := parseOptionalFloat(pnlMaxStr)
+    if err != nil {
+        c.JSON(http.StatusBadRequest, gin.H{"error": "无效的 pnl_max"})
+        return
+    }
+    limit := 50
+    offset := 0
+    if v := c.Query("limit"); v != "" {
+        if n, err := strconv.Atoi(v); err == nil { limit = n }
+    }
+    if v := c.Query("offset"); v != "" {
+        if n, err := strconv.Atoi(v); err == nil { offset = n }
+    }
+
+    deals, err := s.database.ListDeals(userID, traderID, status, symbol, side, from, to, q, pnl, pnlMin, pnlMax, limit, offset)
+    if err != nil {
+        c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("查询失败: %v", err)})
+        return
+    }
+    c.JSON(http.StatusOK, deals)
+}
+
+// handleCountDeals 获取符合筛选条件的总数（用于分页）
+func (s *Server) handleCountDeals(c *gin.Context) {
+    userID := c.GetString("user_id")
+    traderID := strings.TrimSpace(c.Query("trader_id"))
+    status := strings.TrimSpace(c.Query("status"))
+    symbol := strings.TrimSpace(c.Query("symbol"))
+    side := strings.TrimSpace(c.Query("side"))
+    from := strings.TrimSpace(c.Query("from"))
+    to := strings.TrimSpace(c.Query("to"))
+    q := strings.TrimSpace(c.Query("q"))
+    pnl := strings.TrimSpace(c.Query("pnl"))
+    pnlMinStr := strings.TrimSpace(c.Query("pnl_min"))
+    pnlMaxStr := strings.TrimSpace(c.Query("pnl_max"))
+    pnlMin, err := parseOptionalFloat(pnlMinStr)
+    if err != nil {
+        c.JSON(http.StatusBadRequest, gin.H{"error": "无效的 pnl_min"})
+        return
+    }
+    pnlMax, err := parseOptionalFloat(pnlMaxStr)
+    if err != nil {
+        c.JSON(http.StatusBadRequest, gin.H{"error": "无效的 pnl_max"})
+        return
+    }
+
+    total, err := s.database.CountDeals(userID, traderID, status, symbol, side, from, to, q, pnl, pnlMin, pnlMax)
+    if err != nil {
+        c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("统计失败: %v", err)})
+        return
+    }
+    c.JSON(http.StatusOK, gin.H{"total": total})
+}
+
+// handleGetDealByID 获取指定交易详情（包含事件时间线）
+func (s *Server) handleGetDealByID(c *gin.Context) {
+    userID := c.GetString("user_id")
+    idStr := c.Param("id")
+    traderID := strings.TrimSpace(c.Query("trader_id"))
+    if traderID == "" {
+        c.JSON(http.StatusBadRequest, gin.H{"error": "缺少 trader_id 参数"})
+        return
+    }
+    id, err := strconv.ParseInt(idStr, 10, 64)
+    if err != nil || id <= 0 {
+        c.JSON(http.StatusBadRequest, gin.H{"error": "无效的ID"})
+        return
+    }
+
+    deal, err := s.database.GetDealByID(userID, traderID, id)
+    if err != nil {
+        c.JSON(http.StatusNotFound, gin.H{"error": "交易不存在"})
+        return
+    }
+    events, _ := s.database.ListDealEvents(userID, traderID, id)
+
+    c.JSON(http.StatusOK, gin.H{
+        "deal":   deal,
+        "events": events,
+    })
+}
+
+// handleExportDealsCSV 导出交易记录为CSV（含核心字段）
+func (s *Server) handleExportDealsCSV(c *gin.Context) {
+    userID := c.GetString("user_id")
+    traderID := strings.TrimSpace(c.Query("trader_id"))
+    status := strings.TrimSpace(c.Query("status"))
+    symbol := strings.TrimSpace(c.Query("symbol"))
+    side := strings.TrimSpace(c.Query("side"))
+    from := strings.TrimSpace(c.Query("from"))
+    to := strings.TrimSpace(c.Query("to"))
+    q := strings.TrimSpace(c.Query("q"))
+    pnl := strings.TrimSpace(c.Query("pnl"))
+    pnlMinStr := strings.TrimSpace(c.Query("pnl_min"))
+    pnlMaxStr := strings.TrimSpace(c.Query("pnl_max"))
+    pnlMin, err := parseOptionalFloat(pnlMinStr)
+    if err != nil {
+        c.JSON(http.StatusBadRequest, gin.H{"error": "无效的 pnl_min"})
+        return
+    }
+    pnlMax, err := parseOptionalFloat(pnlMaxStr)
+    if err != nil {
+        c.JSON(http.StatusBadRequest, gin.H{"error": "无效的 pnl_max"})
+        return
+    }
+    columnsParam := strings.TrimSpace(c.Query("columns"))
+    limit := 10000
+    deals, err := s.database.ListDeals(userID, traderID, status, symbol, side, from, to, q, pnl, pnlMin, pnlMax, limit, 0)
+    if err != nil {
+        c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("导出失败: %v", err)})
+        return
+    }
+
+    c.Header("Content-Type", "text/csv; charset=utf-8")
+    c.Header("Content-Disposition", "attachment; filename=deals.csv")
+
+    // Columns selection
+    allCols := []string{"id","user_id","trader_id","exchange","symbol","side","leverage","position_size_usd","quantity","open_price","open_time","open_order_id","stop_loss","take_profit","close_price","close_time","realized_pnl","realized_pnl_pct","status"}
+    cols := allCols
+    if columnsParam != "" {
+        reqCols := strings.Split(columnsParam, ",")
+        var filtered []string
+        for _, c := range reqCols {
+            c = strings.TrimSpace(c)
+            for _, a := range allCols { if a == c { filtered = append(filtered, c); break } }
+        }
+        if len(filtered) > 0 { cols = filtered }
+    }
+    // header
+    c.Writer.Write([]byte(strings.Join(cols, ",") + "\n"))
+    // rows
+    for _, d := range deals {
+        var line []string
+        for _, c := range cols {
+            switch c {
+            case "id": line = append(line, fmt.Sprintf("%d", d.ID))
+            case "user_id": line = append(line, escapeCSV(d.UserID))
+            case "trader_id": line = append(line, escapeCSV(d.TraderID))
+            case "exchange": line = append(line, escapeCSV(d.Exchange))
+            case "symbol": line = append(line, d.Symbol)
+            case "side": line = append(line, d.Side)
+            case "leverage": line = append(line, fmt.Sprintf("%d", d.Leverage))
+            case "position_size_usd": line = append(line, fmt.Sprintf("%.8f", d.PositionSizeUSD))
+            case "quantity": line = append(line, fmt.Sprintf("%.8f", d.Quantity))
+            case "open_price": line = append(line, fmt.Sprintf("%.8f", d.OpenPrice))
+            case "open_time": line = append(line, d.OpenTime.Format("2006-01-02 15:04:05"))
+            case "open_order_id": line = append(line, escapeCSV(d.OpenOrderID))
+            case "stop_loss": line = append(line, fmt.Sprintf("%.8f", d.StopLoss))
+            case "take_profit": line = append(line, fmt.Sprintf("%.8f", d.TakeProfit))
+            case "close_price": if d.ClosePrice.Valid { line = append(line, fmt.Sprintf("%.8f", d.ClosePrice.Float64)) } else { line = append(line, "") }
+            case "close_time": if d.CloseTime.Valid { line = append(line, d.CloseTime.Time.Format("2006-01-02 15:04:05")) } else { line = append(line, "") }
+            case "realized_pnl": if d.RealizedPnL.Valid { line = append(line, fmt.Sprintf("%.8f", d.RealizedPnL.Float64)) } else { line = append(line, "") }
+            case "realized_pnl_pct": if d.RealizedPnLPct.Valid { line = append(line, fmt.Sprintf("%.6f", d.RealizedPnLPct.Float64)) } else { line = append(line, "") }
+            case "status": line = append(line, d.Status)
+            }
+        }
+        c.Writer.Write([]byte(strings.Join(line, ",") + "\n"))
+    }
+}
+
+// handleExportDealsJSONL 导出交易记录为JSONL（每行一个deal JSON）
+func (s *Server) handleExportDealsJSONL(c *gin.Context) {
+    userID := c.GetString("user_id")
+    traderID := strings.TrimSpace(c.Query("trader_id"))
+    status := strings.TrimSpace(c.Query("status"))
+    symbol := strings.TrimSpace(c.Query("symbol"))
+    side := strings.TrimSpace(c.Query("side"))
+    from := strings.TrimSpace(c.Query("from"))
+    to := strings.TrimSpace(c.Query("to"))
+    q := strings.TrimSpace(c.Query("q"))
+    mode := strings.TrimSpace(c.Query("mode")) // full|slim|train
+    pnl := strings.TrimSpace(c.Query("pnl"))
+    pnlMinStr := strings.TrimSpace(c.Query("pnl_min"))
+    pnlMaxStr := strings.TrimSpace(c.Query("pnl_max"))
+    pnlMin, err := parseOptionalFloat(pnlMinStr)
+    if err != nil {
+        c.JSON(http.StatusBadRequest, gin.H{"error": "无效的 pnl_min"})
+        return
+    }
+    pnlMax, err := parseOptionalFloat(pnlMaxStr)
+    if err != nil {
+        c.JSON(http.StatusBadRequest, gin.H{"error": "无效的 pnl_max"})
+        return
+    }
+    trainActions := strings.TrimSpace(c.Query("train_actions"))
+    limit := 10000
+    deals, err := s.database.ListDeals(userID, traderID, status, symbol, side, from, to, q, pnl, pnlMin, pnlMax, limit, 0)
+    if err != nil {
+        c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("导出失败: %v", err)})
+        return
+    }
+
+    c.Header("Content-Type", "application/x-ndjson; charset=utf-8")
+    c.Header("Content-Disposition", "attachment; filename=deals.jsonl")
+    for _, d := range deals {
+        switch mode {
+        case "slim":
+            obj := map[string]interface{}{
+                "id": d.ID,
+                "trader_id": d.TraderID,
+                "exchange": d.Exchange,
+                "symbol": d.Symbol,
+                "side": d.Side,
+                "leverage": d.Leverage,
+                "qty": d.Quantity,
+                "open_price": d.OpenPrice,
+                "open_time": d.OpenTime,
+                "close_price": nullableFloat(d.ClosePrice),
+                "close_time": nullableTime(d.CloseTime),
+                "pnl": nullableFloat(d.RealizedPnL),
+                "pnl_pct": nullableFloat(d.RealizedPnLPct),
+                "status": d.Status,
+            }
+            b, _ := json.Marshal(obj)
+            c.Writer.Write(b)
+            c.Writer.Write([]byte("\n"))
+        case "train":
+            obj := buildTrainSample(d, trainActions)
+            b, _ := json.Marshal(obj)
+            c.Writer.Write(b)
+            c.Writer.Write([]byte("\n"))
+        default:
+            b, _ := json.Marshal(d)
+            c.Writer.Write(b)
+            c.Writer.Write([]byte("\n"))
+        }
+    }
+}
+
+func escapeCSV(s string) string {
+    if strings.ContainsAny(s, ",\"\n") {
+        s = strings.ReplaceAll(s, "\"", "\"\"")
+        return "\"" + s + "\""
+    }
+    return s
+}
+
+func nullableFloat(v sql.NullFloat64) interface{} {
+    if v.Valid { return v.Float64 }
+    return nil
+}
+
+func nullableTime(v sql.NullTime) interface{} {
+    if v.Valid { return v.Time }
+    return nil
+}
+
+func parseOptionalFloat(value string) (*float64, error) {
+    if value == "" {
+        return nil, nil
+    }
+    f, err := strconv.ParseFloat(value, 64)
+    if err != nil {
+        return nil, err
+    }
+    return &f, nil
+}
+
+func buildTrainSample(d *config.DealRecord, trainActions string) map[string]interface{} {
+    output := map[string]interface{}{
+        "reasoning":     d.Reasoning,
+        "decision_json": d.DecisionJSON,
+    }
+    if actions := extractActions(d.DecisionJSON, trainActions); len(actions) > 0 {
+        output["actions"] = actions
+    }
+
+    return map[string]interface{}{
+        "input": map[string]interface{}{
+            "system_prompt": d.SystemPrompt,
+            "user_prompt":   d.UserPrompt,
+            "market_context": d.MarketContextJSON,
+        },
+        "output": output,
+        "meta": map[string]interface{}{
+            "symbol":     d.Symbol,
+            "side":       d.Side,
+            "leverage":   d.Leverage,
+            "status":     d.Status,
+            "pnl":        nullableFloat(d.RealizedPnL),
+            "pnl_pct":    nullableFloat(d.RealizedPnLPct),
+            "open_time":  d.OpenTime,
+            "close_time": nullableTime(d.CloseTime),
+        },
+    }
+}
+
+func extractActions(decisionJSON string, trainActions string) []interface{} {
+    if decisionJSON == "" {
+        return nil
+    }
+    var parsed interface{}
+    if err := json.Unmarshal([]byte(decisionJSON), &parsed); err != nil {
+        return nil
+    }
+    arr, ok := parsed.([]interface{})
+    if !ok {
+        return nil
+    }
+    if trainActions == "final" && len(arr) > 0 {
+        return []interface{}{arr[len(arr)-1]}
+    }
+    return arr
 }
 
 // authMiddleware JWT认证中间件
@@ -2188,4 +2823,51 @@ func (s *Server) handleGetPublicTraderConfig(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, result)
+}
+
+// handleOIRanking 获取 Open Interest 排名（聚合 Binance + Bybit）
+func (s *Server) handleOIRanking(c *gin.Context) {
+	// 从查询参数获取币种列表（逗号分隔）
+	symbolsParam := c.Query("symbols")
+	
+	var symbols []string
+	if symbolsParam != "" {
+		// 分割并清理空格
+		parts := strings.Split(symbolsParam, ",")
+		for _, part := range parts {
+			trimmed := strings.TrimSpace(part)
+			if trimmed != "" {
+				symbols = append(symbols, trimmed)
+			}
+		}
+	}
+	// 如果没有提供 symbols 参数，使用系统默认币种
+	if len(symbols) == 0 {
+		defaultCoinsStr, _ := s.database.GetSystemConfig("default_coins")
+		if defaultCoinsStr != "" {
+			json.Unmarshal([]byte(defaultCoinsStr), &symbols)
+		}
+		// 如果还是没有，使用硬编码默认值
+		if len(symbols) == 0 {
+			symbols = []string{"BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT", "XRPUSDT", "DOGEUSDT", "ADAUSDT", "HYPEUSDT"}
+		}
+	}
+
+	// 创建 OI 聚合器并查询
+	aggregator := market.NewOIAggregator()
+	ranking, err := aggregator.GetOIRanking(symbols)
+	if err != nil {
+		log.Printf("⚠️ OI 排名查询失败: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": fmt.Sprintf("查询失败: %v", err),
+		})
+		return
+	}
+
+	// 返回紧凑的排名数据
+	c.JSON(http.StatusOK, gin.H{
+		"timestamp": time.Now().Unix(),
+		"count":     len(ranking),
+		"data":      ranking,
+	})
 }

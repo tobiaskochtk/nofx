@@ -1,15 +1,18 @@
 package trader
 
 import (
-	"encoding/json"
-	"fmt"
-	"log"
-	"math"
-	"nofx/decision"
-	"nofx/logger"
-	"nofx/market"
-	"nofx/mcp"
-	"nofx/pool"
+    "encoding/json"
+    "fmt"
+    "log"
+    "math"
+    "os"
+    "strconv"
+    "nofx/config"
+    "nofx/decision"
+    "nofx/logger"
+    "nofx/market"
+    "nofx/mcp"
+    "nofx/pool"
 	"strings"
 	"sync"
 	"time"
@@ -38,8 +41,6 @@ type AutoTraderConfig struct {
 	AsterUser       string // Aster主钱包地址
 	AsterSigner     string // Aster API钱包地址
 	AsterPrivateKey string // Aster API钱包私钥
-
-	CoinPoolAPIURL string
 
 	// AI配置
 	UseQwen     bool
@@ -73,6 +74,9 @@ type AutoTraderConfig struct {
 	DefaultCoins []string // 默认币种列表（从数据库获取）
 	TradingCoins []string // 实际交易币种列表
 
+	// 持仓限制
+	MaxPositions int // 最大持仓数量（默认: 3）
+
 	// 系统提示词模板
 	SystemPromptTemplate string // 系统提示词模板名称（如 "default", "aggressive"）
 }
@@ -104,9 +108,27 @@ type AutoTrader struct {
 	monitorWg             sync.WaitGroup     // 用于等待监控goroutine结束
 	peakPnLCache          map[string]float64 // 最高收益缓存 (symbol -> 峰值盈亏百分比)
 	peakPnLCacheMutex     sync.RWMutex       // 缓存读写锁
-	lastBalanceSyncTime   time.Time          // 上次余额同步时间
-	database              interface{}        // 数据库引用（用于自动更新余额）
-	userID                string             // 用户ID
+    lastBalanceSyncTime   time.Time          // 上次余额同步时间
+    database              interface{}        // 数据库引用（用于自动更新余额）
+    userID                string             // 用户ID
+    // deals persistence helpers
+    lastSystemPrompt      string
+    lastUserPrompt        string
+    lastCoTTrace          string
+    lastDecisionJSON      string
+    openDealIDs           map[string]int64   // symbol_side -> dealID
+}
+
+// getEnvFloat 从环境变量读取浮点数（支持 .env 注入）
+func getEnvFloat(name string, def float64) float64 {
+    v := os.Getenv(name)
+    if v == "" {
+        return def
+    }
+    if f, err := strconv.ParseFloat(v, 64); err == nil {
+        return f
+    }
+    return def
 }
 
 // NewAutoTrader 创建自动交易器
@@ -149,11 +171,6 @@ func NewAutoTrader(config AutoTraderConfig, database interface{}, userID string)
 		} else {
 			log.Printf("🤖 [%s] 使用DeepSeek AI", config.Name)
 		}
-	}
-
-	// 初始化币种池API
-	if config.CoinPoolAPIURL != "" {
-		pool.SetCoinPoolAPI(config.CoinPoolAPIURL)
 	}
 
 	// 设置默认交易平台
@@ -228,12 +245,13 @@ func NewAutoTrader(config AutoTraderConfig, database interface{}, userID string)
 		positionFirstSeenTime: make(map[string]int64),
 		stopMonitorCh:         make(chan struct{}),
 		monitorWg:             sync.WaitGroup{},
-		peakPnLCache:          make(map[string]float64),
-		peakPnLCacheMutex:     sync.RWMutex{},
-		lastBalanceSyncTime:   time.Now(), // 初始化为当前时间
-		database:              database,
-		userID:                userID,
-	}, nil
+        peakPnLCache:          make(map[string]float64),
+        peakPnLCacheMutex:     sync.RWMutex{},
+        lastBalanceSyncTime:   time.Now(), // 初始化为当前时间
+        database:              database,
+        userID:                userID,
+        openDealIDs:           make(map[string]int64),
+    }, nil
 }
 
 // Run 运行自动交易主循环
@@ -402,7 +420,9 @@ func (at *AutoTrader) runCycle() error {
 	}
 
 	// 3. 自动同步余额（每10分钟检查一次，充值/提现后自动更新）
-	at.autoSyncBalanceIfNeeded()
+	// 暂时禁用：此功能会将初始余额错误地更新为可用余额，导致P&L计算错误
+	// TODO: 改进逻辑，使用钱包总余额(totalWalletBalance)而非可用余额进行比较
+	// at.autoSyncBalanceIfNeeded()
 
 	// 4. 收集交易上下文
 	ctx, err := at.buildTradingContext()
@@ -444,20 +464,25 @@ func (at *AutoTrader) runCycle() error {
 	log.Printf("📊 账户净值: %.2f USDT | 可用: %.2f USDT | 持仓: %d",
 		ctx.Account.TotalEquity, ctx.Account.AvailableBalance, ctx.Account.PositionCount)
 
-	// 5. 调用AI获取完整决策
+    // 5. 调用AI获取完整决策
 	log.Printf("🤖 正在请求AI分析并决策... [模板: %s]", at.systemPromptTemplate)
-	decision, err := decision.GetFullDecisionWithCustomPrompt(ctx, at.mcpClient, at.customPrompt, at.overrideBasePrompt, at.systemPromptTemplate)
+    decision, err := decision.GetFullDecisionWithCustomPrompt(ctx, at.mcpClient, at.customPrompt, at.overrideBasePrompt, at.systemPromptTemplate)
 
 	// 即使有错误，也保存思维链、决策和输入prompt（用于debug）
-	if decision != nil {
-		record.SystemPrompt = decision.SystemPrompt // 保存系统提示词
-		record.InputPrompt = decision.UserPrompt
-		record.CoTTrace = decision.CoTTrace
-		if len(decision.Decisions) > 0 {
-			decisionJSON, _ := json.MarshalIndent(decision.Decisions, "", "  ")
-			record.DecisionJSON = string(decisionJSON)
-		}
-	}
+    if decision != nil {
+        record.SystemPrompt = decision.SystemPrompt // 保存系统提示词
+        record.InputPrompt = decision.UserPrompt
+        record.CoTTrace = decision.CoTTrace
+        if len(decision.Decisions) > 0 {
+            decisionJSON, _ := json.MarshalIndent(decision.Decisions, "", "  ")
+            record.DecisionJSON = string(decisionJSON)
+        }
+        // 缓存到AutoTrader，便于持久化到deals
+        at.lastSystemPrompt = record.SystemPrompt
+        at.lastUserPrompt = record.InputPrompt
+        at.lastCoTTrace = record.CoTTrace
+        at.lastDecisionJSON = record.DecisionJSON
+    }
 
 	if err != nil {
 		record.Success = false
@@ -563,23 +588,21 @@ func (at *AutoTrader) buildTradingContext() (*decision.Context, error) {
 		return nil, fmt.Errorf("获取账户余额失败: %w", err)
 	}
 
-	// 获取账户字段
-	totalWalletBalance := 0.0
-	totalUnrealizedProfit := 0.0
-	availableBalance := 0.0
+    // 获取账户字段（只需可用余额）
+    availableBalance := 0.0
+    if avail, ok := balance["availableBalance"].(float64); ok {
+        availableBalance = avail
+    }
 
-	if wallet, ok := balance["totalWalletBalance"].(float64); ok {
-		totalWalletBalance = wallet
-	}
-	if unrealized, ok := balance["totalUnrealizedProfit"].(float64); ok {
-		totalUnrealizedProfit = unrealized
-	}
-	if avail, ok := balance["availableBalance"].(float64); ok {
-		availableBalance = avail
-	}
-
-	// Total Equity = 钱包余额 + 未实现盈亏
-	totalEquity := totalWalletBalance + totalUnrealizedProfit
+    // Total Equity（账户净值）
+    // 对于合约账户更贴近实际的口径：可用余额 + 已占用保证金
+    // Hyperliquid / 合约场景: accountValue ≈ available + marginUsed
+    // 如果没有持仓（marginUsed=0），则退化为 totalEquity = availableBalance
+    // 注意：totalWalletBalance = (accountValue - unrealizedPnl) + spotBalance
+    // 旧口径（wallet+unrealized）在存在 Spot 余额时会把 Spot 也计入，从而与前端显示不一致
+    // 统一改为 available + marginUsed，保持与用户期望一致
+    // 先占位，待计算出 totalMarginUsed 后再赋值
+    totalEquity := 0.0
 
 	// 2. 获取持仓信息
 	positions, err := at.trader.GetPositions()
@@ -664,17 +687,38 @@ func (at *AutoTrader) buildTradingContext() (*decision.Context, error) {
 		return nil, fmt.Errorf("获取候选币种失败: %w", err)
 	}
 
+	// 🔥 新增: 智能候选币种过滤（AI预算优化）
+	// 如果已经达到最大持仓数量，则不发送候选币种给AI
+	// 只发送持仓信息用于管理决策（平仓、调整止损止盈等）
+	maxPositions := at.config.MaxPositions
+	if maxPositions <= 0 {
+		maxPositions = 3 // 默认最大持仓3个
+	}
+
+	currentPositionCount := len(positionInfos)
+	if currentPositionCount >= maxPositions {
+		log.Printf("⚠️  已达到最大持仓数 (%d/%d)，跳过候选币种分析（AI预算优化）", currentPositionCount, maxPositions)
+		log.Printf("    仅分析现有持仓的管理决策（平仓/止损止盈调整）")
+		// 清空候选币种列表，只分析现有持仓
+		candidateCoins = []decision.CandidateCoin{}
+	} else {
+		log.Printf("✓ 当前持仓 %d/%d，将分析 %d 个候选币种", currentPositionCount, maxPositions, len(candidateCoins))
+	}
+
 	// 4. 计算总盈亏
-	totalPnL := totalEquity - at.initialBalance
+    // 现在可以计算总权益
+    totalEquity = availableBalance + totalMarginUsed
+
+    totalPnL := totalEquity - at.initialBalance
 	totalPnLPct := 0.0
 	if at.initialBalance > 0 {
 		totalPnLPct = (totalPnL / at.initialBalance) * 100
 	}
 
-	marginUsedPct := 0.0
-	if totalEquity > 0 {
-		marginUsedPct = (totalMarginUsed / totalEquity) * 100
-	}
+    marginUsedPct := 0.0
+    if totalEquity > 0 {
+        marginUsedPct = (totalMarginUsed / totalEquity) * 100
+    }
 
 	// 5. 分析历史表现（最近100个周期，避免长期持仓的交易记录丢失）
 	// 假设每3分钟一个周期，100个周期 = 5小时，足够覆盖大部分交易
@@ -692,6 +736,7 @@ func (at *AutoTrader) buildTradingContext() (*decision.Context, error) {
 		CallCount:       at.callCount,
 		BTCETHLeverage:  at.config.BTCETHLeverage,  // 使用配置的杠杆倍数
 		AltcoinLeverage: at.config.AltcoinLeverage, // 使用配置的杠杆倍数
+		MaxPositions:    maxPositions,              // 传递最大持仓数给Context
 		Account: decision.AccountInfo{
 			TotalEquity:      totalEquity,
 			AvailableBalance: availableBalance,
@@ -723,6 +768,12 @@ func (at *AutoTrader) executeDecisionWithRecord(decision *decision.Decision, act
 	case "update_stop_loss":
 		return at.executeUpdateStopLossWithRecord(decision, actionRecord)
 	case "update_take_profit":
+		return at.executeUpdateTakeProfitWithRecord(decision, actionRecord)
+	case "update_sl_tp":
+		// 组合动作：先更新止损，再更新止盈；两步任一失败则整体失败
+		if err := at.executeUpdateStopLossWithRecord(decision, actionRecord); err != nil {
+			return err
+		}
 		return at.executeUpdateTakeProfitWithRecord(decision, actionRecord)
 	case "partial_close":
 		return at.executePartialCloseWithRecord(decision, actionRecord)
@@ -811,6 +862,62 @@ func (at *AutoTrader) executeOpenLongWithRecord(decision *decision.Decision, act
 		log.Printf("  ⚠ 设置止盈失败: %v", err)
 	}
 
+	// 持久化到数据库（deals）
+	if at.database != nil {
+		if db, ok := at.database.(interface{ CreateDeal(deal *config.DealRecord) (int64, error) }); ok {
+			marketCtx := map[string]interface{}{
+				"symbol":          marketData.Symbol,
+				"current_price":   marketData.CurrentPrice,
+				"price_change_1h": marketData.PriceChange1h,
+				"price_change_4h": marketData.PriceChange4h,
+				"ema20":           marketData.CurrentEMA20,
+				"macd":            marketData.CurrentMACD,
+				"rsi7":            marketData.CurrentRSI7,
+				"funding_rate":    marketData.FundingRate,
+			}
+			if marketData.OpenInterest != nil {
+				marketCtx["oi_latest"] = marketData.OpenInterest.Latest
+				marketCtx["oi_average"] = marketData.OpenInterest.Average
+			}
+			ctxJSON, _ := json.Marshal(marketCtx)
+			openOrderID := fmt.Sprintf("%v", order["orderId"])
+			deal := &config.DealRecord{
+				UserID:            at.userID,
+				TraderID:          at.id,
+				Exchange:          at.exchange,
+				Symbol:            decision.Symbol,
+				Side:              "long",
+				Leverage:          decision.Leverage,
+				PositionSizeUSD:   decision.PositionSizeUSD,
+				Quantity:          quantity,
+				OpenPrice:         marketData.CurrentPrice,
+				OpenTime:          time.Now(),
+				OpenOrderID:       openOrderID,
+				SystemPrompt:      at.lastSystemPrompt,
+				UserPrompt:        at.lastUserPrompt,
+				Reasoning:         decision.Reasoning,
+				CoTTrace:          at.lastCoTTrace,
+				DecisionJSON:      at.lastDecisionJSON,
+				MarketContextJSON: string(ctxJSON),
+				StopLoss:          decision.StopLoss,
+				TakeProfit:        decision.TakeProfit,
+			}
+			if id, err := db.CreateDeal(deal); err != nil {
+				log.Printf("  ⚠️ 记录交易(deal)失败: %v", err)
+			} else {
+				at.openDealIDs[posKey] = id
+				log.Printf("  📝 已保存交易记录到数据库 (deal_id=%d)", id)
+				// 记录事件: open
+				if dbEvt, ok := at.database.(interface{ CreateDealEvent(event *config.DealEvent) error }); ok {
+					_ = dbEvt.CreateDealEvent(&config.DealEvent{
+						UserID: at.userID, TraderID: at.id, DealID: id, Type: "open",
+						Symbol: decision.Symbol, Side: "long", Quantity: quantity, Price: marketData.CurrentPrice, OrderID: openOrderID,
+					})
+				}
+			}
+		}
+	}
+
 	return nil
 }
 
@@ -891,6 +998,63 @@ func (at *AutoTrader) executeOpenShortWithRecord(decision *decision.Decision, ac
 		log.Printf("  ⚠ 设置止盈失败: %v", err)
 	}
 
+	// 持久化到数据库（deals）
+	if at.database != nil {
+		if db, ok := at.database.(interface{ CreateDeal(deal *config.DealRecord) (int64, error) }); ok {
+			marketCtx := map[string]interface{}{
+				"symbol":          marketData.Symbol,
+				"current_price":   marketData.CurrentPrice,
+				"price_change_1h": marketData.PriceChange1h,
+				"price_change_4h": marketData.PriceChange4h,
+				"ema20":           marketData.CurrentEMA20,
+				"macd":            marketData.CurrentMACD,
+				"rsi7":            marketData.CurrentRSI7,
+				"funding_rate":    marketData.FundingRate,
+			}
+			if marketData.OpenInterest != nil {
+				marketCtx["oi_latest"] = marketData.OpenInterest.Latest
+				marketCtx["oi_average"] = marketData.OpenInterest.Average
+			}
+			ctxJSON, _ := json.Marshal(marketCtx)
+			openOrderID := fmt.Sprintf("%v", order["orderId"])
+			deal := &config.DealRecord{
+				UserID:            at.userID,
+				TraderID:          at.id,
+				Exchange:          at.exchange,
+				Symbol:            decision.Symbol,
+				Side:              "short",
+				Leverage:          decision.Leverage,
+				PositionSizeUSD:   decision.PositionSizeUSD,
+				Quantity:          quantity,
+				OpenPrice:         marketData.CurrentPrice,
+				OpenTime:          time.Now(),
+				OpenOrderID:       openOrderID,
+				SystemPrompt:      at.lastSystemPrompt,
+				UserPrompt:        at.lastUserPrompt,
+				Reasoning:         decision.Reasoning,
+				CoTTrace:          at.lastCoTTrace,
+				DecisionJSON:      at.lastDecisionJSON,
+				MarketContextJSON: string(ctxJSON),
+				StopLoss:          decision.StopLoss,
+				TakeProfit:        decision.TakeProfit,
+			}
+			if id, err := db.CreateDeal(deal); err != nil {
+				log.Printf("  ⚠️ 记录交易(deal)失败: %v", err)
+			} else {
+				posKey := decision.Symbol + "_short"
+				at.openDealIDs[posKey] = id
+				log.Printf("  📝 已保存交易记录到数据库 (deal_id=%d)", id)
+				// 记录事件: open
+				if dbEvt, ok := at.database.(interface{ CreateDealEvent(event *config.DealEvent) error }); ok {
+					_ = dbEvt.CreateDealEvent(&config.DealEvent{
+						UserID: at.userID, TraderID: at.id, DealID: id, Type: "open",
+						Symbol: decision.Symbol, Side: "short", Quantity: quantity, Price: marketData.CurrentPrice, OrderID: openOrderID,
+					})
+				}
+			}
+		}
+	}
+
 	return nil
 }
 
@@ -917,6 +1081,65 @@ func (at *AutoTrader) executeCloseLongWithRecord(decision *decision.Decision, ac
 	}
 
 	log.Printf("  ✓ 平仓成功")
+
+	// 更新数据库中的deal（计算P/L）
+	if at.database != nil {
+		posKey := decision.Symbol + "_long"
+		dealID, has := at.openDealIDs[posKey]
+		if !has {
+			// fallback to DB query
+			if dbFind, ok := at.database.(interface{ FindOpenDeal(userID, traderID, symbol, side string) (*config.DealRecord, error) }); ok {
+				if rec, err := dbFind.FindOpenDeal(at.userID, at.id, decision.Symbol, "long"); err == nil && rec != nil {
+					dealID = rec.ID
+				}
+			}
+		}
+
+		if dealID != 0 {
+			// load open record for accurate calc
+			var openRec *config.DealRecord
+			if dbGet, ok := at.database.(interface{ GetDealByID(userID, traderID string, id int64) (*config.DealRecord, error) }); ok {
+				if rec, err := dbGet.GetDealByID(at.userID, at.id, dealID); err == nil {
+					openRec = rec
+				}
+			}
+			if openRec != nil {
+				open := openRec.OpenPrice
+				close := marketData.CurrentPrice
+				// 典型费率/滑点（.env 可配置）
+				slippageRate := getEnvFloat("NOFX_PNL_SLIPPAGE_RATE", 0.0005)
+				feeRate := getEnvFloat("NOFX_PNL_TAKER_FEE_RATE", 0.0004)
+				// 应用滑点（long: 开多价上调，平多价下调）
+				effOpen := open * (1 + slippageRate)
+				effClose := close * (1 - slippageRate)
+				priceChangePct := 0.0
+				if effOpen > 0 { priceChangePct = (effClose - effOpen) / effOpen }
+				positionValue := openRec.Quantity * effOpen
+				grossPnL := positionValue * priceChangePct * float64(openRec.Leverage)
+				// 手续费（开仓+平仓）
+				fees := (openRec.Quantity*effOpen + openRec.Quantity*effClose) * feeRate
+				realizedPnL := grossPnL - fees
+				marginUsed := 0.0
+				if openRec.Leverage > 0 { marginUsed = positionValue / float64(openRec.Leverage) }
+				realizedPnLPct := 0.0
+				if marginUsed > 0 { realizedPnLPct = (realizedPnL / marginUsed) * 100 }
+				duration := time.Since(openRec.OpenTime).Seconds()
+				closeOrderID := fmt.Sprintf("%v", order["orderId"])
+				if dbClose, ok := at.database.(interface{ CloseDeal(userID, traderID string, id int64, closePrice float64, closeOrderID string, realizedPnL, realizedPnLPct float64, durationSeconds int64, wasStopLoss bool) error }); ok {
+					if err := dbClose.CloseDeal(at.userID, at.id, dealID, close, closeOrderID, realizedPnL, realizedPnLPct, int64(duration), false); err != nil {
+						log.Printf("  ⚠️ 更新交易P/L失败: %v", err)
+					} else {
+						delete(at.openDealIDs, posKey)
+						log.Printf("  💾 已更新交易P/L (deal_id=%d)", dealID)
+					}
+				}
+				// 记录事件: close
+				if dbEvt, ok := at.database.(interface{ CreateDealEvent(event *config.DealEvent) error }); ok {
+					_ = dbEvt.CreateDealEvent(&config.DealEvent{UserID: at.userID, TraderID: at.id, DealID: dealID, Type: "close", Symbol: decision.Symbol, Side: "long", Price: close, OrderID: closeOrderID})
+				}
+			}
+		}
+	}
 	return nil
 }
 
@@ -943,6 +1166,61 @@ func (at *AutoTrader) executeCloseShortWithRecord(decision *decision.Decision, a
 	}
 
 	log.Printf("  ✓ 平仓成功")
+
+	// 更新数据库中的deal（计算P/L）
+	if at.database != nil {
+		posKey := decision.Symbol + "_short"
+		dealID, has := at.openDealIDs[posKey]
+		if !has {
+			if dbFind, ok := at.database.(interface{ FindOpenDeal(userID, traderID, symbol, side string) (*config.DealRecord, error) }); ok {
+				if rec, err := dbFind.FindOpenDeal(at.userID, at.id, decision.Symbol, "short"); err == nil && rec != nil {
+					dealID = rec.ID
+				}
+			}
+		}
+		if dealID != 0 {
+			var openRec *config.DealRecord
+			if dbGet, ok := at.database.(interface{ GetDealByID(userID, traderID string, id int64) (*config.DealRecord, error) }); ok {
+				if rec, err := dbGet.GetDealByID(at.userID, at.id, dealID); err == nil {
+					openRec = rec
+				}
+			}
+			if openRec != nil {
+				open := openRec.OpenPrice
+				close := marketData.CurrentPrice
+				// 典型费率/滑点（.env 可配置）
+				slippageRate := getEnvFloat("NOFX_PNL_SLIPPAGE_RATE", 0.0005)
+				feeRate := getEnvFloat("NOFX_PNL_TAKER_FEE_RATE", 0.0004)
+				// 应用滑点（short: 开空价下调，平空价上调）
+				effOpen := open * (1 - slippageRate)
+				effClose := close * (1 + slippageRate)
+				priceChangePct := 0.0
+				if effOpen > 0 { priceChangePct = (effOpen - effClose) / effOpen }
+				positionValue := openRec.Quantity * effOpen
+				grossPnL := positionValue * priceChangePct * float64(openRec.Leverage)
+				fees := (openRec.Quantity*effOpen + openRec.Quantity*effClose) * feeRate
+				realizedPnL := grossPnL - fees
+				marginUsed := 0.0
+				if openRec.Leverage > 0 { marginUsed = positionValue / float64(openRec.Leverage) }
+				realizedPnLPct := 0.0
+				if marginUsed > 0 { realizedPnLPct = (realizedPnL / marginUsed) * 100 }
+				duration := time.Since(openRec.OpenTime).Seconds()
+				closeOrderID := fmt.Sprintf("%v", order["orderId"])
+				if dbClose, ok := at.database.(interface{ CloseDeal(userID, traderID string, id int64, closePrice float64, closeOrderID string, realizedPnL, realizedPnLPct float64, durationSeconds int64, wasStopLoss bool) error }); ok {
+					if err := dbClose.CloseDeal(at.userID, at.id, dealID, close, closeOrderID, realizedPnL, realizedPnLPct, int64(duration), false); err != nil {
+						log.Printf("  ⚠️ 更新交易P/L失败: %v", err)
+					} else {
+						delete(at.openDealIDs, posKey)
+						log.Printf("  💾 已更新交易P/L (deal_id=%d)", dealID)
+					}
+				}
+				// 记录事件: close
+				if dbEvt, ok := at.database.(interface{ CreateDealEvent(event *config.DealEvent) error }); ok {
+					_ = dbEvt.CreateDealEvent(&config.DealEvent{UserID: at.userID, TraderID: at.id, DealID: dealID, Type: "close", Symbol: decision.Symbol, Side: "short", Price: close, OrderID: closeOrderID})
+				}
+			}
+		}
+	}
 	return nil
 }
 
@@ -1021,13 +1299,34 @@ func (at *AutoTrader) executeUpdateStopLossWithRecord(decision *decision.Decisio
 
 	// 调用交易所 API 修改止损
 	quantity := math.Abs(positionAmt)
-	err = at.trader.SetStopLoss(decision.Symbol, positionSide, quantity, decision.NewStopLoss)
-	if err != nil {
-		return fmt.Errorf("修改止损失败: %w", err)
-	}
+err = at.trader.SetStopLoss(decision.Symbol, positionSide, quantity, decision.NewStopLoss)
+if err != nil {
+    return fmt.Errorf("修改止损失败: %w", err)
+}
 
-	log.Printf("  ✓ 止损已调整: %.2f (当前价格: %.2f)", decision.NewStopLoss, marketData.CurrentPrice)
-	return nil
+log.Printf("  ✓ 止损已调整: %.2f (当前价格: %.2f)", decision.NewStopLoss, marketData.CurrentPrice)
+    // 更新数据库止损
+    if at.database != nil {
+        // symbol_side -> id
+        posKey := decision.Symbol + "_" + strings.ToLower(positionSide)
+        dealID, has := at.openDealIDs[posKey]
+        if !has {
+            if dbFind, ok := at.database.(interface{ FindOpenDeal(userID, traderID, symbol, side string) (*config.DealRecord, error) }); ok {
+                if rec, err := dbFind.FindOpenDeal(at.userID, at.id, decision.Symbol, strings.ToLower(positionSide)); err == nil && rec != nil {
+                    dealID = rec.ID
+                }
+            }
+        }
+        if dealID != 0 {
+            if dbUpd, ok := at.database.(interface{ UpdateDealStopLoss(userID, traderID string, id int64, stopLoss float64) error }); ok {
+                _ = dbUpd.UpdateDealStopLoss(at.userID, at.id, dealID, decision.NewStopLoss)
+            }
+            if dbEvt, ok := at.database.(interface{ CreateDealEvent(event *config.DealEvent) error }); ok {
+                _ = dbEvt.CreateDealEvent(&config.DealEvent{UserID: at.userID, TraderID: at.id, DealID: dealID, Type: "update_stop_loss", Symbol: decision.Symbol, Side: strings.ToLower(positionSide), Price: decision.NewStopLoss})
+            }
+        }
+    }
+    return nil
 }
 
 // executeUpdateTakeProfitWithRecord 执行调整止盈并记录详细信息
@@ -1105,13 +1404,33 @@ func (at *AutoTrader) executeUpdateTakeProfitWithRecord(decision *decision.Decis
 
 	// 调用交易所 API 修改止盈
 	quantity := math.Abs(positionAmt)
-	err = at.trader.SetTakeProfit(decision.Symbol, positionSide, quantity, decision.NewTakeProfit)
-	if err != nil {
-		return fmt.Errorf("修改止盈失败: %w", err)
-	}
+err = at.trader.SetTakeProfit(decision.Symbol, positionSide, quantity, decision.NewTakeProfit)
+if err != nil {
+    return fmt.Errorf("修改止盈失败: %w", err)
+}
 
-	log.Printf("  ✓ 止盈已调整: %.2f (当前价格: %.2f)", decision.NewTakeProfit, marketData.CurrentPrice)
-	return nil
+log.Printf("  ✓ 止盈已调整: %.2f (当前价格: %.2f)", decision.NewTakeProfit, marketData.CurrentPrice)
+    // 更新数据库止盈 + 记录事件
+    if at.database != nil {
+        posKey := decision.Symbol + "_" + strings.ToLower(positionSide)
+        dealID, has := at.openDealIDs[posKey]
+        if !has {
+            if dbFind, ok := at.database.(interface{ FindOpenDeal(userID, traderID, symbol, side string) (*config.DealRecord, error) }); ok {
+                if rec, err := dbFind.FindOpenDeal(at.userID, at.id, decision.Symbol, strings.ToLower(positionSide)); err == nil && rec != nil {
+                    dealID = rec.ID
+                }
+            }
+        }
+        if dealID != 0 {
+            if dbUpd, ok := at.database.(interface{ UpdateDealTakeProfit(userID, traderID string, id int64, takeProfit float64) error }); ok {
+                _ = dbUpd.UpdateDealTakeProfit(at.userID, at.id, dealID, decision.NewTakeProfit)
+            }
+            if dbEvt, ok := at.database.(interface{ CreateDealEvent(event *config.DealEvent) error }); ok {
+                _ = dbEvt.CreateDealEvent(&config.DealEvent{UserID: at.userID, TraderID: at.id, DealID: dealID, Type: "update_take_profit", Symbol: decision.Symbol, Side: strings.ToLower(positionSide), Price: decision.NewTakeProfit})
+            }
+        }
+    }
+    return nil
 }
 
 // executePartialCloseWithRecord 执行部分平仓并记录详细信息
@@ -1182,6 +1501,22 @@ func (at *AutoTrader) executePartialCloseWithRecord(decision *decision.Decision,
 	log.Printf("  ✓ 部分平仓成功: 平仓 %.4f (%.1f%%), 剩余 %.4f",
 		closeQuantity, decision.ClosePercentage, remainingQuantity)
 
+	// 记录部分平仓事件
+	if at.database != nil {
+		posKey := decision.Symbol + "_" + strings.ToLower(positionSide)
+		dealID, has := at.openDealIDs[posKey]
+		if !has {
+			if dbFind, ok := at.database.(interface{ FindOpenDeal(userID, traderID, symbol, side string) (*config.DealRecord, error) }); ok {
+				if rec, err := dbFind.FindOpenDeal(at.userID, at.id, decision.Symbol, strings.ToLower(positionSide)); err == nil && rec != nil { dealID = rec.ID }
+			}
+		}
+		if dealID != 0 {
+			if dbEvt, ok := at.database.(interface{ CreateDealEvent(event *config.DealEvent) error }); ok {
+				_ = dbEvt.CreateDealEvent(&config.DealEvent{UserID: at.userID, TraderID: at.id, DealID: dealID, Type: "partial_close", Symbol: decision.Symbol, Side: strings.ToLower(positionSide), Quantity: closeQuantity, Percentage: decision.ClosePercentage, Price: marketData.CurrentPrice, OrderID: fmt.Sprintf("%v", order["orderId"])})
+			}
+		}
+	}
+
 	return nil
 }
 
@@ -1227,7 +1562,50 @@ func (at *AutoTrader) GetSystemPromptTemplate() string {
 
 // GetDecisionLogger 获取决策日志记录器
 func (at *AutoTrader) GetDecisionLogger() *logger.DecisionLogger {
-	return at.decisionLogger
+    return at.decisionLogger
+}
+
+// UpdateAIModelConfig 动态更新AI提供商与密钥（热更新，不需重启trader）
+func (at *AutoTrader) UpdateAIModelConfig(provider, apiKey, customAPIURL, customModelName string) {
+    // 更新内部配置与状态
+    at.aiModel = provider
+    at.config.CustomAPIURL = customAPIURL
+    at.config.CustomModelName = customModelName
+
+    switch strings.ToLower(provider) {
+    case "qwen":
+        at.config.UseQwen = true
+        at.config.QwenKey = apiKey
+        at.config.DeepSeekKey = ""
+        // 应用到 MCP 客户端
+        at.mcpClient.SetQwenAPIKey(apiKey, customAPIURL, customModelName)
+        log.Printf("🔄 [%s] 已更新AI配置为 Qwen (自定义URL=%s, 模型=%s)", at.name, customAPIURL, customModelName)
+    case "deepseek":
+        at.config.UseQwen = false
+        at.config.DeepSeekKey = apiKey
+        at.config.QwenKey = ""
+        at.mcpClient.SetDeepSeekAPIKey(apiKey, customAPIURL, customModelName)
+        log.Printf("🔄 [%s] 已更新AI配置为 DeepSeek (自定义URL=%s, 模型=%s)", at.name, customAPIURL, customModelName)
+    case "custom":
+        at.config.UseQwen = false
+        at.config.CustomAPIKey = apiKey
+        at.config.DeepSeekKey = ""
+        at.config.QwenKey = ""
+        at.mcpClient.SetCustomAPI(customAPIURL, apiKey, customModelName)
+        log.Printf("🔄 [%s] 已更新AI配置为 自定义API (URL=%s, 模型=%s)", at.name, customAPIURL, customModelName)
+    default:
+        // 未知提供商，默认按 DeepSeek 处理以保持兼容
+        at.config.UseQwen = false
+        at.config.DeepSeekKey = apiKey
+        at.config.QwenKey = ""
+        at.mcpClient.SetDeepSeekAPIKey(apiKey, customAPIURL, customModelName)
+        log.Printf("⚠️  [%s] 未知AI提供商 '%s'，按 DeepSeek 处理 (URL=%s, 模型=%s)", at.name, provider, customAPIURL, customModelName)
+    }
+}
+
+// GetBalance 获取账户余额（用于API Balance Check）
+func (at *AutoTrader) GetBalance() (map[string]interface{}, error) {
+	return at.trader.GetBalance()
 }
 
 // GetStatus 获取系统状态（用于API）
@@ -1276,8 +1654,9 @@ func (at *AutoTrader) GetAccountInfo() (map[string]interface{}, error) {
 		availableBalance = avail
 	}
 
-	// Total Equity = 钱包余额 + 未实现盈亏
-	totalEquity := totalWalletBalance + totalUnrealizedProfit
+    // Total Equity 账户净值：在合约账户口径下使用 可用余额 + 已占用保证金
+    // 注意：这里先占位，待计算出 totalMarginUsed 后再赋值
+    totalEquity := 0.0
 
 	// 获取持仓计算总保证金
 	positions, err := at.trader.GetPositions()
@@ -1304,7 +1683,10 @@ func (at *AutoTrader) GetAccountInfo() (map[string]interface{}, error) {
 		totalMarginUsed += marginUsed
 	}
 
-	totalPnL := totalEquity - at.initialBalance
+    // 计算总权益（available + marginUsed）
+    totalEquity = availableBalance + totalMarginUsed
+
+    totalPnL := totalEquity - at.initialBalance
 	totalPnLPct := 0.0
 	if at.initialBalance > 0 {
 		totalPnLPct = (totalPnL / at.initialBalance) * 100
@@ -1316,8 +1698,8 @@ func (at *AutoTrader) GetAccountInfo() (map[string]interface{}, error) {
 	}
 
 	return map[string]interface{}{
-		// 核心字段
-		"total_equity":      totalEquity,           // 账户净值 = wallet + unrealized
+        // 核心字段
+        "total_equity":      totalEquity,           // 账户净值 = available + margin_used（合约账户）
 		"wallet_balance":    totalWalletBalance,    // 钱包余额（不含未实现盈亏）
 		"unrealized_profit": totalUnrealizedProfit, // 未实现盈亏（从API）
 		"available_balance": availableBalance,      // 可用余额
@@ -1396,20 +1778,20 @@ func sortDecisionsByPriority(decisions []decision.Decision) []decision.Decision 
 	}
 
 	// 定义优先级
-	getActionPriority := func(action string) int {
-		switch action {
-		case "close_long", "close_short", "partial_close":
-			return 1 // 最高优先级：先平仓（包括部分平仓）
-		case "update_stop_loss", "update_take_profit":
-			return 2 // 调整持仓止盈止损
-		case "open_long", "open_short":
-			return 3 // 次优先级：后开仓
-		case "hold", "wait":
-			return 4 // 最低优先级：观望
-		default:
-			return 999 // 未知动作放最后
-		}
-	}
+    getActionPriority := func(action string) int {
+        switch action {
+        case "close_long", "close_short", "partial_close":
+            return 1 // 最高优先级：先平仓（包括部分平仓）
+        case "update_stop_loss", "update_take_profit", "update_sl_tp":
+            return 2 // 调整持仓止盈止损
+        case "open_long", "open_short":
+            return 3 // 次优先级：后开仓
+        case "hold", "wait":
+            return 4 // 最低优先级：观望
+        default:
+            return 999 // 未知动作放最后
+        }
+    }
 
 	// 复制决策列表
 	sorted := make([]decision.Decision, len(decisions))
@@ -1487,15 +1869,8 @@ func (at *AutoTrader) getCandidateCoins() ([]decision.CandidateCoin, error) {
 
 // normalizeSymbol 标准化币种符号（确保以USDT结尾）
 func normalizeSymbol(symbol string) string {
-	// 转为大写
-	symbol = strings.ToUpper(strings.TrimSpace(symbol))
-
-	// 确保以USDT结尾
-	if !strings.HasSuffix(symbol, "USDT") {
-		symbol = symbol + "USDT"
-	}
-
-	return symbol
+    // 统一归一化：USDC → USDT，其余无后缀追加USDT
+    return market.Normalize(symbol)
 }
 
 // 启动回撤监控

@@ -186,6 +186,54 @@ export interface CompetitionData {
   count: number
 }
 
+export interface Deal {
+  id: number
+  user_id: string
+  trader_id: string
+  exchange: string
+  symbol: string
+  side: 'long' | 'short'
+  leverage: number
+  position_size_usd: number
+  quantity: number
+  open_price: number
+  open_time: string
+  open_order_id: string
+  system_prompt?: string
+  user_prompt?: string
+  reasoning?: string
+  cot_trace?: string
+  decision_json?: string
+  market_context_json?: string
+  stop_loss: number
+  take_profit: number
+  close_price?: number | null
+  close_time?: string | null
+  close_order_id?: string | null
+  realized_pnl?: number | null
+  realized_pnl_pct?: number | null
+  duration_seconds?: number | null
+  was_stop_loss?: boolean | null
+  status: 'open' | 'closed'
+  created_at?: string
+  updated_at?: string
+}
+
+export interface DealEvent {
+  id: number
+  user_id: string
+  trader_id: string
+  deal_id: number
+  type: 'open' | 'partial_close' | 'update_stop_loss' | 'update_take_profit' | 'close'
+  symbol: string
+  side: 'long' | 'short'
+  quantity?: number
+  percentage?: number
+  price?: number
+  order_id?: string
+  created_at: string
+}
+
 // Trader Configuration Data for View Modal
 export interface TraderConfigData {
   trader_id?: string

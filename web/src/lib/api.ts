@@ -81,6 +81,22 @@ export const api = {
     if (!res.ok) throw new Error('停止交易员失败')
   },
 
+  async checkTraderBalance(traderId: string): Promise<{
+    has_balance: boolean
+    available_balance: number
+    total_wallet_balance: number
+    total_unrealized_profit?: number
+    spot_balance?: number
+    warning?: string
+    error?: string
+  }> {
+    const res = await fetch(`${API_BASE}/traders/${traderId}/balance`, {
+      headers: getAuthHeaders(),
+    })
+    if (!res.ok) throw new Error('获取余额失败')
+    return res.json()
+  },
+
   async updateTraderPrompt(
     traderId: string,
     customPrompt: string
@@ -286,7 +302,12 @@ export const api = {
       ? `${API_BASE}/decisions/latest?trader_id=${traderId}`
       : `${API_BASE}/decisions/latest`
     const res = await fetch(url, {
-      headers: getAuthHeaders(),
+      // Ensure the browser does not serve a cached response
+      cache: 'no-store',
+      headers: {
+        ...getAuthHeaders(),
+        'Cache-Control': 'no-cache',
+      },
     })
     if (!res.ok) throw new Error('获取最新决策失败')
     return res.json()
@@ -355,6 +376,111 @@ export const api = {
     return res.json()
   },
 
+  // Deals APIs
+  async getDeals(params?: {
+    trader_id?: string
+    status?: string
+    symbol?: string
+    side?: string
+    from?: string
+    to?: string
+    q?: string
+    pnl?: 'win' | 'loss'
+    pnl_min?: number
+    pnl_max?: number
+    limit?: number
+    offset?: number
+  }): Promise<import('../types').Deal[]> {
+    const qs = new URLSearchParams()
+    if (params?.trader_id) qs.set('trader_id', params.trader_id)
+    if (params?.status) qs.set('status', params.status)
+    if (params?.symbol) qs.set('symbol', params.symbol)
+    if (params?.side) qs.set('side', params.side)
+    if (params?.from) qs.set('from', params.from)
+    if (params?.to) qs.set('to', params.to)
+    if (params?.q) qs.set('q', params.q)
+    if (params?.pnl) qs.set('pnl', params.pnl)
+    if (params?.pnl_min !== undefined) qs.set('pnl_min', String(params.pnl_min))
+    if (params?.pnl_max !== undefined) qs.set('pnl_max', String(params.pnl_max))
+    if (params?.limit) qs.set('limit', String(params.limit))
+    if (params?.offset) qs.set('offset', String(params.offset))
+    const url = `${API_BASE}/deals${qs.toString() ? `?${qs.toString()}` : ''}`
+    const res = await fetch(url, { headers: getAuthHeaders() })
+    if (!res.ok) throw new Error('获取交易记录失败')
+    return res.json()
+  },
+
+  async getDealsCount(params?: {
+    trader_id?: string
+    status?: string
+    symbol?: string
+    side?: string
+    from?: string
+    to?: string
+    q?: string
+    pnl?: 'win' | 'loss'
+    pnl_min?: number
+    pnl_max?: number
+  }): Promise<number> {
+    const qs = new URLSearchParams()
+    if (params?.trader_id) qs.set('trader_id', params.trader_id)
+    if (params?.status) qs.set('status', params.status)
+    if (params?.symbol) qs.set('symbol', params.symbol)
+    if (params?.side) qs.set('side', params.side)
+    if (params?.from) qs.set('from', params.from)
+    if (params?.to) qs.set('to', params.to)
+    if (params?.q) qs.set('q', params.q)
+    if (params?.pnl) qs.set('pnl', params.pnl)
+    if (params?.pnl_min !== undefined) qs.set('pnl_min', String(params.pnl_min))
+    if (params?.pnl_max !== undefined) qs.set('pnl_max', String(params.pnl_max))
+    const url = `${API_BASE}/deals/count${qs.toString() ? `?${qs.toString()}` : ''}`
+    const res = await fetch(url, { headers: getAuthHeaders() })
+    if (!res.ok) throw new Error('获取交易总数失败')
+    const { total } = await res.json()
+    return total ?? 0
+  },
+
+  async getDealById(traderId: string, id: number): Promise<{ deal: import('../types').Deal; events: import('../types').DealEvent[] }> {
+    const url = `${API_BASE}/deals/${id}?trader_id=${encodeURIComponent(traderId)}`
+    const res = await fetch(url, { headers: getAuthHeaders() })
+    if (!res.ok) throw new Error('获取交易详情失败')
+    return res.json()
+  },
+
+  getDealsExportURL(format: 'csv' | 'jsonl', params?: {
+    trader_id?: string
+    status?: string
+    symbol?: string
+    side?: string
+    from?: string
+    to?: string
+    q?: string
+    pnl?: 'win' | 'loss'
+    pnl_min?: number
+    pnl_max?: number
+    columns?: string[]
+    mode?: 'full' | 'slim' | 'train'
+    train_actions?: 'all' | 'final'
+  }): string {
+    const qs = new URLSearchParams()
+    if (params?.trader_id) qs.set('trader_id', params.trader_id)
+    if (params?.status) qs.set('status', params.status)
+    if (params?.symbol) qs.set('symbol', params.symbol)
+    if (params?.side) qs.set('side', params.side)
+    if (params?.from) qs.set('from', params.from)
+    if (params?.to) qs.set('to', params.to)
+    if (params?.q) qs.set('q', params.q)
+    if (params?.columns && params.columns.length) qs.set('columns', params.columns.join(','))
+    if (params?.pnl) qs.set('pnl', params.pnl)
+    if (params?.pnl_min !== undefined) qs.set('pnl_min', String(params.pnl_min))
+    if (params?.pnl_max !== undefined) qs.set('pnl_max', String(params.pnl_max))
+    if (format === 'jsonl') {
+      if (params?.mode) qs.set('mode', params.mode)
+      if (params?.train_actions) qs.set('train_actions', params.train_actions)
+    }
+    return `${API_BASE}/deals/export.${format}${qs.toString() ? `?${qs.toString()}` : ''}`
+  },
+
   // 获取竞赛数据（无需认证）
   async getCompetition(): Promise<CompetitionData> {
     const res = await fetch(`${API_BASE}/competition`)
@@ -364,8 +490,7 @@ export const api = {
 
   // 用户信号源配置接口
   async getUserSignalSource(): Promise<{
-    coin_pool_url: string
-    oi_top_url: string
+    oi_symbols: string
   }> {
     const res = await fetch(`${API_BASE}/user/signal-sources`, {
       headers: getAuthHeaders(),
@@ -374,16 +499,12 @@ export const api = {
     return res.json()
   },
 
-  async saveUserSignalSource(
-    coinPoolUrl: string,
-    oiTopUrl: string
-  ): Promise<void> {
+  async saveUserSignalSource(oiSymbols: string): Promise<void> {
     const res = await fetch(`${API_BASE}/user/signal-sources`, {
       method: 'POST',
       headers: getAuthHeaders(),
       body: JSON.stringify({
-        coin_pool_url: coinPoolUrl,
-        oi_top_url: oiTopUrl,
+        oi_symbols: oiSymbols,
       }),
     })
     if (!res.ok) throw new Error('保存用户信号源配置失败')

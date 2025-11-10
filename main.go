@@ -8,9 +8,10 @@ import (
 	"nofx/auth"
 	"nofx/config"
 	"nofx/crypto"
-	"nofx/manager"
-	"nofx/market"
-	"nofx/pool"
+    "nofx/manager"
+    "nofx/market"
+    "nofx/pool"
+    "nofx/trader"
 	"os"
 	"os/signal"
 	"strconv"
@@ -340,8 +341,30 @@ func main() {
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
 
-	// TODO: 启动数据库中配置为运行状态的交易员
-	// traderManager.StartAll()
+	// 启动数据库中标记为“运行中”的交易员（支持重启后自动恢复）
+	if bootTraders, err := database.GetTraders("default"); err == nil {
+		started := 0
+		for _, tr := range bootTraders {
+			if tr.IsRunning {
+				if at, err := traderManager.GetTrader(tr.ID); err == nil {
+					go func(name string, at *trader.AutoTrader) {
+						log.Printf("▶️  启动交易员（自动恢复）: %s", name)
+						if err := at.Run(); err != nil {
+							log.Printf("❌ 交易员运行错误（自动恢复）: %v", err)
+						}
+					}(tr.Name, at)
+					started++
+				}
+			}
+		}
+		if started > 0 {
+			log.Printf("✓ 已自动恢复启动 %d 个交易员", started)
+		} else {
+			log.Printf("ℹ️  无需自动恢复启动交易员（数据库标记为运行中的为0）")
+		}
+	} else {
+		log.Printf("⚠️ 无法从数据库读取交易员以自动恢复: %v", err)
+	}
 
 	// 等待退出信号
 	<-sigChan

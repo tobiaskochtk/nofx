@@ -120,25 +120,23 @@ export function EquityChart({ traderId }: EquityChartProps) {
       : undefined) || // 备选：淨值 - 盈亏
     1000 // 默认值（与创建交易员时的默认配置一致）
 
-  // 转换数据格式
+  // 转换数据格式 - 使用后端计算好的 pnl 和 pnl_pct
   const chartData = displayHistory.map((point) => {
-    const pnl = point.total_equity - initialBalance
-    const pnlPct = ((pnl / initialBalance) * 100).toFixed(2)
     return {
       time: new Date(point.timestamp).toLocaleTimeString('zh-CN', {
         hour: '2-digit',
         minute: '2-digit',
       }),
-      value: displayMode === 'dollar' ? point.total_equity : parseFloat(pnlPct),
+      value: displayMode === 'dollar' ? point.total_equity : point.pnl_pct,
       cycle: point.cycle_number,
       raw_equity: point.total_equity,
-      raw_pnl: pnl,
-      raw_pnl_pct: parseFloat(pnlPct),
+      raw_pnl: point.pnl || 0,
+      raw_pnl_pct: Number(point.pnl_pct || 0).toFixed(2),
     }
   })
 
-  const currentValue = chartData[chartData.length - 1]
-  const isProfit = currentValue.raw_pnl >= 0
+  const currentValue = chartData.length > 0 ? chartData[chartData.length - 1] : null
+  const isProfit = currentValue && currentValue.raw_pnl >= 0
 
   // 计算Y轴范围
   const calculateYDomain = () => {
@@ -165,6 +163,8 @@ export function EquityChart({ traderId }: EquityChartProps) {
   const CustomTooltip = ({ active, payload }: any) => {
     if (active && payload && payload.length) {
       const data = payload[0].payload
+      const rawPnl = data.raw_pnl || 0
+      const rawPnlPct = data.raw_pnl_pct || '0.00'
       return (
         <div
           className="rounded p-3 shadow-xl"
@@ -174,15 +174,15 @@ export function EquityChart({ traderId }: EquityChartProps) {
             Cycle #{data.cycle}
           </div>
           <div className="font-bold mono" style={{ color: '#EAECEF' }}>
-            {data.raw_equity.toFixed(2)} USDT
+            {(data.raw_equity || 0).toFixed(2)} USDT
           </div>
           <div
             className="text-sm mono font-bold"
-            style={{ color: data.raw_pnl >= 0 ? '#0ECB81' : '#F6465D' }}
+            style={{ color: rawPnl >= 0 ? '#0ECB81' : '#F6465D' }}
           >
-            {data.raw_pnl >= 0 ? '+' : ''}
-            {data.raw_pnl.toFixed(2)} USDT ({data.raw_pnl_pct >= 0 ? '+' : ''}
-            {data.raw_pnl_pct}%)
+            {rawPnl >= 0 ? '+' : ''}
+            {rawPnl.toFixed(2)} USDT ({rawPnlPct >= 0 ? '+' : ''}
+            {rawPnlPct}%)
           </div>
         </div>
       )
@@ -215,35 +215,39 @@ export function EquityChart({ traderId }: EquityChartProps) {
               </span>
             </span>
             <div className="flex items-center gap-2 flex-wrap">
-              <span
-                className="text-sm sm:text-lg font-bold mono px-2 sm:px-3 py-1 rounded flex items-center gap-1"
-                style={{
-                  color: isProfit ? '#0ECB81' : '#F6465D',
-                  background: isProfit
-                    ? 'rgba(14, 203, 129, 0.1)'
-                    : 'rgba(246, 70, 93, 0.1)',
-                  border: `1px solid ${
-                    isProfit
-                      ? 'rgba(14, 203, 129, 0.2)'
-                      : 'rgba(246, 70, 93, 0.2)'
-                  }`,
-                }}
-              >
-                {isProfit ? (
-                  <ArrowUp className="w-4 h-4" />
-                ) : (
-                  <ArrowDown className="w-4 h-4" />
-                )}
-                {isProfit ? '+' : ''}
-                {currentValue.raw_pnl_pct}%
-              </span>
-              <span
-                className="text-xs sm:text-sm mono"
-                style={{ color: '#848E9C' }}
-              >
-                ({isProfit ? '+' : ''}
-                {currentValue.raw_pnl.toFixed(2)} USDT)
-              </span>
+              {currentValue && (
+                <>
+                  <span
+                    className="text-sm sm:text-lg font-bold mono px-2 sm:px-3 py-1 rounded flex items-center gap-1"
+                    style={{
+                      color: isProfit ? '#0ECB81' : '#F6465D',
+                      background: isProfit
+                        ? 'rgba(14, 203, 129, 0.1)'
+                        : 'rgba(246, 70, 93, 0.1)',
+                      border: `1px solid ${
+                        isProfit
+                          ? 'rgba(14, 203, 129, 0.2)'
+                          : 'rgba(246, 70, 93, 0.2)'
+                      }`,
+                    }}
+                  >
+                    {isProfit ? (
+                      <ArrowUp className="w-4 h-4" />
+                    ) : (
+                      <ArrowDown className="w-4 h-4" />
+                    )}
+                    {isProfit ? '+' : ''}
+                    {currentValue.raw_pnl_pct}%
+                  </span>
+                  <span
+                    className="text-xs sm:text-sm mono"
+                    style={{ color: '#848E9C' }}
+                  >
+                    ({isProfit ? '+' : ''}
+                    {currentValue.raw_pnl.toFixed(2)} USDT)
+                  </span>
+                </>
+              )}
             </div>
           </div>
         </div>
@@ -410,7 +414,7 @@ export function EquityChart({ traderId }: EquityChartProps) {
             className="text-xs sm:text-sm font-bold mono"
             style={{ color: '#EAECEF' }}
           >
-            {currentValue.raw_equity.toFixed(2)} USDT
+            {currentValue?.raw_equity.toFixed(2) || '0.00'} USDT
           </div>
         </div>
         <div

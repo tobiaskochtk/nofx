@@ -431,11 +431,17 @@ func formatFloatSlice(values []float64) string {
 
 // Normalize 标准化symbol,确保是USDT交易对
 func Normalize(symbol string) string {
-	symbol = strings.ToUpper(symbol)
-	if strings.HasSuffix(symbol, "USDT") {
-		return symbol
-	}
-	return symbol + "USDT"
+    symbol = strings.ToUpper(strings.TrimSpace(symbol))
+    // 如果以USDT结尾，直接返回
+    if strings.HasSuffix(symbol, "USDT") {
+        return symbol
+    }
+    // 如果以USDC结尾，转换为USDT（用于统一从Binance拉取行情）
+    if strings.HasSuffix(symbol, "USDC") {
+        return strings.TrimSuffix(symbol, "USDC") + "USDT"
+    }
+    // 兼容 Hyperliquid 等仅给出基础币种（如 BTC、BNB）
+    return symbol + "USDT"
 }
 
 // parseFloat 解析float值

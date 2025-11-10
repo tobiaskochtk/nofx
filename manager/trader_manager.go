@@ -159,18 +159,18 @@ func (tm *TraderManager) LoadTradersFromDatabase(database *config.Database) erro
 			continue
 		}
 
-		// 获取用户信号源配置
-		var coinPoolURL, oiTopURL string
+		// 获取用户信号源配置（OI Symbols）
+		var oiSymbols string
 		if userSignalSource, err := database.GetUserSignalSource(traderCfg.UserID); err == nil {
-			coinPoolURL = userSignalSource.CoinPoolURL
-			oiTopURL = userSignalSource.OITopURL
+			oiSymbols = userSignalSource.OISymbols
+			log.Printf("📡 用户 %s 的信号源配置: OI Symbols=%s (length=%d)", traderCfg.UserID, oiSymbols, len(oiSymbols))
 		} else {
 			// 如果用户没有配置信号源，使用空字符串
-			log.Printf("🔍 用户 %s 暂未配置信号源", traderCfg.UserID)
+			log.Printf("🔍 用户 %s 暂未配置信号源: %v", traderCfg.UserID, err)
 		}
 
 		// 添加到TraderManager
-		err = tm.addTraderFromDB(traderCfg, aiModelCfg, exchangeCfg, coinPoolURL, oiTopURL, maxDailyLoss, maxDrawdown, stopTradingMinutes, defaultCoins, database, traderCfg.UserID)
+		err = tm.addTraderFromDB(traderCfg, aiModelCfg, exchangeCfg, oiSymbols, maxDailyLoss, maxDrawdown, stopTradingMinutes, defaultCoins, database, traderCfg.UserID)
 		if err != nil {
 			log.Printf("❌ 添加交易员 %s 失败: %v", traderCfg.Name, err)
 			continue
@@ -182,15 +182,27 @@ func (tm *TraderManager) LoadTradersFromDatabase(database *config.Database) erro
 }
 
 // addTraderFromConfig 内部方法：从配置添加交易员（不加锁，因为调用方已加锁）
-func (tm *TraderManager) addTraderFromDB(traderCfg *config.TraderRecord, aiModelCfg *config.AIModelConfig, exchangeCfg *config.ExchangeConfig, coinPoolURL, oiTopURL string, maxDailyLoss, maxDrawdown float64, stopTradingMinutes int, defaultCoins []string, database *config.Database, userID string) error {
+func (tm *TraderManager) addTraderFromDB(traderCfg *config.TraderRecord, aiModelCfg *config.AIModelConfig, exchangeCfg *config.ExchangeConfig, oiSymbols string, maxDailyLoss, maxDrawdown float64, stopTradingMinutes int, defaultCoins []string, database *config.Database, userID string) error {
 	if _, exists := tm.traders[traderCfg.ID]; exists {
 		return fmt.Errorf("trader ID '%s' 已存在", traderCfg.ID)
 	}
 
 	// 处理交易币种列表
 	var tradingCoins []string
-	if traderCfg.TradingSymbols != "" {
-		// 解析逗号分隔的交易币种列表
+	
+	// Priorität 1: Wenn OI Symbols vom Benutzer konfiguriert sind, verwende diese (unabhängig von UseOITop Flag)
+	if oiSymbols != "" {
+		// Verwende OI Symbols als Trading Coins
+		symbols := strings.Split(oiSymbols, ",")
+		for _, symbol := range symbols {
+			symbol = strings.TrimSpace(symbol)
+			if symbol != "" {
+				tradingCoins = append(tradingCoins, symbol)
+			}
+		}
+		log.Printf("✓ 交易员 %s 使用信号源配置的 %d 个币种: %v", traderCfg.Name, len(tradingCoins), tradingCoins)
+	} else if traderCfg.TradingSymbols != "" {
+		// Priorität 2: Verwende manuell konfigurierte Trading Symbols
 		symbols := strings.Split(traderCfg.TradingSymbols, ",")
 		for _, symbol := range symbols {
 			symbol = strings.TrimSpace(symbol)
@@ -198,18 +210,13 @@ func (tm *TraderManager) addTraderFromDB(traderCfg *config.TraderRecord, aiModel
 				tradingCoins = append(tradingCoins, symbol)
 			}
 		}
+		log.Printf("✓ 交易员 %s 使用手动配置的 %d 个币种", traderCfg.Name, len(tradingCoins))
 	}
 
-	// 如果没有指定交易币种，使用默认币种
+	// Priorität 3: Wenn keine Symbole konfiguriert sind, verwende Standard-Coins
 	if len(tradingCoins) == 0 {
 		tradingCoins = defaultCoins
-	}
-
-	// 根据交易员配置决定是否使用信号源
-	var effectiveCoinPoolURL string
-	if traderCfg.UseCoinPool && coinPoolURL != "" {
-		effectiveCoinPoolURL = coinPoolURL
-		log.Printf("✓ 交易员 %s 启用 COIN POOL 信号源: %s", traderCfg.Name, coinPoolURL)
+		log.Printf("✓ 交易员 %s 使用系统默认的 %d 个币种", traderCfg.Name, len(defaultCoins))
 	}
 
 	// 构建AutoTraderConfig
@@ -222,11 +229,11 @@ func (tm *TraderManager) addTraderFromDB(traderCfg *config.TraderRecord, aiModel
 		BinanceSecretKey:      "",
 		HyperliquidPrivateKey: "",
 		HyperliquidTestnet:    exchangeCfg.Testnet,
-		CoinPoolAPIURL:        effectiveCoinPoolURL,
 		UseQwen:               aiModelCfg.Provider == "qwen",
 		DeepSeekKey:           "",
 		QwenKey:               "",
 		CustomAPIURL:          aiModelCfg.CustomAPIURL,    // 自定义API URL
+		CustomAPIKey:          "",                         // 自定义API密钥（从AI模型配置映射）
 		CustomModelName:       aiModelCfg.CustomModelName, // 自定义模型名称
 		ScanInterval:          time.Duration(traderCfg.ScanIntervalMinutes) * time.Minute,
 		InitialBalance:        traderCfg.InitialBalance,
@@ -235,6 +242,7 @@ func (tm *TraderManager) addTraderFromDB(traderCfg *config.TraderRecord, aiModel
 		MaxDailyLoss:          maxDailyLoss,
 		MaxDrawdown:           maxDrawdown,
 		StopTradingTime:       time.Duration(stopTradingMinutes) * time.Minute,
+		MaxPositions:          traderCfg.MaxPositions, // 最大持仓数量
 		IsCrossMargin:         traderCfg.IsCrossMargin,
 		DefaultCoins:          defaultCoins,
 		TradingCoins:          tradingCoins,
@@ -259,6 +267,9 @@ func (tm *TraderManager) addTraderFromDB(traderCfg *config.TraderRecord, aiModel
 		traderConfig.QwenKey = aiModelCfg.APIKey
 	} else if aiModelCfg.Provider == "deepseek" {
 		traderConfig.DeepSeekKey = aiModelCfg.APIKey
+	} else if aiModelCfg.Provider == "custom" {
+		// 自定义OpenAI兼容API（例如：OpenAI官方、OpenRouter、Ollama等）
+		traderConfig.CustomAPIKey = aiModelCfg.APIKey
 	}
 
 	// 创建trader实例
@@ -286,7 +297,7 @@ func (tm *TraderManager) addTraderFromDB(traderCfg *config.TraderRecord, aiModel
 // AddTrader 从数据库配置添加trader (移除旧版兼容性)
 
 // AddTraderFromDB 从数据库配置添加trader
-func (tm *TraderManager) AddTraderFromDB(traderCfg *config.TraderRecord, aiModelCfg *config.AIModelConfig, exchangeCfg *config.ExchangeConfig, coinPoolURL, oiTopURL string, maxDailyLoss, maxDrawdown float64, stopTradingMinutes int, defaultCoins []string, database *config.Database, userID string) error {
+func (tm *TraderManager) AddTraderFromDB(traderCfg *config.TraderRecord, aiModelCfg *config.AIModelConfig, exchangeCfg *config.ExchangeConfig, oiSymbols string, maxDailyLoss, maxDrawdown float64, stopTradingMinutes int, defaultCoins []string, database *config.Database, userID string) error {
 	tm.mu.Lock()
 	defer tm.mu.Unlock()
 
@@ -296,8 +307,20 @@ func (tm *TraderManager) AddTraderFromDB(traderCfg *config.TraderRecord, aiModel
 
 	// 处理交易币种列表
 	var tradingCoins []string
-	if traderCfg.TradingSymbols != "" {
-		// 解析逗号分隔的交易币种列表
+	
+	// Priorität 1: Wenn OI Symbols vom Benutzer konfiguriert sind, verwende diese (unabhängig von UseOITop Flag)
+	if oiSymbols != "" {
+		// Verwende OI Symbols als Trading Coins
+		symbols := strings.Split(oiSymbols, ",")
+		for _, symbol := range symbols {
+			symbol = strings.TrimSpace(symbol)
+			if symbol != "" {
+				tradingCoins = append(tradingCoins, symbol)
+			}
+		}
+		log.Printf("✓ 交易员 %s 使用信号源配置的 %d 个币种: %v", traderCfg.Name, len(tradingCoins), tradingCoins)
+	} else if traderCfg.TradingSymbols != "" {
+		// Priorität 2: Verwende manuell konfigurierte Trading Symbols
 		symbols := strings.Split(traderCfg.TradingSymbols, ",")
 		for _, symbol := range symbols {
 			symbol = strings.TrimSpace(symbol)
@@ -305,18 +328,13 @@ func (tm *TraderManager) AddTraderFromDB(traderCfg *config.TraderRecord, aiModel
 				tradingCoins = append(tradingCoins, symbol)
 			}
 		}
+		log.Printf("✓ 交易员 %s 使用手动配置的 %d 个币种", traderCfg.Name, len(tradingCoins))
 	}
 
-	// 如果没有指定交易币种，使用默认币种
+	// Priorität 3: Wenn keine Symbole konfiguriert sind, verwende Standard-Coins
 	if len(tradingCoins) == 0 {
 		tradingCoins = defaultCoins
-	}
-
-	// 根据交易员配置决定是否使用信号源
-	var effectiveCoinPoolURL string
-	if traderCfg.UseCoinPool && coinPoolURL != "" {
-		effectiveCoinPoolURL = coinPoolURL
-		log.Printf("✓ 交易员 %s 启用 COIN POOL 信号源: %s", traderCfg.Name, coinPoolURL)
+		log.Printf("✓ 交易员 %s 使用系统默认的 %d 个币种", traderCfg.Name, len(defaultCoins))
 	}
 
 	// 构建AutoTraderConfig
@@ -329,11 +347,11 @@ func (tm *TraderManager) AddTraderFromDB(traderCfg *config.TraderRecord, aiModel
 		BinanceSecretKey:      "",
 		HyperliquidPrivateKey: "",
 		HyperliquidTestnet:    exchangeCfg.Testnet,
-		CoinPoolAPIURL:        effectiveCoinPoolURL,
 		UseQwen:               aiModelCfg.Provider == "qwen",
 		DeepSeekKey:           "",
 		QwenKey:               "",
 		CustomAPIURL:          aiModelCfg.CustomAPIURL,    // 自定义API URL
+		CustomAPIKey:          "",                         // 自定义API密钥（从AI模型配置映射）
 		CustomModelName:       aiModelCfg.CustomModelName, // 自定义模型名称
 		ScanInterval:          time.Duration(traderCfg.ScanIntervalMinutes) * time.Minute,
 		InitialBalance:        traderCfg.InitialBalance,
@@ -342,6 +360,7 @@ func (tm *TraderManager) AddTraderFromDB(traderCfg *config.TraderRecord, aiModel
 		MaxDailyLoss:          maxDailyLoss,
 		MaxDrawdown:           maxDrawdown,
 		StopTradingTime:       time.Duration(stopTradingMinutes) * time.Minute,
+		MaxPositions:          traderCfg.MaxPositions, // 最大持仓数量
 		IsCrossMargin:         traderCfg.IsCrossMargin,
 		DefaultCoins:          defaultCoins,
 		TradingCoins:          tradingCoins,
@@ -365,6 +384,8 @@ func (tm *TraderManager) AddTraderFromDB(traderCfg *config.TraderRecord, aiModel
 		traderConfig.QwenKey = aiModelCfg.APIKey
 	} else if aiModelCfg.Provider == "deepseek" {
 		traderConfig.DeepSeekKey = aiModelCfg.APIKey
+	} else if aiModelCfg.Provider == "custom" {
+		traderConfig.CustomAPIKey = aiModelCfg.APIKey
 	}
 
 	// 创建trader实例
@@ -728,11 +749,10 @@ func (tm *TraderManager) LoadUserTraders(database *config.Database, userID strin
 	defaultCoinsStr, _ := database.GetSystemConfig("default_coins")
 
 	// 获取用户信号源配置
-	var coinPoolURL, oiTopURL string
+	var oiSymbols string
 	if userSignalSource, err := database.GetUserSignalSource(userID); err == nil {
-		coinPoolURL = userSignalSource.CoinPoolURL
-		oiTopURL = userSignalSource.OITopURL
-		log.Printf("📡 加载用户 %s 的信号源配置: COIN POOL=%s, OI TOP=%s", userID, coinPoolURL, oiTopURL)
+		oiSymbols = userSignalSource.OISymbols
+		log.Printf("📡 加载用户 %s 的信号源配置: OI Symbols=%s", userID, oiSymbols)
 	} else {
 		log.Printf("🔍 用户 %s 暂未配置信号源", userID)
 	}
@@ -776,80 +796,94 @@ func (tm *TraderManager) LoadUserTraders(database *config.Database, userID strin
 		return fmt.Errorf("获取交易所配置失败: %w", err)
 	}
 
-	// 为每个交易员加载配置
-	for _, traderCfg := range traders {
-		// 检查是否已经加载过这个交易员
-		if _, exists := tm.traders[traderCfg.ID]; exists {
-			log.Printf("⚠️ 交易员 %s 已经加载，跳过", traderCfg.Name)
-			continue
-		}
+    // 为每个交易员加载配置
+    for _, traderCfg := range traders {
+        // 从已查询的列表中查找AI模型配置
 
-		// 从已查询的列表中查找AI模型配置
+        var aiModelCfg *config.AIModelConfig
+        // 优先精确匹配 model.ID（新版逻辑）
+        for _, model := range aiModels {
+            if model.ID == traderCfg.AIModelID {
+                aiModelCfg = model
+                break
+            }
+        }
+        // 如果没有精确匹配，尝试匹配 provider（兼容旧数据）
+        if aiModelCfg == nil {
+            for _, model := range aiModels {
+                if model.Provider == traderCfg.AIModelID {
+                    aiModelCfg = model
+                    log.Printf("⚠️  交易员 %s 使用旧版 provider 匹配: %s -> %s", traderCfg.Name, traderCfg.AIModelID, model.ID)
+                    break
+                }
+            }
+        }
 
-		var aiModelCfg *config.AIModelConfig
-		// 优先精确匹配 model.ID（新版逻辑）
-		for _, model := range aiModels {
-			if model.ID == traderCfg.AIModelID {
-				aiModelCfg = model
-				break
-			}
-		}
-		// 如果没有精确匹配，尝试匹配 provider（兼容旧数据）
-		if aiModelCfg == nil {
-			for _, model := range aiModels {
-				if model.Provider == traderCfg.AIModelID {
-					aiModelCfg = model
-					log.Printf("⚠️  交易员 %s 使用旧版 provider 匹配: %s -> %s", traderCfg.Name, traderCfg.AIModelID, model.ID)
-					break
-				}
-			}
-		}
+        if aiModelCfg == nil {
+            log.Printf("⚠️ 交易员 %s 的AI模型 %s 不存在，跳过", traderCfg.Name, traderCfg.AIModelID)
+            continue
+        }
 
-		if aiModelCfg == nil {
-			log.Printf("⚠️ 交易员 %s 的AI模型 %s 不存在，跳过", traderCfg.Name, traderCfg.AIModelID)
-			continue
-		}
+        if !aiModelCfg.Enabled {
+            log.Printf("⚠️ 交易员 %s 的AI模型 %s 未启用，跳过", traderCfg.Name, traderCfg.AIModelID)
+            continue
+        }
 
-		if !aiModelCfg.Enabled {
-			log.Printf("⚠️ 交易员 %s 的AI模型 %s 未启用，跳过", traderCfg.Name, traderCfg.AIModelID)
-			continue
-		}
+        // 从已查询的列表中查找交易所配置
+        var exchangeCfg *config.ExchangeConfig
+        for _, exchange := range exchanges {
+            if exchange.ID == traderCfg.ExchangeID {
+                exchangeCfg = exchange
+                break
+            }
+        }
 
-		// 从已查询的列表中查找交易所配置
-		var exchangeCfg *config.ExchangeConfig
-		for _, exchange := range exchanges {
-			if exchange.ID == traderCfg.ExchangeID {
-				exchangeCfg = exchange
-				break
-			}
-		}
+        if exchangeCfg == nil {
+            log.Printf("⚠️ 交易员 %s 的交易所 %s 不存在，跳过", traderCfg.Name, traderCfg.ExchangeID)
+            continue
+        }
 
-		if exchangeCfg == nil {
-			log.Printf("⚠️ 交易员 %s 的交易所 %s 不存在，跳过", traderCfg.Name, traderCfg.ExchangeID)
-			continue
-		}
+        if !exchangeCfg.Enabled {
+            log.Printf("⚠️ 交易员 %s 的交易所 %s 未启用，跳过", traderCfg.Name, traderCfg.ExchangeID)
+            continue
+        }
 
-		if !exchangeCfg.Enabled {
-			log.Printf("⚠️ 交易员 %s 的交易所 %s 未启用，跳过", traderCfg.Name, traderCfg.ExchangeID)
-			continue
-		}
+        // 到这里说明该交易员配置有效。若已加载，则热更新AI配置；否则加载新交易员。
+        if at, exists := tm.traders[traderCfg.ID]; exists {
+            // 热更新AI密钥 / URL / 模型名，避免“已经加载，跳过”导致配置不生效
+            at.UpdateAIModelConfig(aiModelCfg.Provider, aiModelCfg.APIKey, aiModelCfg.CustomAPIURL, aiModelCfg.CustomModelName)
+            log.Printf("✓ 交易员 %s 已在线更新AI配置 (%s)", traderCfg.Name, aiModelCfg.Provider)
+            continue
+        }
 
-		// 使用现有的方法加载交易员
-		err = tm.loadSingleTrader(traderCfg, aiModelCfg, exchangeCfg, coinPoolURL, oiTopURL, maxDailyLoss, maxDrawdown, stopTradingMinutes, defaultCoins, database, userID)
-		if err != nil {
-			log.Printf("⚠️ 加载交易员 %s 失败: %v", traderCfg.Name, err)
-		}
-	}
+        // 使用现有的方法加载交易员
+        err = tm.loadSingleTrader(traderCfg, aiModelCfg, exchangeCfg, oiSymbols, maxDailyLoss, maxDrawdown, stopTradingMinutes, defaultCoins, database, userID)
+        if err != nil {
+            log.Printf("⚠️ 加载交易员 %s 失败: %v", traderCfg.Name, err)
+        }
+    }
 
 	return nil
 }
 
 // loadSingleTrader 加载单个交易员（从现有代码提取的公共逻辑）
-func (tm *TraderManager) loadSingleTrader(traderCfg *config.TraderRecord, aiModelCfg *config.AIModelConfig, exchangeCfg *config.ExchangeConfig, coinPoolURL, oiTopURL string, maxDailyLoss, maxDrawdown float64, stopTradingMinutes int, defaultCoins []string, database *config.Database, userID string) error {
+func (tm *TraderManager) loadSingleTrader(traderCfg *config.TraderRecord, aiModelCfg *config.AIModelConfig, exchangeCfg *config.ExchangeConfig, oiSymbols string, maxDailyLoss, maxDrawdown float64, stopTradingMinutes int, defaultCoins []string, database *config.Database, userID string) error {
 	// 处理交易币种列表
 	var tradingCoins []string
-	if traderCfg.TradingSymbols != "" {
-		// 解析逗号分隔的交易币种列表
+	
+	// Priorität 1: Wenn OI Symbols vom Benutzer konfiguriert sind, verwende diese (unabhängig von UseOITop Flag)
+	if oiSymbols != "" {
+		// Verwende OI Symbols als Trading Coins
+		symbols := strings.Split(oiSymbols, ",")
+		for _, symbol := range symbols {
+			symbol = strings.TrimSpace(symbol)
+			if symbol != "" {
+				tradingCoins = append(tradingCoins, symbol)
+			}
+		}
+		log.Printf("✓ 交易员 %s 使用信号源配置的 %d 个币种: %v", traderCfg.Name, len(tradingCoins), tradingCoins)
+	} else if traderCfg.TradingSymbols != "" {
+		// Priorität 2: Verwende manuell konfigurierte Trading Symbols
 		symbols := strings.Split(traderCfg.TradingSymbols, ",")
 		for _, symbol := range symbols {
 			symbol = strings.TrimSpace(symbol)
@@ -857,18 +891,13 @@ func (tm *TraderManager) loadSingleTrader(traderCfg *config.TraderRecord, aiMode
 				tradingCoins = append(tradingCoins, symbol)
 			}
 		}
+		log.Printf("✓ 交易员 %s 使用手动配置的 %d 个币种", traderCfg.Name, len(tradingCoins))
 	}
 
-	// 如果没有指定交易币种，使用默认币种
+	// Priorität 3: Wenn keine Symbole konfiguriert sind, verwende Standard-Coins
 	if len(tradingCoins) == 0 {
 		tradingCoins = defaultCoins
-	}
-
-	// 根据交易员配置决定是否使用信号源
-	var effectiveCoinPoolURL string
-	if traderCfg.UseCoinPool && coinPoolURL != "" {
-		effectiveCoinPoolURL = coinPoolURL
-		log.Printf("✓ 交易员 %s 启用 COIN POOL 信号源: %s", traderCfg.Name, coinPoolURL)
+		log.Printf("✓ 交易员 %s 使用系统默认的 %d 个币种", traderCfg.Name, len(defaultCoins))
 	}
 
 	// 构建AutoTraderConfig
@@ -881,13 +910,13 @@ func (tm *TraderManager) loadSingleTrader(traderCfg *config.TraderRecord, aiMode
 		BTCETHLeverage:       traderCfg.BTCETHLeverage,
 		AltcoinLeverage:      traderCfg.AltcoinLeverage,
 		ScanInterval:         time.Duration(traderCfg.ScanIntervalMinutes) * time.Minute,
-		CoinPoolAPIURL:       effectiveCoinPoolURL,
 		CustomAPIURL:         aiModelCfg.CustomAPIURL,    // 自定义API URL
 		CustomModelName:      aiModelCfg.CustomModelName, // 自定义模型名称
 		UseQwen:              aiModelCfg.Provider == "qwen",
 		MaxDailyLoss:         maxDailyLoss,
 		MaxDrawdown:          maxDrawdown,
 		StopTradingTime:      time.Duration(stopTradingMinutes) * time.Minute,
+		MaxPositions:         traderCfg.MaxPositions, // 最大持仓数量
 		IsCrossMargin:        traderCfg.IsCrossMargin,
 		DefaultCoins:         defaultCoins,
 		TradingCoins:         tradingCoins,

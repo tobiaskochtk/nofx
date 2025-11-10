@@ -6,6 +6,7 @@ import (
 	"io/ioutil"
 	"log"
 	"net/http"
+	"nofx/market"
 	"os"
 	"path/filepath"
 	"strings"
@@ -318,49 +319,12 @@ func GetTopRatedCoins(limit int) ([]string, error) {
 
 // normalizeSymbol 标准化币种符号
 func normalizeSymbol(symbol string) string {
-	// 移除空格
-	symbol = trimSpaces(symbol)
-
-	// 转为大写
-	symbol = toUpper(symbol)
-
-	// 确保以USDT结尾
-	if !endsWith(symbol, "USDT") {
-		symbol = symbol + "USDT"
-	}
-
-	return symbol
+    // 统一与行情模块一致：USDC → USDT，无后缀则追加USDT
+    return market.Normalize(symbol)
 }
 
 // 辅助函数
-func trimSpaces(s string) string {
-	result := ""
-	for i := 0; i < len(s); i++ {
-		if s[i] != ' ' {
-			result += string(s[i])
-		}
-	}
-	return result
-}
-
-func toUpper(s string) string {
-	result := ""
-	for i := 0; i < len(s); i++ {
-		c := s[i]
-		if c >= 'a' && c <= 'z' {
-			c = c - 'a' + 'A'
-		}
-		result += string(c)
-	}
-	return result
-}
-
-func endsWith(s, suffix string) bool {
-	if len(s) < len(suffix) {
-		return false
-	}
-	return s[len(s)-len(suffix):] == suffix
-}
+// legacy helpers removed; using market.Normalize
 
 // convertSymbolsToCoins 将币种符号列表转换为CoinInfo列表
 func convertSymbolsToCoins(symbols []string) []CoinInfo {

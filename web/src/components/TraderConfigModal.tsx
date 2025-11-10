@@ -153,6 +153,15 @@ export function TraderConfigModal({
     fetchPromptTemplates()
   }, [])
 
+  // 确保当前选择的 system_prompt_template 始终出现在下拉选项里（避免未列出模板导致显示回退为默认值）
+  useEffect(() => {
+    if (!formData.system_prompt_template) return
+    setPromptTemplates((prev) => {
+      if (prev.some((t) => t.name === formData.system_prompt_template)) return prev
+      return [...prev, { name: formData.system_prompt_template }]
+    })
+  }, [formData.system_prompt_template])
+
   // 当选择的币种改变时，更新输入框
   useEffect(() => {
     const symbolsString = selectedCoins.join(',')

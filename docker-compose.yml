@@ -4,6 +4,10 @@ services:
     build:
       context: .
       dockerfile: ./docker/Dockerfile.backend
+      args:
+        GO_VERSION: 1.25-alpine
+        ALPINE_VERSION: '3.20'
+        TA_LIB_VERSION: 0.4.0
     container_name: nofx-trading
     restart: unless-stopped
     ports:
@@ -14,7 +18,7 @@ services:
       - ./beta_codes.txt:/app/beta_codes.txt:ro
       - ./decision_logs:/app/decision_logs
       - ./prompts:/app/prompts
-      - ./secrets:/app/secrets:ro  # RSA密钥文件
+      - ./secrets:/app/secrets  # RSA密钥文件 (read-write für Generierung)
       - /etc/localtime:/etc/localtime:ro  # Sync host time
     environment:
       - TZ=${NOFX_TIMEZONE:-Asia/Shanghai}  # Set timezone
@@ -35,6 +39,9 @@ services:
     build:
       context: .
       dockerfile: ./docker/Dockerfile.frontend
+      args:
+        NODE_VERSION: 20-alpine
+        NGINX_VERSION: stable-alpine
     container_name: nofx-frontend
     restart: unless-stopped
     ports:
@@ -49,6 +56,22 @@ services:
       timeout: 10s
       retries: 3
       start_period: 5s
+
+  # SQLite Web Viewer (optional, for database inspection)
+  sqlite-web:
+    image: coleifer/sqlite-web
+    container_name: nofx-sqlite-web
+    restart: unless-stopped
+    ports:
+      - "${SQLITE_WEB_PORT:-8081}:8080"
+    volumes:
+      - ./config.db:/data/config.db
+    environment:
+      - SQLITE_DATABASE=/data/config.db
+    networks:
+      - nofx-network
+    profiles:
+      - tools  # Nur starten wenn explizit gewünscht
 
 networks:
   nofx-network:

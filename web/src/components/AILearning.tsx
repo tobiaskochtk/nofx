@@ -62,6 +62,10 @@ interface AILearningProps {
 
 export default function AILearning({ traderId }: AILearningProps) {
   const { language } = useLanguage()
+  const toFixedSafe = (val: any, digits: number, fallback = '-') => {
+    const num = typeof val === 'number' ? val : (val == null ? NaN : Number(val))
+    return Number.isFinite(num) ? num.toFixed(digits) : fallback
+  }
   const { data: performance, error } = useSWR<PerformanceAnalysis>(
     traderId ? `performance-${traderId}` : 'performance',
     () => api.getPerformance(traderId),
@@ -911,7 +915,7 @@ export default function AILearning({ traderId }: AILearningProps) {
                           }}
                         >
                           {isProfitable ? '+' : ''}
-                          {trade.pn_l_pct.toFixed(2)}%
+                          {toFixedSafe(trade.pn_l_pct as any, 2, '0.00')}%
                         </div>
                       </div>
 
@@ -924,7 +928,7 @@ export default function AILearning({ traderId }: AILearningProps) {
                             className="font-mono font-semibold"
                             style={{ color: '#CBD5E1' }}
                           >
-                            {trade.open_price.toFixed(4)}
+                            {toFixedSafe((trade as any).open_price, 4, '-')}
                           </div>
                         </div>
                         <div className="text-right">
@@ -935,7 +939,7 @@ export default function AILearning({ traderId }: AILearningProps) {
                             className="font-mono font-semibold"
                             style={{ color: '#CBD5E1' }}
                           >
-                            {trade.close_price.toFixed(4)}
+                            {toFixedSafe((trade as any).close_price, 4, '-')}
                           </div>
                         </div>
                       </div>
@@ -948,7 +952,7 @@ export default function AILearning({ traderId }: AILearningProps) {
                             className="font-mono font-semibold"
                             style={{ color: '#CBD5E1' }}
                           >
-                            {trade.quantity ? trade.quantity.toFixed(4) : '-'}
+                            {toFixedSafe((trade as any).quantity, 4, '-')}
                           </div>
                         </div>
                         <div className="text-right">
@@ -966,9 +970,7 @@ export default function AILearning({ traderId }: AILearningProps) {
                             className="font-mono font-semibold"
                             style={{ color: '#CBD5E1' }}
                           >
-                            {trade.position_value
-                              ? `$${trade.position_value.toFixed(2)}`
-                              : '-'}
+                            {(() => { const v = toFixedSafe((trade as any).position_value, 2, '-') ; return v === '-' ? '-' : `$${v}` })()}
                           </div>
                         </div>
                         <div className="text-right">
@@ -977,9 +979,7 @@ export default function AILearning({ traderId }: AILearningProps) {
                             className="font-mono font-semibold"
                             style={{ color: '#A78BFA' }}
                           >
-                            {trade.margin_used
-                              ? `$${trade.margin_used.toFixed(2)}`
-                              : '-'}
+                            {(() => { const v = toFixedSafe((trade as any).margin_used, 2, '-') ; return v === '-' ? '-' : `$${v}` })()}
                           </div>
                         </div>
                       </div>
@@ -1001,7 +1001,7 @@ export default function AILearning({ traderId }: AILearningProps) {
                             }}
                           >
                             {isProfitable ? '+' : ''}
-                            {trade.pn_l.toFixed(2)} USDT
+                            {toFixedSafe((trade as any).pn_l, 2, '0.00')} USDT
                           </span>
                         </div>
                       </div>

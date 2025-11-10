@@ -69,12 +69,11 @@ export function AITradersPage({ onTraderSelect }: AITradersPageProps) {
   const [allExchanges, setAllExchanges] = useState<Exchange[]>([])
   const [supportedModels, setSupportedModels] = useState<AIModel[]>([])
   const [supportedExchanges, setSupportedExchanges] = useState<Exchange[]>([])
+  const [defaultCoins, setDefaultCoins] = useState<string[]>([])
   const [userSignalSource, setUserSignalSource] = useState<{
-    coinPoolUrl: string
-    oiTopUrl: string
+    oiSymbols: string
   }>({
-    coinPoolUrl: '',
-    oiTopUrl: '',
+    oiSymbols: '',
   })
 
   const { data: traders, mutate: mutateTraders } = useSWR<TraderInfo[]>(
@@ -117,13 +116,14 @@ export function AITradersPage({ onTraderSelect }: AITradersPageProps) {
         setAllExchanges(exchangeConfigs)
         setSupportedModels(supportedModels)
         setSupportedExchanges(supportedExchanges)
+        // Use a default set of coins for OI tracking
+        setDefaultCoins(['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'BNBUSDT', 'XRPUSDT', 'DOGEUSDT', 'ADAUSDT', 'HYPEUSDT'])
 
         // 加载用户信号源配置
         try {
           const signalSource = await api.getUserSignalSource()
           setUserSignalSource({
-            coinPoolUrl: signalSource.coin_pool_url || '',
-            oiTopUrl: signalSource.oi_top_url || '',
+            oiSymbols: signalSource.oi_symbols || '',
           })
         } catch (error) {
           console.log('📡 用户信号源配置暂未设置')
@@ -276,6 +276,7 @@ export function AITradersPage({ onTraderSelect }: AITradersPageProps) {
         trading_symbols: data.trading_symbols,
         custom_prompt: data.custom_prompt,
         override_base_prompt: data.override_base_prompt,
+        system_prompt_template: data.system_prompt_template,
         is_cross_margin: data.is_cross_margin,
         use_coin_pool: data.use_coin_pool,
         use_oi_top: data.use_oi_top,
@@ -308,6 +309,53 @@ export function AITradersPage({ onTraderSelect }: AITradersPageProps) {
       if (running) {
         await api.stopTrader(traderId)
       } else {
+        // 🔍 Balance-Check vor dem Start
+        let shouldStart = true
+        try {
+          const balanceInfo = await api.checkTraderBalance(traderId)
+          
+          if (!balanceInfo.has_balance) {
+            let warningMessage = language === 'zh' 
+              ? '⚠️ 未找到余额！\n\n'
+              : '⚠️ No Balance Found!\n\n'
+            
+            if (balanceInfo.warning) {
+              warningMessage += balanceInfo.warning + '\n\n'
+            } else if (balanceInfo.spot_balance && balanceInfo.spot_balance > 0) {
+              warningMessage += language === 'zh'
+                ? `您的 USDC 余额 (${balanceInfo.spot_balance.toFixed(2)} USDC) 在现货账户中。\n请转账到永续合约账户以进行交易。\n\n`
+                : `Your USDC balance (${balanceInfo.spot_balance.toFixed(2)} USDC) is in the Spot account.\nPlease transfer it to the Perpetuals account to trade.\n\n`
+            } else {
+              warningMessage += language === 'zh'
+                ? '在交易所未找到余额。\n请检查您的钱包地址和交易所配置。\n\n'
+                : 'No balance found on exchange.\nPlease check your wallet address and exchange configuration.\n\n'
+            }
+            
+            warningMessage += language === 'zh'
+              ? '您仍然要启动机器人吗？'
+              : 'Do you still want to start the bot?'
+            
+            shouldStart = confirm(warningMessage)
+          } else {
+            // Balance gefunden - optional: Info-Message anzeigen
+            const balanceMsg = language === 'zh'
+              ? `✓ 找到余额：\n• 可用：${balanceInfo.available_balance.toFixed(2)} USDC\n• 总计：${balanceInfo.total_wallet_balance.toFixed(2)} USDC`
+              : `✓ Balance found:\n• Available: ${balanceInfo.available_balance.toFixed(2)} USDC\n• Total: ${balanceInfo.total_wallet_balance.toFixed(2)} USDC`
+            console.log(balanceMsg)
+          }
+        } catch (balanceError) {
+          console.warn('Balance check failed:', balanceError)
+          // Bei Fehler trotzdem fragen
+          const msg = language === 'zh'
+            ? '⚠️ 余额检查失败。\n\n您仍然要启动机器人吗？'
+            : '⚠️ Balance check failed.\n\nDo you still want to start the bot?'
+          shouldStart = confirm(msg)
+        }
+        
+        if (!shouldStart) {
+          return // Abbruch
+        }
+        
         await api.startTrader(traderId)
       }
       mutateTraders()
@@ -644,13 +692,10 @@ export function AITradersPage({ onTraderSelect }: AITradersPageProps) {
     setShowExchangeModal(true)
   }
 
-  const handleSaveSignalSource = async (
-    coinPoolUrl: string,
-    oiTopUrl: string
-  ) => {
+  const handleSaveSignalSource = async (oiSymbols: string) => {
     try {
-      await api.saveUserSignalSource(coinPoolUrl, oiTopUrl)
-      setUserSignalSource({ coinPoolUrl, oiTopUrl })
+      await api.saveUserSignalSource(oiSymbols)
+      setUserSignalSource({ oiSymbols })
       setShowSignalSourceModal(false)
     } catch (error) {
       console.error('Failed to save signal source:', error)
@@ -758,9 +803,8 @@ export function AITradersPage({ onTraderSelect }: AITradersPageProps) {
 
       {/* 信号源配置警告 */}
       {traders &&
-        traders.some((t) => t.use_coin_pool || t.use_oi_top) &&
-        !userSignalSource.coinPoolUrl &&
-        !userSignalSource.oiTopUrl && (
+        traders.some((t: any) => t.use_coin_pool || t.use_oi_top) &&
+        !userSignalSource.oiSymbols && (
           <div
             className="rounded-lg px-4 py-3 flex items-start gap-3 animate-slide-in"
             style={{
@@ -1199,11 +1243,11 @@ export function AITradersPage({ onTraderSelect }: AITradersPageProps) {
       {/* Signal Source Configuration Modal */}
       {showSignalSourceModal && (
         <SignalSourceModal
-          coinPoolUrl={userSignalSource.coinPoolUrl}
-          oiTopUrl={userSignalSource.oiTopUrl}
+          oiSymbols={userSignalSource.oiSymbols}
           onSave={handleSaveSignalSource}
           onClose={() => setShowSignalSourceModal(false)}
           language={language}
+          defaultCoins={defaultCoins}
         />
       )}
     </div>
@@ -1257,30 +1301,39 @@ function Tooltip({
 
 // Signal Source Configuration Modal Component
 function SignalSourceModal({
-  coinPoolUrl,
-  oiTopUrl,
+  oiSymbols,
   onSave,
   onClose,
   language,
+  defaultCoins,
 }: {
-  coinPoolUrl: string
-  oiTopUrl: string
-  onSave: (coinPoolUrl: string, oiTopUrl: string) => void
+  oiSymbols: string
+  onSave: (oiSymbols: string) => void
   onClose: () => void
   language: Language
+  defaultCoins: string[]
 }) {
-  const [coinPool, setCoinPool] = useState(coinPoolUrl || '')
-  const [oiTop, setOiTop] = useState(oiTopUrl || '')
+  const [selectedSymbols, setSelectedSymbols] = useState<string[]>(
+    oiSymbols ? oiSymbols.split(',').map((s) => s.trim()).filter(Boolean) : []
+  )
+
+  const handleToggleSymbol = (symbol: string) => {
+    setSelectedSymbols((prev) =>
+      prev.includes(symbol)
+        ? prev.filter((s) => s !== symbol)
+        : [...prev, symbol]
+    )
+  }
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
-    onSave(coinPool.trim(), oiTop.trim())
+    onSave(selectedSymbols.join(','))
   }
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
       <div
-        className="bg-gray-800 rounded-lg p-6 w-full max-w-lg relative"
+        className="bg-gray-800 rounded-lg p-6 w-full max-w-2xl relative max-h-[90vh] overflow-y-auto"
         style={{ background: '#1E2329' }}
       >
         <h3 className="text-xl font-bold mb-4" style={{ color: '#EAECEF' }}>
@@ -1290,50 +1343,64 @@ function SignalSourceModal({
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
             <label
-              className="block text-sm font-semibold mb-2"
+              className="block text-sm font-semibold mb-3"
               style={{ color: '#EAECEF' }}
             >
-              COIN POOL URL
+              {language === 'en' 
+                ? 'Select Symbols for Open Interest Tracking' 
+                : '选择用于跟踪持仓量的币种'}
             </label>
-            <input
-              type="url"
-              value={coinPool}
-              onChange={(e) => setCoinPool(e.target.value)}
-              placeholder="https://api.example.com/coinpool"
-              className="w-full px-3 py-2 rounded"
-              style={{
-                background: '#0B0E11',
-                border: '1px solid #2B3139',
-                color: '#EAECEF',
-              }}
-            />
-            <div className="text-xs mt-1" style={{ color: '#848E9C' }}>
-              {t('coinPoolDescription', language)}
+            
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2">
+              {defaultCoins.map((symbol) => {
+                const isSelected = selectedSymbols.includes(symbol)
+                return (
+                  <button
+                    key={symbol}
+                    type="button"
+                    onClick={() => handleToggleSymbol(symbol)}
+                    className="px-3 py-2 rounded text-sm font-medium transition-all"
+                    style={{
+                      background: isSelected ? '#F0B90B' : '#0B0E11',
+                      border: `1px solid ${isSelected ? '#F0B90B' : '#2B3139'}`,
+                      color: isSelected ? '#000' : '#EAECEF',
+                    }}
+                  >
+                    {symbol.replace('USDT', '')}
+                  </button>
+                )
+              })}
             </div>
-          </div>
 
-          <div>
-            <label
-              className="block text-sm font-semibold mb-2"
-              style={{ color: '#EAECEF' }}
-            >
-              OI TOP URL
-            </label>
-            <input
-              type="url"
-              value={oiTop}
-              onChange={(e) => setOiTop(e.target.value)}
-              placeholder="https://api.example.com/oitop"
-              className="w-full px-3 py-2 rounded"
-              style={{
-                background: '#0B0E11',
-                border: '1px solid #2B3139',
-                color: '#EAECEF',
-              }}
-            />
-            <div className="text-xs mt-1" style={{ color: '#848E9C' }}>
-              {t('oiTopDescription', language)}
+            <div className="text-xs mt-3" style={{ color: '#848E9C' }}>
+              {language === 'en'
+                ? 'Selected symbols will be queried from Binance and Bybit for Open Interest aggregation'
+                : '已选择的币种将从 Binance 和 Bybit 查询持仓量并汇总'}
             </div>
+
+            {selectedSymbols.length > 0 && (
+              <div className="mt-3 p-2 rounded" style={{ background: '#0B0E11' }}>
+                <div className="text-xs font-semibold mb-1" style={{ color: '#848E9C' }}>
+                  {language === 'en' 
+                    ? `Selected (${selectedSymbols.length}):`
+                    : `已选择 (${selectedSymbols.length}):`}
+                </div>
+                <div className="flex flex-wrap gap-1">
+                  {selectedSymbols.map((symbol) => (
+                    <span
+                      key={symbol}
+                      className="px-2 py-1 rounded text-xs"
+                      style={{
+                        background: 'rgba(240, 185, 11, 0.2)',
+                        color: '#F0B90B',
+                      }}
+                    >
+                      {symbol.replace('USDT', '')}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
 
           <div
@@ -1350,9 +1417,21 @@ function SignalSourceModal({
               ℹ️ {t('information', language)}
             </div>
             <div className="text-xs space-y-1" style={{ color: '#848E9C' }}>
-              <div>{t('signalSourceInfo1', language)}</div>
-              <div>{t('signalSourceInfo2', language)}</div>
-              <div>{t('signalSourceInfo3', language)}</div>
+              <div>
+                {language === 'en'
+                  ? '• Open Interest data is aggregated from Binance and Bybit in real-time'
+                  : '• 持仓量数据实时从 Binance 和 Bybit 聚合'}
+              </div>
+              <div>
+                {language === 'en'
+                  ? '• USDC symbols are automatically mapped to USDT for API queries'
+                  : '• USDC 币种将自动映射为 USDT 进行 API 查询'}
+              </div>
+              <div>
+                {language === 'en'
+                  ? '• Traders using OI signals will receive ranked data based on your selection'
+                  : '• 使用 OI 信号的交易员将根据你的选择获得排名数据'}
+              </div>
             </div>
           </div>
 

@@ -45,12 +45,23 @@ func New() *Client {
 		}
 	}
 
+	// 从环境变量读取 Timeout，默认 300 秒 (5分钟，适配 deepseek-reasoner)
+	timeout := 300 * time.Second
+	if envTimeout := os.Getenv("AI_TIMEOUT_SECONDS"); envTimeout != "" {
+		if parsed, err := strconv.Atoi(envTimeout); err == nil && parsed > 0 {
+			timeout = time.Duration(parsed) * time.Second
+			log.Printf("🔧 [MCP] 使用环境变量 AI_TIMEOUT_SECONDS: %d 秒", parsed)
+		} else {
+			log.Printf("⚠️  [MCP] 环境变量 AI_TIMEOUT_SECONDS 无效 (%s)，使用默认值: 300 秒", envTimeout)
+		}
+	}
+
 	// 默认配置
 	return &Client{
 		Provider:  ProviderDeepSeek,
 		BaseURL:   "https://api.deepseek.com/v1",
 		Model:     "deepseek-chat",
-		Timeout:   120 * time.Second, // 增加到120秒，因为AI需要分析大量数据
+		Timeout:   timeout, // 默认 300 秒，适配 deepseek-reasoner 等慢速模型
 		MaxTokens: maxTokens,
 	}
 }
@@ -120,7 +131,8 @@ func (client *Client) SetCustomAPI(apiURL, apiKey, modelName string) {
 	}
 
 	client.Model = modelName
-	client.Timeout = 120 * time.Second
+	// 自定义API也使用较长的超时时间，避免因模型推理慢导致超时
+	client.Timeout = 300 * time.Second
 }
 
 // SetClient 设置完整的AI配置（高级用户）
@@ -178,6 +190,7 @@ func (client *Client) callOnce(systemPrompt, userPrompt string) (string, error) 
 	log.Printf("   Provider: %s", client.Provider)
 	log.Printf("   BaseURL: %s", client.BaseURL)
 	log.Printf("   Model: %s", client.Model)
+	log.Printf("   Timeout: %v", client.Timeout)
 	log.Printf("   UseFullURL: %v", client.UseFullURL)
 	if len(client.APIKey) > 8 {
 		log.Printf("   API Key: %s...%s", client.APIKey[:4], client.APIKey[len(client.APIKey)-4:])

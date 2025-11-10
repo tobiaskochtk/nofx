@@ -11,6 +11,7 @@ import { LandingPage } from './pages/LandingPage'
 import { FAQPage } from './pages/FAQPage'
 import HeaderBar from './components/landing/HeaderBar'
 import AILearning from './components/AILearning'
+import { DealsCard } from './components/DealsCard'
 import { LanguageProvider, useLanguage } from './contexts/LanguageContext'
 import { AuthProvider, useAuth } from './contexts/AuthContext'
 import { t, type Language } from './i18n/translations'
@@ -159,9 +160,10 @@ function App() {
       : null,
     () => api.getLatestDecisions(selectedTraderId),
     {
-      refreshInterval: 30000, // 30秒刷新（决策更新频率较低）
+      // Poll frequently and avoid over-deduping which suppresses refetches
+      refreshInterval: 15000, // 15秒刷新（与其它面板一致）
       revalidateOnFocus: false,
-      dedupingInterval: 20000,
+      dedupingInterval: 1000, // 保证轮询不会被20s去重抑制
     }
   )
 
@@ -824,6 +826,11 @@ function TraderDetailsPage({
       {/* AI Learning & Performance Analysis */}
       <div className="mb-6 animate-slide-in" style={{ animationDelay: '0.3s' }}>
         <AILearning traderId={selectedTrader.trader_id} />
+      </div>
+
+      {/* Deals */}
+      <div className="mb-6 animate-slide-in" style={{ animationDelay: '0.35s' }}>
+        <DealsCard traderId={selectedTrader.trader_id} />
       </div>
     </div>
   )
