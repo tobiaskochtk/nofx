@@ -1,102 +1,58 @@
 import { useEffect, useState } from 'react'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import useSWR from 'swr'
-import { api } from './lib/api'
-import { EquityChart } from './components/EquityChart'
-import { AITradersPage } from './components/AITradersPage'
-import { LoginPage } from './components/LoginPage'
-import { RegisterPage } from './components/RegisterPage'
-import { ResetPasswordPage } from './components/ResetPasswordPage'
-import { CompetitionPage } from './components/CompetitionPage'
-import { LandingPage } from './pages/LandingPage'
-import { FAQPage } from './pages/FAQPage'
-import HeaderBar from './components/landing/HeaderBar'
-import AILearning from './components/AILearning'
-import { DealsCard } from './components/DealsCard'
-import { LanguageProvider, useLanguage } from './contexts/LanguageContext'
-import { AuthProvider, useAuth } from './contexts/AuthContext'
-import { t, type Language } from './i18n/translations'
-import { useSystemConfig } from './hooks/useSystemConfig'
-import { useAuth } from './contexts/AuthContext'
-import { useLanguage } from './contexts/LanguageContext'
-import { t } from './i18n/translations'
+import { api } from '../lib/api'
+import { EquityChart } from '../components/EquityChart'
+import AILearning from '../components/AILearning'
+import { useLanguage } from '../contexts/LanguageContext'
+import { useAuth } from '../contexts/AuthContext'
+import { t, type Language } from '../i18n/translations'
+import {
+  AlertTriangle,
+  Bot,
+  Brain,
+  RefreshCw,
+  TrendingUp,
+  PieChart,
+  Inbox,
+  Send,
+  Check,
+  X,
+  XCircle,
+} from 'lucide-react'
+import { stripLeadingIcons } from '../lib/text'
+import type {
+  SystemStatus,
+  AccountInfo,
+  Position,
+  DecisionRecord,
+  Statistics,
+  TraderInfo,
+} from '../types'
 
-function LoadingScreen() {
-  const { language } = useLanguage()
-
-  return (
-    <div
-      className="min-h-screen flex items-center justify-center"
-      style={{ background: '#0B0E11' }}
-    >
-      <div className="text-center">
-        <img
-          src="/icons/nofx.svg"
-          alt="NoFx Logo"
-          className="w-16 h-16 mx-auto mb-4 animate-pulse"
-        />
-        <p style={{ color: '#EAECEF' }}>{t('loading', language)}</p>
-      </div>
-    </div>
-  )
+// 获取友好的AI模型名称
+function getModelDisplayName(modelId: string): string {
+  switch (modelId.toLowerCase()) {
+    case 'deepseek':
+      return 'DeepSeek'
+    case 'qwen':
+      return 'Qwen'
+    case 'claude':
+      return 'Claude'
+    default:
+      return modelId.toUpperCase()
+  }
 }
 
-function AppContent() {
-  const { isLoading } = useAuth()
-  const { loading: configLoading } = useSystemConfig()
-  const [route, setRoute] = useState(window.location.pathname)
-
-  // 从URL路径读取初始页面状态（支持刷新保持页面）
-  const getInitialPage = (): Page => {
-    const path = window.location.pathname
-    const hash = window.location.hash.slice(1) // 去掉 #
-
-    if (path === '/traders' || hash === 'traders') return 'traders'
-    if (path === '/dashboard' || hash === 'trader' || hash === 'details')
-      return 'trader'
-    return 'competition' // 默认为竞赛页面
-  }
-
-  const [currentPage, setCurrentPage] = useState<Page>(getInitialPage())
-  const [selectedTraderId, setSelectedTraderId] = useState<string | undefined>()
+export default function TraderDashboard() {
+  const { language } = useLanguage()
+  const { user, token } = useAuth()
+  const navigate = useNavigate()
+  const [searchParams, setSearchParams] = useSearchParams()
+  const [selectedTraderId, setSelectedTraderId] = useState<string | undefined>(
+    searchParams.get('trader') || undefined
+  )
   const [lastUpdate, setLastUpdate] = useState<string>('--:--:--')
-
-  // 监听URL变化，同步页面状态
-  useEffect(() => {
-    const handleRouteChange = () => {
-      const path = window.location.pathname
-      const hash = window.location.hash.slice(1)
-
-      if (path === '/traders' || hash === 'traders') {
-        setCurrentPage('traders')
-      } else if (
-        path === '/dashboard' ||
-        hash === 'trader' ||
-        hash === 'details'
-      ) {
-        setCurrentPage('trader')
-      } else if (
-        path === '/competition' ||
-        hash === 'competition' ||
-        hash === ''
-      ) {
-        setCurrentPage('competition')
-      }
-      setRoute(path)
-    }
-
-    window.addEventListener('hashchange', handleRouteChange)
-    window.addEventListener('popstate', handleRouteChange)
-    return () => {
-      window.removeEventListener('hashchange', handleRouteChange)
-      window.removeEventListener('popstate', handleRouteChange)
-    }
-  }, [])
-
-  // 切换页面时更新URL hash (当前通过按钮直接调用setCurrentPage，这个函数暂时保留用于未来扩展)
-  // const navigateToPage = (page: Page) => {
-  //   setCurrentPage(page);
-  //   window.location.hash = page === 'competition' ? '' : 'trader';
-  // };
 
   // 获取trader列表（仅在用户登录时）
   const { data: traders, error: tradersError } = useSWR<TraderInfo[]>(
@@ -104,78 +60,78 @@ function AppContent() {
     api.getTraders,
     {
       refreshInterval: 10000,
-      shouldRetryOnError: false, // 避免在后端未运行时无限重试
+      shouldRetryOnError: false,
     }
   )
 
   // 当获取到traders后，设置默认选中第一个
   useEffect(() => {
     if (traders && traders.length > 0 && !selectedTraderId) {
-      setSelectedTraderId(traders[0].trader_id)
+      const firstTraderId = traders[0].trader_id
+      setSelectedTraderId(firstTraderId)
+      setSearchParams({ trader: firstTraderId })
     }
-  }, [traders, selectedTraderId])
+  }, [traders, selectedTraderId, setSearchParams])
+
+  // 更新URL参数
+  const handleTraderSelect = (traderId: string) => {
+    setSelectedTraderId(traderId)
+    setSearchParams({ trader: traderId })
+  }
 
   // 如果在trader页面，获取该trader的数据
   const { data: status } = useSWR<SystemStatus>(
-    currentPage === 'trader' && selectedTraderId
-      ? `status-${selectedTraderId}`
-      : null,
+    selectedTraderId ? `status-${selectedTraderId}` : null,
     () => api.getStatus(selectedTraderId),
     {
-      refreshInterval: 15000, // 15秒刷新（配合后端15秒缓存）
-      revalidateOnFocus: false, // 禁用聚焦时重新验证，减少请求
-      dedupingInterval: 10000, // 10秒去重，防止短时间内重复请求
+      refreshInterval: 15000,
+      revalidateOnFocus: false,
+      dedupingInterval: 10000,
     }
   )
 
   const { data: account } = useSWR<AccountInfo>(
-    currentPage === 'trader' && selectedTraderId
-      ? `account-${selectedTraderId}`
-      : null,
+    selectedTraderId ? `account-${selectedTraderId}` : null,
     () => api.getAccount(selectedTraderId),
     {
-      refreshInterval: 15000, // 15秒刷新（配合后端15秒缓存）
-      revalidateOnFocus: false, // 禁用聚焦时重新验证，减少请求
-      dedupingInterval: 10000, // 10秒去重，防止短时间内重复请求
+      refreshInterval: 15000,
+      revalidateOnFocus: false,
+      dedupingInterval: 10000,
     }
   )
 
   const { data: positions } = useSWR<Position[]>(
-    currentPage === 'trader' && selectedTraderId
-      ? `positions-${selectedTraderId}`
-      : null,
+    selectedTraderId ? `positions-${selectedTraderId}` : null,
     () => api.getPositions(selectedTraderId),
     {
-      refreshInterval: 15000, // 15秒刷新（配合后端15秒缓存）
-      revalidateOnFocus: false, // 禁用聚焦时重新验证，减少请求
-      dedupingInterval: 10000, // 10秒去重，防止短时间内重复请求
+      refreshInterval: 15000,
+      revalidateOnFocus: false,
+      dedupingInterval: 10000,
     }
   )
 
   const { data: decisions } = useSWR<DecisionRecord[]>(
-    currentPage === 'trader' && selectedTraderId
-      ? `decisions/latest-${selectedTraderId}`
-      : null,
+    selectedTraderId ? `decisions/latest-${selectedTraderId}` : null,
     () => api.getLatestDecisions(selectedTraderId),
     {
-      // Poll frequently and avoid over-deduping which suppresses refetches
-      refreshInterval: 15000, // 15秒刷新（与其它面板一致）
-      revalidateOnFocus: false,
-      dedupingInterval: 1000, // 保证轮询不会被20s去重抑制
-    }
-  )
-
-  const { data: stats } = useSWR<Statistics>(
-    currentPage === 'trader' && selectedTraderId
-      ? `statistics-${selectedTraderId}`
-      : null,
-    () => api.getStatistics(selectedTraderId),
-    {
-      refreshInterval: 30000, // 30秒刷新（统计数据更新频率较低）
+      refreshInterval: 30000,
       revalidateOnFocus: false,
       dedupingInterval: 20000,
     }
   )
+
+  const { data: stats } = useSWR<Statistics>(
+    selectedTraderId ? `statistics-${selectedTraderId}` : null,
+    () => api.getStatistics(selectedTraderId),
+    {
+      refreshInterval: 30000,
+      revalidateOnFocus: false,
+      dedupingInterval: 20000,
+    }
+  )
+
+  // Avoid unused variable warning
+  void stats
 
   useEffect(() => {
     if (account) {
@@ -186,69 +142,11 @@ function AppContent() {
 
   const selectedTrader = traders?.find((t) => t.trader_id === selectedTraderId)
 
-  // Handle routing
-  useEffect(() => {
-    const handlePopState = () => {
-      setRoute(window.location.pathname)
-    }
-    window.addEventListener('popstate', handlePopState)
-    return () => window.removeEventListener('popstate', handlePopState)
-  }, [])
-
-  // Set current page based on route for consistent navigation state
-  useEffect(() => {
-    if (route === '/competition') {
-      setCurrentPage('competition')
-    } else if (route === '/traders') {
-      setCurrentPage('traders')
-    } else if (route === '/dashboard') {
-      setCurrentPage('trader')
-    }
-  }, [route])
-
-  // Show loading spinner while checking auth or config
-  if (isLoading || configLoading) {
-    return <LoadingScreen />
-  }
-
-  return <RouterProvider router={router} />
-}
-
-// Trader Details Page Component
-function TraderDetailsPage({
-  selectedTrader,
-  status,
-  account,
-  positions,
-  decisions,
-  lastUpdate,
-  language,
-  traders,
-  tradersError,
-  selectedTraderId,
-  onTraderSelect,
-  onNavigateToTraders,
-}: {
-  selectedTrader?: TraderInfo
-  traders?: TraderInfo[]
-  tradersError?: Error
-  selectedTraderId?: string
-  onTraderSelect: (traderId: string) => void
-  onNavigateToTraders: () => void
-  status?: SystemStatus
-  account?: AccountInfo
-  positions?: Position[]
-  decisions?: DecisionRecord[]
-  stats?: Statistics
-  lastUpdate: string
-  language: Language
-}) {
-  // If API failed with error, show empty state (likely backend not running)
+  // If API failed with error, show empty state
   if (tradersError) {
     return (
       <div className="flex items-center justify-center min-h-[60vh]">
         <div className="text-center max-w-md mx-auto px-6">
-          {/* Icon */}
           <div
             className="w-24 h-24 mx-auto mb-6 rounded-full flex items-center justify-center"
             style={{
@@ -271,20 +169,14 @@ function TraderDetailsPage({
               />
             </svg>
           </div>
-
-          {/* Title */}
           <h2 className="text-2xl font-bold mb-3" style={{ color: '#EAECEF' }}>
             {t('dashboardEmptyTitle', language)}
           </h2>
-
-          {/* Description */}
           <p className="text-base mb-6" style={{ color: '#848E9C' }}>
             {t('dashboardEmptyDescription', language)}
           </p>
-
-          {/* CTA Button */}
           <button
-            onClick={onNavigateToTraders}
+            onClick={() => navigate('/traders')}
             className="px-6 py-3 rounded-lg font-semibold transition-all hover:scale-105 active:scale-95"
             style={{
               background: 'linear-gradient(135deg, #F0B90B 0%, #FCD535 100%)',
@@ -304,7 +196,6 @@ function TraderDetailsPage({
     return (
       <div className="flex items-center justify-center min-h-[60vh]">
         <div className="text-center max-w-md mx-auto px-6">
-          {/* Icon */}
           <div
             className="w-24 h-24 mx-auto mb-6 rounded-full flex items-center justify-center"
             style={{
@@ -327,20 +218,14 @@ function TraderDetailsPage({
               />
             </svg>
           </div>
-
-          {/* Title */}
           <h2 className="text-2xl font-bold mb-3" style={{ color: '#EAECEF' }}>
             {t('dashboardEmptyTitle', language)}
           </h2>
-
-          {/* Description */}
           <p className="text-base mb-6" style={{ color: '#848E9C' }}>
             {t('dashboardEmptyDescription', language)}
           </p>
-
-          {/* CTA Button */}
           <button
-            onClick={onNavigateToTraders}
+            onClick={() => navigate('/traders')}
             className="px-6 py-3 rounded-lg font-semibold transition-all hover:scale-105 active:scale-95"
             style={{
               background: 'linear-gradient(135deg, #F0B90B 0%, #FCD535 100%)',
@@ -359,7 +244,6 @@ function TraderDetailsPage({
   if (!selectedTrader) {
     return (
       <div className="space-y-6">
-        {/* Loading Skeleton - Binance Style */}
         <div className="binance-card p-6 animate-pulse">
           <div className="skeleton h-8 w-48 mb-3"></div>
           <div className="flex gap-4">
@@ -402,12 +286,12 @@ function TraderDetailsPage({
             style={{ color: '#EAECEF' }}
           >
             <span
-              className="w-10 h-10 rounded-full flex items-center justify-center text-xl"
+              className="w-10 h-10 rounded-full flex items-center justify-center"
               style={{
                 background: 'linear-gradient(135deg, #F0B90B 0%, #FCD535 100%)',
               }}
             >
-              🤖
+              <Bot className="w-5 h-5" style={{ color: '#0B0E11' }} />
             </span>
             {selectedTrader.trader_name}
           </h2>
@@ -420,7 +304,7 @@ function TraderDetailsPage({
               </span>
               <select
                 value={selectedTraderId}
-                onChange={(e) => onTraderSelect(e.target.value)}
+                onChange={(e) => handleTraderSelect(e.target.value)}
                 className="rounded px-3 py-2 text-sm font-medium cursor-pointer transition-colors"
                 style={{
                   background: '#1E2329',
@@ -475,7 +359,8 @@ function TraderDetailsPage({
           style={{ background: '#1E2329', border: '1px solid #2B3139' }}
         >
           <div style={{ color: '#848E9C' }}>
-            🔄 Last Update: {lastUpdate} | Total Equity:{' '}
+            <RefreshCw className="inline w-4 h-4 mr-1 align-text-bottom" />
+            Last Update: {lastUpdate} | Total Equity:{' '}
             {account?.total_equity?.toFixed(2) || '0.00'} | Available:{' '}
             {account?.available_balance?.toFixed(2) || '0.00'} | P&L:{' '}
             {account?.total_pnl?.toFixed(2) || '0.00'} (
@@ -529,7 +414,8 @@ function TraderDetailsPage({
                 className="text-xl font-bold flex items-center gap-2"
                 style={{ color: '#EAECEF' }}
               >
-                📈 {t('currentPositions', language)}
+                <TrendingUp className="w-5 h-5" style={{ color: '#F0B90B' }} />
+                {t('currentPositions', language)}
               </h2>
               {positions && positions.length > 0 && (
                 <div
@@ -664,7 +550,9 @@ function TraderDetailsPage({
               </div>
             ) : (
               <div className="text-center py-16" style={{ color: '#848E9C' }}>
-                <div className="text-6xl mb-4 opacity-50">📊</div>
+                <div className="mb-4 opacity-50 flex justify-center">
+                  <PieChart className="w-16 h-16" />
+                </div>
                 <div className="text-lg font-semibold mb-2">
                   {t('noPositions', language)}
                 </div>
@@ -675,26 +563,24 @@ function TraderDetailsPage({
             )}
           </div>
         </div>
-        {/* 左侧结束 */}
 
-        {/* 右侧：Recent Decisions - 卡片容器 */}
+        {/* 右侧：Recent Decisions */}
         <div
           className="binance-card p-6 animate-slide-in h-fit lg:sticky lg:top-24 lg:max-h-[calc(100vh-120px)]"
           style={{ animationDelay: '0.2s' }}
         >
-          {/* 标题 */}
           <div
             className="flex items-center gap-3 mb-5 pb-4 border-b"
             style={{ borderColor: '#2B3139' }}
           >
             <div
-              className="w-10 h-10 rounded-xl flex items-center justify-center text-xl"
+              className="w-10 h-10 rounded-xl flex items-center justify-center"
               style={{
                 background: 'linear-gradient(135deg, #6366F1 0%, #8B5CF6 100%)',
                 boxShadow: '0 4px 14px rgba(99, 102, 241, 0.4)',
               }}
             >
-              🧠
+              <Brain className="w-5 h-5" style={{ color: '#FFFFFF' }} />
             </div>
             <div>
               <h2 className="text-xl font-bold" style={{ color: '#EAECEF' }}>
@@ -708,7 +594,6 @@ function TraderDetailsPage({
             </div>
           </div>
 
-          {/* 决策列表 - 可滚动 */}
           <div
             className="space-y-4 overflow-y-auto pr-2"
             style={{ maxHeight: 'calc(100vh - 280px)' }}
@@ -719,7 +604,9 @@ function TraderDetailsPage({
               ))
             ) : (
               <div className="py-16 text-center">
-                <div className="text-6xl mb-4 opacity-30">🧠</div>
+                <div className="mb-4 opacity-30 flex justify-center">
+                  <Brain className="w-16 h-16" />
+                </div>
                 <div
                   className="text-lg font-semibold mb-2"
                   style={{ color: '#EAECEF' }}
@@ -733,23 +620,17 @@ function TraderDetailsPage({
             )}
           </div>
         </div>
-        {/* 右侧结束 */}
       </div>
 
       {/* AI Learning & Performance Analysis */}
       <div className="mb-6 animate-slide-in" style={{ animationDelay: '0.3s' }}>
         <AILearning traderId={selectedTrader.trader_id} />
       </div>
-
-      {/* Deals */}
-      <div className="mb-6 animate-slide-in" style={{ animationDelay: '0.35s' }}>
-        <DealsCard traderId={selectedTrader.trader_id} />
-      </div>
     </div>
   )
 }
 
-// Stat Card Component - Binance Style Enhanced
+// Stat Card Component
 function StatCard({
   title,
   value,
@@ -797,7 +678,7 @@ function StatCard({
   )
 }
 
-// Decision Card Component with CoT Trace - Binance Style
+// Decision Card Component
 function DecisionCard({
   decision,
   language,
@@ -847,8 +728,8 @@ function DecisionCard({
             className="flex items-center gap-2 text-sm transition-colors"
             style={{ color: '#60a5fa' }}
           >
-            <span className="font-semibold">
-              📥 {t('inputPrompt', language)}
+            <span className="font-semibold flex items-center gap-2">
+              <Inbox className="w-4 h-4" /> {t('inputPrompt', language)}
             </span>
             <span className="text-xs">
               {showInputPrompt
@@ -879,8 +760,9 @@ function DecisionCard({
             className="flex items-center gap-2 text-sm transition-colors"
             style={{ color: '#F0B90B' }}
           >
-            <span className="font-semibold">
-              📤 {t('aiThinking', language)}
+            <span className="font-semibold flex items-center gap-2">
+              <Send className="w-4 h-4" />{' '}
+              {stripLeadingIcons(t('aiThinking', language))}
             </span>
             <span className="text-xs">
               {showCoT ? t('collapse', language) : t('expand', language)}
@@ -944,7 +826,11 @@ function DecisionCard({
                 </span>
               )}
               <span style={{ color: action.success ? '#0ECB81' : '#F6465D' }}>
-                {action.success ? '✓' : '✗'}
+                {action.success ? (
+                  <Check className="w-3 h-3 inline" />
+                ) : (
+                  <X className="w-3 h-3 inline" />
+                )}
               </span>
               {action.error && (
                 <span className="text-xs ml-2" style={{ color: '#F6465D' }}>
@@ -1000,7 +886,7 @@ function DecisionCard({
           <AlertTriangle size={16} className="flex-shrink-0 mt-0.5" />
           <div className="flex-1">
             <div className="font-semibold mb-1">
-              ⚠️ {t('candidateCoinsZeroWarning', language)}
+              {t('candidateCoinsZeroWarning', language)}
             </div>
             <div className="text-xs space-y-1" style={{ color: '#848E9C' }}>
               <div>{t('possibleReasons', language)}</div>
@@ -1045,25 +931,12 @@ function DecisionCard({
       {/* Error Message */}
       {decision.error_message && (
         <div
-          className="text-sm rounded px-3 py-2 mt-3"
+          className="text-sm rounded px-3 py-2 mt-3 flex items-center gap-2"
           style={{ color: '#F6465D', background: 'rgba(246, 70, 93, 0.1)' }}
         >
-          ❌ {decision.error_message}
+          <XCircle className="w-4 h-4" /> {decision.error_message}
         </div>
       )}
     </div>
-  )
-}
-
-// Wrap App with providers
-export default function AppWithProviders() {
-  return (
-    <LanguageProvider>
-      <AuthProvider>
-        <ConfirmDialogProvider>
-          <AppContent />
-        </ConfirmDialogProvider>
-      </AuthProvider>
-    </LanguageProvider>
   )
 }
