@@ -27,7 +27,10 @@ type Store interface {
 func SanitizeSymbol(symbol string) string {
 	upper := strings.ToUpper(strings.TrimSpace(symbol))
 	replacer := strings.NewReplacer("/", "", ":", "", "-", "")
-	return replacer.Replace(upper)
+	normalized := replacer.Replace(upper)
+	// Hyperliquid uses USDC, but derivs data is indexed by USDT
+	normalized = strings.Replace(normalized, "USDC", "USDT", 1)
+	return normalized
 }
 
 // CacheDir resolves the root directory that stores derivs payloads.

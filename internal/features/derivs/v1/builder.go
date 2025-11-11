@@ -2,6 +2,7 @@ package derivsv1
 
 import (
 	"fmt"
+	"math"
 
 	"nofx/config"
 	"nofx/pkg/types"
@@ -107,6 +108,100 @@ func mergeFeatures(parts ...map[string]interface{}) *types.DerivsFeatures {
 				feat.BasisZ14d = toFloatPointer(raw)
 			case "basis_source_status":
 				feat.BasisSourceStatus = toString(raw)
+			case "cvd_notional_z_3m_short":
+				feat.CVDNotionalZ3mShort = toFloatPointer(raw)
+			case "cvd_notional_z_3m_long":
+				feat.CVDNotionalZ3mLong = toFloatPointer(raw)
+			case "imb_notional_z_3m_short":
+				feat.ImbNotionalZ3mShort = toFloatPointer(raw)
+			case "imb_notional_z_3m_long":
+				feat.ImbNotionalZ3mLong = toFloatPointer(raw)
+			case "tbr_notional_3m":
+				feat.TBRNotional3m = toFloatPointer(raw)
+			case "slope_price_3m_short":
+				feat.SlopePrice3mShort = toFloatPointer(raw)
+			case "slope_price_3m_mid":
+				feat.SlopePrice3mMid = toFloatPointer(raw)
+			case "r2_price_3m_short":
+				feat.R2Price3mShort = toFloatPointer(raw)
+			case "r2_price_3m_mid":
+				feat.R2Price3mMid = toFloatPointer(raw)
+			case "slope_cvdz_3m_short":
+				feat.SlopeCVDZ3mShort = toFloatPointer(raw)
+			case "slope_cvdz_3m_mid":
+				feat.SlopeCVDZ3mMid = toFloatPointer(raw)
+			case "r2_cvdz_3m_short":
+				feat.R2CVDZ3mShort = toFloatPointer(raw)
+			case "r2_cvdz_3m_mid":
+				feat.R2CVDZ3mMid = toFloatPointer(raw)
+			case "slope_imb_3m_short":
+				feat.SlopeImb3mShort = toFloatPointer(raw)
+			case "slope_imb_3m_mid":
+				feat.SlopeImb3mMid = toFloatPointer(raw)
+			case "r2_imb_3m_short":
+				feat.R2Imb3mShort = toFloatPointer(raw)
+			case "r2_imb_3m_mid":
+				feat.R2Imb3mMid = toFloatPointer(raw)
+			case "div_bear_short_3m":
+				feat.DivBearShort3m = toIntPointer(raw)
+			case "div_bull_short_3m":
+				feat.DivBullShort3m = toIntPointer(raw)
+			case "div_bear_mid_3m":
+				feat.DivBearMid3m = toIntPointer(raw)
+			case "div_bull_mid_3m":
+				feat.DivBullMid3m = toIntPointer(raw)
+			case "confidence_cvd_3m":
+				feat.ConfidenceCVD3m = toFloatPointer(raw)
+			case "dist_up_pct_3m":
+				feat.DistUpPct3m = toFloatPointer(raw)
+			case "dist_up_atr_3m":
+				feat.DistUpAtr3m = toFloatPointer(raw)
+			case "cluster_strength_up_3m":
+				feat.ClusterStrengthUp3m = toFloatPointer(raw)
+			case "dist_dn_pct_3m":
+				feat.DistDnPct3m = toFloatPointer(raw)
+			case "dist_dn_atr_3m":
+				feat.DistDnAtr3m = toFloatPointer(raw)
+			case "cluster_strength_down_3m":
+				feat.ClusterStrengthDown3m = toFloatPointer(raw)
+			case "liq_risk_up_3m":
+				feat.LiqRiskUp3m = toIntPointer(raw)
+			case "liq_risk_down_3m":
+				feat.LiqRiskDown3m = toIntPointer(raw)
+			case "prefer_direction_3m":
+				feat.PreferDirection3m = toStringPointer(raw)
+			case "bucket_usd_3m":
+				feat.BucketUsd3m = toFloatPointer(raw)
+			case "event_count_liq_3m":
+				feat.EventCountLiq3m = toIntPointer(raw)
+			case "atr_3m":
+				feat.Atr3m = toFloatPointer(raw)
+			case "confidence_liq_3m":
+				feat.ConfidenceLiq3m = toFloatPointer(raw)
+			case "cvd_notional_z_15m_short":
+				feat.CVDNotionalZ15mShort = toFloatPointer(raw)
+			case "cvd_notional_z_15m_long":
+				feat.CVDNotionalZ15mLong = toFloatPointer(raw)
+			case "imb_notional_z_15m_short":
+				feat.ImbNotionalZ15mShort = toFloatPointer(raw)
+			case "imb_notional_z_15m_long":
+				feat.ImbNotionalZ15mLong = toFloatPointer(raw)
+			case "tbr_notional_15m":
+				feat.TBRNotional15m = toFloatPointer(raw)
+			case "div_bear_mid_15m":
+				feat.DivBearMid15m = toIntPointer(raw)
+			case "div_bull_mid_15m":
+				feat.DivBullMid15m = toIntPointer(raw)
+			case "dist_up_atr_15m":
+				feat.DistUpAtr15m = toFloatPointer(raw)
+			case "dist_dn_atr_15m":
+				feat.DistDnAtr15m = toFloatPointer(raw)
+			case "prefer_direction_15m":
+				feat.PreferDirection15m = toStringPointer(raw)
+			case "confidence_cvd_15m":
+				feat.ConfidenceCVD15m = toFloatPointer(raw)
+			case "confidence_liq_15m":
+				feat.ConfidenceLiq15m = toFloatPointer(raw)
 			}
 		}
 	}
@@ -130,6 +225,12 @@ func toFloatPointer(v interface{}) *float64 {
 		return &val
 	case *float64:
 		return val
+	case int:
+		f := float64(val)
+		return &f
+	case int64:
+		f := float64(val)
+		return &f
 	}
 	return nil
 }
@@ -155,5 +256,23 @@ func toString(v interface{}) string {
 		return *val
 	default:
 		return ""
+	}
+}
+
+func toIntPointer(v interface{}) *int {
+	switch val := v.(type) {
+	case int:
+		i := val
+		return &i
+	case *int:
+		return val
+	case int64:
+		i := int(val)
+		return &i
+	case float64:
+		i := int(math.Round(val))
+		return &i
+	default:
+		return nil
 	}
 }

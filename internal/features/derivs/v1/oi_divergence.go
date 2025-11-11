@@ -1,6 +1,7 @@
 package derivsv1
 
 import (
+    "log"
     "math"
 
     "nofx/internal/features/derivs/v1/rolling"
@@ -21,17 +22,23 @@ type OIFeatureConfig struct {
 // ComputeOIFeatures derives normalized OI deltas, divergence state, and OI↔price correlation.
 func ComputeOIFeatures(cfg OIFeatureConfig) (map[string]interface{}, error) {
     result := map[string]interface{}{}
+    log.Printf("[ComputeOIFeatures] %s: called with History=%v, WindowHours=%d, MinSamples=%d", 
+        cfg.Symbol, cfg.History != nil, cfg.WindowHours, cfg.MinSamples)
     if cfg.History == nil {
+        log.Printf("[ComputeOIFeatures] %s: History is NIL, returning empty", cfg.Symbol)
         return result, nil
     }
 
     oiSeries, priceSeries, err := cfg.History.GetOHLC(cfg.Symbol, cfg.WindowHours)
     if err != nil {
+        log.Printf("[ComputeOIFeatures] %s: GetOHLC returned error: %v", cfg.Symbol, err)
         return nil, err
     }
     result["oi_source_status"] = cfg.History.SourceStatus(cfg.Symbol)
 
     if len(oiSeries) == 0 || len(priceSeries) == 0 || len(oiSeries) < cfg.MinSamples {
+        log.Printf("[ComputeOIFeatures] %s: insufficient data - oiLen=%d, priceLen=%d, minSamples=%d", 
+            cfg.Symbol, len(oiSeries), len(priceSeries), cfg.MinSamples)
         return result, nil
     }
 

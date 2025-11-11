@@ -11,6 +11,27 @@ const venueToExchange: Record<VenueKey, keyof typeof ccxt> = {
 
 type ExchangeCtor = new (params?: Record<string, unknown>) => Exchange
 
+/**
+ * Convert simple symbol format (LINKUSDT) to CCXT perpetual format (LINK/USDT:USDT)
+ */
+function toCCXTSymbol(symbol: string): string {
+  // If already in CCXT format, return as-is
+  if (symbol.includes('/')) {
+    return symbol
+  }
+  // Handle USDT pairs: LINKUSDT -> LINK/USDT:USDT
+  if (symbol.endsWith('USDT')) {
+    const base = symbol.slice(0, -4)
+    return `${base}/USDT:USDT`
+  }
+  // Handle USDC pairs: LINKUSDC -> LINK/USDC:USDC
+  if (symbol.endsWith('USDC')) {
+    const base = symbol.slice(0, -4)
+    return `${base}/USDC:USDC`
+  }
+  return symbol
+}
+
 export async function createVenueAdapters(venues: VenueKey[], timeoutMs: number): Promise<Record<VenueKey, VenueAdapter>> {
   const adapters: Partial<Record<VenueKey, VenueAdapter>> = {}
   for (const venue of venues) {
@@ -38,32 +59,35 @@ class DefaultVenueAdapter implements VenueAdapter {
   constructor(public readonly venue: VenueKey, public readonly client: Exchange) {}
 
   hasMarket(symbol: string): boolean {
-    return !!this.client.markets?.[symbol]
+    const ccxtSymbol = toCCXTSymbol(symbol)
+    return !!this.client.markets?.[ccxtSymbol]
   }
 
   async fetchOpenInterest(symbol: string): Promise<OISample[]> {
+    const ccxtSymbol = toCCXTSymbol(symbol)
     if (!this.client.has?.fetchOpenInterestHistory) {
       return []
     }
     const since = Date.now() - 3600 * 1000 * 336
-    const entries = await this.client.fetchOpenInterestHistory(symbol, '1h', since, 200)
+    const entries = await this.client.fetchOpenInterestHistory(ccxtSymbol, '1h', since, 200)
     if (!Array.isArray(entries)) {
       return []
     }
     return entries
-      .map((row: any) => ({ ts: Number(row.timestamp ?? row.time ?? row[0]), venue: this.venue, value: Number(row.openInterest ?? row[1] ?? 0) }))
+      .map((row: any) => ({ ts: Number(row.timestamp ?? row.time ?? row[0]), venue: this.venue, value: Number(row.openInterestAmount ?? row.openInterestValue ?? row.openInterest ?? row[1] ?? 0) }))
       .filter((sample: OISample) => sample.ts > 0 && Number.isFinite(sample.value))
   }
 
   async fetchFunding(symbol: string): Promise<FundingSample[]> {
+    const ccxtSymbol = toCCXTSymbol(symbol)
     if (this.client.has?.fetchFundingRateHistory) {
-      const entries = await this.client.fetchFundingRateHistory(symbol, undefined, undefined, 200)
+      const entries = await this.client.fetchFundingRateHistory(ccxtSymbol, undefined, undefined, 200)
       return (entries ?? [])
         .map((row: any) => ({ ts: Number(row.timestamp ?? row[0]), venue: this.venue, rate: Number(row.fundingRate ?? row[1] ?? 0) }))
         .filter((sample: FundingSample) => sample.ts > 0 && Number.isFinite(sample.rate))
     }
     if (this.client.has?.fetchFundingRate) {
-      const ticker = await this.client.fetchFundingRate(symbol)
+      const ticker = await this.client.fetchFundingRate(ccxtSymbol)
       return [
         {
           ts: Number(ticker.timestamp ?? Date.now()),
@@ -76,10 +100,11 @@ class DefaultVenueAdapter implements VenueAdapter {
   }
 
   async fetchBasis(symbol: string, resolveSpotIndex: SpotIndexResolver): Promise<BasisSample | null> {
+    const ccxtSymbol = toCCXTSymbol(symbol)
     if (!this.client.has?.fetchTicker) {
       return null
     }
-    const ticker = await this.client.fetchTicker(symbol)
+    const ticker = await this.client.fetchTicker(ccxtSymbol)
     const mark = extractNumber((ticker.info && (ticker.info.markPrice ?? ticker.info.lastPrice)) ?? ticker.markPrice ?? ticker.last)
     let index = extractNumber((ticker.info && (ticker.info.indexPrice ?? ticker.info.index)) ?? (ticker as any).index)
     if (!index || index <= 0) {

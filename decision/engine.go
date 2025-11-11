@@ -4,8 +4,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"math"
 	"nofx/market"
 	"nofx/mcp"
+	"nofx/pkg/types"
 	"nofx/pool"
 	"regexp"
 	"strings"
@@ -26,6 +28,10 @@ var (
 	reReasoningTag = regexp.MustCompile(`(?s)<reasoning>(.*?)</reasoning>`)
 	reDecisionTag  = regexp.MustCompile(`(?s)<decision>(.*?)</decision>`)
 )
+
+const microstructureHeader = "###############################\n# MICROSTRUCTURE ADD-ONS (F4, F5)\n# Decision TF: 3m (base); Optional confirmation TF: 15m\n# All floats rounded to 3–6 decimals; print null if unavailable\n# Z-windows: short=90 buckets, long=360 buckets; LinReg windows: short=20, mid=60 buckets\n###############################\n\n"
+
+const aiMicrostructureUsageGuide = "###############################\n# AI TRADING AGENT — HOW TO USE THESE NEW FIELDS (concise guards, no chain-of-thought)\n###############################\n- If liq_risk_up==1 and you would enter_long → downweight or avoid; set avoid_long=1 in your internal policy.\n- If liq_risk_down==1 and you would enter_short → downweight or avoid; set avoid_short=1.\n- Prefer entries when:\n  (a) bullish divergence (div_bull_*==1) aligns with prefer_direction=prefer_longs AND both dist_up_atr, dist_dn_atr ≥ 1.0,\n  or (b) bearish divergence aligns with prefer_shorts with same distance condition.\n- Scale size with confidence scores: size_pct ≤ 0.25 if min(confidence_cvd, confidence_liq) < 0.3; otherwise proportionally to the lower of the two.\n- When any 3m critical field is null/NaN, prefer HOLD unless 15m confirms with confidence ≥ 0.7.\n\n"
 
 // PositionInfo 持仓信息
 type PositionInfo struct {
@@ -193,13 +199,13 @@ func fetchMarketDataForContext(ctx *Context) error {
 		positionSymbols[pos.Symbol] = true
 	}
 
-    for symbol := range symbolSet {
-        data, err := market.Get(symbol)
-        if err != nil {
-            // 单个币种失败不影响整体，但记录错误以便排查
-            log.Printf("⚠️  获取市场数据失败: %s (%v)", symbol, err)
-            continue
-        }
+	for symbol := range symbolSet {
+		data, err := market.Get(symbol)
+		if err != nil {
+			// 单个币种失败不影响整体，但记录错误以便排查
+			log.Printf("⚠️  获取市场数据失败: %s (%v)", symbol, err)
+			continue
+		}
 
 		// ⚠️ 流动性过滤：持仓价值低于阈值的币种不做（多空都不做）
 		// 持仓价值 = 持仓量 × 当前价格
@@ -208,35 +214,35 @@ func fetchMarketDataForContext(ctx *Context) error {
 		const minOIThresholdMillions = 15.0 // 可調整：15M(保守) / 10M(平衡) / 8M(寬鬆) / 5M(激進)
 
 		isExistingPosition := positionSymbols[symbol]
-        if !isExistingPosition && data.OpenInterest != nil && data.OpenInterest.Latest > 0 && data.CurrentPrice > 0 {
-            // 计算持仓价值（USD）= 持仓量 × 当前价格
-            oiValue := data.OpenInterest.Latest * data.CurrentPrice
-            oiValueInMillions := oiValue / 1_000_000 // 转换为百万美元单位
-            if oiValueInMillions < minOIThresholdMillions {
-                log.Printf("⚠️  %s 持仓价值过低(%.2fM USD < %.1fM)，跳过此币种 [持仓量:%.0f × 价格:%.4f]",
-                    symbol, oiValueInMillions, minOIThresholdMillions, data.OpenInterest.Latest, data.CurrentPrice)
-                continue
-            }
-        }
+		if !isExistingPosition && data.OpenInterest != nil && data.OpenInterest.Latest > 0 && data.CurrentPrice > 0 {
+			// 计算持仓价值（USD）= 持仓量 × 当前价格
+			oiValue := data.OpenInterest.Latest * data.CurrentPrice
+			oiValueInMillions := oiValue / 1_000_000 // 转换为百万美元单位
+			if oiValueInMillions < minOIThresholdMillions {
+				log.Printf("⚠️  %s 持仓价值过低(%.2fM USD < %.1fM)，跳过此币种 [持仓量:%.0f × 价格:%.4f]",
+					symbol, oiValueInMillions, minOIThresholdMillions, data.OpenInterest.Latest, data.CurrentPrice)
+				continue
+			}
+		}
 
-        ctx.MarketDataMap[symbol] = data
-    }
+		ctx.MarketDataMap[symbol] = data
+	}
 
-    // 安全回退：若无任何市场数据（可能因API失败或阈值过滤过严），强制加载基础三大币种
-    if len(ctx.MarketDataMap) == 0 {
-        fallbackSymbols := []string{"BTCUSDT", "ETHUSDT", "BNBUSDT"}
-        for _, fs := range fallbackSymbols {
-            if _, exists := ctx.MarketDataMap[fs]; exists {
-                continue
-            }
-            if data, err := market.Get(fs); err == nil {
-                ctx.MarketDataMap[fs] = data
-                log.Printf("🛟 回退加载基础币种市场数据: %s", fs)
-            } else {
-                log.Printf("⚠️  回退加载失败: %s (%v)", fs, err)
-            }
-        }
-    }
+	// 安全回退：若无任何市场数据（可能因API失败或阈值过滤过严），强制加载基础三大币种
+	if len(ctx.MarketDataMap) == 0 {
+		fallbackSymbols := []string{"BTCUSDT", "ETHUSDT", "BNBUSDT"}
+		for _, fs := range fallbackSymbols {
+			if _, exists := ctx.MarketDataMap[fs]; exists {
+				continue
+			}
+			if data, err := market.Get(fs); err == nil {
+				ctx.MarketDataMap[fs] = data
+				log.Printf("🛟 回退加载基础币种市场数据: %s", fs)
+			} else {
+				log.Printf("⚠️  回退加载失败: %s (%v)", fs, err)
+			}
+		}
+	}
 
 	// 加载OI Top数据（不影响主流程）
 	oiPositions, err := pool.GetOITopPositions()
@@ -392,6 +398,7 @@ func buildSystemPrompt(ctx *Context, templateName string) string {
 // buildUserPrompt 构建 User Prompt（动态数据）
 func buildUserPrompt(ctx *Context) string {
 	var sb strings.Builder
+	microstructurePrinted := false
 
 	// 系统状态
 	sb.WriteString(fmt.Sprintf("时间: %s | 周期: #%d | 运行: %d分钟\n\n",
@@ -412,6 +419,9 @@ func buildUserPrompt(ctx *Context) string {
 		ctx.Account.TotalPnLPct,
 		ctx.Account.MarginUsedPct,
 		ctx.Account.PositionCount))
+
+	positionSymbolsForMicro := make([]string, 0, len(ctx.Positions))
+	positionSymbolSeen := make(map[string]bool)
 
 	// 持仓（完整市场数据）
 	if len(ctx.Positions) > 0 {
@@ -440,41 +450,64 @@ func buildUserPrompt(ctx *Context) string {
 			if marketData, ok := ctx.MarketDataMap[pos.Symbol]; ok {
 				sb.WriteString(market.Format(marketData))
 				sb.WriteString("\n")
+				if !positionSymbolSeen[pos.Symbol] {
+					positionSymbolSeen[pos.Symbol] = true
+					positionSymbolsForMicro = append(positionSymbolsForMicro, pos.Symbol)
+				}
 			}
 		}
 	} else {
 		sb.WriteString("当前持仓: 无\n\n")
 	}
 
-    // 候选币种（完整市场数据）
-    // 先统计实际可展示的候选币数量，避免显示与实际不符的(0个)提示
-    availableCandidates := make([]CandidateCoin, 0, len(ctx.CandidateCoins))
-    for _, coin := range ctx.CandidateCoins {
-        if _, hasData := ctx.MarketDataMap[coin.Symbol]; hasData {
-            availableCandidates = append(availableCandidates, coin)
-        }
-    }
+	if block := formatPositionsMicrostructure(ctx, positionSymbolsForMicro); block != "" {
+		sb.WriteString(microstructureHeader)
+		sb.WriteString(block)
+		sb.WriteString("\n")
+		microstructurePrinted = true
+	}
 
-    sb.WriteString(fmt.Sprintf("## 候选币种 (%d个)\n\n", len(availableCandidates)))
+	// 候选币种（完整市场数据）
+	// 先统计实际可展示的候选币数量，避免显示与实际不符的(0个)提示
+	availableCandidates := make([]CandidateCoin, 0, len(ctx.CandidateCoins))
+	for _, coin := range ctx.CandidateCoins {
+		if _, hasData := ctx.MarketDataMap[coin.Symbol]; hasData {
+			availableCandidates = append(availableCandidates, coin)
+		}
+	}
 
-    displayedCount := 0
-    for _, coin := range availableCandidates {
-        marketData := ctx.MarketDataMap[coin.Symbol]
-        displayedCount++
+	sb.WriteString(fmt.Sprintf("## 候选币种 (%d个)\n\n", len(availableCandidates)))
 
-        sourceTags := ""
-        if len(coin.Sources) > 1 {
-            sourceTags = " (AI500+OI_Top双重信号)"
-        } else if len(coin.Sources) == 1 && coin.Sources[0] == "oi_top" {
-            sourceTags = " (OI_Top持仓增长)"
-        }
+	displayedCount := 0
+	for _, coin := range availableCandidates {
+		marketData := ctx.MarketDataMap[coin.Symbol]
+		displayedCount++
 
-        // 使用FormatMarketData输出完整市场数据
-        sb.WriteString(fmt.Sprintf("### %d. %s%s\n\n", displayedCount, coin.Symbol, sourceTags))
-        sb.WriteString(market.Format(marketData))
-        sb.WriteString("\n")
-    }
+		sourceTags := ""
+		if len(coin.Sources) > 1 {
+			sourceTags = " (AI500+OI_Top双重信号)"
+		} else if len(coin.Sources) == 1 && coin.Sources[0] == "oi_top" {
+			sourceTags = " (OI_Top持仓增长)"
+		}
+
+		// 使用FormatMarketData输出完整市场数据
+		sb.WriteString(fmt.Sprintf("### %d. %s%s\n\n", displayedCount, coin.Symbol, sourceTags))
+		sb.WriteString(market.Format(marketData))
+		sb.WriteString("\n")
+		if candidateBlock := formatCandidateMicrostructure(coin.Symbol, marketData); candidateBlock != "" {
+			if !microstructurePrinted {
+				sb.WriteString(microstructureHeader)
+				microstructurePrinted = true
+			}
+			sb.WriteString(candidateBlock)
+			sb.WriteString("\n")
+		}
+	}
 	sb.WriteString("\n")
+
+	if microstructurePrinted {
+		sb.WriteString(aiMicrostructureUsageGuide)
+	}
 
 	// 夏普比率（直接传值，不要复杂格式化）
 	if ctx.Performance != nil {
@@ -494,6 +527,169 @@ func buildUserPrompt(ctx *Context) string {
 	sb.WriteString("现在请分析并输出决策（思维链 + JSON）\n")
 
 	return sb.String()
+}
+
+func formatPositionsMicrostructure(ctx *Context, symbols []string) string {
+	if len(symbols) == 0 {
+		return ""
+	}
+	var feature4Blocks []string
+	var feature5Blocks []string
+	var confirmationBlocks []string
+	for _, symbol := range symbols {
+		data := ctx.MarketDataMap[symbol]
+		if data == nil {
+			continue
+		}
+		derivs := microDerivs(data)
+		feature4Blocks = append(feature4Blocks, formatPositionFeature4(symbol, derivs))
+		feature5Blocks = append(feature5Blocks, formatPositionFeature5(symbol, derivs))
+		confirmationBlocks = append(confirmationBlocks, formatPositionConfirmation(symbol, derivs))
+	}
+	if len(feature4Blocks) == 0 && len(feature5Blocks) == 0 && len(confirmationBlocks) == 0 {
+		return ""
+	}
+	var sb strings.Builder
+	sb.WriteString("## 当前持仓 · Microstructure (Feature 4 & 5)\n\n")
+	sb.WriteString("### Feature 4 — CVD & Taker Imbalance (3m)\n")
+	sb.WriteString("# Definitions (informational):\n")
+	sb.WriteString("# - cvd_notional_z: z-score of cumulative taker (buy-sell) notional\n")
+	sb.WriteString("# - imb_notional_z: z-score of taker imbalance in notional units (−1..+1)\n")
+	sb.WriteString("# - tbr_notional: taker buy ratio in notional units (0..1)\n")
+	sb.WriteString("# - slope_*: OLS slope over H buckets; r2_*: fit quality\n")
+	sb.WriteString("# - Divergences compare price slope vs CVD z-slope (bearish = price↑ + CVD↓; bullish = price↓ + CVD↑)\n\n")
+	for _, block := range feature4Blocks {
+		sb.WriteString(block)
+		if !strings.HasSuffix(block, "\n\n") {
+			sb.WriteString("\n")
+		}
+	}
+	sb.WriteString("### Feature 5 — Liquidation Heatmap Distance (3m, window=30d, HL=7d)\n")
+	sb.WriteString("# dist_*_atr uses Wilder ATR on the TF; prefer_direction derived from nearest cluster distances\n\n")
+	for _, block := range feature5Blocks {
+		sb.WriteString(block)
+		if !strings.HasSuffix(block, "\n\n") {
+			sb.WriteString("\n")
+		}
+	}
+	sb.WriteString("# Optional confirmation TF (15m) — mirror the same fields if you use HTF confirmation\n\n")
+	for _, block := range confirmationBlocks {
+		sb.WriteString(block)
+		if !strings.HasSuffix(block, "\n\n") {
+			sb.WriteString("\n")
+		}
+	}
+	return sb.String()
+}
+
+func formatPositionFeature4(symbol string, f *types.DerivsFeatures) string {
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf("CVD/Taker (3m) — %s:\n", symbol))
+	sb.WriteString(fmt.Sprintf("cvd_notional_z (short/long): %s / %s\n", microFloat(f.CVDNotionalZ3mShort, 4), microFloat(f.CVDNotionalZ3mLong, 4)))
+	sb.WriteString(fmt.Sprintf("imb_notional_z (short/long): %s / %s\n", microFloat(f.ImbNotionalZ3mShort, 4), microFloat(f.ImbNotionalZ3mLong, 4)))
+	sb.WriteString(fmt.Sprintf("tbr_notional: %s\n", microFloat(f.TBRNotional3m, 4)))
+	sb.WriteString(fmt.Sprintf("Slopes & R² (3m, short=20 / mid=60) — %s:\n", symbol))
+	sb.WriteString(fmt.Sprintf("slope_price: %s (R² %s), %s (R² %s)\n", microFloat(f.SlopePrice3mShort, 4), microFloat(f.R2Price3mShort, 3), microFloat(f.SlopePrice3mMid, 4), microFloat(f.R2Price3mMid, 3)))
+	sb.WriteString(fmt.Sprintf("slope_cvd_z: %s (R² %s), %s (R² %s)\n", microFloat(f.SlopeCVDZ3mShort, 4), microFloat(f.R2CVDZ3mShort, 3), microFloat(f.SlopeCVDZ3mMid, 4), microFloat(f.R2CVDZ3mMid, 3)))
+	sb.WriteString(fmt.Sprintf("slope_imb: %s (R² %s), %s (R² %s)\n", microFloat(f.SlopeImb3mShort, 4), microFloat(f.R2Imb3mShort, 3), microFloat(f.SlopeImb3mMid, 4), microFloat(f.R2Imb3mMid, 3)))
+	sb.WriteString(fmt.Sprintf("Divergences (3m): bearish_short=%s bullish_short=%s | bearish_mid=%s bullish_mid=%s\n",
+		microInt(f.DivBearShort3m), microInt(f.DivBullShort3m), microInt(f.DivBearMid3m), microInt(f.DivBullMid3m)))
+	sb.WriteString(fmt.Sprintf("confidence_cvd (0..1): %s\n\n", microFloat(f.ConfidenceCVD3m, 3)))
+	return sb.String()
+}
+
+func formatPositionFeature5(symbol string, f *types.DerivsFeatures) string {
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf("Feature 5 (3m) — %s:\n", symbol))
+	sb.WriteString(fmt.Sprintf("dist_up_pct=%s dist_up_atr=%s cluster_strength_up=%s\n", microPercent(f.DistUpPct3m, 3), microFloat(f.DistUpAtr3m, 3), microFloat(f.ClusterStrengthUp3m, 3)))
+	sb.WriteString(fmt.Sprintf("dist_dn_pct=%s dist_dn_atr=%s cluster_strength_down=%s\n", microPercent(f.DistDnPct3m, 3), microFloat(f.DistDnAtr3m, 3), microFloat(f.ClusterStrengthDown3m, 3)))
+	sb.WriteString(fmt.Sprintf("liq_risk_up=%s liq_risk_down=%s prefer_direction=%s\n", microInt(f.LiqRiskUp3m), microInt(f.LiqRiskDown3m), microStringValue(f.PreferDirection3m)))
+	sb.WriteString(fmt.Sprintf("Meta (3m): bucket_usd=%s event_count=%s atr_tf=%s\n", microFloat(f.BucketUsd3m, 3), microInt(f.EventCountLiq3m), microFloat(f.Atr3m, 3)))
+	sb.WriteString(fmt.Sprintf("confidence_liq (0..1): %s\n\n", microFloat(f.ConfidenceLiq3m, 3)))
+	return sb.String()
+}
+
+func formatPositionConfirmation(symbol string, f *types.DerivsFeatures) string {
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf("[15m Confirmation — %s]\n", symbol))
+	sb.WriteString(fmt.Sprintf("cvd_notional_z (short/long): %s / %s\n", microFloat(f.CVDNotionalZ15mShort, 4), microFloat(f.CVDNotionalZ15mLong, 4)))
+	sb.WriteString(fmt.Sprintf("imb_notional_z (short/long): %s / %s\n", microFloat(f.ImbNotionalZ15mShort, 4), microFloat(f.ImbNotionalZ15mLong, 4)))
+	sb.WriteString(fmt.Sprintf("tbr_notional: %s\n", microFloat(f.TBRNotional15m, 4)))
+	sb.WriteString(fmt.Sprintf("Divergences (15m): bearish_mid=%s bullish_mid=%s\n", microInt(f.DivBearMid15m), microInt(f.DivBullMid15m)))
+	sb.WriteString(fmt.Sprintf("dist_up_atr=%s dist_dn_atr=%s prefer_direction=%s\n", microFloat(f.DistUpAtr15m, 3), microFloat(f.DistDnAtr15m, 3), microStringValue(f.PreferDirection15m)))
+	sb.WriteString(fmt.Sprintf("confidence_cvd=%s confidence_liq=%s\n\n", microFloat(f.ConfidenceCVD15m, 3), microFloat(f.ConfidenceLiq15m, 3)))
+	return sb.String()
+}
+
+func formatCandidateMicrostructure(symbol string, data *market.Data) string {
+	derivs := microDerivs(data)
+	if derivs == nil {
+		return ""
+	}
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf("### %s\n\n", symbol))
+	sb.WriteString("Microstructure — Feature 4 (CVD/Taker, 3m):\n")
+	sb.WriteString(fmt.Sprintf("cvd_notional_z (short/long): %s / %s\n", microFloat(derivs.CVDNotionalZ3mShort, 4), microFloat(derivs.CVDNotionalZ3mLong, 4)))
+	sb.WriteString(fmt.Sprintf("imb_notional_z (short/long): %s / %s\n", microFloat(derivs.ImbNotionalZ3mShort, 4), microFloat(derivs.ImbNotionalZ3mLong, 4)))
+	sb.WriteString(fmt.Sprintf("tbr_notional: %s\n", microFloat(derivs.TBRNotional3m, 4)))
+	sb.WriteString(fmt.Sprintf("Slopes & R² (3m): slope_price %s (R² %s); slope_cvd_z %s (R² %s)\n",
+		microFloat(derivs.SlopePrice3mShort, 4), microFloat(derivs.R2Price3mShort, 3),
+		microFloat(derivs.SlopeCVDZ3mShort, 4), microFloat(derivs.R2CVDZ3mShort, 3)))
+	sb.WriteString(fmt.Sprintf("Divergences (3m): bearish_short=%s bullish_short=%s\n", microInt(derivs.DivBearShort3m), microInt(derivs.DivBullShort3m)))
+	sb.WriteString(fmt.Sprintf("confidence_cvd=%s\n\n", microFloat(derivs.ConfidenceCVD3m, 3)))
+	sb.WriteString("Microstructure — Feature 5 (Liq Distance, 3m):\n")
+	sb.WriteString(fmt.Sprintf("dist_up_pct=%s dist_up_atr=%s cluster_strength_up=%s\n", microPercent(derivs.DistUpPct3m, 3), microFloat(derivs.DistUpAtr3m, 3), microFloat(derivs.ClusterStrengthUp3m, 3)))
+	sb.WriteString(fmt.Sprintf("dist_dn_pct=%s dist_dn_atr=%s cluster_strength_down=%s\n", microPercent(derivs.DistDnPct3m, 3), microFloat(derivs.DistDnAtr3m, 3), microFloat(derivs.ClusterStrengthDown3m, 3)))
+	sb.WriteString(fmt.Sprintf("liq_risk_up=%s liq_risk_down=%s prefer_direction=%s\n", microInt(derivs.LiqRiskUp3m), microInt(derivs.LiqRiskDown3m), microStringValue(derivs.PreferDirection3m)))
+	sb.WriteString(fmt.Sprintf("Meta: bucket_usd=%s event_count=%s atr_tf=%s\n", microFloat(derivs.BucketUsd3m, 3), microInt(derivs.EventCountLiq3m), microFloat(derivs.Atr3m, 3)))
+	sb.WriteString(fmt.Sprintf("confidence_liq=%s\n\n", microFloat(derivs.ConfidenceLiq3m, 3)))
+	sb.WriteString("# (Optional) 15m confirmation fields as above:\n")
+	sb.WriteString(fmt.Sprintf("[15m] cvd_notional_z short/long: %s/%s; dist_up_atr=%s dist_dn_atr=%s; prefer_direction=%s\n",
+		microFloat(derivs.CVDNotionalZ15mShort, 4), microFloat(derivs.CVDNotionalZ15mLong, 4),
+		microFloat(derivs.DistUpAtr15m, 3), microFloat(derivs.DistDnAtr15m, 3), microStringValue(derivs.PreferDirection15m)))
+	sb.WriteString(fmt.Sprintf("[15m] confidences: cvd=%s liq=%s\n\n", microFloat(derivs.ConfidenceCVD15m, 3), microFloat(derivs.ConfidenceLiq15m, 3)))
+	return sb.String()
+}
+
+func microDerivs(data *market.Data) *types.DerivsFeatures {
+	if data != nil && data.Snapshot != nil && data.Snapshot.Features.Derivs != nil {
+		return data.Snapshot.Features.Derivs
+	}
+	return &types.DerivsFeatures{}
+}
+
+func microFloat(v *float64, decimals int) string {
+	if v == nil || math.IsNaN(*v) || math.IsInf(*v, 0) {
+		return "null"
+	}
+	format := fmt.Sprintf("%%.%df", decimals)
+	return fmt.Sprintf(format, *v)
+}
+
+func microPercent(v *float64, decimals int) string {
+	value := microFloat(v, decimals)
+	if value == "null" {
+		return value
+	}
+	return value + "%"
+}
+
+func microInt(v *int) string {
+	if v == nil {
+		return "null"
+	}
+	return fmt.Sprintf("%d", *v)
+}
+
+func microStringValue(v *string) string {
+	if v == nil {
+		return "null"
+	}
+	trimmed := strings.TrimSpace(*v)
+	if trimmed == "" {
+		return "null"
+	}
+	return trimmed
 }
 
 // parseFullDecisionResponse 解析AI的完整决策响应
@@ -744,19 +940,19 @@ func findMatchingBracket(s string, start int) int {
 // validateDecision 验证单个决策的有效性
 func validateDecision(d *Decision, accountEquity float64, btcEthLeverage, altcoinLeverage int) error {
 	// 验证action
-    validActions := map[string]bool{
-        "open_long":          true,
-        "open_short":         true,
-        "close_long":         true,
-        "close_short":        true,
-        "update_stop_loss":   true,
-        "update_take_profit": true,
-        "partial_close":      true,
-        "hold":               true,
-        "wait":               true,
-        // 兼容：同时更新止损与止盈（AI 可能输出的合并动作）
-        "update_sl_tp":       true,
-    }
+	validActions := map[string]bool{
+		"open_long":          true,
+		"open_short":         true,
+		"close_long":         true,
+		"close_short":        true,
+		"update_stop_loss":   true,
+		"update_take_profit": true,
+		"partial_close":      true,
+		"hold":               true,
+		"wait":               true,
+		// 兼容：同时更新止损与止盈（AI 可能输出的合并动作）
+		"update_sl_tp": true,
+	}
 
 	if !validActions[d.Action] {
 		return fmt.Errorf("无效的action: %s", d.Action)
@@ -857,19 +1053,19 @@ func validateDecision(d *Decision, accountEquity float64, btcEthLeverage, altcoi
 		}
 	}
 
-    // 动态调整止损验证
-    if d.Action == "update_stop_loss" || d.Action == "update_sl_tp" {
-        if d.NewStopLoss <= 0 {
-            return fmt.Errorf("新止损价格必须大于0: %.2f", d.NewStopLoss)
-        }
-    }
+	// 动态调整止损验证
+	if d.Action == "update_stop_loss" || d.Action == "update_sl_tp" {
+		if d.NewStopLoss <= 0 {
+			return fmt.Errorf("新止损价格必须大于0: %.2f", d.NewStopLoss)
+		}
+	}
 
-    // 动态调整止盈验证
-    if d.Action == "update_take_profit" || d.Action == "update_sl_tp" {
-        if d.NewTakeProfit <= 0 {
-            return fmt.Errorf("新止盈价格必须大于0: %.2f", d.NewTakeProfit)
-        }
-    }
+	// 动态调整止盈验证
+	if d.Action == "update_take_profit" || d.Action == "update_sl_tp" {
+		if d.NewTakeProfit <= 0 {
+			return fmt.Errorf("新止盈价格必须大于0: %.2f", d.NewTakeProfit)
+		}
+	}
 
 	// 部分平仓验证
 	if d.Action == "partial_close" {

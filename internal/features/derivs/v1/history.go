@@ -1,6 +1,7 @@
 package derivsv1
 
 import (
+	"log"
 	"sort"
 	"strings"
 	"time"
@@ -154,16 +155,26 @@ func joinStatus(status map[string]string) string {
 func (h *CacheOIHistory) GetOHLC(symbol string, hours int) ([]float64, []float64, error) {
 	oiCache, err := h.store.LoadOI(symbol)
 	if err != nil || oiCache == nil {
+		log.Printf("[GetOHLC] %s: LoadOI returned err=%v, cache=nil=%v", symbol, err, oiCache == nil)
 		return nil, nil, err
 	}
+	log.Printf("[GetOHLC] %s: Loaded OI cache with %d venue samples", symbol, len(oiCache.Samples))
+	
 	basisCache, err := h.store.LoadBasis(symbol)
 	if err != nil || basisCache == nil {
+		log.Printf("[GetOHLC] %s: LoadBasis returned err=%v, cache=nil=%v", symbol, err, basisCache == nil)
 		return nil, nil, err
 	}
+	log.Printf("[GetOHLC] %s: Loaded Basis cache with %d samples", symbol, len(basisCache.Samples))
 
 	cutoff := cutoffTime(hours)
+	log.Printf("[GetOHLC] %s: cutoff=%v (hours=%d)", symbol, cutoff, hours)
+	
 	oiSeries := aggregateOI(oiCache.Samples, cutoff)
+	log.Printf("[GetOHLC] %s: aggregateOI returned %d hourly buckets", symbol, len(oiSeries))
+	
 	priceSeries := aggregatePrices(basisCache.Samples, cutoff)
+	log.Printf("[GetOHLC] %s: aggregatePrices returned %d hourly buckets", symbol, len(priceSeries))
 
 	keys := mapKeysSorted(oiSeries)
 	var oiValues []float64
@@ -176,6 +187,7 @@ func (h *CacheOIHistory) GetOHLC(symbol string, hours int) ([]float64, []float64
 		oiValues = append(oiValues, oiSeries[ts])
 		priceValues = append(priceValues, price)
 	}
+	log.Printf("[GetOHLC] %s: aligned %d timestamps (out of %d OI buckets)", symbol, len(oiValues), len(oiSeries))
 	return oiValues, priceValues, nil
 }
 

@@ -1,20 +1,20 @@
 derivs_v1:
   enabled: true
   symbols:
-    - "LINK/USDT:USDT"
-    - "UNI/USDT:USDT"
-    - "BNB/USDT:USDT"
-    - "XRP/USDT:USDT"
-    - "DOGE/USDT:USDT"
-    - "ADA/USDT:USDT"
-    - "AVAX/USDT:USDT"
-    - "TRX/USDT:USDT"
-    - "LTC/USDT:USDT"
-    - "DOT/USDT:USDT"
-    - "ARB/USDT:USDT"
-    - "APT/USDT:USDT"
-    - "AAVE/USDT:USDT"
-    - "SOL/USDT:USDT"
+    - "LINKUSDT"
+    - "UNIUSDT"
+    - "BNBUSDT"
+    - "XRPUSDT"
+    - "DOGEUSDT"
+    - "ADAUSDT"
+    - "AVAXUSDT"
+    - "TRXUSDT"
+    - "LTCUSDT"
+    - "DOTUSDT"
+    - "ARBUSDT"
+    - "APTUSDT"
+    - "AAVEUSDT"
+    - "SOLUSDT"
   exchangesPerp: ["binanceusdm","bybit","okx","bitget"]
   spotIndexExchanges: ["binance","kraken","coinbase"]
   timings:

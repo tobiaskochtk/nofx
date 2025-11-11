@@ -682,7 +682,7 @@ func (at *AutoTrader) buildTradingContext() (*decision.Context, error) {
 		pnlPct := calculatePnLPercentage(unrealizedPnl, marginUsed)
 
 		// 跟踪持仓首次出现时间
-		posKey := symbol + "_" + side
+		posKey := makePositionKey(symbol, side)
 		currentPositionKeys[posKey] = true
 		if _, exists := at.positionFirstSeenTime[posKey]; !exists {
 			// 新持仓，记录当前时间
@@ -692,7 +692,7 @@ func (at *AutoTrader) buildTradingContext() (*decision.Context, error) {
 
 		// 获取该持仓的历史最高收益率
 		at.peakPnLCacheMutex.RLock()
-		peakPnlPct := at.peakPnLCache[symbol]
+		peakPnlPct := at.peakPnLCache[posKey]
 		at.peakPnLCacheMutex.RUnlock()
 
 		positionInfos = append(positionInfos, decision.PositionInfo{
@@ -848,6 +848,7 @@ func (at *AutoTrader) executeOpenLongWithRecord(decision *decision.Decision, act
 	quantity := decision.PositionSizeUSD / marketData.CurrentPrice
 	actionRecord.Quantity = quantity
 	actionRecord.Price = marketData.CurrentPrice
+	dbSymbol := normalizeDealSymbol(decision.Symbol)
 
 	// ⚠️ 保证金验证：防止保证金不足错误（code=-2019）
 	requiredMargin := decision.PositionSizeUSD / float64(decision.Leverage)
@@ -901,7 +902,7 @@ func (at *AutoTrader) executeOpenLongWithRecord(decision *decision.Decision, act
 	log.Printf("  ✓ 开仓成功，订单ID: %v, 数量: %.4f (成交: %.4f @ %.4f)", order["orderId"], quantity, filledQty, fillPrice)
 
 	// 记录开仓时间
-	posKey := decision.Symbol + "_long"
+	posKey := makePositionKey(decision.Symbol, "long")
 	at.positionFirstSeenTime[posKey] = time.Now().UnixMilli()
 
 	// 设置止损止盈
@@ -937,7 +938,7 @@ func (at *AutoTrader) executeOpenLongWithRecord(decision *decision.Decision, act
 				UserID:            at.userID,
 				TraderID:          at.id,
 				Exchange:          at.exchange,
-				Symbol:            decision.Symbol,
+				Symbol:            dbSymbol,
 				Side:              "long",
 				Leverage:          decision.Leverage,
 				PositionSizeUSD:   decision.PositionSizeUSD,
@@ -965,7 +966,7 @@ func (at *AutoTrader) executeOpenLongWithRecord(decision *decision.Decision, act
 				}); ok {
 					_ = dbEvt.CreateDealEvent(&config.DealEvent{
 						UserID: at.userID, TraderID: at.id, DealID: id, Type: "open",
-						Symbol: decision.Symbol, Side: "long", Quantity: filledQty, Price: fillPrice, OrderID: openOrderID,
+						Symbol: dbSymbol, Side: "long", Quantity: filledQty, Price: fillPrice, OrderID: openOrderID,
 					})
 				}
 			}
@@ -999,6 +1000,7 @@ func (at *AutoTrader) executeOpenShortWithRecord(decision *decision.Decision, ac
 	quantity := decision.PositionSizeUSD / marketData.CurrentPrice
 	actionRecord.Quantity = quantity
 	actionRecord.Price = marketData.CurrentPrice
+	dbSymbol := normalizeDealSymbol(decision.Symbol)
 
 	// ⚠️ 保证金验证：防止保证金不足错误（code=-2019）
 	requiredMargin := decision.PositionSizeUSD / float64(decision.Leverage)
@@ -1052,7 +1054,7 @@ func (at *AutoTrader) executeOpenShortWithRecord(decision *decision.Decision, ac
 	log.Printf("  ✓ 开仓成功，订单ID: %v, 数量: %.4f (成交: %.4f @ %.4f)", order["orderId"], quantity, filledQty, fillPrice)
 
 	// 记录开仓时间
-	posKey := decision.Symbol + "_short"
+	posKey := makePositionKey(decision.Symbol, "short")
 	at.positionFirstSeenTime[posKey] = time.Now().UnixMilli()
 
 	// 设置止损止盈
@@ -1088,7 +1090,7 @@ func (at *AutoTrader) executeOpenShortWithRecord(decision *decision.Decision, ac
 				UserID:            at.userID,
 				TraderID:          at.id,
 				Exchange:          at.exchange,
-				Symbol:            decision.Symbol,
+				Symbol:            dbSymbol,
 				Side:              "short",
 				Leverage:          decision.Leverage,
 				PositionSizeUSD:   decision.PositionSizeUSD,
@@ -1108,7 +1110,7 @@ func (at *AutoTrader) executeOpenShortWithRecord(decision *decision.Decision, ac
 			if id, err := db.CreateDeal(deal); err != nil {
 				log.Printf("  ⚠️ 记录交易(deal)失败: %v", err)
 			} else {
-				posKey := decision.Symbol + "_short"
+				posKey := makePositionKey(decision.Symbol, "short")
 				at.openDealIDs[posKey] = id
 				log.Printf("  📝 已保存交易记录到数据库 (deal_id=%d)", id)
 				// 记录事件: open
@@ -1117,7 +1119,7 @@ func (at *AutoTrader) executeOpenShortWithRecord(decision *decision.Decision, ac
 				}); ok {
 					_ = dbEvt.CreateDealEvent(&config.DealEvent{
 						UserID: at.userID, TraderID: at.id, DealID: id, Type: "open",
-						Symbol: decision.Symbol, Side: "short", Quantity: filledQty, Price: fillPrice, OrderID: openOrderID,
+						Symbol: dbSymbol, Side: "short", Quantity: filledQty, Price: fillPrice, OrderID: openOrderID,
 					})
 				}
 			}
@@ -1226,6 +1228,7 @@ func (at *AutoTrader) executeUpdateStopLossWithRecord(decision *decision.Decisio
 	// 获取持仓方向和数量
 	side, _ := targetPosition["side"].(string)
 	positionSide := strings.ToUpper(side)
+	normalizedSymbol := normalizeDealSymbol(decision.Symbol)
 	positionAmt, _ := targetPosition["positionAmt"].(float64)
 
 	// 验证新止损价格合理性
@@ -1275,13 +1278,13 @@ func (at *AutoTrader) executeUpdateStopLossWithRecord(decision *decision.Decisio
 	// 更新数据库止损
 	if at.database != nil {
 		// symbol_side -> id
-		posKey := decision.Symbol + "_" + strings.ToLower(positionSide)
+		posKey := makePositionKey(decision.Symbol, positionSide)
 		dealID, has := at.openDealIDs[posKey]
 		if !has {
 			if dbFind, ok := at.database.(interface {
 				FindOpenDeal(userID, traderID, symbol, side string) (*config.DealRecord, error)
 			}); ok {
-				if rec, err := dbFind.FindOpenDeal(at.userID, at.id, decision.Symbol, strings.ToLower(positionSide)); err == nil && rec != nil {
+				if rec, err := dbFind.FindOpenDeal(at.userID, at.id, normalizedSymbol, strings.ToLower(positionSide)); err == nil && rec != nil {
 					dealID = rec.ID
 				}
 			}
@@ -1295,7 +1298,7 @@ func (at *AutoTrader) executeUpdateStopLossWithRecord(decision *decision.Decisio
 			if dbEvt, ok := at.database.(interface {
 				CreateDealEvent(event *config.DealEvent) error
 			}); ok {
-				_ = dbEvt.CreateDealEvent(&config.DealEvent{UserID: at.userID, TraderID: at.id, DealID: dealID, Type: "update_stop_loss", Symbol: decision.Symbol, Side: strings.ToLower(positionSide), Price: decision.NewStopLoss})
+				_ = dbEvt.CreateDealEvent(&config.DealEvent{UserID: at.userID, TraderID: at.id, DealID: dealID, Type: "update_stop_loss", Symbol: normalizedSymbol, Side: strings.ToLower(positionSide), Price: decision.NewStopLoss})
 			}
 		}
 	}
@@ -1337,6 +1340,7 @@ func (at *AutoTrader) executeUpdateTakeProfitWithRecord(decision *decision.Decis
 	// 获取持仓方向和数量
 	side, _ := targetPosition["side"].(string)
 	positionSide := strings.ToUpper(side)
+	normalizedSymbol := normalizeDealSymbol(decision.Symbol)
 	positionAmt, _ := targetPosition["positionAmt"].(float64)
 
 	// 验证新止盈价格合理性
@@ -1385,13 +1389,13 @@ func (at *AutoTrader) executeUpdateTakeProfitWithRecord(decision *decision.Decis
 	log.Printf("  ✓ 止盈已调整: %.2f (当前价格: %.2f)", decision.NewTakeProfit, marketData.CurrentPrice)
 	// 更新数据库止盈 + 记录事件
 	if at.database != nil {
-		posKey := decision.Symbol + "_" + strings.ToLower(positionSide)
+		posKey := makePositionKey(decision.Symbol, positionSide)
 		dealID, has := at.openDealIDs[posKey]
 		if !has {
 			if dbFind, ok := at.database.(interface {
 				FindOpenDeal(userID, traderID, symbol, side string) (*config.DealRecord, error)
 			}); ok {
-				if rec, err := dbFind.FindOpenDeal(at.userID, at.id, decision.Symbol, strings.ToLower(positionSide)); err == nil && rec != nil {
+				if rec, err := dbFind.FindOpenDeal(at.userID, at.id, normalizedSymbol, strings.ToLower(positionSide)); err == nil && rec != nil {
 					dealID = rec.ID
 				}
 			}
@@ -1405,7 +1409,7 @@ func (at *AutoTrader) executeUpdateTakeProfitWithRecord(decision *decision.Decis
 			if dbEvt, ok := at.database.(interface {
 				CreateDealEvent(event *config.DealEvent) error
 			}); ok {
-				_ = dbEvt.CreateDealEvent(&config.DealEvent{UserID: at.userID, TraderID: at.id, DealID: dealID, Type: "update_take_profit", Symbol: decision.Symbol, Side: strings.ToLower(positionSide), Price: decision.NewTakeProfit})
+				_ = dbEvt.CreateDealEvent(&config.DealEvent{UserID: at.userID, TraderID: at.id, DealID: dealID, Type: "update_take_profit", Symbol: normalizedSymbol, Side: strings.ToLower(positionSide), Price: decision.NewTakeProfit})
 			}
 		}
 	}
@@ -1452,6 +1456,7 @@ func (at *AutoTrader) executePartialCloseWithRecord(decision *decision.Decision,
 	// 获取持仓方向和数量
 	side, _ := targetPosition["side"].(string)
 	positionSide := strings.ToUpper(side)
+	normalizedSymbol := normalizeDealSymbol(decision.Symbol)
 	positionAmt, _ := targetPosition["positionAmt"].(float64)
 
 	// 计算平仓数量
@@ -1493,13 +1498,13 @@ func (at *AutoTrader) executePartialCloseWithRecord(decision *decision.Decision,
 
 	// 记录部分平仓事件
 	if at.database != nil {
-		posKey := decision.Symbol + "_" + strings.ToLower(positionSide)
+		posKey := makePositionKey(decision.Symbol, positionSide)
 		dealID, has := at.openDealIDs[posKey]
 		if !has {
 			if dbFind, ok := at.database.(interface {
 				FindOpenDeal(userID, traderID, symbol, side string) (*config.DealRecord, error)
 			}); ok {
-				if rec, err := dbFind.FindOpenDeal(at.userID, at.id, decision.Symbol, strings.ToLower(positionSide)); err == nil && rec != nil {
+				if rec, err := dbFind.FindOpenDeal(at.userID, at.id, normalizedSymbol, strings.ToLower(positionSide)); err == nil && rec != nil {
 					dealID = rec.ID
 				}
 			}
@@ -1508,7 +1513,7 @@ func (at *AutoTrader) executePartialCloseWithRecord(decision *decision.Decision,
 			if dbEvt, ok := at.database.(interface {
 				CreateDealEvent(event *config.DealEvent) error
 			}); ok {
-				_ = dbEvt.CreateDealEvent(&config.DealEvent{UserID: at.userID, TraderID: at.id, DealID: dealID, Type: "partial_close", Symbol: decision.Symbol, Side: strings.ToLower(positionSide), Quantity: filledQuantity, Percentage: decision.ClosePercentage, Price: fillPrice, OrderID: fmt.Sprintf("%v", order["orderId"])})
+				_ = dbEvt.CreateDealEvent(&config.DealEvent{UserID: at.userID, TraderID: at.id, DealID: dealID, Type: "partial_close", Symbol: normalizedSymbol, Side: strings.ToLower(positionSide), Quantity: filledQuantity, Percentage: decision.ClosePercentage, Price: fillPrice, OrderID: fmt.Sprintf("%v", order["orderId"])})
 			}
 		}
 	}
@@ -1517,11 +1522,13 @@ func (at *AutoTrader) executePartialCloseWithRecord(decision *decision.Decision,
 }
 
 func (at *AutoTrader) closeDealInternal(symbol, side string, closePrice float64, orderID string, wasStopLoss bool, reason string) {
+	symbol = normalizeDealSymbol(symbol)
 	dealID, openRec := at.getOpenDealRecord(symbol, side)
 	at.closeDealInternalWithRecord(symbol, side, dealID, openRec, closePrice, orderID, wasStopLoss, reason)
 }
 
 func (at *AutoTrader) closeDealInternalWithRecord(symbol, side string, dealID int64, openRec *config.DealRecord, closePrice float64, orderID string, wasStopLoss bool, reason string) {
+	symbol = normalizeDealSymbol(symbol)
 	if dealID == 0 || openRec == nil {
 		log.Printf("⚠️ [%s] 未找到可关闭的交易记录 (%s %s)", at.name, symbol, side)
 		return
@@ -1538,7 +1545,7 @@ func (at *AutoTrader) closeDealInternalWithRecord(symbol, side string, dealID in
 			log.Printf("⚠️ [%s] 更新交易P/L失败 (%s %s): %v", at.name, symbol, side, err)
 			return
 		}
-		posKey := fmt.Sprintf("%s_%s", symbol, strings.ToLower(side))
+		posKey := makePositionKey(symbol, side)
 		delete(at.openDealIDs, posKey)
 		log.Printf("💾 [%s] 已更新交易P/L (deal_id=%d, reason=%s)", at.name, dealID, reason)
 		if evt, ok := at.database.(interface {
@@ -1612,9 +1619,27 @@ func orderInt64Value(order map[string]interface{}, key string) (int64, bool) {
 	return 0, false
 }
 
+func normalizeDealSymbol(symbol string) string {
+	s := strings.ToUpper(strings.TrimSpace(symbol))
+	switch {
+	case strings.HasSuffix(s, "USDC"):
+		return s[:len(s)-4] + "USDT"
+	case strings.HasSuffix(s, "USD"):
+		// Treat bare USD as USDT for consistency
+		return s + "T"
+	default:
+		return s
+	}
+}
+
+func makePositionKey(symbol, side string) string {
+	return normalizeDealSymbol(symbol) + "_" + strings.ToLower(strings.TrimSpace(side))
+}
+
 func (at *AutoTrader) getOpenDealRecord(symbol, side string) (int64, *config.DealRecord) {
+	symbol = normalizeDealSymbol(symbol)
 	side = strings.ToLower(side)
-	posKey := fmt.Sprintf("%s_%s", symbol, side)
+	posKey := makePositionKey(symbol, side)
 	if dealID, ok := at.openDealIDs[posKey]; ok {
 		if rec := at.getDealByID(dealID); rec != nil {
 			return dealID, rec
@@ -2117,6 +2142,7 @@ func (at *AutoTrader) checkPositionDrawdown() {
 
 	for _, pos := range positions {
 		symbol := pos["symbol"].(string)
+		logSymbol := normalizeDealSymbol(symbol)
 		side := pos["side"].(string)
 		entryPrice := pos["entryPrice"].(float64)
 		markPrice := pos["markPrice"].(float64)
@@ -2139,7 +2165,7 @@ func (at *AutoTrader) checkPositionDrawdown() {
 		}
 
 		// 构造持仓唯一标识（区分多空）
-		posKey := symbol + "_" + side
+		posKey := makePositionKey(symbol, side)
 
 		// 获取该持仓的历史最高收益
 		at.peakPnLCacheMutex.RLock()
@@ -2164,20 +2190,20 @@ func (at *AutoTrader) checkPositionDrawdown() {
 		// 检查平仓条件：收益大于5%且回撤超过40%
 		if currentPnLPct > 5.0 && drawdownPct >= 40.0 {
 			log.Printf("🚨 触发回撤平仓条件: %s %s | 当前收益: %.2f%% | 最高收益: %.2f%% | 回撤: %.2f%%",
-				symbol, side, currentPnLPct, peakPnLPct, drawdownPct)
+				logSymbol, side, currentPnLPct, peakPnLPct, drawdownPct)
 
 			// 执行平仓
 			if err := at.emergencyClosePosition(symbol, side); err != nil {
 				log.Printf("❌ 回撤平仓失败 (%s %s): %v", symbol, side, err)
 			} else {
-				log.Printf("✅ 回撤平仓成功: %s %s", symbol, side)
+				log.Printf("✅ 回撤平仓成功: %s %s", logSymbol, side)
 				// 平仓后清理该持仓的缓存
 				at.ClearPeakPnLCache(symbol, side)
 			}
 		} else if currentPnLPct > 5.0 {
 			// 记录接近平仓条件的情况（用于调试）
 			log.Printf("📊 回撤监控: %s %s | 收益: %.2f%% | 最高: %.2f%% | 回撤: %.2f%%",
-				symbol, side, currentPnLPct, peakPnLPct, drawdownPct)
+				logSymbol, side, currentPnLPct, peakPnLPct, drawdownPct)
 		}
 	}
 }
@@ -2222,7 +2248,7 @@ func (at *AutoTrader) UpdatePeakPnL(symbol, side string, currentPnLPct float64) 
 	at.peakPnLCacheMutex.Lock()
 	defer at.peakPnLCacheMutex.Unlock()
 
-	posKey := symbol + "_" + side
+	posKey := makePositionKey(symbol, side)
 	if peak, exists := at.peakPnLCache[posKey]; exists {
 		// 更新峰值（如果是多头，取较大值；如果是空头，currentPnLPct为负，也要比较）
 		if currentPnLPct > peak {
@@ -2239,6 +2265,6 @@ func (at *AutoTrader) ClearPeakPnLCache(symbol, side string) {
 	at.peakPnLCacheMutex.Lock()
 	defer at.peakPnLCacheMutex.Unlock()
 
-	posKey := symbol + "_" + side
+	posKey := makePositionKey(symbol, side)
 	delete(at.peakPnLCache, posKey)
 }
