@@ -74,76 +74,33 @@ export function LoginPage() {
   }
 
   return (
-    <div className="min-h-screen" style={{ background: 'var(--brand-black)' }}>
-      <HeaderBar
-        onLoginClick={() => {}}
-        isLoggedIn={false}
-        isHomePage={false}
-        currentPage="login"
-        language={language}
-        onLanguageChange={() => {}}
-        onPageChange={(page) => {
-          console.log('LoginPage onPageChange called with:', page)
-          if (page === 'competition') {
-            window.location.href = '/competition'
-          }
-        }}
-      />
-
-      <div
-        className="flex items-center justify-center pt-20"
-        style={{ minHeight: 'calc(100vh - 80px)' }}
-      >
-        <div className="w-full max-w-md">
-          {/* Logo */}
-          <div className="text-center mb-8">
-            <div className="w-16 h-16 mx-auto mb-4 flex items-center justify-center">
-              <img
-                src="/icons/nofx.svg"
-                alt="NoFx Logo"
-                className="w-16 h-16 object-contain"
-              />
-            </div>
-            <h1
-              className="text-2xl font-bold"
-              style={{ color: 'var(--brand-light-gray)' }}
-            >
-              Login to NOFX
-            </h1>
-            <p
-              className="text-sm mt-2"
-              style={{ color: 'var(--text-secondary)' }}
-            >
-              {step === 'login' ? 'Please enter your email and password' : 'Please enter two-factor authentication code'}
-            </p>
+    <div
+      className="flex items-center justify-center py-12"
+      style={{ minHeight: 'calc(100vh - 64px)' }}
+    >
+      <div className="w-full max-w-md">
+        {/* Logo */}
+        <div className="text-center mb-8">
+          <div className="w-16 h-16 mx-auto mb-4 flex items-center justify-center">
+            <img
+              src="/icons/nofx.svg"
+              alt="NoFx Logo"
+              className="w-16 h-16 object-contain"
+            />
           </div>
           <h1
             className="text-2xl font-bold"
             style={{ color: 'var(--brand-light-gray)' }}
           >
-            {adminMode ? (
-              <form onSubmit={handleAdminLogin} className="space-y-4">
-                <div>
-                  <label
-                    className="block text-sm font-semibold mb-2"
-                    style={{ color: 'var(--brand-light-gray)' }}
-                  >
-                    Admin Password
-                  </label>
-                  <input
-                    type="password"
-                    value={adminPassword}
-                    onChange={(e) => setAdminPassword(e.target.value)}
-                    className="w-full px-3 py-2 rounded"
-                    style={{
-                      background: 'var(--brand-black)',
-                      border: '1px solid var(--panel-border)',
-                      color: 'var(--brand-light-gray)',
-                    }}
-                    placeholder="Please enter admin password"
-                    required
-                  />
-                </div>
+            登录 NOFX
+          </h1>
+          <p
+            className="text-sm mt-2"
+            style={{ color: 'var(--text-secondary)' }}
+          >
+            {step === 'login' ? '请输入您的邮箱和密码' : '请输入两步验证码'}
+          </p>
+        </div>
 
         {/* Login Form */}
         <div
@@ -185,18 +142,48 @@ export function LoginPage() {
                     color: 'var(--binance-red)',
                   }}
                 >
-                  {loading ? t('loading', language) : 'Login'}
-                </button>
-              </form>
-            ) : step === 'login' ? (
-              <form onSubmit={handleLogin} className="space-y-4">
-                <div>
-                  <label
-                    className="block text-sm font-semibold mb-2"
-                    style={{ color: 'var(--brand-light-gray)' }}
-                  >
-                    {t('email', language)}
-                  </label>
+                  {error}
+                </div>
+              )}
+
+              <button
+                type="submit"
+                disabled={loading}
+                className="w-full px-4 py-2 rounded text-sm font-semibold transition-all hover:scale-105 disabled:opacity-50"
+                style={{
+                  background: 'var(--brand-yellow)',
+                  color: 'var(--brand-black)',
+                }}
+              >
+                {loading ? t('loading', language) : '登录'}
+              </button>
+            </form>
+          ) : step === 'login' ? (
+            <form onSubmit={handleLogin} className="space-y-4">
+              <div>
+                <label
+                  className="block text-sm font-semibold mb-2"
+                  style={{ color: 'var(--brand-light-gray)' }}
+                >
+                  {t('email', language)}
+                </label>
+                <Input
+                  type="email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  placeholder={t('emailPlaceholder', language)}
+                  required
+                />
+              </div>
+
+              <div>
+                <label
+                  className="block text-sm font-semibold mb-2"
+                  style={{ color: 'var(--brand-light-gray)' }}
+                >
+                  {t('password', language)}
+                </label>
+                <div className="relative">
                   <Input
                     type={showPassword ? 'text' : 'password'}
                     value={password}

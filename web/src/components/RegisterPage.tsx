@@ -177,28 +177,8 @@ export function RegisterPage() {
                     className="absolute inset-y-0 right-2 w-8 h-10 flex items-center justify-center rounded bg-transparent p-0 m-0 border-0 outline-none focus:outline-none focus:ring-0 appearance-none cursor-pointer btn-icon"
                     style={{ color: 'var(--text-secondary)' }}
                   >
-                    {t('password', language)}
-                  </label>
-                  <div className="relative">
-                    <Input
-                      type={showPassword ? 'text' : 'password'}
-                      value={password}
-                      onChange={(e) => setPassword(e.target.value)}
-                      className="pr-10"
-                      placeholder={t('passwordPlaceholder', language)}
-                      required
-                    />
-                    <button
-                      type="button"
-                      aria-label={showPassword ? 'Hide password' : 'Show password'}
-                      onMouseDown={(e) => e.preventDefault()}
-                      onClick={() => setShowPassword((v) => !v)}
-                      className="absolute inset-y-0 right-2 w-8 h-10 flex items-center justify-center rounded bg-transparent p-0 m-0 border-0 outline-none focus:outline-none focus:ring-0 appearance-none cursor-pointer btn-icon"
-                      style={{ color: 'var(--text-secondary)' }}
-                    >
-                      {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
-                    </button>
-                  </div>
+                    {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+                  </button>
                 </div>
               </div>
 
@@ -226,32 +206,12 @@ export function RegisterPage() {
                     className="absolute inset-y-0 right-2 w-8 h-10 flex items-center justify-center rounded bg-transparent p-0 m-0 border-0 outline-none focus:outline-none focus:ring-0 appearance-none cursor-pointer btn-icon"
                     style={{ color: 'var(--text-secondary)' }}
                   >
-                    {t('confirmPassword', language)}
-                  </label>
-                  <div className="relative">
-                    <Input
-                      type={showConfirmPassword ? 'text' : 'password'}
-                      value={confirmPassword}
-                      onChange={(e) => setConfirmPassword(e.target.value)}
-                      className="pr-10"
-                      placeholder={t('confirmPasswordPlaceholder', language)}
-                      required
-                    />
-                    <button
-                      type="button"
-                      aria-label={showConfirmPassword ? 'Hide password' : 'Show password'}
-                      onMouseDown={(e) => e.preventDefault()}
-                      onClick={() => setShowConfirmPassword((v) => !v)}
-                      className="absolute inset-y-0 right-2 w-8 h-10 flex items-center justify-center rounded bg-transparent p-0 m-0 border-0 outline-none focus:outline-none focus:ring-0 appearance-none cursor-pointer btn-icon"
-                      style={{ color: 'var(--text-secondary)' }}
-                    >
-                      {showConfirmPassword ? (
-                        <EyeOff size={18} />
-                      ) : (
-                        <Eye size={18} />
-                      )}
-                    </button>
-                  </div>
+                    {showConfirmPassword ? (
+                      <EyeOff size={18} />
+                    ) : (
+                      <Eye size={18} />
+                    )}
+                  </button>
                 </div>
               </div>
 
