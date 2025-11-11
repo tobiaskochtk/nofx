@@ -43,6 +43,8 @@ config.json
 # Web build artifacts (but include source for multi-stage build)
 web/node_modules/
 web/dist/
+packages/ingest/node_modules/
+packages/ingest/dist/
 
 # Temporary files
 tmp/

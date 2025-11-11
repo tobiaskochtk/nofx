@@ -179,7 +179,7 @@ export function RegisterPage() {
                     />
                     <button
                       type="button"
-                      aria-label={showPassword ? '隐藏密码' : '显示密码'}
+                      aria-label={showPassword ? 'Hide password' : 'Show password'}
                       onMouseDown={(e) => e.preventDefault()}
                       onClick={() => setShowPassword((v) => !v)}
                       className="absolute inset-y-0 right-2 w-8 h-10 flex items-center justify-center rounded bg-transparent p-0 m-0 border-0 outline-none focus:outline-none focus:ring-0 appearance-none cursor-pointer btn-icon"
@@ -208,7 +208,7 @@ export function RegisterPage() {
                     />
                     <button
                       type="button"
-                      aria-label={showConfirmPassword ? '隐藏密码' : '显示密码'}
+                      aria-label={showConfirmPassword ? 'Hide password' : 'Show password'}
                       onMouseDown={(e) => e.preventDefault()}
                       onClick={() => setShowConfirmPassword((v) => !v)}
                       className="absolute inset-y-0 right-2 w-8 h-10 flex items-center justify-center rounded bg-transparent p-0 m-0 border-0 outline-none focus:outline-none focus:ring-0 appearance-none cursor-pointer btn-icon"

@@ -839,9 +839,9 @@ export function AITradersPage({ onTraderSelect }: AITradersPageProps) {
                   <strong>{t('solutions', language)}</strong>
                 </p>
                 <ul className="list-disc list-inside space-y-1 ml-2 mt-1">
-                  <li>点击"{t('signalSource', language)}"按钮配置API地址</li>
-                  <li>或在交易员配置中禁用"使用币种池"和"使用OI Top"</li>
-                  <li>或在交易员配置中设置自定义币种列表</li>
+                  <li>Click the "{t('signalSource', language)}" button to configure API address</li>
+                  <li>Or disable "Use Coin Pool" and "Use OI Top" in trader configuration</li>
+                  <li>Or set a custom coin list in trader configuration</li>
                 </ul>
               </div>
               <button
@@ -1358,7 +1358,7 @@ function SignalSourceModal({
             >
               {language === 'en' 
                 ? 'Select Symbols for Open Interest Tracking' 
-                : '选择用于跟踪持仓量的币种'}
+                : 'Select Symbols for Open Interest Tracking'}
             </label>
             
             <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2">

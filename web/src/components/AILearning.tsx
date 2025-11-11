@@ -70,7 +70,7 @@ export default function AILearning({ traderId }: AILearningProps) {
     traderId ? `performance-${traderId}` : 'performance',
     () => api.getPerformance(traderId),
     {
-      refreshInterval: 30000, // 30秒刷新（AI学习分析数据更新频率较低）
+      refreshInterval: 30000, // Refresh every 30 seconds (AI learning analysis data updates less frequently)
       revalidateOnFocus: false,
       dedupingInterval: 20000,
     }
@@ -124,7 +124,7 @@ export default function AILearning({ traderId }: AILearningProps) {
 
   return (
     <div className="space-y-8">
-      {/* 标题区 - 优化设计 */}
+      {/* Header Section - Optimized Design */}
       <div
         className="relative rounded-2xl p-6 overflow-hidden"
         style={{
@@ -171,9 +171,9 @@ export default function AILearning({ traderId }: AILearningProps) {
         </div>
       </div>
 
-      {/* 核心指标卡片 - 4列网格 */}
+      {/* Core Metrics Cards - 4 Column Grid */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        {/* 总交易数 */}
+        {/* Total Trades */}
         <div
           className="rounded-2xl p-5 relative overflow-hidden group hover:scale-105 transition-transform"
           style={{
@@ -213,7 +213,7 @@ export default function AILearning({ traderId }: AILearningProps) {
           </div>
         </div>
 
-        {/* 胜率 */}
+        {/* Win Rate */}
         <div
           className="rounded-2xl p-5 relative overflow-hidden group hover:scale-105 transition-transform"
           style={{
@@ -258,7 +258,7 @@ export default function AILearning({ traderId }: AILearningProps) {
           </div>
         </div>
 
-        {/* 平均盈利 */}
+        {/* Average Win */}
         <div
           className="rounded-2xl p-5 relative overflow-hidden group hover:scale-105 transition-transform"
           style={{
@@ -298,7 +298,7 @@ export default function AILearning({ traderId }: AILearningProps) {
           </div>
         </div>
 
-        {/* 平均亏损 */}
+        {/* Average Loss */}
         <div
           className="rounded-2xl p-5 relative overflow-hidden group hover:scale-105 transition-transform"
           style={{
@@ -339,9 +339,9 @@ export default function AILearning({ traderId }: AILearningProps) {
         </div>
       </div>
 
-      {/* 关键指标：夏普比率 & 盈亏比 - 2列网格 */}
+      {/* Key Metrics: Sharpe Ratio & Profit Factor - 2 Column Grid */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* 夏普比率 */}
+        {/* Sharpe Ratio */}
         <div
           className="rounded-2xl p-6 relative overflow-hidden"
           style={{
@@ -372,10 +372,10 @@ export default function AILearning({ traderId }: AILearningProps) {
               </div>
               <div>
                 <div className="text-lg font-bold" style={{ color: '#C4B5FD' }}>
-                  夏普比率
+                  Sharpe Ratio
                 </div>
                 <div className="text-xs" style={{ color: '#94A3B8' }}>
-                  风险调整后收益 · AI自我进化指标
+                  Risk-Adjusted Returns · AI Evolution Metric
                 </div>
               </div>
             </div>
@@ -424,12 +424,12 @@ export default function AILearning({ traderId }: AILearningProps) {
                     }}
                   >
                     {performance.sharpe_ratio >= 2
-                      ? '🟢 卓越表现'
+                      ? '🟢 Excellent'
                       : performance.sharpe_ratio >= 1
-                        ? '🟢 良好表现'
+                        ? '🟢 Good'
                         : performance.sharpe_ratio >= 0
-                          ? '🟡 波动较大'
-                          : '🔴 需要调整'}
+                          ? '🟡 High Volatility'
+                          : '🔴 Needs Adjustment'}
                   </div>
                 </div>
               )}
@@ -448,22 +448,22 @@ export default function AILearning({ traderId }: AILearningProps) {
                   style={{ color: '#DDD6FE' }}
                 >
                   {performance.sharpe_ratio >= 2 &&
-                    '✨ AI策略非常有效！风险调整后收益优异，可适度扩大仓位但保持纪律。'}
+                    '✨ AI strategy is highly effective! Excellent risk-adjusted returns, can moderately increase position size while maintaining discipline.'}
                   {performance.sharpe_ratio >= 1 &&
                     performance.sharpe_ratio < 2 &&
-                    '✅ 策略表现稳健，风险收益平衡良好，继续保持当前策略。'}
+                    '✅ Strategy performs steadily, good risk-reward balance, continue maintaining current strategy.'}
                   {performance.sharpe_ratio >= 0 &&
                     performance.sharpe_ratio < 1 &&
-                    '⚠️ 收益为正但波动较大，AI正在优化策略，降低风险。'}
+                    '⚠️ Positive returns but high volatility, AI is optimizing strategy to reduce risk.'}
                   {performance.sharpe_ratio < 0 &&
-                    '🚨 当前策略需要调整！AI已自动进入保守模式，减少仓位和交易频率。'}
+                    '🚨 Current strategy needs adjustment! AI has automatically entered conservative mode, reducing position size and trading frequency.'}
                 </div>
               </div>
             )}
           </div>
         </div>
 
-        {/* 盈亏比 */}
+        {/* Profit Factor */}
         <div
           className="rounded-2xl p-6 relative overflow-hidden"
           style={{
@@ -567,25 +567,25 @@ export default function AILearning({ traderId }: AILearningProps) {
                 style={{ color: '#FEF3C7' }}
               >
                 {(performance.profit_factor || 0) >= 2.0 &&
-                  '🔥 盈利能力出色！每亏1元能赚' +
+                  '🔥 Excellent profitability! For every $1 lost, earning $' +
                     (performance.profit_factor || 0).toFixed(1) +
-                    '元，AI策略表现优异。'}
+                    ', AI strategy performing excellently.'}
                 {(performance.profit_factor || 0) >= 1.5 &&
                   (performance.profit_factor || 0) < 2.0 &&
-                  '✓ 策略稳定盈利，盈亏比健康，继续保持纪律性交易。'}
+                  '✓ Strategy is consistently profitable with healthy profit/loss ratio, continue disciplined trading.'}
                 {(performance.profit_factor || 0) >= 1.0 &&
                   (performance.profit_factor || 0) < 1.5 &&
-                  '⚠️ 策略略有盈利但需优化，AI正在调整仓位和止损策略。'}
+                  '⚠️ Strategy is slightly profitable but needs optimization, AI is adjusting position sizing and stop-loss strategy.'}
                 {(performance.profit_factor || 0) > 0 &&
                   (performance.profit_factor || 0) < 1.0 &&
-                  '❌ 平均亏损大于盈利，需要调整策略或降低交易频率。'}
+                  '❌ Average loss exceeds profit, need to adjust strategy or reduce trading frequency.'}
               </div>
             </div>
           </div>
         </div>
       </div>
 
-      {/* 最佳/最差币种 - 独立行 */}
+      {/* Best/Worst Performing Coins - Independent Row */}
       {(performance.best_symbol || performance.worst_symbol) && (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           {performance.best_symbol && (
@@ -673,9 +673,9 @@ export default function AILearning({ traderId }: AILearningProps) {
         </div>
       )}
 
-      {/* 币种表现 & 历史成交 - 左右分屏 2列布局 */}
+      {/* Symbol Performance & Trade History - Left/Right Split 2 Column Layout */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* 左侧：币种表现统计表格 */}
+        {/* Left: Symbol Performance Statistics Table */}
         {symbolStatsList.length > 0 && (
           <div
             className="rounded-2xl overflow-hidden"
@@ -809,7 +809,7 @@ export default function AILearning({ traderId }: AILearningProps) {
           </div>
         )}
 
-        {/* 右侧：历史成交记录 */}
+        {/* Right: Trade History */}
         <div
           className="rounded-2xl overflow-hidden"
           style={{
@@ -1059,7 +1059,7 @@ export default function AILearning({ traderId }: AILearningProps) {
         </div>
       </div>
 
-      {/* AI学习说明 - 现代化设计 */}
+      {/* AI Learning Explanation - Modern Design */}
       <div
         className="rounded-2xl p-6 backdrop-blur-sm"
         style={{
@@ -1119,7 +1119,7 @@ export default function AILearning({ traderId }: AILearningProps) {
   )
 }
 
-// 格式化持仓时长
+// Format position duration
 function formatDuration(duration: string | undefined): string {
   if (!duration) return '-'
 
@@ -1131,9 +1131,9 @@ function formatDuration(duration: string | undefined): string {
   const seconds = match[3] || ''
 
   let result = ''
-  if (hours) result += hours.replace('h', '小时')
-  if (minutes) result += minutes.replace('m', '分')
-  if (!hours && seconds) result += seconds.replace(/(\d+)\.?\d*s/, '$1秒')
+  if (hours) result += hours.replace('h', 'h ')
+  if (minutes) result += minutes.replace('m', 'm ')
+  if (!hours && seconds) result += seconds.replace(/(\d+)\.?\d*s/, '$1s')
 
   return result || duration
 }

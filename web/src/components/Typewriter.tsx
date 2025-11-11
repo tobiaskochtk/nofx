@@ -2,8 +2,8 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 
 interface TypewriterProps {
   lines: string[]
-  typingSpeed?: number // 毫秒/字符
-  lineDelay?: number // 每行结束的额外等待
+  typingSpeed?: number // ミリ秒/文字 | milliseconds per character
+  lineDelay?: number // 各行終了時の追加待機時間 | extra wait at end of each line
   className?: string
   style?: React.CSSProperties
 }
@@ -27,7 +27,7 @@ export default function Typewriter({
   )
 
   useEffect(() => {
-    // 重置状态
+    // ステートをリセット | Reset state
     lineIndexRef.current = 0
     charIndexRef.current = 0
     setTypedLines([''])
@@ -45,23 +45,23 @@ export default function Typewriter({
         charIndexRef.current += 1
         timerRef.current = window.setTimeout(typeNext, typingSpeed)
       } else {
-        // 行结束
+        // 行終了 | Line end
         if (lineIndexRef.current < sanitizedLines.length - 1) {
           lineIndexRef.current += 1
           charIndexRef.current = 0
           setTypedLines((prev) => [...prev, ''])
           timerRef.current = window.setTimeout(typeNext, lineDelay)
         } else {
-          // 最后一行输入完毕
+          // 最後の行の入力完了 | Last line input complete
           timerRef.current = null
         }
       }
     }
 
-    // 延迟一帧开始打字,确保状态已重置
+    // 1フレーム遅延してタイピング開始、ステートがリセット済みであることを確認 | Delay one frame to start typing, ensure state is reset
     timerRef.current = window.setTimeout(typeNext, 0)
 
-    // 光标闪烁
+    // カーソル点滅 | Cursor blink
     blinkRef.current = window.setInterval(() => {
       setShowCursor((v) => !v)
     }, 500)

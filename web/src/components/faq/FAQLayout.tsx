@@ -114,7 +114,7 @@ export function FAQLayout({ language }: FAQLayoutProps) {
             <div className="text-center py-12">
               <p className="text-lg" style={{ color: '#848E9C' }}>
                 {language === 'zh'
-                  ? '没有找到匹配的问题'
+                  ? 'No matching questions found'
                   : 'No matching questions found'}
               </p>
               <button
@@ -126,7 +126,7 @@ export function FAQLayout({ language }: FAQLayoutProps) {
                   color: '#0B0E11',
                 }}
               >
-                {language === 'zh' ? '清除搜索' : 'Clear Search'}
+                {language === 'zh' ? 'Clear Search' : 'Clear Search'}
               </button>
             </div>
           )}

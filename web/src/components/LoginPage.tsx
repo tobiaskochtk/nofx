@@ -100,13 +100,13 @@ export function LoginPage() {
               className="text-2xl font-bold"
               style={{ color: 'var(--brand-light-gray)' }}
             >
-              登录 NOFX
+              Login to NOFX
             </h1>
             <p
               className="text-sm mt-2"
               style={{ color: 'var(--text-secondary)' }}
             >
-              {step === 'login' ? '请输入您的邮箱和密码' : '请输入两步验证码'}
+              {step === 'login' ? 'Please enter your email and password' : 'Please enter two-factor authentication code'}
             </p>
           </div>
 
@@ -125,7 +125,7 @@ export function LoginPage() {
                     className="block text-sm font-semibold mb-2"
                     style={{ color: 'var(--brand-light-gray)' }}
                   >
-                    管理员密码
+                    Admin Password
                   </label>
                   <input
                     type="password"
@@ -137,7 +137,7 @@ export function LoginPage() {
                       border: '1px solid var(--panel-border)',
                       color: 'var(--brand-light-gray)',
                     }}
-                    placeholder="请输入管理员密码"
+                    placeholder="Please enter admin password"
                     required
                   />
                 </div>
@@ -163,7 +163,7 @@ export function LoginPage() {
                     color: 'var(--brand-black)',
                   }}
                 >
-                  {loading ? t('loading', language) : '登录'}
+                  {loading ? t('loading', language) : 'Login'}
                 </button>
               </form>
             ) : step === 'login' ? (

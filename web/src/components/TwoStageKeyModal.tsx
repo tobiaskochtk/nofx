@@ -86,11 +86,11 @@ export function TwoStageKeyModal({
     setProcessing(true)
 
     try {
-      // 生成混淆字符串
+      // 難読化文字列を生成 | Generate obfuscation string
       const obfuscation = generateObfuscation()
       setManualObfuscationValue(obfuscation)
 
-      // 尝试复制到剪贴板
+      // クリップボードへのコピーを試行 | Try to copy to clipboard
       if (navigator.clipboard) {
         try {
           await navigator.clipboard.writeText(obfuscation)

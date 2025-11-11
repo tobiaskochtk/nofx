@@ -3,7 +3,7 @@ import type { AIModel, Exchange, CreateTraderRequest } from '../types'
 import { useLanguage } from '../contexts/LanguageContext'
 import { t } from '../i18n/translations'
 
-// 提取下划线后面的名称部分
+// アンダースコアの後の名前部分を抽出 | Extract name part after underscore
 function getShortName(fullName: string): string {
   const parts = fullName.split('_')
   return parts.length > 1 ? parts[parts.length - 1] : fullName
@@ -74,7 +74,7 @@ export function TraderConfigModal({
   useEffect(() => {
     if (traderData) {
       setFormData(traderData)
-      // 设置已选择的币种
+      // 選択されたコインを設定 | Set selected coins
       if (traderData.trading_symbols) {
         const coins = traderData.trading_symbols
           .split(',')
@@ -100,7 +100,7 @@ export function TraderConfigModal({
         scan_interval_minutes: 3,
       })
     }
-    // 确保旧数据也有默认的 system_prompt_template
+    // 古いデータにもデフォルトの system_prompt_template を確保 | Ensure old data also has default system_prompt_template
     if (traderData && traderData.system_prompt_template === undefined) {
       setFormData((prev) => ({
         ...prev,
@@ -109,7 +109,7 @@ export function TraderConfigModal({
     }
   }, [traderData, isEditMode, availableModels, availableExchanges])
 
-  // 获取系统配置中的币种列表
+  // システム設定からコインリストを取得 | Get coin list from system config
   useEffect(() => {
     const fetchConfig = async () => {
       try {
@@ -120,7 +120,7 @@ export function TraderConfigModal({
         }
       } catch (error) {
         console.error('Failed to fetch config:', error)
-        // 使用默认币种列表
+        // デフォルトのコインリストを使用 | Use default coin list
         setAvailableCoins([
           'BTCUSDT',
           'ETHUSDT',

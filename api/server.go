@@ -36,6 +36,39 @@ type Server struct {
 	port          int
 }
 
+type dealResponse struct {
+	ID                int64      `json:"id"`
+	UserID            string     `json:"user_id"`
+	TraderID          string     `json:"trader_id"`
+	Exchange          string     `json:"exchange"`
+	Symbol            string     `json:"symbol"`
+	Side              string     `json:"side"`
+	Leverage          int        `json:"leverage"`
+	PositionSizeUSD   float64    `json:"position_size_usd"`
+	Quantity          float64    `json:"quantity"`
+	OpenPrice         float64    `json:"open_price"`
+	OpenTime          time.Time  `json:"open_time"`
+	OpenOrderID       string     `json:"open_order_id"`
+	SystemPrompt      string     `json:"system_prompt"`
+	UserPrompt        string     `json:"user_prompt"`
+	Reasoning         string     `json:"reasoning"`
+	CoTTrace          string     `json:"cot_trace"`
+	DecisionJSON      string     `json:"decision_json"`
+	MarketContextJSON string     `json:"market_context_json"`
+	StopLoss          float64    `json:"stop_loss"`
+	TakeProfit        float64    `json:"take_profit"`
+	ClosePrice        *float64   `json:"close_price"`
+	CloseTime         *time.Time `json:"close_time"`
+	CloseOrderID      *string    `json:"close_order_id"`
+	RealizedPnL       *float64   `json:"realized_pnl"`
+	RealizedPnLPct    *float64   `json:"realized_pnl_pct"`
+	DurationSeconds   *int64     `json:"duration_seconds"`
+	WasStopLoss       *bool      `json:"was_stop_loss"`
+	Status            string     `json:"status"`
+	CreatedAt         time.Time  `json:"created_at"`
+	UpdatedAt         time.Time  `json:"updated_at"`
+}
+
 // NewServer 创建API服务器
 func NewServer(traderManager *manager.TraderManager, database *config.Database, cryptoService *crypto.CryptoService, port int) *Server {
 	// 设置为Release模式（减少日志输出）
@@ -931,8 +964,25 @@ func (s *Server) handleStopTrader(c *gin.Context) {
 		return
 	}
 
-	// 停止交易员
-	trader.Stop()
+	// 停止交易员 - 使用goroutine避免阻塞HTTP请求,设置超时
+	stopCh := make(chan struct{})
+	go func() {
+		trader.Stop()
+		close(stopCh)
+	}()
+
+	// 等待停止完成或超时(30秒)
+	timeout := time.NewTimer(30 * time.Second)
+	defer timeout.Stop()
+
+	select {
+	case <-stopCh:
+		// 停止成功
+		log.Printf("⏹  交易员 %s 已停止", trader.GetName())
+	case <-timeout.C:
+		// 超时，强制标记为停止
+		log.Printf("⚠️  交易员 %s 停止操作超时，强制标记为停止", trader.GetName())
+	}
 
 	// 更新数据库中的运行状态
 	err = s.database.UpdateTraderStatus(userID, traderID, false)
@@ -940,8 +990,7 @@ func (s *Server) handleStopTrader(c *gin.Context) {
 		log.Printf("⚠️  更新交易员状态失败: %v", err)
 	}
 
-	log.Printf("⏹  交易员 %s 已停止", trader.GetName())
-	c.JSON(http.StatusOK, gin.H{"message": "交易员已停止"})
+	c.JSON(http.StatusOK, gin.H{"message": "交易员停止请求已发送"})
 }
 
 // handleCheckTraderBalance 检查交易员账户余额
@@ -1954,12 +2003,12 @@ func (s *Server) handleListDeals(c *gin.Context) {
         if n, err := strconv.Atoi(v); err == nil { offset = n }
     }
 
-    deals, err := s.database.ListDeals(userID, traderID, status, symbol, side, from, to, q, pnl, pnlMin, pnlMax, limit, offset)
-    if err != nil {
-        c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("查询失败: %v", err)})
-        return
-    }
-    c.JSON(http.StatusOK, deals)
+	deals, err := s.database.ListDeals(userID, traderID, status, symbol, side, from, to, q, pnl, pnlMin, pnlMax, limit, offset)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("查询失败: %v", err)})
+		return
+	}
+	c.JSON(http.StatusOK, makeDealResponses(deals))
 }
 
 // handleCountDeals 获取符合筛选条件的总数（用于分页）
@@ -2016,10 +2065,10 @@ func (s *Server) handleGetDealByID(c *gin.Context) {
     }
     events, _ := s.database.ListDealEvents(userID, traderID, id)
 
-    c.JSON(http.StatusOK, gin.H{
-        "deal":   deal,
-        "events": events,
-    })
+	c.JSON(http.StatusOK, gin.H{
+		"deal":   makeDealResponse(deal),
+		"events": events,
+	})
 }
 
 // handleExportDealsCSV 导出交易记录为CSV（含核心字段）
@@ -2053,8 +2102,8 @@ func (s *Server) handleExportDealsCSV(c *gin.Context) {
         return
     }
 
-    c.Header("Content-Type", "text/csv; charset=utf-8")
-    c.Header("Content-Disposition", "attachment; filename=deals.csv")
+	c.Header("Content-Type", "text/csv; charset=utf-8")
+	c.Header("Content-Disposition", "attachment; filename=deals.csv")
 
     // Columns selection
     allCols := []string{"id","user_id","trader_id","exchange","symbol","side","leverage","position_size_usd","quantity","open_price","open_time","open_order_id","stop_loss","take_profit","close_price","close_time","realized_pnl","realized_pnl_pct","status"}
@@ -2183,8 +2232,97 @@ func nullableFloat(v sql.NullFloat64) interface{} {
 }
 
 func nullableTime(v sql.NullTime) interface{} {
-    if v.Valid { return v.Time }
-    return nil
+	if v.Valid { return v.Time }
+	return nil
+}
+
+func makeDealResponses(src []*config.DealRecord) []*dealResponse {
+	if len(src) == 0 {
+		return []*dealResponse{}
+	}
+	out := make([]*dealResponse, 0, len(src))
+	for _, d := range src {
+		out = append(out, makeDealResponse(d))
+	}
+	return out
+}
+
+func makeDealResponse(d *config.DealRecord) *dealResponse {
+	if d == nil {
+		return nil
+	}
+	return &dealResponse{
+		ID:                d.ID,
+		UserID:            d.UserID,
+		TraderID:          d.TraderID,
+		Exchange:          d.Exchange,
+		Symbol:            d.Symbol,
+		Side:              d.Side,
+		Leverage:          d.Leverage,
+		PositionSizeUSD:   d.PositionSizeUSD,
+		Quantity:          d.Quantity,
+		OpenPrice:         d.OpenPrice,
+		OpenTime:          d.OpenTime,
+		OpenOrderID:       d.OpenOrderID,
+		SystemPrompt:      d.SystemPrompt,
+		UserPrompt:        d.UserPrompt,
+		Reasoning:         d.Reasoning,
+		CoTTrace:          d.CoTTrace,
+		DecisionJSON:      d.DecisionJSON,
+		MarketContextJSON: d.MarketContextJSON,
+		StopLoss:          d.StopLoss,
+		TakeProfit:        d.TakeProfit,
+		ClosePrice:        floatPtr(d.ClosePrice),
+		CloseTime:         timePtr(d.CloseTime),
+		CloseOrderID:      stringPtr(d.CloseOrderID),
+		RealizedPnL:       floatPtr(d.RealizedPnL),
+		RealizedPnLPct:    floatPtr(d.RealizedPnLPct),
+		DurationSeconds:   intPtr(d.DurationSeconds),
+		WasStopLoss:       boolPtr(d.WasStopLoss),
+		Status:            d.Status,
+		CreatedAt:         d.CreatedAt,
+		UpdatedAt:         d.UpdatedAt,
+	}
+}
+
+func floatPtr(v sql.NullFloat64) *float64 {
+	if !v.Valid {
+		return nil
+	}
+	val := v.Float64
+	return &val
+}
+
+func intPtr(v sql.NullInt64) *int64 {
+	if !v.Valid {
+		return nil
+	}
+	val := v.Int64
+	return &val
+}
+
+func boolPtr(v sql.NullBool) *bool {
+	if !v.Valid {
+		return nil
+	}
+	val := v.Bool
+	return &val
+}
+
+func stringPtr(v sql.NullString) *string {
+	if !v.Valid {
+		return nil
+	}
+	val := v.String
+	return &val
+}
+
+func timePtr(v sql.NullTime) *time.Time {
+	if !v.Valid {
+		return nil
+	}
+	val := v.Time
+	return &val
 }
 
 func parseOptionalFloat(value string) (*float64, error) {

@@ -1,4 +1,4 @@
-// 系统状态
+// システムステータス | System status
 export interface SystemStatus {
   is_running: boolean
   start_time: string
@@ -11,7 +11,7 @@ export interface SystemStatus {
   ai_provider: string
 }
 
-// 账户信息
+// アカウント情報 | Account information
 export interface AccountInfo {
   total_equity: number
   available_balance: number
@@ -25,7 +25,7 @@ export interface AccountInfo {
   daily_pnl: number
 }
 
-// 持仓信息
+// ポジション情報 | Position information
 export interface Position {
   symbol: string
   side: string
@@ -39,7 +39,7 @@ export interface Position {
   margin_used: number
 }
 
-// 决策动作
+// 決策アクション | Decision action
 export interface DecisionAction {
   action: string
   symbol: string
@@ -52,7 +52,7 @@ export interface DecisionAction {
   error: string
 }
 
-// 决策记录
+// 決策レコード | Decision record
 export interface DecisionRecord {
   timestamp: string
   cycle_number: number
@@ -83,7 +83,7 @@ export interface DecisionRecord {
   error_message: string
 }
 
-// 统计信息
+// 統計情報 | Statistics information
 export interface Statistics {
   total_cycles: number
   successful_cycles: number

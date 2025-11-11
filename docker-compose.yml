@@ -17,6 +17,7 @@ services:
       - ./config.json:/app/config.json:ro
       - ./config.db:/app/config.db
       - ./beta_codes.txt:/app/beta_codes.txt:ro
+      - ./config/derivs_v1.yaml:/app/config/derivs_v1.yaml:ro
       - ./decision_logs:/app/decision_logs
       - ./prompts:/app/prompts
       - ./secrets:/app/secrets  # RSA密钥文件 (read-write für Generierung)
@@ -26,6 +27,8 @@ services:
       - AI_MAX_TOKENS=4000  # AI响应的最大token数（默认2000，建议4000-8000）
       - DATA_ENCRYPTION_KEY=${DATA_ENCRYPTION_KEY}  # 数据库加密密钥
       - JWT_SECRET=${JWT_SECRET}  # JWT认证密钥
+    depends_on:
+      - redis
     networks:
       - nofx-network
     healthcheck:
@@ -74,6 +77,63 @@ services:
     profiles:
       - tools  # Nur starten wenn explizit gewünscht
 
+  redis:
+    image: redis:7-alpine
+    container_name: nofx-redis
+    restart: unless-stopped
+    command: ["redis-server", "--save", "60", "1", "--loglevel", "warning"]
+    volumes:
+      - redis-data:/data
+    networks:
+      - nofx-network
+
+  derivs-ingest:
+    build:
+      context: .
+      dockerfile: ./docker/Dockerfile.ingest
+    container_name: nofx-derivs-ingest
+    restart: unless-stopped
+    environment:
+      - NODE_ENV=production
+    working_dir: /app/packages/ingest
+    command: ["npm", "run", "start:derivs"]
+    volumes:
+      - ./config/derivs_v1.yaml:/app/config/derivs_v1.yaml:ro
+    depends_on:
+      - redis
+    networks:
+      - nofx-network
+
+  # Development/Testing service with Go toolchain
+  nofx-dev:
+    build:
+      context: .
+      dockerfile: ./docker/Dockerfile.dev
+      args:
+        GO_VERSION: 1.25-alpine
+        ALPINE_VERSION: '3.20'
+        TA_LIB_VERSION: 0.4.0
+    container_name: nofx-dev
+    working_dir: /app
+    volumes:
+      - .:/app
+      - go-mod-cache:/go/pkg/mod
+      - go-build-cache:/root/.cache/go-build
+    environment:
+      - GOROOT=/usr/local/go
+      - GOTOOLCHAIN=local
+      - CGO_ENABLED=1
+    command: ["sleep", "infinity"]
+    networks:
+      - nofx-network
+    profiles:
+      - dev
+
 networks:
   nofx-network:
     driver: bridge
+
+volumes:
+  redis-data:
+  go-mod-cache:
+  go-build-cache:

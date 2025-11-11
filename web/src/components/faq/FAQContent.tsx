@@ -97,14 +97,14 @@ export function FAQContent({
                   {item.id === 'github-projects-tasks' ? (
                     <div className="space-y-3">
                       <div className="text-base">
-                        {language === 'zh' ? '链接：' : 'Links:'}{' '}
+                        {language === 'zh' ? 'Links:' : 'Links:'}{' '}
                         <a
                           href="https://github.com/orgs/NoFxAiOS/projects/3"
                           target="_blank"
                           rel="noreferrer"
                           style={{ color: '#F0B90B' }}
                         >
-                          {language === 'zh' ? '路线图' : 'Roadmap'}
+                          {language === 'zh' ? 'Roadmap' : 'Roadmap'}
                         </a>
                         {'  |  '}
                         <a
@@ -113,7 +113,7 @@ export function FAQContent({
                           rel="noreferrer"
                           style={{ color: '#F0B90B' }}
                         >
-                          {language === 'zh' ? '任务看板' : 'Task Dashboard'}
+                          {language === 'zh' ? 'Task Dashboard' : 'Task Dashboard'}
                         </a>
                       </div>
                       <ol className="list-decimal pl-5 space-y-1 text-base">

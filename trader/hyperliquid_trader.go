@@ -147,7 +147,7 @@ func (t *HyperliquidTrader) GetBalance() (map[string]interface{}, error) {
 	} else if spotState != nil && len(spotState.Balances) > 0 {
 		log.Printf("🔍 [DEBUG] Spot API返回 %d 个余额记录", len(spotState.Balances))
 		for i, balance := range spotState.Balances {
-			log.Printf("🔍 [DEBUG] Spot余额[%d]: Coin=%s, Total=%s, Available=%s, Hold=%s", 
+			log.Printf("🔍 [DEBUG] Spot余额[%d]: Coin=%s, Total=%s, Available=%s, Hold=%s",
 				i, balance.Coin, balance.Total, balance.Hold, balance.Hold)
 			if balance.Coin == "USDC" {
 				spotUSDCBalance, _ = strconv.ParseFloat(balance.Total, 64)
@@ -217,7 +217,7 @@ func (t *HyperliquidTrader) GetBalance() (map[string]interface{}, error) {
 	// 为了兼容auto_trader.go的计算逻辑（totalEquity = totalWalletBalance + totalUnrealizedProfit）
 	// 需要返回"不包含未实现盈亏的钱包余额"
 	walletBalanceWithoutUnrealized := accountValue - totalUnrealizedPnl
-	log.Printf("🔍 [DEBUG] 钱包余额(不含未实现盈亏): %.2f = %.2f - %.2f", 
+	log.Printf("🔍 [DEBUG] 钱包余额(不含未实现盈亏): %.2f = %.2f - %.2f",
 		walletBalanceWithoutUnrealized, accountValue, totalUnrealizedPnl)
 
 	// ✅ Step 4: 使用 Withdrawable 欄位（PR #443）
@@ -225,7 +225,7 @@ func (t *HyperliquidTrader) GetBalance() (map[string]interface{}, error) {
 	availableBalance := 0.0
 	if accountState.Withdrawable != "" {
 		withdrawable, err := strconv.ParseFloat(accountState.Withdrawable, 64)
-		log.Printf("🔍 [DEBUG] Withdrawable字段: %s -> %.2f (err=%v)", 
+		log.Printf("🔍 [DEBUG] Withdrawable字段: %s -> %.2f (err=%v)",
 			accountState.Withdrawable, withdrawable, err)
 		if err == nil && withdrawable > 0 {
 			availableBalance = withdrawable
@@ -238,7 +238,7 @@ func (t *HyperliquidTrader) GetBalance() (map[string]interface{}, error) {
 	// 降级方案：如果没有 Withdrawable，使用简单计算
 	if availableBalance == 0 && accountState.Withdrawable == "" {
 		availableBalance = accountValue - totalMarginUsed
-		log.Printf("🔍 [DEBUG] 使用降级计算: %.2f = %.2f - %.2f", 
+		log.Printf("🔍 [DEBUG] 使用降级计算: %.2f = %.2f - %.2f",
 			availableBalance, accountValue, totalMarginUsed)
 		if availableBalance < 0 {
 			log.Printf("⚠️ 计算出的可用余额为负数 (%.2f)，重置为 0", availableBalance)
@@ -252,7 +252,7 @@ func (t *HyperliquidTrader) GetBalance() (map[string]interface{}, error) {
 	totalWalletBalance := walletBalanceWithoutUnrealized + spotUSDCBalance
 
 	log.Printf("🔍 [DEBUG] 最终计算结果:")
-	log.Printf("  • totalWalletBalance = %.2f + %.2f = %.2f", 
+	log.Printf("  • totalWalletBalance = %.2f + %.2f = %.2f",
 		walletBalanceWithoutUnrealized, spotUSDCBalance, totalWalletBalance)
 	log.Printf("  • availableBalance = %.2f", availableBalance)
 	log.Printf("  • totalUnrealizedProfit = %.2f", totalUnrealizedPnl)
@@ -415,17 +415,20 @@ func (t *HyperliquidTrader) OpenLong(symbol string, quantity float64, leverage i
 		ReduceOnly: false,
 	}
 
-	_, err = t.exchange.Order(t.ctx, order, nil)
+	status, err := t.exchange.Order(t.ctx, order, nil)
 	if err != nil {
 		return nil, fmt.Errorf("开多仓失败: %w", err)
 	}
 
-	log.Printf("✓ 开多仓成功: %s 数量: %.4f", symbol, roundedQuantity)
+	fillPrice, filledSize, orderID := getOrderFillInfo(status, aggressivePrice, roundedQuantity)
+	log.Printf("✓ 开多仓成功: %s 数量: %.4f (成交: %.4f @ %.4f)", symbol, roundedQuantity, filledSize, fillPrice)
 
 	result := make(map[string]interface{})
-	result["orderId"] = 0 // Hyperliquid没有返回order ID
+	result["orderId"] = orderID
 	result["symbol"] = symbol
 	result["status"] = "FILLED"
+	result["avgPrice"] = fillPrice
+	result["filledSize"] = filledSize
 
 	return result, nil
 }
@@ -473,17 +476,20 @@ func (t *HyperliquidTrader) OpenShort(symbol string, quantity float64, leverage 
 		ReduceOnly: false,
 	}
 
-	_, err = t.exchange.Order(t.ctx, order, nil)
+	status, err := t.exchange.Order(t.ctx, order, nil)
 	if err != nil {
 		return nil, fmt.Errorf("开空仓失败: %w", err)
 	}
 
-	log.Printf("✓ 开空仓成功: %s 数量: %.4f", symbol, roundedQuantity)
+	fillPrice, filledSize, orderID := getOrderFillInfo(status, aggressivePrice, roundedQuantity)
+	log.Printf("✓ 开空仓成功: %s 数量: %.4f (成交: %.4f @ %.4f)", symbol, roundedQuantity, filledSize, fillPrice)
 
 	result := make(map[string]interface{})
-	result["orderId"] = 0
+	result["orderId"] = orderID
 	result["symbol"] = symbol
 	result["status"] = "FILLED"
+	result["avgPrice"] = fillPrice
+	result["filledSize"] = filledSize
 
 	return result, nil
 }
@@ -540,12 +546,13 @@ func (t *HyperliquidTrader) CloseLong(symbol string, quantity float64) (map[stri
 		ReduceOnly: true, // 只平仓，不开新仓
 	}
 
-	_, err = t.exchange.Order(t.ctx, order, nil)
+	status, err := t.exchange.Order(t.ctx, order, nil)
 	if err != nil {
 		return nil, fmt.Errorf("平多仓失败: %w", err)
 	}
 
-	log.Printf("✓ 平多仓成功: %s 数量: %.4f", symbol, roundedQuantity)
+	fillPrice, filledSize, orderID := getOrderFillInfo(status, aggressivePrice, roundedQuantity)
+	log.Printf("✓ 平多仓成功: %s 数量: %.4f (成交: %.4f @ %.4f)", symbol, roundedQuantity, filledSize, fillPrice)
 
 	// 平仓后取消该币种的所有挂单
 	if err := t.CancelAllOrders(symbol); err != nil {
@@ -553,9 +560,11 @@ func (t *HyperliquidTrader) CloseLong(symbol string, quantity float64) (map[stri
 	}
 
 	result := make(map[string]interface{})
-	result["orderId"] = 0
+	result["orderId"] = orderID
 	result["symbol"] = symbol
 	result["status"] = "FILLED"
+	result["avgPrice"] = fillPrice
+	result["filledSize"] = filledSize
 
 	return result, nil
 }
@@ -612,12 +621,13 @@ func (t *HyperliquidTrader) CloseShort(symbol string, quantity float64) (map[str
 		ReduceOnly: true,
 	}
 
-	_, err = t.exchange.Order(t.ctx, order, nil)
+	status, err := t.exchange.Order(t.ctx, order, nil)
 	if err != nil {
 		return nil, fmt.Errorf("平空仓失败: %w", err)
 	}
 
-	log.Printf("✓ 平空仓成功: %s 数量: %.4f", symbol, roundedQuantity)
+	fillPrice, filledSize, orderID := getOrderFillInfo(status, aggressivePrice, roundedQuantity)
+	log.Printf("✓ 平空仓成功: %s 数量: %.4f (成交: %.4f @ %.4f)", symbol, roundedQuantity, filledSize, fillPrice)
 
 	// 平仓后取消该币种的所有挂单
 	if err := t.CancelAllOrders(symbol); err != nil {
@@ -625,9 +635,11 @@ func (t *HyperliquidTrader) CloseShort(symbol string, quantity float64) (map[str
 	}
 
 	result := make(map[string]interface{})
-	result["orderId"] = 0
+	result["orderId"] = orderID
 	result["symbol"] = symbol
 	result["status"] = "FILLED"
+	result["avgPrice"] = fillPrice
+	result["filledSize"] = filledSize
 
 	return result, nil
 }
@@ -706,6 +718,26 @@ func (t *HyperliquidTrader) CancelStopOrders(symbol string) error {
 	}
 
 	return nil
+}
+
+func getOrderFillInfo(status hyperliquid.OrderStatus, fallbackPrice, fallbackSize float64) (float64, float64, int64) {
+	avgPrice := fallbackPrice
+	filledSize := fallbackSize
+	var orderID int64
+
+	if status.Filled != nil {
+		if px, err := strconv.ParseFloat(status.Filled.AvgPx, 64); err == nil {
+			avgPrice = px
+		}
+		if sz, err := strconv.ParseFloat(status.Filled.TotalSz, 64); err == nil && sz > 0 {
+			filledSize = sz
+		}
+		orderID = int64(status.Filled.Oid)
+	} else if status.Resting != nil {
+		orderID = status.Resting.Oid
+	}
+
+	return avgPrice, filledSize, orderID
 }
 
 // GetMarketPrice 获取市场价格
