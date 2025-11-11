@@ -6,8 +6,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"math"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/sonirico/go-hyperliquid"
@@ -21,6 +23,12 @@ type HyperliquidTrader struct {
 	meta          *hyperliquid.Meta // 缓存meta信息（包含精度等）
 	isCrossMargin bool              // 是否为全仓模式
 }
+
+const (
+	hyperliquidFillLookback        = 45 * time.Second
+	hyperliquidFillQtyTolerance    = 0.05
+	hyperliquidFillQtyAbsTolerance = 1e-6
+)
 
 // NewHyperliquidTrader 创建Hyperliquid交易器
 func NewHyperliquidTrader(privateKeyHex string, walletAddr string, testnet bool) (*HyperliquidTrader, error) {
@@ -421,6 +429,7 @@ func (t *HyperliquidTrader) OpenLong(symbol string, quantity float64, leverage i
 	}
 
 	fillPrice, filledSize, orderID := getOrderFillInfo(status, aggressivePrice, roundedQuantity)
+	fillPrice, filledSize, orderID = t.resolveFillFromHistory(symbol, "Open Long", fillPrice, filledSize, orderID)
 	log.Printf("✓ 开多仓成功: %s 数量: %.4f (成交: %.4f @ %.4f)", symbol, roundedQuantity, filledSize, fillPrice)
 
 	result := make(map[string]interface{})
@@ -482,6 +491,7 @@ func (t *HyperliquidTrader) OpenShort(symbol string, quantity float64, leverage 
 	}
 
 	fillPrice, filledSize, orderID := getOrderFillInfo(status, aggressivePrice, roundedQuantity)
+	fillPrice, filledSize, orderID = t.resolveFillFromHistory(symbol, "Open Short", fillPrice, filledSize, orderID)
 	log.Printf("✓ 开空仓成功: %s 数量: %.4f (成交: %.4f @ %.4f)", symbol, roundedQuantity, filledSize, fillPrice)
 
 	result := make(map[string]interface{})
@@ -552,6 +562,7 @@ func (t *HyperliquidTrader) CloseLong(symbol string, quantity float64) (map[stri
 	}
 
 	fillPrice, filledSize, orderID := getOrderFillInfo(status, aggressivePrice, roundedQuantity)
+	fillPrice, filledSize, orderID = t.resolveFillFromHistory(symbol, "Close Long", fillPrice, filledSize, orderID)
 	log.Printf("✓ 平多仓成功: %s 数量: %.4f (成交: %.4f @ %.4f)", symbol, roundedQuantity, filledSize, fillPrice)
 
 	// 平仓后取消该币种的所有挂单
@@ -627,6 +638,7 @@ func (t *HyperliquidTrader) CloseShort(symbol string, quantity float64) (map[str
 	}
 
 	fillPrice, filledSize, orderID := getOrderFillInfo(status, aggressivePrice, roundedQuantity)
+	fillPrice, filledSize, orderID = t.resolveFillFromHistory(symbol, "Close Short", fillPrice, filledSize, orderID)
 	log.Printf("✓ 平空仓成功: %s 数量: %.4f (成交: %.4f @ %.4f)", symbol, roundedQuantity, filledSize, fillPrice)
 
 	// 平仓后取消该币种的所有挂单
@@ -738,6 +750,72 @@ func getOrderFillInfo(status hyperliquid.OrderStatus, fallbackPrice, fallbackSiz
 	}
 
 	return avgPrice, filledSize, orderID
+}
+
+func (t *HyperliquidTrader) resolveFillFromHistory(symbol, expectedDir string, fallbackPrice, fallbackSize float64, fallbackOrderID int64) (float64, float64, int64) {
+	price, size, orderID, err := t.fetchRecentFill(symbol, expectedDir, fallbackSize)
+	if err != nil {
+		log.Printf("  ⚠️ 无法匹配最新成交记录 (%s %s): %v", symbol, expectedDir, err)
+		if orderID == 0 {
+			orderID = fallbackOrderID
+		}
+		return fallbackPrice, fallbackSize, orderID
+	}
+	if orderID == 0 {
+		orderID = fallbackOrderID
+	}
+	return price, size, orderID
+}
+
+func (t *HyperliquidTrader) fetchRecentFill(symbol, expectedDir string, expectedSize float64) (float64, float64, int64, error) {
+	startTime := time.Now().Add(-hyperliquidFillLookback).UnixMilli()
+	fills, err := t.exchange.Info().UserFillsByTime(t.ctx, t.walletAddr, startTime, nil)
+	if err != nil {
+		return 0, 0, 0, fmt.Errorf("获取成交记录失败: %w", err)
+	}
+
+	coin := convertSymbolToHyperliquid(symbol)
+	sizeTolerance := hyperliquidFillQtyAbsTolerance
+	if expectedSize > 0 {
+		sizeTolerance = math.Max(expectedSize*hyperliquidFillQtyTolerance, hyperliquidFillQtyAbsTolerance)
+	}
+
+	totalSize := 0.0
+	weightedPrice := 0.0
+	var orderID int64
+
+	for i := len(fills) - 1; i >= 0; i-- {
+		fill := fills[i]
+		if fill.Coin != coin {
+			continue
+		}
+		if expectedDir != "" && !strings.EqualFold(fill.Dir, expectedDir) {
+			continue
+		}
+		size, err := strconv.ParseFloat(fill.Size, 64)
+		if err != nil || size <= 0 {
+			continue
+		}
+		price, err := strconv.ParseFloat(fill.Price, 64)
+		if err != nil || price <= 0 {
+			continue
+		}
+
+		if orderID == 0 {
+			orderID = fill.Oid
+		}
+
+		totalSize += size
+		weightedPrice += price * size
+
+		if expectedSize <= 0 || totalSize+sizeTolerance >= expectedSize {
+			if totalSize > 0 {
+				return weightedPrice / totalSize, totalSize, orderID, nil
+			}
+		}
+	}
+
+	return 0, 0, orderID, fmt.Errorf("在最近%ds内未找到匹配的成交 (symbol=%s dir=%s)", int(hyperliquidFillLookback.Seconds()), symbol, expectedDir)
 }
 
 // GetMarketPrice 获取市场价格
