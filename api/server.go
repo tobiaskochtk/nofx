@@ -863,9 +863,6 @@ func (s *Server) handleStartTrader(c *gin.Context) {
 		return
 	}
 
-	// 获取模板名称
-	templateName := traderRecord.SystemPromptTemplate
-
 	trader, err := s.traderManager.GetTrader(traderID)
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "交易员不存在"})
