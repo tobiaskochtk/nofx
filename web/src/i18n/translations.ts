@@ -300,6 +300,7 @@ export const translations = {
     promptTemplateHansen: 'Hansen Strategy',
     promptTemplateNof1: 'NoF1 English Framework',
     promptTemplateTaroLong: 'Taro Long Position',
+    promptTemplateV3Compatible: 'V3 Compatible Strategy',
     promptDescDefault: '📊 Default Stable Strategy',
     promptDescDefaultContent:
       'Maximize Sharpe ratio, balanced risk-reward, suitable for beginners and stable long-term trading',
@@ -318,6 +319,9 @@ export const translations = {
     promptDescTaroLong: '📈 Taro Long Position Strategy',
     promptDescTaroLongContent:
       'Data-driven decisions, multi-dimensional validation, continuous learning evolution, long position specialist',
+    promptDescV3Compatible: '🔄 V3 Compatible Strategy',
+    promptDescV3CompatibleContent:
+      'Compatible with V3 models, json output format, for less token usage',
 
     // Loading & Error
     loading: 'Loading...',
@@ -1151,6 +1155,10 @@ export const translations = {
     promptDescTaroLong: '📈 Taro 长仓策略',
     promptDescTaroLongContent:
       '数据驱动决策，多维度验证，持续学习进化，长仓专用',
+    promptDescV3Compatible: '🔄 V3 Compatible Strategy',
+    promptDescV3CompatibleContent:
+      'Compatible with V3 models, json output format, for less token usage',
+
 
     // Loading & Error
     loading: '加载中...',

@@ -129,14 +129,16 @@ func Get(symbol string) (*Data, error) {
 		}
 		derivsTarget = data.Snapshot.Features.Derivs
 	}
-	if err := enrichStructuralFeatures(symbol, klines3m, derivsTarget); err != nil {
+	if err := enrichStructuralFeatures(symbol, klines3m, derivsTarget, data); err != nil {
 		log.Printf("⚠️ enrichStructuralFeatures %s failed: %v", symbol, err)
 	}
 	log.Printf("🔍 [DEBUG] Before enrichMicrostructure: symbol=%s, klines3m len=%d, derivsTarget==nil: %v", symbol, len(klines3m), derivsTarget == nil)
-	if err := enrichMicrostructureFeatures(symbol, klines3m, derivsTarget); err != nil {
+	if err := enrichMicrostructureFeatures(symbol, klines3m, derivsTarget, data); err != nil {
 		log.Printf("⚠️ enrichMicrostructureFeatures %s failed: %v", symbol, err)
 	}
 	log.Printf("🔍 [DEBUG] After enrichMicrostructure: symbol=%s", symbol)
+
+	data.CollectedAt = time.Now().UTC()
 
 	return data, nil
 }

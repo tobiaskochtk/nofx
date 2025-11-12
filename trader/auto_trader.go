@@ -776,6 +776,7 @@ func (at *AutoTrader) buildTradingContext() (*decision.Context, error) {
 		BTCETHLeverage:  at.config.BTCETHLeverage,  // 使用配置的杠杆倍数
 		AltcoinLeverage: at.config.AltcoinLeverage, // 使用配置的杠杆倍数
 		MaxPositions:    maxPositions,              // 传递最大持仓数给Context
+		PayloadVersion:  decision.PayloadSchemaVersion,
 		Account: decision.AccountInfo{
 			TotalEquity:      totalEquity,
 			AvailableBalance: availableBalance,

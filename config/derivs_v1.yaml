@@ -1,6 +1,7 @@
 derivs_v1:
   enabled: true
   symbols:
+    - "BTCUSDT"
     - "LINKUSDT"
     - "UNIUSDT"
     - "BNBUSDT"

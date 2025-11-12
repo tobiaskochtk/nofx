@@ -22,7 +22,7 @@ const (
 )
 
 // enrichMicrostructureFeatures populates Feature4 & Feature5 fields for 3m + optional 15m scopes.
-func enrichMicrostructureFeatures(symbol string, base3m []Kline, dest *types.DerivsFeatures) error {
+func enrichMicrostructureFeatures(symbol string, base3m []Kline, dest *types.DerivsFeatures, carrier *Data) error {
 	log.Printf("🔄 [Microstructure] %s: ENTRY - base3m len=%d, dest==nil: %v", symbol, len(base3m), dest == nil)
 	if dest == nil || len(base3m) == 0 {
 		log.Printf("⚠️ [Microstructure] %s: early return (dest==nil: %v, base3m len=%d)", symbol, dest == nil, len(base3m))
@@ -34,6 +34,15 @@ func enrichMicrostructureFeatures(symbol string, base3m []Kline, dest *types.Der
 		log.Printf("⚠️ [Microstructure] %s: unable to extend bars: %v", symbol, err)
 	}
 	log.Printf("📊 [Microstructure] %s: base3m=%d bars, ensured bars3m=%d (min required: %d)", symbol, len(base3m), len(bars3m), microFeature4MinBars)
+	if carrier != nil {
+		coverage := math.Min(1, float64(len(bars3m))/float64(microPreferredBars3m))
+		lastTs := time.Now().UTC()
+		if len(bars3m) > 0 {
+			lastTs = time.UnixMilli(bars3m[len(bars3m)-1].CloseTime).UTC()
+		}
+		carrier.recordFeatureMeta(FeatureKeyF4, coverage, lastTs)
+		carrier.recordFeatureMeta(FeatureKeyF5, coverage, lastTs)
+	}
 	if len(bars3m) < microFeature4MinBars {
 		log.Printf("⏳ [Microstructure] %s: insufficient bars (%d/%d)", symbol, len(bars3m), microFeature4MinBars)
 		return nil

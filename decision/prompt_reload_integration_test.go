@@ -264,6 +264,7 @@ func makePromptTestContext(equity float64, btcLev, altLev int) *Context {
 		BTCETHLeverage:  btcLev,
 		AltcoinLeverage: altLev,
 		MaxPositions:    3,
+		PayloadVersion:  PayloadSchemaVersion,
 		RuntimeMinutes:  1,
 		CurrentTime:     "2000-01-01 00:00:00",
 		MarketDataMap:   make(map[string]*market.Data),

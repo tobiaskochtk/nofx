@@ -12,7 +12,7 @@ func TestEnrichStructuralFeaturesPopulatesFields(t *testing.T) {
 	bars := mockStructuralBars(structuralPreferredBars3m, 1.0)
 	dest := &types.DerivsFeatures{}
 
-	if err := enrichStructuralFeatures("TESTUSDT", bars, dest); err != nil {
+	if err := enrichStructuralFeatures("TESTUSDT", bars, dest, nil); err != nil {
 		t.Fatalf("enrichStructuralFeatures error: %v", err)
 	}
 

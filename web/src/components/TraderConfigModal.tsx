@@ -673,6 +673,7 @@ export function TraderConfigModal({
                         Hansen: 'promptTemplateHansen',
                         nof1: 'promptTemplateNof1',
                         taro_long_prompts: 'promptTemplateTaroLong',
+                        v3_compatible: 'promptTemplateV3Compatible',
                       }
                       const key = keyMap[name]
                       return key
@@ -708,6 +709,7 @@ export function TraderConfigModal({
                         Hansen: 'promptDescHansen',
                         nof1: 'promptDescNof1',
                         taro_long_prompts: 'promptDescTaroLong',
+                        v3_compatible: 'promptDescV3Compatible',
                       }
                       const key = titleKeyMap[formData.system_prompt_template]
                       return key
@@ -724,6 +726,7 @@ export function TraderConfigModal({
                         Hansen: 'promptDescHansenContent',
                         nof1: 'promptDescNof1Content',
                         taro_long_prompts: 'promptDescTaroLongContent',
+                        v3_compatible: 'promptDescV3CompatibleContent',
                       }
                       const key = contentKeyMap[formData.system_prompt_template]
                       return key

@@ -1,25 +1,59 @@
 package market
 
 import (
-    "time"
+	"time"
 
-    "nofx/internal/snapshot"
+	"nofx/internal/snapshot"
 )
 
 // Data 市场数据结构
 type Data struct {
-    Symbol            string
-    CurrentPrice      float64
-    PriceChange1h     float64 // 1小时价格变化百分比
-    PriceChange4h     float64 // 4小时价格变化百分比
+	Symbol            string
+	CurrentPrice      float64
+	PriceChange1h     float64 // 1小时价格变化百分比
+	PriceChange4h     float64 // 4小时价格变化百分比
 	CurrentEMA20      float64
 	CurrentMACD       float64
 	CurrentRSI7       float64
-    OpenInterest      *OIData
-    FundingRate       float64
-    IntradaySeries    *IntradayData
-    LongerTermContext *LongerTermData
-    Snapshot          *snapshot.Snapshot
+	OpenInterest      *OIData
+	FundingRate       float64
+	IntradaySeries    *IntradayData
+	LongerTermContext *LongerTermData
+	Snapshot          *snapshot.Snapshot
+	FeatureMeta       map[string]FeatureStat
+	CollectedAt       time.Time
+}
+
+// FeatureStat captures coverage + freshness metadata for a feature namespace.
+type FeatureStat struct {
+	Coverage  float64
+	UpdatedAt time.Time
+}
+
+// recordFeatureMeta stores coverage + freshness info for downstream gating.
+func (d *Data) recordFeatureMeta(key string, coverage float64, updatedAt time.Time) {
+	if d == nil || key == "" {
+		return
+	}
+	if d.FeatureMeta == nil {
+		d.FeatureMeta = make(map[string]FeatureStat)
+	}
+	if coverage < 0 {
+		coverage = 0
+	}
+	if coverage > 1 {
+		coverage = 1
+	}
+	d.FeatureMeta[key] = FeatureStat{Coverage: coverage, UpdatedAt: updatedAt}
+}
+
+// FeatureQuality returns the stored metadata for a given feature key, if any.
+func (d *Data) FeatureQuality(key string) (FeatureStat, bool) {
+	if d == nil {
+		return FeatureStat{}, false
+	}
+	stat, ok := d.FeatureMeta[key]
+	return stat, ok
 }
 
 // OIData Open Interest数据

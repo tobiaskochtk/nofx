@@ -21,6 +21,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 - Reorganized documentation structure into logical categories
 - Updated all README files with proper navigation links
+- Decision engine now emits market data payload v3.1 (boot dictionary, JSON-only feed, QoS validation, per-feature gating)
 
 ---
 

@@ -1,8 +1,10 @@
 #!/bin/bash
 # Script to run Go tests in WSL with proper environment setup
 
-export GOROOT=/home/bot/.local/go
+export GOROOT=/usr/local/go
 export PATH=$GOROOT/bin:/home/bot/.local/bin:$PATH
+export GOPATH=$HOME/go
+export PATH=$PATH:$GOPATH/bin
 export GOTOOLCHAIN=local
 export CGO_ENABLED=1
 

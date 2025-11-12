@@ -10,7 +10,8 @@ import (
 func TestEnrichMicrostructureFeaturesPopulatesFeature4(t *testing.T) {
 	bars := makeTestBars(500, 3*time.Minute)
 	dest := &types.DerivsFeatures{}
-	if err := enrichMicrostructureFeatures("TESTUSDT", bars, dest); err != nil {
+	carrier := &Data{}
+	if err := enrichMicrostructureFeatures("TESTUSDT", bars, dest, carrier); err != nil {
 		t.Fatalf("enrichMicrostructureFeatures error: %v", err)
 	}
 	if dest.CVDNotionalZ3mShort == nil || dest.TBRNotional3m == nil {

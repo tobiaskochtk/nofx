@@ -54,7 +54,7 @@ type volResult struct {
 	confidence         float64
 }
 
-func enrichStructuralFeatures(symbol string, base3m []Kline, dest *types.DerivsFeatures) error {
+func enrichStructuralFeatures(symbol string, base3m []Kline, dest *types.DerivsFeatures, carrier *Data) error {
 	if dest == nil || len(base3m) == 0 {
 		return nil
 	}
@@ -66,6 +66,16 @@ func enrichStructuralFeatures(symbol string, base3m []Kline, dest *types.DerivsF
 
 	log.Printf("📊 [Structural] %s: base3m=%d bars, fetched=%d bars (min required: %d)",
 		symbol, len(base3m), len(bars3m), structuralMinBars3m)
+
+	if carrier != nil {
+		coverage := math.Min(1, float64(len(bars3m))/float64(structuralPreferredBars3m))
+		lastTs := time.Now().UTC()
+		if len(bars3m) > 0 {
+			lastTs = time.UnixMilli(bars3m[len(bars3m)-1].CloseTime).UTC()
+		}
+		carrier.recordFeatureMeta(FeatureKeyF6, coverage, lastTs)
+		carrier.recordFeatureMeta(FeatureKeyF7, coverage, lastTs)
+	}
 
 	if len(bars3m) >= structuralMinBars3m {
 		enrichAVWAP("3m", bars3m, dest)
