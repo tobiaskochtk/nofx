@@ -19,6 +19,10 @@ import {
   type TwoStageKeyModalResult,
 } from './TwoStageKeyModal'
 import {
+  WebCryptoEnvironmentCheck,
+  type WebCryptoCheckStatus,
+} from './WebCryptoEnvironmentCheck'
+import {
   Bot,
   Brain,
   Landmark,
@@ -1828,6 +1832,8 @@ function ExchangeConfigModal({
   } | null>(null)
   const [loadingIP, setLoadingIP] = useState(false)
   const [copiedIP, setCopiedIP] = useState(false)
+  const [webCryptoStatus, setWebCryptoStatus] =
+    useState<WebCryptoCheckStatus>('idle')
 
   // 币安配置指南展开状态
   const [showBinanceGuide, setShowBinanceGuide] = useState(false)
@@ -2064,34 +2070,51 @@ function ExchangeConfigModal({
             style={{ maxHeight: 'calc(100vh - 16rem)' }}
           >
             {!editingExchangeId && (
-              <div>
-                <label
-                  className="block text-sm font-semibold mb-2"
-                  style={{ color: '#EAECEF' }}
-                >
-                  {t('selectExchange', language)}
-                </label>
-                <select
-                  value={selectedExchangeId}
-                  onChange={(e) => setSelectedExchangeId(e.target.value)}
-                  className="w-full px-3 py-2 rounded"
-                  style={{
-                    background: '#0B0E11',
-                    border: '1px solid #2B3139',
-                    color: '#EAECEF',
-                  }}
-                  required
-                >
-                  <option value="">
-                    {t('pleaseSelectExchange', language)}
-                  </option>
-                  {availableExchanges.map((exchange) => (
-                    <option key={exchange.id} value={exchange.id}>
-                      {getShortName(exchange.name)} (
-                      {exchange.type.toUpperCase()})
+              <div className="space-y-3">
+                <div className="space-y-2">
+                  <div
+                    className="text-xs font-semibold uppercase tracking-wide"
+                    style={{ color: '#F0B90B' }}
+                  >
+                    {t('environmentSteps.checkTitle', language)}
+                  </div>
+                  <WebCryptoEnvironmentCheck
+                    language={language}
+                    variant="card"
+                    onStatusChange={setWebCryptoStatus}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <div
+                    className="text-xs font-semibold uppercase tracking-wide"
+                    style={{ color: '#F0B90B' }}
+                  >
+                    {t('environmentSteps.selectTitle', language)}
+                  </div>
+                  <select
+                    value={selectedExchangeId}
+                    onChange={(e) => setSelectedExchangeId(e.target.value)}
+                    className="w-full px-3 py-2 rounded"
+                    style={{
+                      background: '#0B0E11',
+                      border: '1px solid #2B3139',
+                      color: '#EAECEF',
+                    }}
+                    aria-label={t('selectExchange', language)}
+                    disabled={webCryptoStatus !== 'secure'}
+                    required
+                  >
+                    <option value="">
+                      {t('pleaseSelectExchange', language)}
                     </option>
-                  ))}
-                </select>
+                    {availableExchanges.map((exchange) => (
+                      <option key={exchange.id} value={exchange.id}>
+                        {getShortName(exchange.name)} (
+                        {exchange.type.toUpperCase()})
+                      </option>
+                    ))}
+                  </select>
+                </div>
               </div>
             )}
 
@@ -2355,39 +2378,6 @@ function ExchangeConfigModal({
                     </>
                   )}
 
-                {/* Hyperliquid 交易所的字段 */}
-                {selectedExchange.id === 'hyperliquid' && (
-                  <>
-                    <div>
-                      <label
-                        className="block text-sm font-semibold mb-2"
-                        style={{ color: '#EAECEF' }}
-                      >
-                        {t('privateKey', language)}
-                      </label>
-                      <input
-                        type="password"
-                        value={apiKey}
-                        onChange={(e) => setApiKey(e.target.value)}
-                        placeholder={t('enterPrivateKey', language)}
-                        className="w-full px-3 py-2 rounded"
-                        style={{
-                          background: '#0B0E11',
-                          border: '1px solid #2B3139',
-                          color: '#EAECEF',
-                        }}
-                        required
-                      />
-                      <div
-                        className="text-xs mt-1"
-                        style={{ color: '#848E9C' }}
-                      >
-                        {t('hyperliquidPrivateKeyDesc', language)}
-                      </div>
-                    </div>
-                  </>
-                )}
-
                 {/* Aster 交易所的字段 */}
                 {selectedExchange.id === 'aster' && (
                   <>
@@ -2608,160 +2598,6 @@ function ExchangeConfigModal({
                         style={{ color: '#848E9C' }}
                       >
                         {t('hyperliquidMainWalletAddressDesc', language)}
-                      </div>
-                    </div>
-                  </>
-                )}
-
-                {/* Aster 交易所的字段 */}
-                {selectedExchange.id === 'aster' && (
-                  <>
-                    <div>
-                      <label
-                        className="block text-sm font-semibold mb-2 flex items-center gap-2"
-                        style={{ color: '#EAECEF' }}
-                      >
-                        {t('user', language)}
-                        <Tooltip content={t('asterUserDesc', language)}>
-                          <HelpCircle
-                            className="w-4 h-4 cursor-help"
-                            style={{ color: '#F0B90B' }}
-                          />
-                        </Tooltip>
-                      </label>
-                      <input
-                        type="text"
-                        value={asterUser}
-                        onChange={(e) => setAsterUser(e.target.value)}
-                        placeholder={t('enterUser', language)}
-                        className="w-full px-3 py-2 rounded"
-                        style={{
-                          background: '#0B0E11',
-                          border: '1px solid #2B3139',
-                          color: '#EAECEF',
-                        }}
-                        required
-                      />
-                    </div>
-
-                    <div>
-                      <label
-                        className="block text-sm font-semibold mb-2 flex items-center gap-2"
-                        style={{ color: '#EAECEF' }}
-                      >
-                        {t('signer', language)}
-                        <Tooltip content={t('asterSignerDesc', language)}>
-                          <HelpCircle
-                            className="w-4 h-4 cursor-help"
-                            style={{ color: '#F0B90B' }}
-                          />
-                        </Tooltip>
-                      </label>
-                      <input
-                        type="text"
-                        value={asterSigner}
-                        onChange={(e) => setAsterSigner(e.target.value)}
-                        placeholder={t('enterSigner', language)}
-                        className="w-full px-3 py-2 rounded"
-                        style={{
-                          background: '#0B0E11',
-                          border: '1px solid #2B3139',
-                          color: '#EAECEF',
-                        }}
-                        required
-                      />
-                    </div>
-
-                    <div>
-                      <label
-                        className="block text-sm font-semibold mb-2 flex items-center gap-2"
-                        style={{ color: '#EAECEF' }}
-                      >
-                        {t('privateKey', language)}
-                        <Tooltip content={t('asterPrivateKeyDesc', language)}>
-                          <HelpCircle
-                            className="w-4 h-4 cursor-help"
-                            style={{ color: '#F0B90B' }}
-                          />
-                        </Tooltip>
-                      </label>
-                      <div className="flex flex-col gap-2">
-                        <div className="flex gap-2">
-                          <input
-                            type="text"
-                            value={maskSecret(asterPrivateKey)}
-                            readOnly
-                            placeholder={t('enterPrivateKey', language)}
-                            className="w-full px-3 py-2 rounded"
-                            style={{
-                              background: '#0B0E11',
-                              border: '1px solid #2B3139',
-                              color: '#EAECEF',
-                            }}
-                          />
-                          <button
-                            type="button"
-                            onClick={() => setSecureInputTarget('aster')}
-                            className="px-3 py-2 rounded text-xs font-semibold transition-all hover:scale-105"
-                            style={{
-                              background: '#F0B90B',
-                              color: '#000',
-                              whiteSpace: 'nowrap',
-                            }}
-                          >
-                            {asterPrivateKey
-                              ? t('secureInputReenter', language)
-                              : t('secureInputButton', language)}
-                          </button>
-                          {asterPrivateKey && (
-                            <button
-                              type="button"
-                              onClick={() => setAsterPrivateKey('')}
-                              className="px-3 py-2 rounded text-xs font-semibold transition-all hover:scale-105"
-                              style={{
-                                background: '#1B1F2B',
-                                color: '#848E9C',
-                                whiteSpace: 'nowrap',
-                              }}
-                            >
-                              {t('secureInputClear', language)}
-                            </button>
-                          )}
-                        </div>
-                        {asterPrivateKey && (
-                          <div className="text-xs" style={{ color: '#848E9C' }}>
-                            {t('secureInputHint', language)}
-                          </div>
-                        )}
-                      </div>
-                    </div>
-
-                    <div
-                      className="p-4 rounded"
-                      style={{
-                        background: 'rgba(240, 185, 11, 0.1)',
-                        border: '1px solid rgba(240, 185, 11, 0.2)',
-                      }}
-                    >
-                      <div
-                        className="text-sm font-semibold mb-2"
-                        style={{ color: '#F0B90B' }}
-                      >
-                        <span className="inline-flex items-center gap-1">
-                          <AlertTriangle className="w-4 h-4" />{' '}
-                          {t('securityWarning', language)}
-                        </span>
-                      </div>
-                      <div
-                        className="text-xs space-y-1"
-                        style={{ color: '#848E9C' }}
-                      >
-                        {selectedExchange.id === 'aster' && (
-                          <div>{t('asterUsdtWarning', language)}</div>
-                        )}
-                        <div>{t('exchangeConfigWarning1', language)}</div>
-                        <div>{t('exchangeConfigWarning2', language)}</div>
-                        <div>{t('exchangeConfigWarning3', language)}</div>
                       </div>
                     </div>
                   </>
