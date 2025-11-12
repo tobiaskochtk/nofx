@@ -36,5 +36,19 @@ export function loadDerivsConfig(configPath = path.resolve(process.cwd(), '../..
   if (!parsed.derivs_v1.enabled) {
     throw new Error('derivs_v1.enabled=false; nothing to ingest')
   }
-  return parsed.derivs_v1 as DerivsConfig
+  const cfg = parsed.derivs_v1 as DerivsConfig
+  const { DERIVS_REDIS_ADDR, DERIVS_REDIS_PASSWORD, DERIVS_REDIS_DB, DERIVS_REDIS_KEYSPACE } = process.env
+  if (DERIVS_REDIS_ADDR) {
+    cfg.cache.redis_addr = DERIVS_REDIS_ADDR
+  }
+  if (DERIVS_REDIS_PASSWORD) {
+    cfg.cache.redis_password = DERIVS_REDIS_PASSWORD
+  }
+  if (DERIVS_REDIS_DB && !Number.isNaN(Number(DERIVS_REDIS_DB))) {
+    cfg.cache.redis_db = Number(DERIVS_REDIS_DB)
+  }
+  if (DERIVS_REDIS_KEYSPACE) {
+    cfg.cache.keyspace = DERIVS_REDIS_KEYSPACE
+  }
+  return cfg
 }

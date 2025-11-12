@@ -4,12 +4,14 @@ import (
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
+	"log"
 	"math"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
 
+	"nofx/internal/snapshot"
 	"nofx/pkg/types"
 )
 
@@ -105,9 +107,31 @@ func Get(symbol string) (*Data, error) {
 		IntradaySeries:    intradayData,
 		LongerTermContext: longerTermData,
 	}
+	var derivsTarget *types.DerivsFeatures
 	if snap := buildDerivsSnapshot(symbol); snap != nil {
 		data.Snapshot = snap
+		if snap.Features.Derivs != nil {
+			derivsTarget = snap.Features.Derivs
+		}
 	}
+	if data.Snapshot == nil {
+		data.Snapshot = &snapshot.Snapshot{Symbol: symbol}
+	}
+	if derivsTarget == nil {
+		if data.Snapshot.Features.Derivs == nil {
+			data.Snapshot.Features.Derivs = &types.DerivsFeatures{}
+		}
+		derivsTarget = data.Snapshot.Features.Derivs
+	}
+	if err := enrichStructuralFeatures(symbol, klines3m, derivsTarget); err != nil {
+		log.Printf("⚠️ enrichStructuralFeatures %s failed: %v", symbol, err)
+	}
+	log.Printf("🔍 [DEBUG] Before enrichMicrostructure: symbol=%s, klines3m len=%d, derivsTarget==nil: %v", symbol, len(klines3m), derivsTarget == nil)
+	if err := enrichMicrostructureFeatures(symbol, klines3m, derivsTarget); err != nil {
+		log.Printf("⚠️ enrichMicrostructureFeatures %s failed: %v", symbol, err)
+	}
+	log.Printf("🔍 [DEBUG] After enrichMicrostructure: symbol=%s", symbol)
+
 	return data, nil
 }
 
@@ -581,17 +605,17 @@ func safeString(v *string) string {
 
 // Normalize 标准化symbol,确保是USDT交易对
 func Normalize(symbol string) string {
-    symbol = strings.ToUpper(strings.TrimSpace(symbol))
-    // 如果以USDT结尾，直接返回
-    if strings.HasSuffix(symbol, "USDT") {
-        return symbol
-    }
-    // 如果以USDC结尾，转换为USDT（用于统一从Binance拉取行情）
-    if strings.HasSuffix(symbol, "USDC") {
-        return strings.TrimSuffix(symbol, "USDC") + "USDT"
-    }
-    // 兼容 Hyperliquid 等仅给出基础币种（如 BTC、BNB）
-    return symbol + "USDT"
+	symbol = strings.ToUpper(strings.TrimSpace(symbol))
+	// 如果以USDT结尾，直接返回
+	if strings.HasSuffix(symbol, "USDT") {
+		return symbol
+	}
+	// 如果以USDC结尾，转换为USDT（用于统一从Binance拉取行情）
+	if strings.HasSuffix(symbol, "USDC") {
+		return strings.TrimSuffix(symbol, "USDC") + "USDT"
+	}
+	// 兼容 Hyperliquid 等仅给出基础币种（如 BTC、BNB）
+	return symbol + "USDT"
 }
 
 // parseFloat 解析float值

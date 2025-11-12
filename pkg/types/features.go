@@ -60,7 +60,36 @@ type DerivsFeatures struct {
 	Atr3m                 *float64 `json:"atr_3m,omitempty"`
 	ConfidenceLiq3m       *float64 `json:"confidence_liq_3m,omitempty"`
 
-	// Optional confirmation TF (15m)
+	// Structural Feature 6 (Anchored VWAP) - 3m
+	AVWAPUpName3m         *string  `json:"avwap_up_name_3m,omitempty"`
+	AVWAPUpPrice3m        *float64 `json:"avwap_up_price_3m,omitempty"`
+	AVWAPUpDistAtr3m      *float64 `json:"avwap_up_dist_atr_3m,omitempty"`
+	AVWAPUpBand1DistAtr3m *float64 `json:"avwap_up_band1_dist_atr_3m,omitempty"`
+	AVWAPDnName3m         *string  `json:"avwap_dn_name_3m,omitempty"`
+	AVWAPDnPrice3m        *float64 `json:"avwap_dn_price_3m,omitempty"`
+	AVWAPDnDistAtr3m      *float64 `json:"avwap_dn_dist_atr_3m,omitempty"`
+	AVWAPDnBand1DistAtr3m *float64 `json:"avwap_dn_band1_dist_atr_3m,omitempty"`
+	AVWAPReclaimUp3m      *int     `json:"avwap_reclaim_up_3m,omitempty"`
+	AVWAPRejectionDn3m    *int     `json:"avwap_rejection_down_3m,omitempty"`
+	AVWAPConfluenceBull3m *int     `json:"avwap_confluence_bull_3m,omitempty"`
+	AVWAPConfluenceBear3m *int     `json:"avwap_confluence_bear_3m,omitempty"`
+	AVWAPBias3m           *string  `json:"avwap_bias_3m,omitempty"`
+	ConfidenceAVWAP3m     *float64 `json:"confidence_avwap_3m,omitempty"`
+
+	// Structural Feature 7 (Volatility & Squeeze) - 3m
+	BBW3m              *float64 `json:"bbw_3m,omitempty"`
+	KCWidth3m          *float64 `json:"kc_width_3m,omitempty"`
+	BBWPctRank3m       *float64 `json:"bbw_pct_rank_3m,omitempty"`
+	SqueezeOn3m        *int     `json:"squeeze_on_3m,omitempty"`
+	SqueezePersist3m   *int     `json:"squeeze_persistence_3m,omitempty"`
+	SqueezeRelease3m   *int     `json:"squeeze_release_3m,omitempty"`
+	BBWExpansionRate3m *float64 `json:"bbw_expansion_rate_3m,omitempty"`
+	RvRatio3m          *float64 `json:"rv_ratio_3m,omitempty"`
+	RvRatioZ3m         *float64 `json:"rv_ratio_z_3m,omitempty"`
+	VolRegime3m        *string  `json:"vol_regime_3m,omitempty"`
+	ConfidenceVol3m    *float64 `json:"confidence_vol_3m,omitempty"`
+
+	// Optional confirmation TF (15m) - microstructure spillover
 	CVDNotionalZ15mShort *float64 `json:"cvd_notional_z_15m_short,omitempty"`
 	CVDNotionalZ15mLong  *float64 `json:"cvd_notional_z_15m_long,omitempty"`
 	ImbNotionalZ15mShort *float64 `json:"imb_notional_z_15m_short,omitempty"`
@@ -73,4 +102,20 @@ type DerivsFeatures struct {
 	PreferDirection15m   *string  `json:"prefer_direction_15m,omitempty"`
 	ConfidenceCVD15m     *float64 `json:"confidence_cvd_15m,omitempty"`
 	ConfidenceLiq15m     *float64 `json:"confidence_liq_15m,omitempty"`
+
+	// Optional confirmation TF (15m) - structural
+	AVWAPUpName15m   *string  `json:"avwap_up_name_15m,omitempty"`
+	AVWAPUpDistAtr15m *float64 `json:"avwap_up_dist_atr_15m,omitempty"`
+	AVWAPDnName15m   *string  `json:"avwap_dn_name_15m,omitempty"`
+	AVWAPDnDistAtr15m *float64 `json:"avwap_dn_dist_atr_15m,omitempty"`
+	AVWAPReclaimUp15m  *int     `json:"avwap_reclaim_up_15m,omitempty"`
+	AVWAPRejectionDn15m *int     `json:"avwap_rejection_down_15m,omitempty"`
+	AVWAPBias15m       *string  `json:"avwap_bias_15m,omitempty"`
+	ConfidenceAVWAP15m *float64 `json:"confidence_avwap_15m,omitempty"`
+	SqueezeOn15m       *int     `json:"squeeze_on_15m,omitempty"`
+	SqueezeRelease15m  *int     `json:"squeeze_release_15m,omitempty"`
+	BBWPctRank15m      *float64 `json:"bbw_pct_rank_15m,omitempty"`
+	RvRatio15m         *float64 `json:"rv_ratio_15m,omitempty"`
+	VolRegime15m       *string  `json:"vol_regime_15m,omitempty"`
+	ConfidenceVol15m   *float64 `json:"confidence_vol_15m,omitempty"`
 }

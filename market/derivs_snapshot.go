@@ -50,7 +50,9 @@ func buildDerivsSnapshot(symbol string) *snapshot.Snapshot {
 		return nil
 	}
 	log.Printf("🔍 [Derivs] Building snapshot for symbol: %s", symbol)
+	log.Printf("🔍 [Derivs] About to call snapshotBld.Build(%s)...", symbol)
 	snap, err := snapshotBld.Build(symbol)
+	log.Printf("🔍 [Derivs] snapshotBld.Build(%s) returned: snap==nil: %t, err: %v", symbol, snap == nil, err)
 	if err != nil {
 		log.Printf("⚠️ 构建衍生品特征失败 (%s): %v", symbol, err)
 		return nil

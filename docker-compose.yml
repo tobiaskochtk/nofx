@@ -29,6 +29,7 @@ services:
       - JWT_SECRET=${JWT_SECRET}  # JWT认证密钥
     depends_on:
       - redis
+      - derivs-ingest
     networks:
       - nofx-network
     healthcheck:
@@ -95,6 +96,8 @@ services:
     restart: unless-stopped
     environment:
       - NODE_ENV=production
+      - DERIVS_REDIS_ADDR=redis:6379
+      - DERIVS_REDIS_KEYSPACE=derivs:v1
     working_dir: /app/packages/ingest
     command: ["npm", "run", "start:derivs"]
     volumes:

@@ -31,6 +31,8 @@ var (
 
 const microstructureHeader = "###############################\n# MICROSTRUCTURE ADD-ONS (F4, F5)\n# Decision TF: 3m (base); Optional confirmation TF: 15m\n# All floats rounded to 3–6 decimals; print null if unavailable\n# Z-windows: short=90 buckets, long=360 buckets; LinReg windows: short=20, mid=60 buckets\n###############################\n\n"
 
+const structuralHeader = "###############################\n# STRUCTURAL ADD-ONS (F6, F7)\n# Decision TF: 3m (base); optional confirmation TF: 15m\n# All floats rounded to 3–6 decimals; print null if unavailable\n###############################\n\n"
+
 const aiMicrostructureUsageGuide = "###############################\n# AI TRADING AGENT — HOW TO USE THESE NEW FIELDS (concise guards, no chain-of-thought)\n###############################\n- If liq_risk_up==1 and you would enter_long → downweight or avoid; set avoid_long=1 in your internal policy.\n- If liq_risk_down==1 and you would enter_short → downweight or avoid; set avoid_short=1.\n- Prefer entries when:\n  (a) bullish divergence (div_bull_*==1) aligns with prefer_direction=prefer_longs AND both dist_up_atr, dist_dn_atr ≥ 1.0,\n  or (b) bearish divergence aligns with prefer_shorts with same distance condition.\n- Scale size with confidence scores: size_pct ≤ 0.25 if min(confidence_cvd, confidence_liq) < 0.3; otherwise proportionally to the lower of the two.\n- When any 3m critical field is null/NaN, prefer HOLD unless 15m confirms with confidence ≥ 0.7.\n\n"
 
 // PositionInfo 持仓信息
@@ -399,6 +401,8 @@ func buildSystemPrompt(ctx *Context, templateName string) string {
 func buildUserPrompt(ctx *Context) string {
 	var sb strings.Builder
 	microstructurePrinted := false
+	structuralPrinted := false
+	candidateStructuralPrinted := false
 
 	// 系统状态
 	sb.WriteString(fmt.Sprintf("时间: %s | 周期: #%d | 运行: %d分钟\n\n",
@@ -467,6 +471,15 @@ func buildUserPrompt(ctx *Context) string {
 		microstructurePrinted = true
 	}
 
+	if block := formatPositionsStructural(ctx, positionSymbolsForMicro); block != "" {
+		if !structuralPrinted {
+			sb.WriteString(structuralHeader)
+			structuralPrinted = true
+		}
+		sb.WriteString(block)
+		sb.WriteString("\n")
+	}
+
 	// 候选币种（完整市场数据）
 	// 先统计实际可展示的候选币数量，避免显示与实际不符的(0个)提示
 	availableCandidates := make([]CandidateCoin, 0, len(ctx.CandidateCoins))
@@ -501,6 +514,21 @@ func buildUserPrompt(ctx *Context) string {
 			}
 			sb.WriteString(candidateBlock)
 			sb.WriteString("\n")
+		}
+
+		if structuralBlock := formatCandidateStructural(coin.Symbol, marketData); structuralBlock != "" {
+			if !structuralPrinted {
+				sb.WriteString(structuralHeader)
+				structuralPrinted = true
+			}
+			if !candidateStructuralPrinted {
+				sb.WriteString("## 候选币种 · Structural (repeat per asset after your existing fields)\n\n")
+				candidateStructuralPrinted = true
+			}
+			sb.WriteString(structuralBlock)
+			if !strings.HasSuffix(structuralBlock, "\n\n") {
+				sb.WriteString("\n")
+			}
 		}
 	}
 	sb.WriteString("\n")
@@ -651,6 +679,166 @@ func formatCandidateMicrostructure(symbol string, data *market.Data) string {
 	return sb.String()
 }
 
+func formatPositionsStructural(ctx *Context, symbols []string) string {
+	if len(symbols) == 0 {
+		return ""
+	}
+	var feature6Blocks []string
+	var feature7Blocks []string
+	var confirmationBlocks []string
+	for _, symbol := range symbols {
+		data := ctx.MarketDataMap[symbol]
+		if data == nil {
+			continue
+		}
+		derivs := microDerivs(data)
+		feature6Blocks = append(feature6Blocks, formatPositionFeature6(symbol, derivs))
+		feature7Blocks = append(feature7Blocks, formatPositionFeature7(symbol, derivs))
+		confirmationBlocks = append(confirmationBlocks, formatStructuralConfirmation(symbol, derivs))
+	}
+	if len(feature6Blocks) == 0 && len(feature7Blocks) == 0 && len(confirmationBlocks) == 0 {
+		return ""
+	}
+	var sb strings.Builder
+	sb.WriteString("## 当前持仓 · Structural (Feature 6 & 7)\n\n")
+	sb.WriteString("### Feature 6 — Anchored VWAPs (AVWAP) from Key Events (3m)\n")
+	sb.WriteString("# Definitions:\n")
+	sb.WriteString("# - AVWAP(anchor_ts) = Σ(P*V)/ΣV since anchor_ts (1m bars or trades)\n")
+	sb.WriteString("# - Bands: ±k·σ where σ = stdev(Close − AVWAP) over W_BAND bars (default W_BAND=200, k=1)\n")
+	sb.WriteString("# - Anchors considered: ATH, ATL, YTD_HI, YTD_LO, WEEK_OPEN, MONTH_OPEN, DAILY_OPEN, SWING_HI, SWING_LO\n")
+	sb.WriteString("# - Distances reported in ATR units for robustness; “near” if < 0.5 ATR\n\n")
+	for _, block := range feature6Blocks {
+		sb.WriteString(block)
+		if !strings.HasSuffix(block, "\n\n") {
+			sb.WriteString("\n")
+		}
+	}
+	sb.WriteString("### Feature 7 — Volatility Regime & Squeeze (3m)\n")
+	sb.WriteString("# Definitions:\n")
+	sb.WriteString("# - BBW = (BBU − BBL) / mid, with Bollinger (len=20, k=2)\n")
+	sb.WriteString("# - KC_width = 2 * KeltnerFactor * EMA(TR, len=20), KeltnerFactor=1.5\n")
+	sb.WriteString("# - squeeze_on = 1 if BBW < k_squeeze * KC_width (default k_squeeze=1.0)\n")
+	sb.WriteString("# - rv_ratio = realized_vol_short / realized_vol_long (short=60min=20 bars; long=1d=480 bars; stdev of log returns)\n")
+	sb.WriteString("# - Regime via BBW percentile over lookback (e.g., 30d on 3m ≈ 14,400 bars) + squeeze flags\n\n")
+	for _, block := range feature7Blocks {
+		sb.WriteString(block)
+		if !strings.HasSuffix(block, "\n\n") {
+			sb.WriteString("\n")
+		}
+	}
+	sb.WriteString("# Optional confirmation TF (15m) — mirror key fields\n\n")
+	for _, block := range confirmationBlocks {
+		sb.WriteString(block)
+		if !strings.HasSuffix(block, "\n\n") {
+			sb.WriteString("\n")
+		}
+	}
+	return sb.String()
+}
+
+func formatPositionFeature6(symbol string, f *types.DerivsFeatures) string {
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf("AVWAP (3m) — %s:\n", symbol))
+	sb.WriteString(fmt.Sprintf("Nearest AVWAP above: name=%s price=%s dist_atr=%s band(+1σ)_dist_atr=%s\n",
+		microStringValue(f.AVWAPUpName3m),
+		microFloat(f.AVWAPUpPrice3m, 4),
+		microFloat(f.AVWAPUpDistAtr3m, 3),
+		microFloat(f.AVWAPUpBand1DistAtr3m, 3)))
+	sb.WriteString(fmt.Sprintf("Nearest AVWAP below: name=%s price=%s dist_atr=%s band(−1σ)_dist_atr=%s\n",
+		microStringValue(f.AVWAPDnName3m),
+		microFloat(f.AVWAPDnPrice3m, 4),
+		microFloat(f.AVWAPDnDistAtr3m, 3),
+		microFloat(f.AVWAPDnBand1DistAtr3m, 3)))
+	sb.WriteString(fmt.Sprintf("Reclaim/Reject: reclaim_up=%s rejection_down=%s\n",
+		microInt(f.AVWAPReclaimUp3m), microInt(f.AVWAPRejectionDn3m)))
+	sb.WriteString(fmt.Sprintf("Confluence: bull_count=%s bear_count=%s bias=%s\n",
+		microInt(f.AVWAPConfluenceBull3m), microInt(f.AVWAPConfluenceBear3m), microStringValue(f.AVWAPBias3m)))
+	sb.WriteString(fmt.Sprintf("confidence_avwap (0..1): %s\n\n", microFloat(f.ConfidenceAVWAP3m, 3)))
+	return sb.String()
+}
+
+func formatPositionFeature7(symbol string, f *types.DerivsFeatures) string {
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf("Volatility regime (3m) — %s:\n", symbol))
+	sb.WriteString(fmt.Sprintf("BBW=%s KC_width=%s bbw_pct_rank=%s squeeze_on=%s squeeze_persistence_bars=%s\n",
+		microFloat(f.BBW3m, 4),
+		microFloat(f.KCWidth3m, 4),
+		microPercentRaw(f.BBWPctRank3m, 2),
+		microInt(f.SqueezeOn3m),
+		microInt(f.SqueezePersist3m)))
+	sb.WriteString(fmt.Sprintf("squeeze_release=%s expansion_rate=%s\n",
+		microInt(f.SqueezeRelease3m), microFloat(f.BBWExpansionRate3m, 4)))
+	sb.WriteString(fmt.Sprintf("rv_ratio=%s rv_ratio_z=%s regime=%s\n",
+		microFloat(f.RvRatio3m, 4),
+		microFloat(f.RvRatioZ3m, 3),
+		microStringValue(f.VolRegime3m)))
+	sb.WriteString(fmt.Sprintf("confidence_vol (0..1): %s\n\n", microFloat(f.ConfidenceVol3m, 3)))
+	return sb.String()
+}
+
+func formatStructuralConfirmation(symbol string, f *types.DerivsFeatures) string {
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf("[15m AVWAP — %s]\n", symbol))
+	sb.WriteString(fmt.Sprintf("up_name=%s dist_atr=%s | dn_name=%s dist_atr=%s\n",
+		microStringValue(f.AVWAPUpName15m),
+		microFloat(f.AVWAPUpDistAtr15m, 3),
+		microStringValue(f.AVWAPDnName15m),
+		microFloat(f.AVWAPDnDistAtr15m, 3)))
+	sb.WriteString(fmt.Sprintf("reclaim_up=%s rejection_down=%s bias=%s\n",
+		microInt(f.AVWAPReclaimUp15m), microInt(f.AVWAPRejectionDn15m), microStringValue(f.AVWAPBias15m)))
+	sb.WriteString(fmt.Sprintf("confidence_avwap=%s\n", microFloat(f.ConfidenceAVWAP15m, 3)))
+	sb.WriteString(fmt.Sprintf("[15m Volatility — %s]\n", symbol))
+	sb.WriteString(fmt.Sprintf("squeeze_on=%s release=%s bbw_pct_rank=%s rv_ratio=%s regime=%s\n",
+		microInt(f.SqueezeOn15m),
+		microInt(f.SqueezeRelease15m),
+		microPercentRaw(f.BBWPctRank15m, 2),
+		microFloat(f.RvRatio15m, 4),
+		microStringValue(f.VolRegime15m)))
+	sb.WriteString(fmt.Sprintf("confidence_vol=%s\n\n", microFloat(f.ConfidenceVol15m, 3)))
+	return sb.String()
+}
+
+func formatCandidateStructural(symbol string, data *market.Data) string {
+	derivs := microDerivs(data)
+	if derivs == nil {
+		return ""
+	}
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf("### %s\n\n", symbol))
+	sb.WriteString("Anchored VWAPs — Feature 6 (3m):\n")
+	sb.WriteString(fmt.Sprintf("up_name=%s price=%s dist_atr=%s band(+1σ)=%s; dn_name=%s price=%s dist_atr=%s band(-1σ)=%s\n",
+		microStringValue(derivs.AVWAPUpName3m),
+		microFloat(derivs.AVWAPUpPrice3m, 4),
+		microFloat(derivs.AVWAPUpDistAtr3m, 3),
+		microFloat(derivs.AVWAPUpBand1DistAtr3m, 3),
+		microStringValue(derivs.AVWAPDnName3m),
+		microFloat(derivs.AVWAPDnPrice3m, 4),
+		microFloat(derivs.AVWAPDnDistAtr3m, 3),
+		microFloat(derivs.AVWAPDnBand1DistAtr3m, 3)))
+	sb.WriteString(fmt.Sprintf("reclaim_up=%s rejection_down=%s bias=%s\n",
+		microInt(derivs.AVWAPReclaimUp3m), microInt(derivs.AVWAPRejectionDn3m), microStringValue(derivs.AVWAPBias3m)))
+	sb.WriteString(fmt.Sprintf("confluence: bull=%s bear=%s conf=%s\n",
+		microInt(derivs.AVWAPConfluenceBull3m), microInt(derivs.AVWAPConfluenceBear3m), microFloat(derivs.ConfidenceAVWAP3m, 3)))
+	sb.WriteString("\nVolatility Regime & Squeeze — Feature 7 (3m):\n")
+	sb.WriteString(fmt.Sprintf("BBW=%s KC_width=%s bbw_pct_rank=%s squeeze_on=%s release=%s\n",
+		microFloat(derivs.BBW3m, 4),
+		microFloat(derivs.KCWidth3m, 4),
+		microPercentRaw(derivs.BBWPctRank3m, 2),
+		microInt(derivs.SqueezeOn3m),
+		microInt(derivs.SqueezeRelease3m)))
+	sb.WriteString(fmt.Sprintf("rv_ratio=%s rv_ratio_z=%s regime=%s conf=%s\n\n",
+		microFloat(derivs.RvRatio3m, 4),
+		microFloat(derivs.RvRatioZ3m, 3),
+		microStringValue(derivs.VolRegime3m),
+		microFloat(derivs.ConfidenceVol3m, 3)))
+	sb.WriteString("# (Optional) 15m confirmation\n")
+	sb.WriteString(fmt.Sprintf("[15m] AVWAP bias=%s; squeeze_on=%s; regime=%s\n\n",
+		microStringValue(derivs.AVWAPBias15m),
+		microInt(derivs.SqueezeOn15m),
+		microStringValue(derivs.VolRegime15m)))
+	return sb.String()
+}
+
 func microDerivs(data *market.Data) *types.DerivsFeatures {
 	if data != nil && data.Snapshot != nil && data.Snapshot.Features.Derivs != nil {
 		return data.Snapshot.Features.Derivs
@@ -672,6 +860,10 @@ func microPercent(v *float64, decimals int) string {
 		return value
 	}
 	return value + "%"
+}
+
+func microPercentRaw(v *float64, decimals int) string {
+	return microPercent(v, decimals)
 }
 
 func microInt(v *int) string {

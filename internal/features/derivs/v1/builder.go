@@ -2,6 +2,7 @@ package derivsv1
 
 import (
 	"fmt"
+	"log"
 	"math"
 
 	"nofx/config"
@@ -37,13 +38,19 @@ func NewBuilder(cfg *config.DerivsV1Config, store Store) *Builder {
 
 // Build assembles DerivsFeatures for a normalized symbol (e.g., LINKUSDT).
 func (b *Builder) Build(symbol string) (*types.DerivsFeatures, error) {
+	log.Printf("[Builder.Build] ENTRY: %s", symbol)
 	if b == nil || b.cfg == nil || !b.cfg.Enabled {
+		log.Printf("[Builder.Build] %s: early return (nil builder or disabled)", symbol)
 		return nil, nil
 	}
 	norm := SanitizeSymbol(symbol)
+	log.Printf("[Builder.Build] %s: normalized to %s", symbol, norm)
+	
 	if _, ok := b.enabledSymbols[norm]; !ok {
+		log.Printf("[Builder.Build] %s: NOT in enabled list (have %d symbols)", norm, len(b.enabledSymbols))
 		return nil, nil
 	}
+	log.Printf("[Builder.Build] %s: proceeding with feature computation", norm)
 
 	oiFeatures, err := ComputeOIFeatures(OIFeatureConfig{
 		Symbol:          norm,
@@ -178,6 +185,56 @@ func mergeFeatures(parts ...map[string]interface{}) *types.DerivsFeatures {
 				feat.Atr3m = toFloatPointer(raw)
 			case "confidence_liq_3m":
 				feat.ConfidenceLiq3m = toFloatPointer(raw)
+			case "avwap_up_name_3m":
+				feat.AVWAPUpName3m = toStringPointer(raw)
+			case "avwap_up_price_3m":
+				feat.AVWAPUpPrice3m = toFloatPointer(raw)
+			case "avwap_up_dist_atr_3m":
+				feat.AVWAPUpDistAtr3m = toFloatPointer(raw)
+			case "avwap_up_band1_dist_atr_3m":
+				feat.AVWAPUpBand1DistAtr3m = toFloatPointer(raw)
+			case "avwap_dn_name_3m":
+				feat.AVWAPDnName3m = toStringPointer(raw)
+			case "avwap_dn_price_3m":
+				feat.AVWAPDnPrice3m = toFloatPointer(raw)
+			case "avwap_dn_dist_atr_3m":
+				feat.AVWAPDnDistAtr3m = toFloatPointer(raw)
+			case "avwap_dn_band1_dist_atr_3m":
+				feat.AVWAPDnBand1DistAtr3m = toFloatPointer(raw)
+			case "avwap_reclaim_up_3m":
+				feat.AVWAPReclaimUp3m = toIntPointer(raw)
+			case "avwap_rejection_down_3m":
+				feat.AVWAPRejectionDn3m = toIntPointer(raw)
+			case "avwap_confluence_bull_3m":
+				feat.AVWAPConfluenceBull3m = toIntPointer(raw)
+			case "avwap_confluence_bear_3m":
+				feat.AVWAPConfluenceBear3m = toIntPointer(raw)
+			case "avwap_bias_3m":
+				feat.AVWAPBias3m = toStringPointer(raw)
+			case "confidence_avwap_3m":
+				feat.ConfidenceAVWAP3m = toFloatPointer(raw)
+			case "bbw_3m":
+				feat.BBW3m = toFloatPointer(raw)
+			case "kc_width_3m":
+				feat.KCWidth3m = toFloatPointer(raw)
+			case "bbw_pct_rank_3m":
+				feat.BBWPctRank3m = toFloatPointer(raw)
+			case "squeeze_on_3m":
+				feat.SqueezeOn3m = toIntPointer(raw)
+			case "squeeze_persistence_3m":
+				feat.SqueezePersist3m = toIntPointer(raw)
+			case "squeeze_release_3m":
+				feat.SqueezeRelease3m = toIntPointer(raw)
+			case "bbw_expansion_rate_3m":
+				feat.BBWExpansionRate3m = toFloatPointer(raw)
+			case "rv_ratio_3m":
+				feat.RvRatio3m = toFloatPointer(raw)
+			case "rv_ratio_z_3m":
+				feat.RvRatioZ3m = toFloatPointer(raw)
+			case "vol_regime_3m":
+				feat.VolRegime3m = toStringPointer(raw)
+			case "confidence_vol_3m":
+				feat.ConfidenceVol3m = toFloatPointer(raw)
 			case "cvd_notional_z_15m_short":
 				feat.CVDNotionalZ15mShort = toFloatPointer(raw)
 			case "cvd_notional_z_15m_long":
@@ -202,6 +259,34 @@ func mergeFeatures(parts ...map[string]interface{}) *types.DerivsFeatures {
 				feat.ConfidenceCVD15m = toFloatPointer(raw)
 			case "confidence_liq_15m":
 				feat.ConfidenceLiq15m = toFloatPointer(raw)
+			case "avwap_up_name_15m":
+				feat.AVWAPUpName15m = toStringPointer(raw)
+			case "avwap_up_dist_atr_15m":
+				feat.AVWAPUpDistAtr15m = toFloatPointer(raw)
+			case "avwap_dn_name_15m":
+				feat.AVWAPDnName15m = toStringPointer(raw)
+			case "avwap_dn_dist_atr_15m":
+				feat.AVWAPDnDistAtr15m = toFloatPointer(raw)
+			case "avwap_reclaim_up_15m":
+				feat.AVWAPReclaimUp15m = toIntPointer(raw)
+			case "avwap_rejection_down_15m":
+				feat.AVWAPRejectionDn15m = toIntPointer(raw)
+			case "avwap_bias_15m":
+				feat.AVWAPBias15m = toStringPointer(raw)
+			case "confidence_avwap_15m":
+				feat.ConfidenceAVWAP15m = toFloatPointer(raw)
+			case "squeeze_on_15m":
+				feat.SqueezeOn15m = toIntPointer(raw)
+			case "squeeze_release_15m":
+				feat.SqueezeRelease15m = toIntPointer(raw)
+			case "bbw_pct_rank_15m":
+				feat.BBWPctRank15m = toFloatPointer(raw)
+			case "rv_ratio_15m":
+				feat.RvRatio15m = toFloatPointer(raw)
+			case "vol_regime_15m":
+				feat.VolRegime15m = toStringPointer(raw)
+			case "confidence_vol_15m":
+				feat.ConfidenceVol15m = toFloatPointer(raw)
 			}
 		}
 	}

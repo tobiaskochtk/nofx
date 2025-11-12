@@ -367,6 +367,16 @@ Open your browser and visit: **http://localhost:3000**
 ./start.sh restart   # Restart services
 ```
 
+#### Derivatives Cache (Redis + Ingest) for Local Tools
+
+If you want to run local helpers such as `go run cmd/test_derivs`, make sure the derivatives cache pipeline is up. We provide a helper script that launches Redis plus the ingest worker inside Docker:
+
+```bash
+./scripts/start_local_derivs_cache.sh
+```
+
+This keeps the cache refreshed automatically so any host-side commands (Go binaries, tests, etc.) can read populated derivatives data without starting extra services manually.
+
 **📖 For detailed Docker deployment guide, troubleshooting, and advanced configuration:**
 - **English**: See [docs/getting-started/docker-deploy.en.md](docs/getting-started/docker-deploy.en.md)
 - **中文**: 查看 [docs/getting-started/docker-deploy.zh-CN.md](docs/getting-started/docker-deploy.zh-CN.md)

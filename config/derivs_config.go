@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strconv"
 
 	"gopkg.in/yaml.v3"
 )
@@ -59,8 +60,22 @@ func LoadDerivsV1Config(path string) (*DerivsV1Config, error) {
 		return nil, fmt.Errorf("parse derivs config: %w", err)
 	}
 	cfg := &wrapper.DerivsV1
+	if envAddr := os.Getenv("DERIVS_REDIS_ADDR"); envAddr != "" {
+		cfg.Cache.RedisAddr = envAddr
+	}
 	if cfg.Cache.RedisAddr == "" {
 		cfg.Cache.RedisAddr = "127.0.0.1:6379"
+	}
+	if envPass := os.Getenv("DERIVS_REDIS_PASSWORD"); envPass != "" {
+		cfg.Cache.RedisPassword = envPass
+	}
+	if envDB := os.Getenv("DERIVS_REDIS_DB"); envDB != "" {
+		if db, err := strconv.Atoi(envDB); err == nil {
+			cfg.Cache.RedisDB = db
+		}
+	}
+	if envKeyspace := os.Getenv("DERIVS_REDIS_KEYSPACE"); envKeyspace != "" {
+		cfg.Cache.Keyspace = envKeyspace
 	}
 	if cfg.Cache.Keyspace == "" {
 		cfg.Cache.Keyspace = "derivs:v1"
