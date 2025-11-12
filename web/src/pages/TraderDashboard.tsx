@@ -126,7 +126,7 @@ export default function TraderDashboard() {
     user && token && selectedTraderId
       ? `decisions/latest-${selectedTraderId}-${decisionLimit}`
       : null,
-    () => api.getLatestDecisions(selectedTraderId, decisionLimit),
+    () => api.getLatestDecisions(selectedTraderId),
     {
       refreshInterval: 30000,
       revalidateOnFocus: false,

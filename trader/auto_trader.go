@@ -1523,7 +1523,7 @@ func (at *AutoTrader) executePartialCloseWithRecord(decision *decision.Decision,
 		actionRecord.OrderID = orderID
 	}
 
-	remainingQuantity := totalQuantity - filledQuantity
+	remainingQuantity = totalQuantity - filledQuantity
 	log.Printf("  ✓ 部分平仓成功: 平仓 %.4f (%.1f%%), 剩余 %.4f",
 		filledQuantity, decision.ClosePercentage, remainingQuantity)
 
