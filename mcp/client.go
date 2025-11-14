@@ -79,7 +79,7 @@ func (client *Client) SetAPIKey(apiKey, apiURL, customModel string) {
 		client.UseFullURL = false
 	}
 
-	client.Model = modelName
+	client.Model = customModel
 	// 自定义API也使用较长的超时时间，避免因模型推理慢导致超时
 	client.Timeout = 300 * time.Second
 }

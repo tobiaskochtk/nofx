@@ -93,24 +93,19 @@ export function ComparisonChart({ traders }: ComparisonChartProps) {
             hour: '2-digit',
             minute: '2-digit',
           })
-          timestampMap.set(ts, {
-            timestamp: ts,
-            time,
-            traders: new Map(),
-          })
-        }
-
-        // 使用后端已经计算好的 pnl_pct
-        const pnlPct = point.pnl_pct || 0
-
-        timestampMap.get(ts)!.traders.set(trader.trader_id, {
-          pnl_pct: point.total_pnl_pct || 0,
-          equity: point.total_equity,
+        timestampMap.set(ts, {
+          timestamp: ts,
+          time,
+          traders: new Map(),
         })
+      }
+
+      timestampMap.get(ts)!.traders.set(trader.trader_id, {
+        pnl_pct: point.total_pnl_pct || 0,
+        equity: point.total_equity,
       })
     })
-
-    // 按时间戳排序，转换为数组
+  })    // 按时间戳排序，转换为数组
     const combined = Array.from(timestampMap.entries())
       .sort(([tsA], [tsB]) => new Date(tsA).getTime() - new Date(tsB).getTime())
       .map(([ts, data], index) => {

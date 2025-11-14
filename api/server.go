@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
-	"math"
 	"net"
 	"net/http"
 	"nofx/auth"
@@ -1731,10 +1730,10 @@ func (s *Server) handleEquityHistory(c *gin.Context) {
 		totalEquity := record.AccountState.TotalBalance
 
 		// 计算盈亏：从当前净值减去初始余额
-		actualTotalPnL := totalEquity - initialBalance
+		actualTotalPnL := totalEquity - base
 		totalPnLPct := 0.0
-		if initialBalance > 0 {
-			totalPnLPct = (actualTotalPnL / initialBalance) * 100
+		if base > 0 {
+			totalPnLPct = (actualTotalPnL / base) * 100
 		}
 
 		history = append(history, EquityPoint{

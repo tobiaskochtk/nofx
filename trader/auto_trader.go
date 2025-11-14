@@ -556,6 +556,7 @@ func (at *AutoTrader) buildTradingContext() (*decision.Context, error) {
 
 	var positionInfos []decision.PositionInfo
 	totalMarginUsed := 0.0
+	totalUnrealizedProfit := 0.0
 
 	// 当前持仓的key集合（用于清理已平仓的记录）
 	currentPositionKeys := make(map[string]bool)
@@ -577,6 +578,7 @@ func (at *AutoTrader) buildTradingContext() (*decision.Context, error) {
 
 		unrealizedPnl := pos["unRealizedProfit"].(float64)
 		liquidationPrice := pos["liquidationPrice"].(float64)
+		totalUnrealizedProfit += unrealizedPnl
 
 		// 计算占用保证金（估算）
 		leverage := 10 // 默认值，实际应该从持仓信息获取
@@ -1775,27 +1777,27 @@ func (at *AutoTrader) UpdateAIModelConfig(provider, apiKey, customAPIURL, custom
 		at.config.QwenKey = apiKey
 		at.config.DeepSeekKey = ""
 		// 应用到 MCP 客户端
-		at.mcpClient.SetQwenAPIKey(apiKey, customAPIURL, customModelName)
+		at.mcpClient.SetAPIKey(apiKey, customAPIURL, customModelName)
 		log.Printf("🔄 [%s] 已更新AI配置为 Qwen (自定义URL=%s, 模型=%s)", at.name, customAPIURL, customModelName)
 	case "deepseek":
 		at.config.UseQwen = false
 		at.config.DeepSeekKey = apiKey
 		at.config.QwenKey = ""
-		at.mcpClient.SetDeepSeekAPIKey(apiKey, customAPIURL, customModelName)
+		at.mcpClient.SetAPIKey(apiKey, customAPIURL, customModelName)
 		log.Printf("🔄 [%s] 已更新AI配置为 DeepSeek (自定义URL=%s, 模型=%s)", at.name, customAPIURL, customModelName)
 	case "custom":
 		at.config.UseQwen = false
 		at.config.CustomAPIKey = apiKey
 		at.config.DeepSeekKey = ""
 		at.config.QwenKey = ""
-		at.mcpClient.SetCustomAPI(customAPIURL, apiKey, customModelName)
+		at.mcpClient.SetAPIKey(apiKey, customAPIURL, customModelName)
 		log.Printf("🔄 [%s] 已更新AI配置为 自定义API (URL=%s, 模型=%s)", at.name, customAPIURL, customModelName)
 	default:
 		// 未知提供商，默认按 DeepSeek 处理以保持兼容
 		at.config.UseQwen = false
 		at.config.DeepSeekKey = apiKey
 		at.config.QwenKey = ""
-		at.mcpClient.SetDeepSeekAPIKey(apiKey, customAPIURL, customModelName)
+		at.mcpClient.SetAPIKey(apiKey, customAPIURL, customModelName)
 		log.Printf("⚠️  [%s] 未知AI提供商 '%s'，按 DeepSeek 处理 (URL=%s, 模型=%s)", at.name, provider, customAPIURL, customModelName)
 	}
 }
