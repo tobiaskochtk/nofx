@@ -2,19 +2,19 @@ derivs_v1:
   enabled: true
   symbols:
     - "BTCUSDT"
-    - "LINKUSDT"
-    - "UNIUSDT"
     - "BNBUSDT"
     - "XRPUSDT"
     - "DOGEUSDT"
-    - "ADAUSDT"
-    - "AVAXUSDT"
+    - "LINKUSDT"
     - "TRXUSDT"
     - "LTCUSDT"
-    - "DOTUSDT"
+    - "UNIUSDT"
     - "ARBUSDT"
-    - "APTUSDT"
+    - "ETHUSDT"
     - "AAVEUSDT"
+    - "AVAXUSDT"
+    - "ADAUSDT"
+    - "NEARUSDT"
     - "SOLUSDT"
   exchangesPerp: ["binanceusdm","bybit","okx","bitget"]
   spotIndexExchanges: ["binance","kraken","coinbase"]

@@ -62,7 +62,7 @@ export function TraderConfigModal({
     is_cross_margin: true,
     use_coin_pool: false,
     use_oi_top: false,
-    initial_balance: 1000,
+    initial_balance: 850,
     scan_interval_minutes: 3,
   })
   const [isSaving, setIsSaving] = useState(false)

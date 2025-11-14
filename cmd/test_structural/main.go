@@ -13,10 +13,10 @@ func main() {
 
 	// Test symbols from your trading list
 	symbols := []string{
-		"BTCUSDT", "BNBUSDT", "XRPUSDT", "DOGEUSDT", "ADAUSDT",
-		"LINKUSDT", "AVAXUSDT", "TRXUSDT", "LTCUSDT",
-		"DOTUSDT", "UNIUSDT", "ARBUSDT", "APTUSDT",
-		"AAVEUSDT", "MKRUSDT",
+		"BTCUSDT", "BNBUSDT", "XRPUSDT", "DOGEUSDT",
+		"LINKUSDT", "TRXUSDT", "LTCUSDT",
+		"UNIUSDT", "ARBUSDT", "ETHUSDT",
+		"AAVEUSDT", "SOLUSDT",
 	}
 
 	successCount := 0

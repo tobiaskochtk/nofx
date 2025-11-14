@@ -16,13 +16,17 @@ import (
 // defaultMainstreamCoins 默认主流币种池（从配置文件读取）
 var defaultMainstreamCoins = []string{
 	"BTCUSDT",
-	"ETHUSDT",
-	"SOLUSDT",
 	"BNBUSDT",
 	"XRPUSDT",
 	"DOGEUSDT",
-	"ADAUSDT",
-	"HYPEUSDT",
+	"LINKUSDT",
+	"TRXUSDT",
+	"LTCUSDT",
+	"UNIUSDT",
+	"ARBUSDT",
+	"ETHUSDT",
+	"AAVEUSDT",
+	"SOLUSDT",
 }
 
 // CoinPoolConfig 币种池配置
@@ -319,8 +323,8 @@ func GetTopRatedCoins(limit int) ([]string, error) {
 
 // normalizeSymbol 标准化币种符号
 func normalizeSymbol(symbol string) string {
-    // 统一与行情模块一致：USDC → USDT，无后缀则追加USDT
-    return market.Normalize(symbol)
+	// 统一与行情模块一致：USDC → USDT，无后缀则追加USDT
+	return market.Normalize(symbol)
 }
 
 // 辅助函数

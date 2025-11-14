@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"math"
+	"reflect"
 	"sort"
 	"strings"
 	"sync"
@@ -25,41 +26,43 @@ const (
 
 var (
 	bootDict = map[string]string{
-		"ts":        "timestamp ISO-8601 UTC",
-		"acct":      "account",
-		"eq":        "equity",
-		"bal":       "balance",
-		"upnl":      "unrealized_pnl_pct",
-		"marg":      "margin_pct",
-		"pos":       "positions",
-		"sym":       "symbol",
-		"side":      "side",
-		"px":        "last_price",
-		"ent":       "entry_price",
-		"lev":       "leverage",
-		"liq":       "liq_price",
-		"age_min":   "minutes open",
-		"ctx":       "context fields",
-		"atr3":      "ATR_3m_len14",
-		"ema20":     "EMA20",
-		"macd":      "MACD",
-		"rsi7":      "RSI7",
-		"oi":        "open_interest_last",
-		"fund_bps":  "funding in bps",
-		"basis_pct": "basis in %",
-		"f":         "features",
-		"f4":        "microstructure_cvd",
-		"f5":        "liq_heatmap",
-		"f6":        "avwap",
-		"f7":        "vol_regime",
-		"qos":       "quality_of_signals",
-		"cov":       "coverage_0to1",
-		"age_s":     "seconds_since_latest_sample",
-		"c15":       "15m_confirm",
-		"rank":      "server-side rank score",
-		"pol":       "policy",
-		"topk":      "top_k candidates",
-		"conf":      "confidence_0to1",
+		"ts":           "timestamp ISO-8601 UTC",
+		"acct":         "account",
+		"eq":           "equity",
+		"bal":          "balance",
+		"upnl":         "unrealized_pnl_pct",
+		"marg":         "margin_pct",
+		"pos":          "positions",
+		"sym":          "symbol",
+		"side":         "side",
+		"px":           "last_price",
+		"ent":          "entry_price",
+		"pnl_pct":      "unrealized_profit_loss_pct",
+		"lev":          "leverage",
+		"liq":          "liq_price",
+		"age_min":      "minutes open",
+		"ctx":          "context fields",
+		"atr3":         "ATR_3m_len14",
+		"ema20":        "EMA20",
+		"macd":         "MACD",
+		"rsi7":         "RSI7",
+		"oi":           "open_interest_last",
+		"fund_bps":     "funding in bps",
+		"basis_pct":    "basis in %",
+		"f":            "features",
+		"f4":           "microstructure_cvd",
+		"f5":           "liq_heatmap",
+		"f6":           "avwap",
+		"f7":           "vol_regime",
+		"qos":          "quality_of_signals",
+		"cov":          "coverage_0to1",
+		"age_s":        "seconds_since_latest_sample",
+		"c15":          "15m_confirm",
+		"rank":         "server-side rank score",
+		"pol":          "policy",
+		"topk":         "top_k candidates",
+		"conf":         "confidence_0to1",
+		"sharpe_ratio": "Sharpe Ratio (risk-adjusted return)",
 	}
 	bootOnce sync.Once
 )
@@ -97,6 +100,7 @@ type positionPayload struct {
 	Side      string          `json:"side"`
 	Entry     float64         `json:"ent"`
 	Price     float64         `json:"px"`
+	PnLPct    *float64        `json:"pnl_pct,omitempty"` // Unrealized profit/loss percentage for dynamic trailing stop
 	Leverage  int             `json:"lev"`
 	LiqPrice  *float64        `json:"liq,omitempty"`
 	AgeMin    *int            `json:"age_min,omitempty"`
@@ -227,10 +231,11 @@ type policyPayload struct {
 }
 
 type metaPayload struct {
-	Summary   string `json:"summary"`
-	Account   string `json:"account"`
-	Positions string `json:"positions"`
-	Latest    string `json:"latest,omitempty"`
+	Summary     string   `json:"summary"`
+	Account     string   `json:"account"`
+	Positions   string   `json:"positions"`
+	Latest      string   `json:"latest,omitempty"`
+	SharpeRatio *float64 `json:"sharpe_ratio,omitempty"` // Sharpe Ratio for AI decision making
 }
 
 type payloadDiagnostics struct {
@@ -344,6 +349,13 @@ func buildPositionPayload(ctx *Context, pos *PositionInfo, diag *payloadDiagnost
 		Price:    roundTo(pos.MarkPrice, 4),
 		Leverage: pos.Leverage,
 	}
+
+	// Add unrealized PnL percentage for dynamic trailing stop logic
+	if pos.EntryPrice > 0 {
+		pnlPct := roundTo(pos.UnrealizedPnLPct, 2)
+		payload.PnLPct = &pnlPct
+	}
+
 	if pos.LiquidationPrice > 0 {
 		val := roundTo(pos.LiquidationPrice, 4)
 		payload.LiqPrice = &val
@@ -630,11 +642,42 @@ func buildMetaPayload(ctx *Context) *metaPayload {
 		positionLine = strings.Join(lines, "\n")
 	}
 	latestLine := buildLatestLine(ctx)
+
+	// Extract Sharpe Ratio from Performance if available
+	var sharpeRatio *float64
+	if ctx.Performance != nil {
+		// Try to type assert to map[string]interface{} first (common JSON unmarshal result)
+		if perfMap, ok := ctx.Performance.(map[string]interface{}); ok {
+			if sr, exists := perfMap["sharpe_ratio"]; exists {
+				if srFloat, ok := sr.(float64); ok {
+					sharpeRatio = &srFloat
+				}
+			}
+		}
+		// Also try direct struct type assertion in case it's already typed
+		if sharpeRatio == nil {
+			// Use reflection to get SharpeRatio field dynamically
+			// This handles the case where Performance is logger.PerformanceAnalysis
+			v := reflect.ValueOf(ctx.Performance)
+			if v.Kind() == reflect.Ptr {
+				v = v.Elem()
+			}
+			if v.Kind() == reflect.Struct {
+				field := v.FieldByName("SharpeRatio")
+				if field.IsValid() && field.Kind() == reflect.Float64 {
+					sr := field.Float()
+					sharpeRatio = &sr
+				}
+			}
+		}
+	}
+
 	return &metaPayload{
-		Summary:   summary,
-		Account:   accountLine,
-		Positions: positionLine,
-		Latest:    latestLine,
+		Summary:     summary,
+		Account:     accountLine,
+		Positions:   positionLine,
+		Latest:      latestLine,
+		SharpeRatio: sharpeRatio,
 	}
 }
 

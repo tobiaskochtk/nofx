@@ -127,7 +127,7 @@ export function AITradersPage({ onTraderSelect }: AITradersPageProps) {
         setSupportedModels(supportedModels)
         setSupportedExchanges(supportedExchanges)
         // Use a default set of coins for OI tracking
-        setDefaultCoins(['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'BNBUSDT', 'XRPUSDT', 'DOGEUSDT', 'ADAUSDT', 'HYPEUSDT'])
+        setDefaultCoins(['BTCUSDT', 'ETHUSDT', 'BNBUSDT', 'XRPUSDT', 'DOGEUSDT', 'LINKUSDT', 'TRXUSDT', 'LTCUSDT', 'UNIUSDT', 'ARBUSDT', 'ETHUSDT',	'AAVEUSDT', 'SOLUSDT'])
 
         // 加载用户信号源配置
         try {
