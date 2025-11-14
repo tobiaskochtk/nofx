@@ -104,7 +104,7 @@ export function ComparisonChart({ traders }: ComparisonChartProps) {
         const pnlPct = point.pnl_pct || 0
 
         timestampMap.get(ts)!.traders.set(trader.trader_id, {
-          pnl_pct: pnlPct,
+          pnl_pct: point.total_pnl_pct || 0,
           equity: point.total_equity,
         })
       })

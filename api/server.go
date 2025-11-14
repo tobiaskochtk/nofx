@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"math"
 	"net"
 	"net/http"
 	"nofx/auth"
@@ -173,7 +174,6 @@ func (s *Server) setupRoutes() {
 			protected.POST("/traders/:id/stop", s.handleStopTrader)
 			protected.GET("/traders/:id/balance", s.handleCheckTraderBalance)
 			protected.PUT("/traders/:id/prompt", s.handleUpdateTraderPrompt)
-			protected.POST("/traders/:id/sync-balance", s.handleSyncBalance)
 
 			// AI模型配置
 			protected.GET("/models", s.handleGetModelConfigs)
@@ -638,16 +638,36 @@ func (s *Server) handleCreateTrader(c *gin.Context) {
 			if balanceErr != nil {
 				log.Printf("⚠️ 查询交易所余额失败，使用用户输入的初始资金: %v", balanceErr)
 			} else {
-				// 提取可用余额
-				if availableBalance, ok := balanceInfo["available_balance"].(float64); ok && availableBalance > 0 {
-					actualBalance = availableBalance
-					log.Printf("✓ 查询到交易所实际余额: %.2f USDT (用户输入: %.2f USDT)", actualBalance, req.InitialBalance)
-				} else if totalBalance, ok := balanceInfo["balance"].(float64); ok && totalBalance > 0 {
-					// 有些交易所可能只返回 balance 字段
-					actualBalance = totalBalance
-					log.Printf("✓ 查询到交易所实际余额: %.2f USDT (用户输入: %.2f USDT)", actualBalance, req.InitialBalance)
+				// 🔧 计算Total Equity = Wallet Balance + Unrealized Profit
+				// 这是账户的真实净值，用作Initial Balance的基准
+				var totalWalletBalance float64
+				var totalUnrealizedProfit float64
+
+				// 提取钱包余额
+				if wb, ok := balanceInfo["totalWalletBalance"].(float64); ok {
+					totalWalletBalance = wb
+				} else if wb, ok := balanceInfo["wallet_balance"].(float64); ok {
+					totalWalletBalance = wb
+				} else if wb, ok := balanceInfo["balance"].(float64); ok {
+					totalWalletBalance = wb
+				}
+
+				// 提取未实现盈亏
+				if up, ok := balanceInfo["totalUnrealizedProfit"].(float64); ok {
+					totalUnrealizedProfit = up
+				} else if up, ok := balanceInfo["unrealized_profit"].(float64); ok {
+					totalUnrealizedProfit = up
+				}
+
+				// 计算总净值
+				totalEquity := totalWalletBalance + totalUnrealizedProfit
+
+				if totalEquity > 0 {
+					actualBalance = totalEquity
+					log.Printf("✅ 查询到交易所实际净值: %.2f USDT (钱包: %.2f + 未实现: %.2f, 用户输入: %.2f)",
+						actualBalance, totalWalletBalance, totalUnrealizedProfit, req.InitialBalance)
 				} else {
-					log.Printf("⚠️ 无法从余额信息中提取可用余额，使用用户输入的初始资金")
+					log.Printf("⚠️ 无法从余额信息中计算净值，使用用户输入的初始资金")
 				}
 			}
 		}
@@ -1099,113 +1119,6 @@ func (s *Server) handleUpdateTraderPrompt(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{"message": "自定义prompt已更新"})
-}
-
-// handleSyncBalance 同步交易所余额到initial_balance（选项B：手动同步 + 选项C：智能检测）
-func (s *Server) handleSyncBalance(c *gin.Context) {
-	userID := c.GetString("user_id")
-	traderID := c.Param("id")
-
-	log.Printf("🔄 用户 %s 请求同步交易员 %s 的余额", userID, traderID)
-
-	// 从数据库获取交易员配置（包含交易所信息）
-	traderConfig, _, exchangeCfg, err := s.database.GetTraderConfig(userID, traderID)
-	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "交易员不存在"})
-		return
-	}
-
-	if exchangeCfg == nil || !exchangeCfg.Enabled {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "交易所未配置或未启用"})
-		return
-	}
-
-	// 创建临时 trader 查询余额
-	var tempTrader trader.Trader
-	var createErr error
-
-	switch traderConfig.ExchangeID {
-	case "binance":
-		tempTrader = trader.NewFuturesTrader(exchangeCfg.APIKey, exchangeCfg.SecretKey, userID)
-	case "hyperliquid":
-		tempTrader, createErr = trader.NewHyperliquidTrader(
-			exchangeCfg.APIKey,
-			exchangeCfg.HyperliquidWalletAddr,
-			exchangeCfg.Testnet,
-		)
-	case "aster":
-		tempTrader, createErr = trader.NewAsterTrader(
-			exchangeCfg.AsterUser,
-			exchangeCfg.AsterSigner,
-			exchangeCfg.AsterPrivateKey,
-		)
-	default:
-		c.JSON(http.StatusBadRequest, gin.H{"error": "不支持的交易所类型"})
-		return
-	}
-
-	if createErr != nil {
-		log.Printf("⚠️ 创建临时 trader 失败: %v", createErr)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("连接交易所失败: %v", createErr)})
-		return
-	}
-
-	// 查询实际余额
-	balanceInfo, balanceErr := tempTrader.GetBalance()
-	if balanceErr != nil {
-		log.Printf("⚠️ 查询交易所余额失败: %v", balanceErr)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("查询余额失败: %v", balanceErr)})
-		return
-	}
-
-	// 提取可用余额
-	var actualBalance float64
-	if availableBalance, ok := balanceInfo["available_balance"].(float64); ok && availableBalance > 0 {
-		actualBalance = availableBalance
-	} else if availableBalance, ok := balanceInfo["availableBalance"].(float64); ok && availableBalance > 0 {
-		actualBalance = availableBalance
-	} else if totalBalance, ok := balanceInfo["balance"].(float64); ok && totalBalance > 0 {
-		actualBalance = totalBalance
-	} else {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "无法获取可用余额"})
-		return
-	}
-
-	oldBalance := traderConfig.InitialBalance
-
-	// ✅ 选项C：智能检测余额变化
-	changePercent := ((actualBalance - oldBalance) / oldBalance) * 100
-	changeType := "增加"
-	if changePercent < 0 {
-		changeType = "减少"
-	}
-
-	log.Printf("✓ 查询到交易所实际余额: %.2f USDT (当前配置: %.2f USDT, 变化: %.2f%%)",
-		actualBalance, oldBalance, changePercent)
-
-	// 更新数据库中的 initial_balance
-	err = s.database.UpdateTraderInitialBalance(userID, traderID, actualBalance)
-	if err != nil {
-		log.Printf("❌ 更新initial_balance失败: %v", err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "更新余额失败"})
-		return
-	}
-
-	// 重新加载交易员到内存
-	err = s.traderManager.LoadTraderByID(s.database, userID, traderID)
-	if err != nil {
-		log.Printf("⚠️ 重新加载交易员到内存失败: %v", err)
-	}
-
-	log.Printf("✅ 已同步余额: %.2f → %.2f USDT (%s %.2f%%)", oldBalance, actualBalance, changeType, changePercent)
-
-	c.JSON(http.StatusOK, gin.H{
-		"message":        "余额同步成功",
-		"old_balance":    oldBalance,
-		"new_balance":    actualBalance,
-		"change_percent": changePercent,
-		"change_type":    changeType,
-	})
 }
 
 // handleGetModelConfigs 获取AI模型配置
@@ -1796,22 +1709,16 @@ func (s *Server) handleEquityHistory(c *gin.Context) {
 		CycleNumber      int     `json:"cycle_number"`
 	}
 
-	// 从AutoTrader获取初始余额（用于计算盈亏百分比）
-	initialBalance := 0.0
+	// 从AutoTrader获取当前初始余额（用作旧数据的fallback）
+	base := 0.0
 	if status := trader.GetStatus(); status != nil {
 		if ib, ok := status["initial_balance"].(float64); ok && ib > 0 {
-			initialBalance = ib
+			base = ib
 		}
 	}
 
-	// 如果无法从status获取，且有历史记录，则从第一条记录获取
-	if initialBalance == 0 && len(records) > 0 {
-		// 第一条记录的equity作为初始余额
-		initialBalance = records[0].AccountState.TotalBalance
-	}
-
 	// 如果还是无法获取，返回错误
-	if initialBalance == 0 {
+	if base == 0 {
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"error": "无法获取初始余额",
 		})
