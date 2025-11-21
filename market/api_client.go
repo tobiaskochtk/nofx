@@ -80,33 +80,11 @@ func (c *APIClient) GetKlines(symbol, interval string, limit int) ([]Kline, erro
 		return nil, err
 	}
 
-	// Check if response is an error object
-	if resp.StatusCode != http.StatusOK {
-		var apiError struct {
-			Code int    `json:"code"`
-			Msg  string `json:"msg"`
-		}
-		if json.Unmarshal(body, &apiError) == nil {
-			return nil, fmt.Errorf("API error %d: %s", apiError.Code, apiError.Msg)
-		}
-		return nil, fmt.Errorf("API error: status code %d, body: %s", resp.StatusCode, string(body))
-	}
-
-	// Try to detect if response is an error object even with 200 status
-	var errorCheck map[string]interface{}
-	if json.Unmarshal(body, &errorCheck) == nil {
-		if code, hasCode := errorCheck["code"]; hasCode {
-			if msg, hasMsg := errorCheck["msg"]; hasMsg {
-				return nil, fmt.Errorf("API error %v: %v", code, msg)
-			}
-		}
-	}
-
 	var klineResponses []KlineResponse
 	err = json.Unmarshal(body, &klineResponses)
 	if err != nil {
 		log.Printf("获取K线数据失败,响应内容: %s", string(body))
-		return nil, fmt.Errorf("failed to parse klines (response: %s): %w", string(body), err)
+		return nil, err
 	}
 
 	var klines []Kline

@@ -10,9 +10,6 @@ import (
 	"strings"
 	"sync"
 	"time"
-
-	"nofx/internal/snapshot"
-	"nofx/pkg/types"
 )
 
 // FundingRateCache 资金费率缓存结构
@@ -100,7 +97,7 @@ func Get(symbol string) (*Data, error) {
 	// 计算长期数据
 	longerTermData := calculateLongerTermData(klines4h)
 
-	data := &Data{
+	return &Data{
 		Symbol:            symbol,
 		CurrentPrice:      currentPrice,
 		PriceChange1h:     priceChange1h,
@@ -112,35 +109,7 @@ func Get(symbol string) (*Data, error) {
 		FundingRate:       fundingRate,
 		IntradaySeries:    intradayData,
 		LongerTermContext: longerTermData,
-	}
-	var derivsTarget *types.DerivsFeatures
-	if snap := buildDerivsSnapshot(symbol); snap != nil {
-		data.Snapshot = snap
-		if snap.Features.Derivs != nil {
-			derivsTarget = snap.Features.Derivs
-		}
-	}
-	if data.Snapshot == nil {
-		data.Snapshot = &snapshot.Snapshot{Symbol: symbol}
-	}
-	if derivsTarget == nil {
-		if data.Snapshot.Features.Derivs == nil {
-			data.Snapshot.Features.Derivs = &types.DerivsFeatures{}
-		}
-		derivsTarget = data.Snapshot.Features.Derivs
-	}
-	if err := enrichStructuralFeatures(symbol, klines3m, derivsTarget, data); err != nil {
-		log.Printf("⚠️ enrichStructuralFeatures %s failed: %v", symbol, err)
-	}
-	log.Printf("🔍 [DEBUG] Before enrichMicrostructure: symbol=%s, klines3m len=%d, derivsTarget==nil: %v", symbol, len(klines3m), derivsTarget == nil)
-	if err := enrichMicrostructureFeatures(symbol, klines3m, derivsTarget, data); err != nil {
-		log.Printf("⚠️ enrichMicrostructureFeatures %s failed: %v", symbol, err)
-	}
-	log.Printf("🔍 [DEBUG] After enrichMicrostructure: symbol=%s", symbol)
-
-	data.CollectedAt = time.Now().UTC()
-
-	return data, nil
+	}, nil
 }
 
 // calculateEMA 计算EMA
@@ -512,10 +481,6 @@ func Format(data *Data) string {
 		}
 	}
 
-	if data.Snapshot != nil && data.Snapshot.Features.Derivs != nil {
-		sb.WriteString(formatDerivsFeatures(data.Snapshot.Features.Derivs))
-	}
-
 	return sb.String()
 }
 
@@ -559,70 +524,12 @@ func formatFloatSlice(values []float64) string {
 	return "[" + strings.Join(strValues, ", ") + "]"
 }
 
-func formatDerivsFeatures(f *types.DerivsFeatures) string {
-	var sb strings.Builder
-	sb.WriteString("Derivatives flow (hourly):\n")
-	sb.WriteString(fmt.Sprintf(
-		"OI Δ1h: %s | OI z(7d): %s | Price corr24h: %s | Regime: %s\n",
-		formatPctPointer(f.OIDelta1hPct),
-		formatFloatPointer(f.OIZ7d, 2),
-		formatFloatPointer(f.OIPriceCorr24h, 2),
-		safeString(f.OIPriceDiv),
-	))
-	sb.WriteString(fmt.Sprintf(
-		"Funding: %s bps | Median z: %s | Dispersion: %s bps\n",
-		formatFloatPointer(f.FundingLatestBps, 2),
-		formatFloatPointer(f.FundingMedianZ7d, 2),
-		formatFloatPointer(f.FundingDispersionBps, 2),
-	))
-	sb.WriteString(fmt.Sprintf(
-		"Basis: %s%% | Basis z(14d): %s\n",
-		formatPctPointer(f.BasisPct),
-		formatFloatPointer(f.BasisZ14d, 2),
-	))
-	sb.WriteString(fmt.Sprintf(
-		"Sources → OI: %s | Funding: %s | Basis: %s\n\n",
-		f.OISourceStatus,
-		f.FundingSourceStatus,
-		f.BasisSourceStatus,
-	))
-	return sb.String()
-}
-
-func formatPctPointer(v *float64) string {
-	if v == nil {
-		return "n/a"
-	}
-	return fmt.Sprintf("%+.2f%%", *v*100)
-}
-
-func formatFloatPointer(v *float64, precision int) string {
-	if v == nil {
-		return "n/a"
-	}
-	format := fmt.Sprintf("%%.%df", precision)
-	return fmt.Sprintf(format, *v)
-}
-
-func safeString(v *string) string {
-	if v == nil || *v == "" {
-		return "n/a"
-	}
-	return *v
-}
-
 // Normalize 标准化symbol,确保是USDT交易对
 func Normalize(symbol string) string {
-	symbol = strings.ToUpper(strings.TrimSpace(symbol))
-	// 如果以USDT结尾，直接返回
+	symbol = strings.ToUpper(symbol)
 	if strings.HasSuffix(symbol, "USDT") {
 		return symbol
 	}
-	// 如果以USDC结尾，转换为USDT（用于统一从Binance拉取行情）
-	if strings.HasSuffix(symbol, "USDC") {
-		return strings.TrimSuffix(symbol, "USDC") + "USDT"
-	}
-	// 兼容 Hyperliquid 等仅给出基础币种（如 BTC、BNB）
 	return symbol + "USDT"
 }
 

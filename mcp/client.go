@@ -12,10 +12,25 @@ import (
 
 const (
 	ProviderCustom = "custom"
+
+	MCPClientTemperature = 0.5
 )
 
 var (
 	DefaultTimeout = 120 * time.Second
+
+	MaxRetryTimes = 3
+
+	retryableErrors = []string{
+		"EOF",
+		"timeout",
+		"connection reset",
+		"connection refused",
+		"temporary failure",
+		"no such host",
+		"stream error",   // HTTP/2 stream 错误
+		"INTERNAL_ERROR", // 服务端内部错误
+	}
 )
 
 // Client AI API配置
@@ -37,37 +52,64 @@ type Client struct {
 	hooks clientHooks
 }
 
+// New 创建默认客户端（向前兼容）
+//
+// Deprecated: 推荐使用 NewClient(...opts) 以获得更好的灵活性
 func New() AIClient {
-	// 从环境变量读取 MaxTokens，默认 2000
-	maxTokens := 2000
-	if envMaxTokens := os.Getenv("AI_MAX_TOKENS"); envMaxTokens != "" {
-		if parsed, err := strconv.Atoi(envMaxTokens); err == nil && parsed > 0 {
-			maxTokens = parsed
-			log.Printf("🔧 [MCP] 使用环境变量 AI_MAX_TOKENS: %d", maxTokens)
-		} else {
-			log.Printf("⚠️  [MCP] 环境变量 AI_MAX_TOKENS 无效 (%s)，使用默认值: %d", envMaxTokens, maxTokens)
-		}
+	return NewClient()
+}
+
+// NewClient 创建客户端（支持选项模式）
+//
+// 使用示例：
+//   // 基础用法（向前兼容）
+//   client := mcp.NewClient()
+//
+//   // 自定义日志
+//   client := mcp.NewClient(mcp.WithLogger(customLogger))
+//
+//   // 自定义超时
+//   client := mcp.NewClient(mcp.WithTimeout(60*time.Second))
+//
+//   // 组合多个选项
+//   client := mcp.NewClient(
+//       mcp.WithDeepSeekConfig("sk-xxx"),
+//       mcp.WithLogger(customLogger),
+//       mcp.WithTimeout(60*time.Second),
+//   )
+func NewClient(opts ...ClientOption) AIClient {
+	// 1. 创建默认配置
+	cfg := DefaultConfig()
+
+	// 2. 应用用户选项
+	for _, opt := range opts {
+		opt(cfg)
 	}
 
-	// 从环境变量读取 Timeout，默认 300 秒 (5分钟，适配 deepseek-reasoner)
-	timeout := 300 * time.Second
-	if envTimeout := os.Getenv("AI_TIMEOUT_SECONDS"); envTimeout != "" {
-		if parsed, err := strconv.Atoi(envTimeout); err == nil && parsed > 0 {
-			timeout = time.Duration(parsed) * time.Second
-			log.Printf("🔧 [MCP] 使用环境变量 AI_TIMEOUT_SECONDS: %d 秒", parsed)
-		} else {
-			log.Printf("⚠️  [MCP] 环境变量 AI_TIMEOUT_SECONDS 无效 (%s)，使用默认值: 300 秒", envTimeout)
-		}
+	// 3. 创建客户端实例
+	client := &Client{
+		Provider:   cfg.Provider,
+		APIKey:     cfg.APIKey,
+		BaseURL:    cfg.BaseURL,
+		Model:      cfg.Model,
+		MaxTokens:  cfg.MaxTokens,
+		UseFullURL: cfg.UseFullURL,
+		httpClient: cfg.HTTPClient,
+		logger:     cfg.Logger,
+		config:     cfg,
 	}
 
-	// 默认配置
-	return &Client{
-		Provider:  ProviderDeepSeek,
-		BaseURL:   "https://api.deepseek.com/v1",
-		Model:     "deepseek-chat",
-		Timeout:   timeout, // 默认 300 秒，适配 deepseek-reasoner 等慢速模型
-		MaxTokens: maxTokens,
+	// 4. 设置默认 Provider（如果未设置）
+	if client.Provider == "" {
+		client.Provider = ProviderDeepSeek
+		client.BaseURL = DefaultDeepSeekBaseURL
+		client.Model = DefaultDeepSeekModel
 	}
+
+	// 5. 设置 hooks 指向自己
+	client.hooks = client
+
+	return client
 }
 
 // SetCustomAPI 设置自定义OpenAI兼容API
@@ -85,8 +127,10 @@ func (client *Client) SetAPIKey(apiKey, apiURL, customModel string) {
 	}
 
 	client.Model = customModel
-	// 自定义API也使用较长的超时时间，避免因模型推理慢导致超时
-	client.Timeout = 300 * time.Second
+}
+
+func (client *Client) SetTimeout(timeout time.Duration) {
+	client.httpClient.Timeout = timeout
 }
 
 // CallWithMessages 模板方法 - 固定的重试流程（不可重写）
@@ -134,19 +178,6 @@ func (client *Client) setAuthHeader(reqHeader http.Header) {
 	reqHeader.Set("Authorization", fmt.Sprintf("Bearer %s", client.APIKey))
 }
 
-// callOnce 单次调用AI API（内部使用）
-func (client *Client) callOnce(systemPrompt, userPrompt string) (string, error) {
-	// 打印当前 AI 配置
-	log.Printf("📡 [MCP] AI 请求配置:")
-	log.Printf("   Provider: %s", client.Provider)
-	log.Printf("   BaseURL: %s", client.BaseURL)
-	log.Printf("   Model: %s", client.Model)
-	log.Printf("   Timeout: %v", client.Timeout)
-	log.Printf("   UseFullURL: %v", client.UseFullURL)
-	if len(client.APIKey) > 8 {
-		log.Printf("   API Key: %s...%s", client.APIKey[:4], client.APIKey[len(client.APIKey)-4:])
-	}
-
 func (client *Client) buildMCPRequestBody(systemPrompt, userPrompt string) map[string]any {
 	// 构建 messages 数组
 	messages := []map[string]string{}
@@ -183,45 +214,7 @@ func (client *Client) marshalRequestBody(requestBody map[string]any) ([]byte, er
 	return jsonData, nil
 }
 
-	// 创建HTTP请求
-	var url string
-	if client.UseFullURL {
-		// 使用完整URL，不添加/chat/completions
-		url = client.BaseURL
-	} else {
-		// 默认行为：添加/chat/completions
-		url = fmt.Sprintf("%s/chat/completions", client.BaseURL)
-	}
-	log.Printf("📡 [MCP] 请求 URL: %s", url)
-
-	req, err := http.NewRequest("POST", url, bytes.NewBuffer(jsonData))
-	if err != nil {
-		return "", fmt.Errorf("创建请求失败: %w", err)
-	}
-
-	req.Header.Set("Content-Type", "application/json")
-
-	client.setAuthHeader(req.Header)
-
-	// 发送请求
-	httpClient := &http.Client{Timeout: client.Timeout}
-	resp, err := httpClient.Do(req)
-	if err != nil {
-		return "", fmt.Errorf("发送请求失败: %w", err)
-	}
-	defer resp.Body.Close()
-
-	// 读取响应
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return "", fmt.Errorf("读取响应失败: %w", err)
-	}
-
-	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("API返回错误 (status %d): %s", resp.StatusCode, string(body))
-	}
-
-	// 解析响应
+func (client *Client) parseMCPResponse(body []byte) (string, error) {
 	var result struct {
 		Choices []struct {
 			Message struct {

@@ -7,7 +7,6 @@ import (
 	"math"
 	"nofx/market"
 	"nofx/mcp"
-	"nofx/pkg/types"
 	"nofx/pool"
 	"regexp"
 	"strings"
@@ -28,12 +27,6 @@ var (
 	reReasoningTag = regexp.MustCompile(`(?s)<reasoning>(.*?)</reasoning>`)
 	reDecisionTag  = regexp.MustCompile(`(?s)<decision>(.*?)</decision>`)
 )
-
-const microstructureHeader = "###############################\n# MICROSTRUCTURE ADD-ONS (F4, F5)\n# Decision TF: 3m (base); Optional confirmation TF: 15m\n# All floats rounded to 3–6 decimals; print null if unavailable\n# Z-windows: short=90 buckets, long=360 buckets; LinReg windows: short=20, mid=60 buckets\n###############################\n\n"
-
-const structuralHeader = "###############################\n# STRUCTURAL ADD-ONS (F6, F7)\n# Decision TF: 3m (base); optional confirmation TF: 15m\n# All floats rounded to 3–6 decimals; print null if unavailable\n###############################\n\n"
-
-const aiMicrostructureUsageGuide = "###############################\n# AI TRADING AGENT — HOW TO USE THESE NEW FIELDS (concise guards, no chain-of-thought)\n###############################\n- If liq_risk_up==1 and you would enter_long → downweight or avoid; set avoid_long=1 in your internal policy.\n- If liq_risk_down==1 and you would enter_short → downweight or avoid; set avoid_short=1.\n- Prefer entries when:\n  (a) bullish divergence (div_bull_*==1) aligns with prefer_direction=prefer_longs AND both dist_up_atr, dist_dn_atr ≥ 1.0,\n  or (b) bearish divergence aligns with prefer_shorts with same distance condition.\n- Scale size with confidence scores: size_pct ≤ 0.25 if min(confidence_cvd, confidence_liq) < 0.3; otherwise proportionally to the lower of the two.\n- When any 3m critical field is null/NaN, prefer HOLD unless 15m confirms with confidence ≥ 0.7.\n\n"
 
 // PositionInfo 持仓信息
 type PositionInfo struct {
@@ -92,8 +85,6 @@ type Context struct {
 	Performance     interface{}             `json:"-"` // 历史表现分析（logger.PerformanceAnalysis）
 	BTCETHLeverage  int                     `json:"-"` // BTC/ETH杠杆倍数（从配置读取）
 	AltcoinLeverage int                     `json:"-"` // 山寨币杠杆倍数（从配置读取）
-	MaxPositions    int                     `json:"-"` // 最大持仓数量（从配置读取）
-	PayloadVersion  string                  `json:"-"`
 }
 
 // Decision AI的交易决策
@@ -118,77 +109,12 @@ type Decision struct {
 	Reasoning  string  `json:"reasoning"`
 }
 
-// UnmarshalJSON custom unmarshaler to support both old and new field naming conventions
-func (d *Decision) UnmarshalJSON(data []byte) error {
-	// Define a temporary struct with all possible field names
-	type Alias Decision
-
-	// StopsTargets struct for the new format
-	type StopsTargets struct {
-		SL *float64 `json:"sl,omitempty"`
-		TP *float64 `json:"tp,omitempty"`
-	}
-
-	aux := &struct {
-		// New format fields (v3.1 payload style)
-		Sym          *string       `json:"sym,omitempty"`           // Support "sym" as alternative to "symbol"
-		Lev          *int          `json:"lev,omitempty"`           // Support "lev" as alternative to "leverage"
-		SizePct      *float64      `json:"size_pct,omitempty"`      // Support "size_pct" as alternative to "position_size_usd"
-		ReasonCodes  []string      `json:"reason_codes,omitempty"`  // Support reason_codes (optional)
-		StopsTargets *StopsTargets `json:"stops_targets,omitempty"` // Support stops_targets
-		*Alias
-	}{
-		Alias: (*Alias)(d),
-	}
-
-	if err := json.Unmarshal(data, &aux); err != nil {
-		return err
-	}
-
-	// Map "sym" to "symbol"
-	if aux.Sym != nil && d.Symbol == "" {
-		d.Symbol = *aux.Sym
-	}
-
-	// Map "lev" to "leverage"
-	if aux.Lev != nil && d.Leverage == 0 {
-		d.Leverage = *aux.Lev
-	}
-
-	// Map "size_pct" to "position_size_usd"
-	// Note: size_pct is a percentage (0-1), needs to be converted to USD
-	// This will be handled in validation where we have access to account equity
-	if aux.SizePct != nil && d.PositionSizeUSD == 0 {
-		// Store it temporarily in a way that can be converted later
-		// For now, we'll use a marker value and handle conversion in validation
-		d.PositionSizeUSD = *aux.SizePct * -1.0 // Negative indicates it's a percentage
-	}
-
-	// Map "stops_targets" to "stop_loss" and "take_profit"
-	if aux.StopsTargets != nil {
-		if aux.StopsTargets.SL != nil && d.StopLoss == 0 {
-			d.StopLoss = *aux.StopsTargets.SL
-		}
-		if aux.StopsTargets.TP != nil && d.TakeProfit == 0 {
-			d.TakeProfit = *aux.StopsTargets.TP
-		}
-	}
-
-	// Map "reason_codes" to "reasoning"
-	if len(aux.ReasonCodes) > 0 && d.Reasoning == "" {
-		d.Reasoning = strings.Join(aux.ReasonCodes, ", ")
-	}
-
-	return nil
-}
-
 // FullDecision AI的完整决策（包含思维链）
 type FullDecision struct {
 	SystemPrompt string     `json:"system_prompt"` // 系统提示词（发送给AI的系统prompt）
 	UserPrompt   string     `json:"user_prompt"`   // 发送给AI的输入prompt
 	CoTTrace     string     `json:"cot_trace"`     // 思维链分析（AI输出）
 	Decisions    []Decision `json:"decisions"`     // 具体决策列表
-	Notes        string     `json:"notes,omitempty"`
 	Timestamp    time.Time  `json:"timestamp"`
 	// AIRequestDurationMs 记录 AI API 调用耗时（毫秒）方便排查延迟问题
 	AIRequestDurationMs int64 `json:"ai_request_duration_ms,omitempty"`
@@ -207,11 +133,8 @@ func GetFullDecisionWithCustomPrompt(ctx *Context, mcpClient mcp.AIClient, custo
 	}
 
 	// 2. 构建 System Prompt（固定规则）和 User Prompt（动态数据）
-	systemPrompt := buildSystemPromptWithCustom(ctx, customPrompt, overrideBase, templateName)
-	userPrompt, err := buildUserPrompt(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("构建市场数据payload失败: %w", err)
-	}
+	systemPrompt := buildSystemPromptWithCustom(ctx.Account.TotalEquity, ctx.BTCETHLeverage, ctx.AltcoinLeverage, customPrompt, overrideBase, templateName)
+	userPrompt := buildUserPrompt(ctx)
 
 	// 3. 调用AI API（使用 system + user prompt）
 	aiCallStart := time.Now()
@@ -274,8 +197,7 @@ func fetchMarketDataForContext(ctx *Context) error {
 	for symbol := range symbolSet {
 		data, err := market.Get(symbol)
 		if err != nil {
-			// 单个币种失败不影响整体，但记录错误以便排查
-			log.Printf("⚠️  获取市场数据失败: %s (%v)", symbol, err)
+			// 单个币种失败不影响整体，只记录错误
 			continue
 		}
 
@@ -286,7 +208,7 @@ func fetchMarketDataForContext(ctx *Context) error {
 		const minOIThresholdMillions = 15.0 // 可調整：15M(保守) / 10M(平衡) / 8M(寬鬆) / 5M(激進)
 
 		isExistingPosition := positionSymbols[symbol]
-		if !isExistingPosition && data.OpenInterest != nil && data.OpenInterest.Latest > 0 && data.CurrentPrice > 0 {
+		if !isExistingPosition && data.OpenInterest != nil && data.CurrentPrice > 0 {
 			// 计算持仓价值（USD）= 持仓量 × 当前价格
 			oiValue := data.OpenInterest.Latest * data.CurrentPrice
 			oiValueInMillions := oiValue / 1_000_000 // 转换为百万美元单位
@@ -298,22 +220,6 @@ func fetchMarketDataForContext(ctx *Context) error {
 		}
 
 		ctx.MarketDataMap[symbol] = data
-	}
-
-	// 安全回退：若无任何市场数据（可能因API失败或阈值过滤过严），强制加载基础三大币种
-	if len(ctx.MarketDataMap) == 0 {
-		fallbackSymbols := []string{"BTCUSDT", "ETHUSDT", "BNBUSDT"}
-		for _, fs := range fallbackSymbols {
-			if _, exists := ctx.MarketDataMap[fs]; exists {
-				continue
-			}
-			if data, err := market.Get(fs); err == nil {
-				ctx.MarketDataMap[fs] = data
-				log.Printf("🛟 回退加载基础币种市场数据: %s", fs)
-			} else {
-				log.Printf("⚠️  回退加载失败: %s (%v)", fs, err)
-			}
-		}
 	}
 
 	// 加载OI Top数据（不影响主流程）
@@ -366,14 +272,14 @@ func calculateMaxCandidates(ctx *Context) int {
 }
 
 // buildSystemPromptWithCustom 构建包含自定义内容的 System Prompt
-func buildSystemPromptWithCustom(ctx *Context, customPrompt string, overrideBase bool, templateName string) string {
+func buildSystemPromptWithCustom(accountEquity float64, btcEthLeverage, altcoinLeverage int, customPrompt string, overrideBase bool, templateName string) string {
 	// 如果覆盖基础prompt且有自定义prompt，只使用自定义prompt
 	if overrideBase && customPrompt != "" {
 		return customPrompt
 	}
 
 	// 获取基础prompt（使用指定的模板）
-	basePrompt := buildSystemPrompt(ctx, templateName)
+	basePrompt := buildSystemPrompt(accountEquity, btcEthLeverage, altcoinLeverage, templateName)
 
 	// 如果没有自定义prompt，直接返回基础prompt
 	if customPrompt == "" {
@@ -393,7 +299,7 @@ func buildSystemPromptWithCustom(ctx *Context, customPrompt string, overrideBase
 }
 
 // buildSystemPrompt 构建 System Prompt（使用模板+动态部分）
-func buildSystemPrompt(ctx *Context, templateName string) string {
+func buildSystemPrompt(accountEquity float64, btcEthLeverage, altcoinLeverage int, templateName string) string {
 	var sb strings.Builder
 
 	// 1. 加载提示词模板（核心交易策略部分）
@@ -419,393 +325,144 @@ func buildSystemPrompt(ctx *Context, templateName string) string {
 		sb.WriteString("\n\n")
 	}
 
-	accountEquity := ctx.Account.TotalEquity
-	btcEthLeverage := ctx.BTCETHLeverage
-	altcoinLeverage := ctx.AltcoinLeverage
-	maxPositions := ctx.MaxPositions
-	if maxPositions <= 0 {
-		maxPositions = 3 // 默认值
-	}
-
 	// 2. 硬约束（风险控制）- 动态生成
 	sb.WriteString("# 硬约束（风险控制）\n\n")
 	sb.WriteString("1. 风险回报比: 必须 ≥ 1:3（冒1%风险，赚3%+收益）\n")
-	sb.WriteString(fmt.Sprintf("2. 最多持仓: %d个币种（质量>数量）\n", maxPositions))
+	sb.WriteString("2. 最多持仓: 3个币种（质量>数量）\n")
 	sb.WriteString(fmt.Sprintf("3. 单币仓位: 山寨%.0f-%.0f U | BTC/ETH %.0f-%.0f U\n",
 		accountEquity*0.8, accountEquity*1.5, accountEquity*5, accountEquity*10))
 	sb.WriteString(fmt.Sprintf("4. 杠杆限制: **山寨币最大%dx杠杆** | **BTC/ETH最大%dx杠杆** (⚠️ 严格执行，不可超过)\n", altcoinLeverage, btcEthLeverage))
 	sb.WriteString("5. 保证金: 总使用率 ≤ 90%\n")
 	sb.WriteString("6. 开仓金额: 建议 **≥12 USDT** (交易所最小名义价值 10 USDT + 安全边际)\n\n")
 
-	// 🎯 自动追踪止损系统说明
-	sb.WriteString("7. **自动追踪止损 (Automated Tiered Trailing Stop)**\n")
-	sb.WriteString("   - 系统已启用分级自动追踪止损，根据利润阶段自动保护收益\n")
-	sb.WriteString("   - 分级配置: \n")
-	sb.WriteString("     * 利润 ≥0.5%: 止损设在 +0.2% 利润（锁定小盈利）\n")
-	sb.WriteString("     * 利润 ≥1.0%: 止损设在 当前利润-0.5%（动态追踪）\n")
-	sb.WriteString("     * 利润 ≥3.0%: 止损设在 当前利润-1.0%（加大保护）\n")
-	sb.WriteString("     * 利润 ≥10%: 止损设在 当前利润-3.0%（深度保护）\n")
-	sb.WriteString("   - 示例: 11.5%利润 → 自动止损在8.5%利润处\n")
-	sb.WriteString("   - **重要**: 系统不允许AI修改止损（TRAILING_STOP_ALLOW_AI_OVERRIDE=false）\n")
-	sb.WriteString("   - 自动系统每30秒检查并更新，无需AI干预\n")
-	sb.WriteString("   - 建议: 专注于开仓/平仓决策，止损保护由系统自动管理\n\n")
-
-	// 🔥 新增: 如果已达到最大持仓，明确告知AI只能管理现有持仓
-	if len(ctx.CandidateCoins) == 0 && len(ctx.Positions) >= maxPositions {
-		sb.WriteString(fmt.Sprintf("\n⚠️ **当前已达到最大持仓数(%d/%d)，无法开新仓**\n", len(ctx.Positions), maxPositions))
-		sb.WriteString("- 请专注于管理现有持仓：评估是否应该平仓、调整止损/止盈\n")
-		sb.WriteString("- 只有在有持仓被平仓后，才能考虑开新仓\n")
-	}
-	sb.WriteString("# 数据契约 (Data Contract)\n\n")
-	sb.WriteString("- 输入payload为JSON ver 3.1，无额外文本，键含义仅在启动字典中提供一次。\n")
-	sb.WriteString("- 仅在 `qos.cov ≥ 0.95` 且 `qos.age_s ≤ pol.sla_s` 时使用 f4~f7，否则忽略该特征并降低自信。\n")
-	sb.WriteString("- 严格遵守 `pol` 中的 size_cap / hold_on_null / need_15m / min_conf；若 need_15m=true 但无 c15，则保持或减仓。\n")
-	sb.WriteString("- `topk` 已完成预筛选；禁止推测或请求不在列表中的资产。\n")
-	sb.WriteString("- 所有距离字段均为正值(ATR/百分比)，方向由键名指示；不要自行加负号。\n")
-	sb.WriteString("- `c15` 块仅在 `pol.need_15m` 为 true 且payload包含该字段时使用。\n\n")
-
 	// 3. 输出格式 - 动态生成
-	sb.WriteString("# 输出格式 (JSON Only)\n\n")
-	sb.WriteString("返回：{\"decisions\": [...], \"notes\": \"可选≤240字符\"}。禁止输出XML、Markdown或额外说明。\n")
-	sb.WriteString("- 每个decision对象字段：symbol, action, leverage, position_size_usd, stop_loss, take_profit, confidence(0-100), risk_usd, reasoning；按需使用 new_stop_loss/new_take_profit/close_percentage。\n")
-	sb.WriteString("- 合法action：hold | wait | open_long | open_short | close_long | close_short | add | reduce | update_stop_loss | update_take_profit | update_sl_tp | partial_close。\n")
-	sb.WriteString("- 确保止损/止盈符合硬约束；无法满足时返回 hold 并说明原因。\n")
-	sb.WriteString("- `notes` 可选，≤240字符，用于概述全局风险；否则返回空字符串。\n")
-	sb.WriteString("- 若无可执行方案，输出 {\"decisions\": [{\"symbol\": \"ALL\", \"action\": \"hold\", \"reasoning\": \"原因\"}], \"notes\": \"\"}。\n\n")
+	sb.WriteString("# 输出格式 (严格遵守)\n\n")
+	sb.WriteString("**必须使用XML标签 <reasoning> 和 <decision> 标签分隔思维链和决策JSON，避免解析错误**\n\n")
+	sb.WriteString("## 格式要求\n\n")
+	sb.WriteString("<reasoning>\n")
+	sb.WriteString("你的思维链分析...\n")
+	sb.WriteString("- 简洁分析你的思考过程 \n")
+	sb.WriteString("</reasoning>\n\n")
+	sb.WriteString("<decision>\n")
+	sb.WriteString("```json\n[\n")
+	sb.WriteString(fmt.Sprintf("  {\"symbol\": \"BTCUSDT\", \"action\": \"open_short\", \"leverage\": %d, \"position_size_usd\": %.0f, \"stop_loss\": 97000, \"take_profit\": 91000, \"confidence\": 85, \"risk_usd\": 300, \"reasoning\": \"下跌趋势+MACD死叉\"},\n", btcEthLeverage, accountEquity*5))
+	sb.WriteString("  {\"symbol\": \"SOLUSDT\", \"action\": \"update_stop_loss\", \"new_stop_loss\": 155, \"reasoning\": \"移动止损至保本位\"},\n")
+	sb.WriteString("  {\"symbol\": \"ETHUSDT\", \"action\": \"close_long\", \"reasoning\": \"止盈离场\"}\n")
+	sb.WriteString("]\n```\n")
+	sb.WriteString("</decision>\n\n")
+	sb.WriteString("## 字段说明\n\n")
+	sb.WriteString("- `action`: open_long | open_short | close_long | close_short | update_stop_loss | update_take_profit | partial_close | hold | wait\n")
+	sb.WriteString("- `confidence`: 0-100（开仓建议≥75）\n")
+	sb.WriteString("- 开仓时必填: leverage, position_size_usd, stop_loss, take_profit, confidence, risk_usd, reasoning\n")
+	sb.WriteString("- update_stop_loss 时必填: new_stop_loss (注意是 new_stop_loss，不是 stop_loss)\n")
+	sb.WriteString("- update_take_profit 时必填: new_take_profit (注意是 new_take_profit，不是 take_profit)\n")
+	sb.WriteString("- partial_close 时必填: close_percentage (0-100)\n\n")
 
 	return sb.String()
 }
 
 // buildUserPrompt 构建 User Prompt（动态数据）
-func buildUserPrompt(ctx *Context) (string, error) {
-	return buildUserPayload(ctx)
-}
+func buildUserPrompt(ctx *Context) string {
+	var sb strings.Builder
 
-func formatPositionsMicrostructure(ctx *Context, symbols []string) string {
-	if len(symbols) == 0 {
-		return ""
+	// 系统状态
+	sb.WriteString(fmt.Sprintf("时间: %s | 周期: #%d | 运行: %d分钟\n\n",
+		ctx.CurrentTime, ctx.CallCount, ctx.RuntimeMinutes))
+
+	// BTC 市场
+	if btcData, hasBTC := ctx.MarketDataMap["BTCUSDT"]; hasBTC {
+		sb.WriteString(fmt.Sprintf("BTC: %.2f (1h: %+.2f%%, 4h: %+.2f%%) | MACD: %.4f | RSI: %.2f\n\n",
+			btcData.CurrentPrice, btcData.PriceChange1h, btcData.PriceChange4h,
+			btcData.CurrentMACD, btcData.CurrentRSI7))
 	}
-	var feature4Blocks []string
-	var feature5Blocks []string
-	var confirmationBlocks []string
-	for _, symbol := range symbols {
-		data := ctx.MarketDataMap[symbol]
-		if data == nil {
+
+	// 账户
+	sb.WriteString(fmt.Sprintf("账户: 净值%.2f | 余额%.2f (%.1f%%) | 盈亏%+.2f%% | 保证金%.1f%% | 持仓%d个\n\n",
+		ctx.Account.TotalEquity,
+		ctx.Account.AvailableBalance,
+		(ctx.Account.AvailableBalance/ctx.Account.TotalEquity)*100,
+		ctx.Account.TotalPnLPct,
+		ctx.Account.MarginUsedPct,
+		ctx.Account.PositionCount))
+
+	// 持仓（完整市场数据）
+	if len(ctx.Positions) > 0 {
+		sb.WriteString("## 当前持仓\n")
+		for i, pos := range ctx.Positions {
+			// 计算持仓时长
+			holdingDuration := ""
+			if pos.UpdateTime > 0 {
+				durationMs := time.Now().UnixMilli() - pos.UpdateTime
+				durationMin := durationMs / (1000 * 60) // 转换为分钟
+				if durationMin < 60 {
+					holdingDuration = fmt.Sprintf(" | 持仓时长%d分钟", durationMin)
+				} else {
+					durationHour := durationMin / 60
+					durationMinRemainder := durationMin % 60
+					holdingDuration = fmt.Sprintf(" | 持仓时长%d小时%d分钟", durationHour, durationMinRemainder)
+				}
+			}
+
+			// 计算仓位价值（用于 partial_close 检查）
+			positionValue := math.Abs(pos.Quantity) * pos.MarkPrice
+
+			sb.WriteString(fmt.Sprintf("%d. %s %s | 入场价%.4f 当前价%.4f | 数量%.4f | 仓位价值%.2f USDT | 盈亏%+.2f%% | 盈亏金额%+.2f USDT | 最高收益率%.2f%% | 杠杆%dx | 保证金%.0f | 强平价%.4f%s\n\n",
+				i+1, pos.Symbol, strings.ToUpper(pos.Side),
+				pos.EntryPrice, pos.MarkPrice, pos.Quantity, positionValue, pos.UnrealizedPnLPct, pos.UnrealizedPnL, pos.PeakPnLPct,
+				pos.Leverage, pos.MarginUsed, pos.LiquidationPrice, holdingDuration))
+
+			// 使用FormatMarketData输出完整市场数据
+			if marketData, ok := ctx.MarketDataMap[pos.Symbol]; ok {
+				sb.WriteString(market.Format(marketData))
+				sb.WriteString("\n")
+			}
+		}
+	} else {
+		sb.WriteString("当前持仓: 无\n\n")
+	}
+
+	// 候选币种（完整市场数据）
+	sb.WriteString(fmt.Sprintf("## 候选币种 (%d个)\n\n", len(ctx.MarketDataMap)))
+	displayedCount := 0
+	for _, coin := range ctx.CandidateCoins {
+		marketData, hasData := ctx.MarketDataMap[coin.Symbol]
+		if !hasData {
 			continue
 		}
-		derivs := microDerivs(data)
-		feature4Blocks = append(feature4Blocks, formatPositionFeature4(symbol, derivs))
-		feature5Blocks = append(feature5Blocks, formatPositionFeature5(symbol, derivs))
-		confirmationBlocks = append(confirmationBlocks, formatPositionConfirmation(symbol, derivs))
+		displayedCount++
+
+		sourceTags := ""
+		if len(coin.Sources) > 1 {
+			sourceTags = " (AI500+OI_Top双重信号)"
+		} else if len(coin.Sources) == 1 && coin.Sources[0] == "oi_top" {
+			sourceTags = " (OI_Top持仓增长)"
+		}
+
+		// 使用FormatMarketData输出完整市场数据
+		sb.WriteString(fmt.Sprintf("### %d. %s%s\n\n", displayedCount, coin.Symbol, sourceTags))
+		sb.WriteString(market.Format(marketData))
+		sb.WriteString("\n")
 	}
-	if len(feature4Blocks) == 0 && len(feature5Blocks) == 0 && len(confirmationBlocks) == 0 {
-		return ""
-	}
-	var sb strings.Builder
-	sb.WriteString("## 当前持仓 · Microstructure (Feature 4 & 5)\n\n")
-	sb.WriteString("### Feature 4 — CVD & Taker Imbalance (3m)\n")
-	sb.WriteString("# Definitions (informational):\n")
-	sb.WriteString("# - cvd_notional_z: z-score of cumulative taker (buy-sell) notional\n")
-	sb.WriteString("# - imb_notional_z: z-score of taker imbalance in notional units (−1..+1)\n")
-	sb.WriteString("# - tbr_notional: taker buy ratio in notional units (0..1)\n")
-	sb.WriteString("# - slope_*: OLS slope over H buckets; r2_*: fit quality\n")
-	sb.WriteString("# - Divergences compare price slope vs CVD z-slope (bearish = price↑ + CVD↓; bullish = price↓ + CVD↑)\n\n")
-	for _, block := range feature4Blocks {
-		sb.WriteString(block)
-		if !strings.HasSuffix(block, "\n\n") {
-			sb.WriteString("\n")
+	sb.WriteString("\n")
+
+	// 夏普比率（直接传值，不要复杂格式化）
+	if ctx.Performance != nil {
+		// 直接从interface{}中提取SharpeRatio
+		type PerformanceData struct {
+			SharpeRatio float64 `json:"sharpe_ratio"`
+		}
+		var perfData PerformanceData
+		if jsonData, err := json.Marshal(ctx.Performance); err == nil {
+			if err := json.Unmarshal(jsonData, &perfData); err == nil {
+				sb.WriteString(fmt.Sprintf("## 📊 夏普比率: %.2f\n\n", perfData.SharpeRatio))
+			}
 		}
 	}
-	sb.WriteString("### Feature 5 — Liquidation Heatmap Distance (3m, window=30d, HL=7d)\n")
-	sb.WriteString("# dist_*_atr uses Wilder ATR on the TF; prefer_direction derived from nearest cluster distances\n\n")
-	for _, block := range feature5Blocks {
-		sb.WriteString(block)
-		if !strings.HasSuffix(block, "\n\n") {
-			sb.WriteString("\n")
-		}
-	}
-	sb.WriteString("# Optional confirmation TF (15m) — mirror the same fields if you use HTF confirmation\n\n")
-	for _, block := range confirmationBlocks {
-		sb.WriteString(block)
-		if !strings.HasSuffix(block, "\n\n") {
-			sb.WriteString("\n")
-		}
-	}
+
+	sb.WriteString("---\n\n")
+	sb.WriteString("现在请分析并输出决策（思维链 + JSON）\n")
+
 	return sb.String()
-}
-
-func formatPositionFeature4(symbol string, f *types.DerivsFeatures) string {
-	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("CVD/Taker (3m) — %s:\n", symbol))
-	sb.WriteString(fmt.Sprintf("cvd_notional_z (short/long): %s / %s\n", microFloat(f.CVDNotionalZ3mShort, 4), microFloat(f.CVDNotionalZ3mLong, 4)))
-	sb.WriteString(fmt.Sprintf("imb_notional_z (short/long): %s / %s\n", microFloat(f.ImbNotionalZ3mShort, 4), microFloat(f.ImbNotionalZ3mLong, 4)))
-	sb.WriteString(fmt.Sprintf("tbr_notional: %s\n", microFloat(f.TBRNotional3m, 4)))
-	sb.WriteString(fmt.Sprintf("Slopes & R² (3m, short=20 / mid=60) — %s:\n", symbol))
-	sb.WriteString(fmt.Sprintf("slope_price: %s (R² %s), %s (R² %s)\n", microFloat(f.SlopePrice3mShort, 4), microFloat(f.R2Price3mShort, 3), microFloat(f.SlopePrice3mMid, 4), microFloat(f.R2Price3mMid, 3)))
-	sb.WriteString(fmt.Sprintf("slope_cvd_z: %s (R² %s), %s (R² %s)\n", microFloat(f.SlopeCVDZ3mShort, 4), microFloat(f.R2CVDZ3mShort, 3), microFloat(f.SlopeCVDZ3mMid, 4), microFloat(f.R2CVDZ3mMid, 3)))
-	sb.WriteString(fmt.Sprintf("slope_imb: %s (R² %s), %s (R² %s)\n", microFloat(f.SlopeImb3mShort, 4), microFloat(f.R2Imb3mShort, 3), microFloat(f.SlopeImb3mMid, 4), microFloat(f.R2Imb3mMid, 3)))
-	sb.WriteString(fmt.Sprintf("Divergences (3m): bearish_short=%s bullish_short=%s | bearish_mid=%s bullish_mid=%s\n",
-		microInt(f.DivBearShort3m), microInt(f.DivBullShort3m), microInt(f.DivBearMid3m), microInt(f.DivBullMid3m)))
-	sb.WriteString(fmt.Sprintf("confidence_cvd (0..1): %s\n\n", microFloat(f.ConfidenceCVD3m, 3)))
-	return sb.String()
-}
-
-func formatPositionFeature5(symbol string, f *types.DerivsFeatures) string {
-	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("Feature 5 (3m) — %s:\n", symbol))
-	sb.WriteString(fmt.Sprintf("dist_up_pct=%s dist_up_atr=%s cluster_strength_up=%s\n", microPercent(f.DistUpPct3m, 3), microFloat(f.DistUpAtr3m, 3), microFloat(f.ClusterStrengthUp3m, 3)))
-	sb.WriteString(fmt.Sprintf("dist_dn_pct=%s dist_dn_atr=%s cluster_strength_down=%s\n", microPercent(f.DistDnPct3m, 3), microFloat(f.DistDnAtr3m, 3), microFloat(f.ClusterStrengthDown3m, 3)))
-	sb.WriteString(fmt.Sprintf("liq_risk_up=%s liq_risk_down=%s prefer_direction=%s\n", microInt(f.LiqRiskUp3m), microInt(f.LiqRiskDown3m), microStringValue(f.PreferDirection3m)))
-	sb.WriteString(fmt.Sprintf("Meta (3m): bucket_usd=%s event_count=%s atr_tf=%s\n", microFloat(f.BucketUsd3m, 3), microInt(f.EventCountLiq3m), microFloat(f.Atr3m, 3)))
-	sb.WriteString(fmt.Sprintf("confidence_liq (0..1): %s\n\n", microFloat(f.ConfidenceLiq3m, 3)))
-	return sb.String()
-}
-
-func formatPositionConfirmation(symbol string, f *types.DerivsFeatures) string {
-	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("[15m Confirmation — %s]\n", symbol))
-	sb.WriteString(fmt.Sprintf("cvd_notional_z (short/long): %s / %s\n", microFloat(f.CVDNotionalZ15mShort, 4), microFloat(f.CVDNotionalZ15mLong, 4)))
-	sb.WriteString(fmt.Sprintf("imb_notional_z (short/long): %s / %s\n", microFloat(f.ImbNotionalZ15mShort, 4), microFloat(f.ImbNotionalZ15mLong, 4)))
-	sb.WriteString(fmt.Sprintf("tbr_notional: %s\n", microFloat(f.TBRNotional15m, 4)))
-	sb.WriteString(fmt.Sprintf("Divergences (15m): bearish_mid=%s bullish_mid=%s\n", microInt(f.DivBearMid15m), microInt(f.DivBullMid15m)))
-	sb.WriteString(fmt.Sprintf("dist_up_atr=%s dist_dn_atr=%s prefer_direction=%s\n", microFloat(f.DistUpAtr15m, 3), microFloat(f.DistDnAtr15m, 3), microStringValue(f.PreferDirection15m)))
-	sb.WriteString(fmt.Sprintf("confidence_cvd=%s confidence_liq=%s\n\n", microFloat(f.ConfidenceCVD15m, 3), microFloat(f.ConfidenceLiq15m, 3)))
-	return sb.String()
-}
-
-func formatCandidateMicrostructure(symbol string, data *market.Data) string {
-	derivs := microDerivs(data)
-	if derivs == nil {
-		return ""
-	}
-	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("### %s\n\n", symbol))
-	sb.WriteString("Microstructure — Feature 4 (CVD/Taker, 3m):\n")
-	sb.WriteString(fmt.Sprintf("cvd_notional_z (short/long): %s / %s\n", microFloat(derivs.CVDNotionalZ3mShort, 4), microFloat(derivs.CVDNotionalZ3mLong, 4)))
-	sb.WriteString(fmt.Sprintf("imb_notional_z (short/long): %s / %s\n", microFloat(derivs.ImbNotionalZ3mShort, 4), microFloat(derivs.ImbNotionalZ3mLong, 4)))
-	sb.WriteString(fmt.Sprintf("tbr_notional: %s\n", microFloat(derivs.TBRNotional3m, 4)))
-	sb.WriteString(fmt.Sprintf("Slopes & R² (3m): slope_price %s (R² %s); slope_cvd_z %s (R² %s)\n",
-		microFloat(derivs.SlopePrice3mShort, 4), microFloat(derivs.R2Price3mShort, 3),
-		microFloat(derivs.SlopeCVDZ3mShort, 4), microFloat(derivs.R2CVDZ3mShort, 3)))
-	sb.WriteString(fmt.Sprintf("Divergences (3m): bearish_short=%s bullish_short=%s\n", microInt(derivs.DivBearShort3m), microInt(derivs.DivBullShort3m)))
-	sb.WriteString(fmt.Sprintf("confidence_cvd=%s\n\n", microFloat(derivs.ConfidenceCVD3m, 3)))
-	sb.WriteString("Microstructure — Feature 5 (Liq Distance, 3m):\n")
-	sb.WriteString(fmt.Sprintf("dist_up_pct=%s dist_up_atr=%s cluster_strength_up=%s\n", microPercent(derivs.DistUpPct3m, 3), microFloat(derivs.DistUpAtr3m, 3), microFloat(derivs.ClusterStrengthUp3m, 3)))
-	sb.WriteString(fmt.Sprintf("dist_dn_pct=%s dist_dn_atr=%s cluster_strength_down=%s\n", microPercent(derivs.DistDnPct3m, 3), microFloat(derivs.DistDnAtr3m, 3), microFloat(derivs.ClusterStrengthDown3m, 3)))
-	sb.WriteString(fmt.Sprintf("liq_risk_up=%s liq_risk_down=%s prefer_direction=%s\n", microInt(derivs.LiqRiskUp3m), microInt(derivs.LiqRiskDown3m), microStringValue(derivs.PreferDirection3m)))
-	sb.WriteString(fmt.Sprintf("Meta: bucket_usd=%s event_count=%s atr_tf=%s\n", microFloat(derivs.BucketUsd3m, 3), microInt(derivs.EventCountLiq3m), microFloat(derivs.Atr3m, 3)))
-	sb.WriteString(fmt.Sprintf("confidence_liq=%s\n\n", microFloat(derivs.ConfidenceLiq3m, 3)))
-	sb.WriteString("# (Optional) 15m confirmation fields as above:\n")
-	sb.WriteString(fmt.Sprintf("[15m] cvd_notional_z short/long: %s/%s; dist_up_atr=%s dist_dn_atr=%s; prefer_direction=%s\n",
-		microFloat(derivs.CVDNotionalZ15mShort, 4), microFloat(derivs.CVDNotionalZ15mLong, 4),
-		microFloat(derivs.DistUpAtr15m, 3), microFloat(derivs.DistDnAtr15m, 3), microStringValue(derivs.PreferDirection15m)))
-	sb.WriteString(fmt.Sprintf("[15m] confidences: cvd=%s liq=%s\n\n", microFloat(derivs.ConfidenceCVD15m, 3), microFloat(derivs.ConfidenceLiq15m, 3)))
-	return sb.String()
-}
-
-func formatPositionsStructural(ctx *Context, symbols []string) string {
-	if len(symbols) == 0 {
-		return ""
-	}
-	var feature6Blocks []string
-	var feature7Blocks []string
-	var confirmationBlocks []string
-	for _, symbol := range symbols {
-		data := ctx.MarketDataMap[symbol]
-		if data == nil {
-			continue
-		}
-		derivs := microDerivs(data)
-		feature6Blocks = append(feature6Blocks, formatPositionFeature6(symbol, derivs))
-		feature7Blocks = append(feature7Blocks, formatPositionFeature7(symbol, derivs))
-		confirmationBlocks = append(confirmationBlocks, formatStructuralConfirmation(symbol, derivs))
-	}
-	if len(feature6Blocks) == 0 && len(feature7Blocks) == 0 && len(confirmationBlocks) == 0 {
-		return ""
-	}
-	var sb strings.Builder
-	sb.WriteString("## 当前持仓 · Structural (Feature 6 & 7)\n\n")
-	sb.WriteString("### Feature 6 — Anchored VWAPs (AVWAP) from Key Events (3m)\n")
-	sb.WriteString("# Definitions:\n")
-	sb.WriteString("# - AVWAP(anchor_ts) = Σ(P*V)/ΣV since anchor_ts (1m bars or trades)\n")
-	sb.WriteString("# - Bands: ±k·σ where σ = stdev(Close − AVWAP) over W_BAND bars (default W_BAND=200, k=1)\n")
-	sb.WriteString("# - Anchors considered: ATH, ATL, YTD_HI, YTD_LO, WEEK_OPEN, MONTH_OPEN, DAILY_OPEN, SWING_HI, SWING_LO\n")
-	sb.WriteString("# - Distances reported in ATR units for robustness; “near” if < 0.5 ATR\n\n")
-	for _, block := range feature6Blocks {
-		sb.WriteString(block)
-		if !strings.HasSuffix(block, "\n\n") {
-			sb.WriteString("\n")
-		}
-	}
-	sb.WriteString("### Feature 7 — Volatility Regime & Squeeze (3m)\n")
-	sb.WriteString("# Definitions:\n")
-	sb.WriteString("# - BBW = (BBU − BBL) / mid, with Bollinger (len=20, k=2)\n")
-	sb.WriteString("# - KC_width = 2 * KeltnerFactor * EMA(TR, len=20), KeltnerFactor=1.5\n")
-	sb.WriteString("# - squeeze_on = 1 if BBW < k_squeeze * KC_width (default k_squeeze=1.0)\n")
-	sb.WriteString("# - rv_ratio = realized_vol_short / realized_vol_long (short=60min=20 bars; long=1d=480 bars; stdev of log returns)\n")
-	sb.WriteString("# - Regime via BBW percentile over lookback (e.g., 30d on 3m ≈ 14,400 bars) + squeeze flags\n\n")
-	for _, block := range feature7Blocks {
-		sb.WriteString(block)
-		if !strings.HasSuffix(block, "\n\n") {
-			sb.WriteString("\n")
-		}
-	}
-	sb.WriteString("# Optional confirmation TF (15m) — mirror key fields\n\n")
-	for _, block := range confirmationBlocks {
-		sb.WriteString(block)
-		if !strings.HasSuffix(block, "\n\n") {
-			sb.WriteString("\n")
-		}
-	}
-	return sb.String()
-}
-
-func formatPositionFeature6(symbol string, f *types.DerivsFeatures) string {
-	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("AVWAP (3m) — %s:\n", symbol))
-	sb.WriteString(fmt.Sprintf("Nearest AVWAP above: name=%s price=%s dist_atr=%s band(+1σ)_dist_atr=%s\n",
-		microStringValue(f.AVWAPUpName3m),
-		microFloat(f.AVWAPUpPrice3m, 4),
-		microFloat(f.AVWAPUpDistAtr3m, 3),
-		microFloat(f.AVWAPUpBand1DistAtr3m, 3)))
-	sb.WriteString(fmt.Sprintf("Nearest AVWAP below: name=%s price=%s dist_atr=%s band(−1σ)_dist_atr=%s\n",
-		microStringValue(f.AVWAPDnName3m),
-		microFloat(f.AVWAPDnPrice3m, 4),
-		microFloat(f.AVWAPDnDistAtr3m, 3),
-		microFloat(f.AVWAPDnBand1DistAtr3m, 3)))
-	sb.WriteString(fmt.Sprintf("Reclaim/Reject: reclaim_up=%s rejection_down=%s\n",
-		microInt(f.AVWAPReclaimUp3m), microInt(f.AVWAPRejectionDn3m)))
-	sb.WriteString(fmt.Sprintf("Confluence: bull_count=%s bear_count=%s bias=%s\n",
-		microInt(f.AVWAPConfluenceBull3m), microInt(f.AVWAPConfluenceBear3m), microStringValue(f.AVWAPBias3m)))
-	sb.WriteString(fmt.Sprintf("confidence_avwap (0..1): %s\n\n", microFloat(f.ConfidenceAVWAP3m, 3)))
-	return sb.String()
-}
-
-func formatPositionFeature7(symbol string, f *types.DerivsFeatures) string {
-	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("Volatility regime (3m) — %s:\n", symbol))
-	sb.WriteString(fmt.Sprintf("BBW=%s KC_width=%s bbw_pct_rank=%s squeeze_on=%s squeeze_persistence_bars=%s\n",
-		microFloat(f.BBW3m, 4),
-		microFloat(f.KCWidth3m, 4),
-		microPercentRaw(f.BBWPctRank3m, 2),
-		microInt(f.SqueezeOn3m),
-		microInt(f.SqueezePersist3m)))
-	sb.WriteString(fmt.Sprintf("squeeze_release=%s expansion_rate=%s\n",
-		microInt(f.SqueezeRelease3m), microFloat(f.BBWExpansionRate3m, 4)))
-	sb.WriteString(fmt.Sprintf("rv_ratio=%s rv_ratio_z=%s regime=%s\n",
-		microFloat(f.RvRatio3m, 4),
-		microFloat(f.RvRatioZ3m, 3),
-		microStringValue(f.VolRegime3m)))
-	sb.WriteString(fmt.Sprintf("confidence_vol (0..1): %s\n\n", microFloat(f.ConfidenceVol3m, 3)))
-	return sb.String()
-}
-
-func formatStructuralConfirmation(symbol string, f *types.DerivsFeatures) string {
-	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("[15m AVWAP — %s]\n", symbol))
-	sb.WriteString(fmt.Sprintf("up_name=%s dist_atr=%s | dn_name=%s dist_atr=%s\n",
-		microStringValue(f.AVWAPUpName15m),
-		microFloat(f.AVWAPUpDistAtr15m, 3),
-		microStringValue(f.AVWAPDnName15m),
-		microFloat(f.AVWAPDnDistAtr15m, 3)))
-	sb.WriteString(fmt.Sprintf("reclaim_up=%s rejection_down=%s bias=%s\n",
-		microInt(f.AVWAPReclaimUp15m), microInt(f.AVWAPRejectionDn15m), microStringValue(f.AVWAPBias15m)))
-	sb.WriteString(fmt.Sprintf("confidence_avwap=%s\n", microFloat(f.ConfidenceAVWAP15m, 3)))
-	sb.WriteString(fmt.Sprintf("[15m Volatility — %s]\n", symbol))
-	sb.WriteString(fmt.Sprintf("squeeze_on=%s release=%s bbw_pct_rank=%s rv_ratio=%s regime=%s\n",
-		microInt(f.SqueezeOn15m),
-		microInt(f.SqueezeRelease15m),
-		microPercentRaw(f.BBWPctRank15m, 2),
-		microFloat(f.RvRatio15m, 4),
-		microStringValue(f.VolRegime15m)))
-	sb.WriteString(fmt.Sprintf("confidence_vol=%s\n\n", microFloat(f.ConfidenceVol15m, 3)))
-	return sb.String()
-}
-
-func formatCandidateStructural(symbol string, data *market.Data) string {
-	derivs := microDerivs(data)
-	if derivs == nil {
-		return ""
-	}
-	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("### %s\n\n", symbol))
-	sb.WriteString("Anchored VWAPs — Feature 6 (3m):\n")
-	sb.WriteString(fmt.Sprintf("up_name=%s price=%s dist_atr=%s band(+1σ)=%s; dn_name=%s price=%s dist_atr=%s band(-1σ)=%s\n",
-		microStringValue(derivs.AVWAPUpName3m),
-		microFloat(derivs.AVWAPUpPrice3m, 4),
-		microFloat(derivs.AVWAPUpDistAtr3m, 3),
-		microFloat(derivs.AVWAPUpBand1DistAtr3m, 3),
-		microStringValue(derivs.AVWAPDnName3m),
-		microFloat(derivs.AVWAPDnPrice3m, 4),
-		microFloat(derivs.AVWAPDnDistAtr3m, 3),
-		microFloat(derivs.AVWAPDnBand1DistAtr3m, 3)))
-	sb.WriteString(fmt.Sprintf("reclaim_up=%s rejection_down=%s bias=%s\n",
-		microInt(derivs.AVWAPReclaimUp3m), microInt(derivs.AVWAPRejectionDn3m), microStringValue(derivs.AVWAPBias3m)))
-	sb.WriteString(fmt.Sprintf("confluence: bull=%s bear=%s conf=%s\n",
-		microInt(derivs.AVWAPConfluenceBull3m), microInt(derivs.AVWAPConfluenceBear3m), microFloat(derivs.ConfidenceAVWAP3m, 3)))
-	sb.WriteString("\nVolatility Regime & Squeeze — Feature 7 (3m):\n")
-	sb.WriteString(fmt.Sprintf("BBW=%s KC_width=%s bbw_pct_rank=%s squeeze_on=%s release=%s\n",
-		microFloat(derivs.BBW3m, 4),
-		microFloat(derivs.KCWidth3m, 4),
-		microPercentRaw(derivs.BBWPctRank3m, 2),
-		microInt(derivs.SqueezeOn3m),
-		microInt(derivs.SqueezeRelease3m)))
-	sb.WriteString(fmt.Sprintf("rv_ratio=%s rv_ratio_z=%s regime=%s conf=%s\n\n",
-		microFloat(derivs.RvRatio3m, 4),
-		microFloat(derivs.RvRatioZ3m, 3),
-		microStringValue(derivs.VolRegime3m),
-		microFloat(derivs.ConfidenceVol3m, 3)))
-	sb.WriteString("# (Optional) 15m confirmation\n")
-	sb.WriteString(fmt.Sprintf("[15m] AVWAP bias=%s; squeeze_on=%s; regime=%s\n\n",
-		microStringValue(derivs.AVWAPBias15m),
-		microInt(derivs.SqueezeOn15m),
-		microStringValue(derivs.VolRegime15m)))
-	return sb.String()
-}
-
-func microDerivs(data *market.Data) *types.DerivsFeatures {
-	if data != nil && data.Snapshot != nil && data.Snapshot.Features.Derivs != nil {
-		return data.Snapshot.Features.Derivs
-	}
-	return &types.DerivsFeatures{}
-}
-
-func microFloat(v *float64, decimals int) string {
-	if v == nil || math.IsNaN(*v) || math.IsInf(*v, 0) {
-		return "null"
-	}
-	format := fmt.Sprintf("%%.%df", decimals)
-	return fmt.Sprintf(format, *v)
-}
-
-func microPercent(v *float64, decimals int) string {
-	value := microFloat(v, decimals)
-	if value == "null" {
-		return value
-	}
-	return value + "%"
-}
-
-func microPercentRaw(v *float64, decimals int) string {
-	return microPercent(v, decimals)
-}
-
-func microInt(v *int) string {
-	if v == nil {
-		return "null"
-	}
-	return fmt.Sprintf("%d", *v)
-}
-
-func microStringValue(v *string) string {
-	if v == nil {
-		return "null"
-	}
-	trimmed := strings.TrimSpace(*v)
-	if trimmed == "" {
-		return "null"
-	}
-	return trimmed
 }
 
 // parseFullDecisionResponse 解析AI的完整决策响应
@@ -814,11 +471,10 @@ func parseFullDecisionResponse(aiResponse string, accountEquity float64, btcEthL
 	cotTrace := extractCoTTrace(aiResponse)
 
 	// 2. 提取JSON决策列表
-	decisions, notes, err := extractDecisions(aiResponse)
+	decisions, err := extractDecisions(aiResponse)
 	if err != nil {
 		return &FullDecision{
 			CoTTrace:  cotTrace,
-			Notes:     notes,
 			Decisions: []Decision{},
 		}, fmt.Errorf("提取决策失败: %w", err)
 	}
@@ -827,14 +483,12 @@ func parseFullDecisionResponse(aiResponse string, accountEquity float64, btcEthL
 	if err := validateDecisions(decisions, accountEquity, btcEthLeverage, altcoinLeverage); err != nil {
 		return &FullDecision{
 			CoTTrace:  cotTrace,
-			Notes:     notes,
 			Decisions: decisions,
 		}, fmt.Errorf("决策验证失败: %w", err)
 	}
 
 	return &FullDecision{
 		CoTTrace:  cotTrace,
-		Notes:     notes,
 		Decisions: decisions,
 	}, nil
 }
@@ -865,64 +519,83 @@ func extractCoTTrace(response string) string {
 }
 
 // extractDecisions 提取JSON决策列表
-func extractDecisions(response string) ([]Decision, string, error) {
+func extractDecisions(response string) ([]Decision, error) {
+	// 预清洗：去零宽/BOM
 	s := removeInvisibleRunes(response)
 	s = strings.TrimSpace(s)
-	s = fixMissingQuotes(s)
-	if decisions, notes, err := parseModelJSON(s); err == nil {
-		return decisions, notes, nil
-	}
 
+	// 🔧 关键修复 (Critical Fix)：在正则匹配之前就先修复全角字符！
+	// 否则正则表达式 \[ 无法匹配全角的 ［
+	s = fixMissingQuotes(s)
+
+	// 方法1: 优先尝试从 <decision> 标签中提取
 	var jsonPart string
 	if match := reDecisionTag.FindStringSubmatch(s); match != nil && len(match) > 1 {
 		jsonPart = strings.TrimSpace(match[1])
 		log.Printf("✓ 使用 <decision> 标签提取JSON")
 	} else {
+		// 后备方案：使用整个响应
 		jsonPart = s
 		log.Printf("⚠️  未找到 <decision> 标签，使用全文搜索JSON")
 	}
 
+	// 修复 jsonPart 中的全角字符
 	jsonPart = fixMissingQuotes(jsonPart)
 
+	// 1) 优先从 ```json 代码块中提取
 	if m := reJSONFence.FindStringSubmatch(jsonPart); m != nil && len(m) > 1 {
 		jsonContent := strings.TrimSpace(m[1])
-		jsonContent = compactArrayOpen(jsonContent)
-		jsonContent = fixMissingQuotes(jsonContent)
+		jsonContent = compactArrayOpen(jsonContent) // 把 "[ {" 规整为 "[{"
+		jsonContent = fixMissingQuotes(jsonContent) // 二次修复（防止 regex 提取后还有残留全角）
 		if err := validateJSONFormat(jsonContent); err != nil {
-			return nil, "", fmt.Errorf("JSON格式验证失败: %w\nJSON内容: %s\n完整响应:\n%s", err, jsonContent, response)
+			return nil, fmt.Errorf("JSON格式验证失败: %w\nJSON内容: %s\n完整响应:\n%s", err, jsonContent, response)
 		}
-		decisions, notes, err := parseModelJSON(jsonContent)
-		if err != nil {
-			return nil, "", err
+		var decisions []Decision
+		if err := json.Unmarshal([]byte(jsonContent), &decisions); err != nil {
+			return nil, fmt.Errorf("JSON解析失败: %w\nJSON内容: %s", err, jsonContent)
 		}
-		return decisions, notes, nil
+		return decisions, nil
 	}
 
+	// 2) 退而求其次 (Fallback)：全文寻找首个对象数组
+	// 注意：此时 jsonPart 已经过 fixMissingQuotes()，全角字符已转换为半角
 	jsonContent := strings.TrimSpace(reJSONArray.FindString(jsonPart))
 	if jsonContent == "" {
+		// 🔧 安全回退 (Safe Fallback)：当AI只输出思维链没有JSON时，生成保底决策（避免系统崩溃）
 		log.Printf("⚠️  [SafeFallback] AI未输出JSON决策，进入安全等待模式 (AI response without JSON, entering safe wait mode)")
+
+		// 提取思维链摘要（最多 240 字符）
 		cotSummary := jsonPart
 		if len(cotSummary) > 240 {
 			cotSummary = cotSummary[:240] + "..."
 		}
+
+		// 生成保底决策：所有币种进入 wait 状态
 		fallbackDecision := Decision{
 			Symbol:    "ALL",
 			Action:    "wait",
 			Reasoning: fmt.Sprintf("模型未输出结构化JSON决策，进入安全等待；摘要：%s", cotSummary),
 		}
-		return []Decision{fallbackDecision}, "", nil
+
+		return []Decision{fallbackDecision}, nil
 	}
 
+	// 🔧 规整格式（此时全角字符已在前面修复过）
 	jsonContent = compactArrayOpen(jsonContent)
-	jsonContent = fixMissingQuotes(jsonContent)
+	jsonContent = fixMissingQuotes(jsonContent) // 二次修复（防止 regex 提取后还有残留全角）
+
+	// 🔧 验证 JSON 格式（检测常见错误）
 	if err := validateJSONFormat(jsonContent); err != nil {
-		return nil, "", fmt.Errorf("JSON格式验证失败: %w\nJSON内容: %s\n完整响应:\n%s", err, jsonContent, response)
+		return nil, fmt.Errorf("JSON格式验证失败: %w\nJSON内容: %s\n完整响应:\n%s", err, jsonContent, response)
 	}
-	decisions, notes, err := parseModelJSON(jsonContent)
-	if err != nil {
-		return nil, "", err
+
+	// 解析JSON
+	var decisions []Decision
+	if err := json.Unmarshal([]byte(jsonContent), &decisions); err != nil {
+		return nil, fmt.Errorf("JSON解析失败: %w\nJSON内容: %s", err, jsonContent)
 	}
-	return decisions, notes, nil
+
+	return decisions, nil
 }
 
 // fixMissingQuotes 替换中文引号和全角字符为英文引号和半角字符（避免AI输出全角JSON字符导致解析失败）
@@ -958,17 +631,18 @@ func fixMissingQuotes(jsonStr string) string {
 func validateJSONFormat(jsonStr string) error {
 	trimmed := strings.TrimSpace(jsonStr)
 
-	if strings.HasPrefix(trimmed, "{") {
-		if !strings.Contains(trimmed, "\"decisions\"") {
-			return fmt.Errorf("JSON对象缺少 decisions 字段")
+	// 允许 [ 和 { 之间存在任意空白（含零宽）
+	if !reArrayHead.MatchString(trimmed) {
+		// 检查是否是纯数字/范围数组（常见错误）
+		if strings.HasPrefix(trimmed, "[") && !strings.Contains(trimmed[:min(20, len(trimmed))], "{") {
+			return fmt.Errorf("不是有效的决策数组（必须包含对象 {}），实际内容: %s", trimmed[:min(50, len(trimmed))])
 		}
-	} else {
-		if !reArrayHead.MatchString(trimmed) {
-			if strings.HasPrefix(trimmed, "[") && !strings.Contains(trimmed[:min(20, len(trimmed))], "{") {
-				return fmt.Errorf("不是有效的决策数组（必须包含对象 {}），实际内容: %s", trimmed[:min(50, len(trimmed))])
-			}
-			return fmt.Errorf("JSON 必须以 [{ 开头（允许空白），实际: %s", trimmed[:min(20, len(trimmed))])
-		}
+		return fmt.Errorf("JSON 必须以 [{ 开头（允许空白），实际: %s", trimmed[:min(20, len(trimmed))])
+	}
+
+	// 检查是否包含范围符号 ~（LLM 常见错误）
+	if strings.Contains(jsonStr, "~") {
+		return fmt.Errorf("JSON 中不可包含范围符号 ~，所有数字必须是精确的单一值")
 	}
 
 	// 检查是否包含千位分隔符（如 98,000）
@@ -986,33 +660,6 @@ func validateJSONFormat(jsonStr string) error {
 	return nil
 }
 
-func parseModelJSON(raw string) ([]Decision, string, error) {
-	trimmed := strings.TrimSpace(raw)
-	if trimmed == "" {
-		return nil, "", fmt.Errorf("JSON内容为空")
-	}
-	var envelope struct {
-		Decisions []Decision `json:"decisions"`
-		Notes     string     `json:"notes"`
-	}
-	if strings.HasPrefix(trimmed, "{") {
-		if err := json.Unmarshal([]byte(trimmed), &envelope); err == nil {
-			if len(envelope.Decisions) > 0 || envelope.Notes != "" {
-				return envelope.Decisions, strings.TrimSpace(envelope.Notes), nil
-			}
-		}
-	}
-	var arr []Decision
-	if strings.HasPrefix(trimmed, "[") {
-		if err := json.Unmarshal([]byte(trimmed), &arr); err == nil {
-			return arr, "", nil
-		}
-	} else if strings.HasPrefix(trimmed, "{") {
-		return nil, "", fmt.Errorf("JSON对象未提供决策数组")
-	}
-	return nil, "", fmt.Errorf("无法解析决策JSON")
-}
-
 // min 返回两个整数中的较小值
 func min(a, b int) int {
 	if a < b {
@@ -1023,10 +670,7 @@ func min(a, b int) int {
 
 // removeInvisibleRunes 去除零宽字符和 BOM，避免肉眼看不见的前缀破坏校验
 func removeInvisibleRunes(s string) string {
-	s = reInvisibleRunes.ReplaceAllString(s, "")
-	// 替换波浪号 ~ 为 "约" (在文本中用于近似值，在数字字段中会导致JSON解析错误)
-	s = strings.ReplaceAll(s, "~", "约")
-	return s
+	return reInvisibleRunes.ReplaceAllString(s, "")
 }
 
 // compactArrayOpen 规整开头的 "[ {" → "[{"
@@ -1036,16 +680,8 @@ func compactArrayOpen(s string) string {
 
 // validateDecisions 验证所有决策（需要账户信息和杠杆配置）
 func validateDecisions(decisions []Decision, accountEquity float64, btcEthLeverage, altcoinLeverage int) error {
-	for i := range decisions {
-		// Convert size_pct to position_size_usd if needed (marked by negative value)
-		if decisions[i].PositionSizeUSD < 0 {
-			sizePct := math.Abs(decisions[i].PositionSizeUSD)
-			decisions[i].PositionSizeUSD = accountEquity * sizePct
-			log.Printf("✓ Converted size_pct %.2f%% to position_size_usd %.2f USD (equity: %.2f)",
-				sizePct*100, decisions[i].PositionSizeUSD, accountEquity)
-		}
-
-		if err := validateDecision(&decisions[i], accountEquity, btcEthLeverage, altcoinLeverage); err != nil {
+	for i, decision := range decisions {
+		if err := validateDecision(&decision, accountEquity, btcEthLeverage, altcoinLeverage); err != nil {
 			return fmt.Errorf("决策 #%d 验证失败: %w", i+1, err)
 		}
 	}
@@ -1087,8 +723,6 @@ func validateDecision(d *Decision, accountEquity float64, btcEthLeverage, altcoi
 		"partial_close":      true,
 		"hold":               true,
 		"wait":               true,
-		// 兼容：同时更新止损与止盈（AI 可能输出的合并动作）
-		"update_sl_tp": true,
 	}
 
 	if !validActions[d.Action] {
@@ -1191,14 +825,14 @@ func validateDecision(d *Decision, accountEquity float64, btcEthLeverage, altcoi
 	}
 
 	// 动态调整止损验证
-	if d.Action == "update_stop_loss" || d.Action == "update_sl_tp" {
+	if d.Action == "update_stop_loss" {
 		if d.NewStopLoss <= 0 {
 			return fmt.Errorf("新止损价格必须大于0: %.2f", d.NewStopLoss)
 		}
 	}
 
 	// 动态调整止盈验证
-	if d.Action == "update_take_profit" || d.Action == "update_sl_tp" {
+	if d.Action == "update_take_profit" {
 		if d.NewTakeProfit <= 0 {
 			return fmt.Errorf("新止盈价格必须大于0: %.2f", d.NewTakeProfit)
 		}
