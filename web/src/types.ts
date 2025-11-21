@@ -132,6 +132,10 @@ export interface Exchange {
   asterUser?: string
   asterSigner?: string
   asterPrivateKey?: string
+  // LIGHTER 特定字段
+  lighterWalletAddr?: string
+  lighterPrivateKey?: string
+  lighterApiKeyPrivateKey?: string
 }
 
 export interface CreateTraderRequest {
@@ -175,6 +179,10 @@ export interface UpdateExchangeConfigRequest {
       aster_user?: string
       aster_signer?: string
       aster_private_key?: string
+      // LIGHTER 特定字段
+      lighter_wallet_addr?: string
+      lighter_private_key?: string
+      lighter_api_key_private_key?: string
     }
   }
 }

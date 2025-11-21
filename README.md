@@ -289,7 +289,7 @@ nano config.json  # or use any editor
 #### Step 2: One-Click Start
 ```bash
 # Option 1: Use convenience script (Recommended)
-chmod +x start.sh
+chmod +x ./start.sh
 ./start.sh start --build
 
 > #### Docker Compose Version Notes

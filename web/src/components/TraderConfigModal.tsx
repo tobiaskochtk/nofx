@@ -210,9 +210,21 @@ export function TraderConfigModal({
     setBalanceFetchError('')
 
     try {
-      const token = localStorage.getItem('auth_token')
-      if (!token) {
-        throw new Error('未登录，请先登录')
+      const result = await httpClient.get<{
+        total_equity?: number
+        balance?: number
+      }>(`/api/account?trader_id=${traderData.trader_id}`)
+
+      if (result.success && result.data) {
+        // total_equity = 当前账户净值（包含未实现盈亏）
+        // 这应该作为新的初始余额
+        const currentBalance =
+          result.data.total_equity || result.data.balance || 0
+
+        setFormData((prev) => ({ ...prev, initial_balance: currentBalance }))
+        toast.success('已获取当前余额')
+      } else {
+        throw new Error(result.message || '获取余额失败')
       }
 
       const response = await httpClient.get(
@@ -233,7 +245,7 @@ export function TraderConfigModal({
     } catch (error) {
       console.error('获取余额失败:', error)
       setBalanceFetchError('获取余额失败，请检查网络连接')
-      toast.error('获取余额失败，请检查网络连接')
+      // Note: Network/system errors already shown via toast by httpClient
     } finally {
       setIsFetchingBalance(false)
     }

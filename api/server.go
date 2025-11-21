@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"math"
 	"net"
 	"net/http"
 	"nofx/auth"
@@ -511,6 +512,8 @@ type UpdateExchangeConfigRequest struct {
 		AsterUser             string `json:"aster_user"`
 		AsterSigner           string `json:"aster_signer"`
 		AsterPrivateKey       string `json:"aster_private_key"`
+		LighterWalletAddr     string `json:"lighter_wallet_addr"`
+		LighterPrivateKey     string `json:"lighter_private_key"`
 	} `json:"exchanges"`
 }
 
@@ -545,8 +548,9 @@ func (s *Server) handleCreateTrader(c *gin.Context) {
 		}
 	}
 
-	// 生成交易员ID
-	traderID := fmt.Sprintf("%s_%s_%d", req.ExchangeID, req.AIModelID, time.Now().Unix())
+	// 生成交易员ID (使用 UUID 确保唯一性，解决 Issue #893)
+	// 保留前缀以便调试和日志追踪
+	traderID := fmt.Sprintf("%s_%s_%s", req.ExchangeID, req.AIModelID, uuid.New().String())
 
 	// 设置默认值
 	isCrossMargin := true // 默认为全仓模式
@@ -1319,7 +1323,7 @@ func (s *Server) handleUpdateExchangeConfigs(c *gin.Context) {
 
 	// 更新每个交易所的配置
 	for exchangeID, exchangeData := range req.Exchanges {
-		err := s.database.UpdateExchange(userID, exchangeID, exchangeData.Enabled, exchangeData.APIKey, exchangeData.SecretKey, exchangeData.Testnet, exchangeData.HyperliquidWalletAddr, exchangeData.AsterUser, exchangeData.AsterSigner, exchangeData.AsterPrivateKey)
+		err := s.database.UpdateExchange(userID, exchangeID, exchangeData.Enabled, exchangeData.APIKey, exchangeData.SecretKey, exchangeData.Testnet, exchangeData.HyperliquidWalletAddr, exchangeData.AsterUser, exchangeData.AsterSigner, exchangeData.AsterPrivateKey, exchangeData.LighterWalletAddr, exchangeData.LighterPrivateKey)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("更新交易所 %s 失败: %v", exchangeID, err)})
 			return
