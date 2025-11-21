@@ -202,9 +202,9 @@ export function ComparisonChart({ traders }: ComparisonChartProps) {
             {data.time} - #{data.index}
           </div>
           {traders.map((trader) => {
-            const pnlPct = data[`${trader.trader_id}_pnl_pct`]
             const equity = data[`${trader.trader_id}_equity`]
-            if (pnlPct === undefined) return null
+            const pnlPctValue = data[`${trader.trader_id}_pnl_pct`]
+            if (pnlPctValue === undefined) return null
 
             return (
               <div key={trader.trader_id} className="mb-1.5 last:mb-0">
@@ -216,10 +216,10 @@ export function ComparisonChart({ traders }: ComparisonChartProps) {
                 </div>
                 <div
                   className="text-sm mono font-bold"
-                  style={{ color: pnlPct >= 0 ? '#0ECB81' : '#F6465D' }}
+                  style={{ color: pnlPctValue >= 0 ? '#0ECB81' : '#F6465D' }}
                 >
-                  {pnlPct >= 0 ? '+' : ''}
-                  {pnlPct.toFixed(2)}%
+                  {pnlPctValue >= 0 ? '+' : ''}
+                  {pnlPctValue.toFixed(2)}%
                   <span
                     className="text-xs ml-2 font-normal"
                     style={{ color: '#848E9C' }}

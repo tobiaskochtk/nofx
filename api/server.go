@@ -187,6 +187,11 @@ func (s *Server) setupRoutes() {
 			protected.GET("/user/signal-sources", s.handleGetUserSignalSource)
 			protected.POST("/user/signal-sources", s.handleSaveUserSignalSource)
 
+			// Trailing Stop配置
+			protected.GET("/trailing-stop/config", s.handleGetTrailingStopConfig)
+			protected.PUT("/trailing-stop/config", s.handleUpdateTrailingStopConfig)
+			protected.GET("/trailing-stop/logs", s.handleGetTrailingStopLogs)
+
 			// 指定trader的数据（使用query参数 ?trader_id=xxx）
 			protected.GET("/status", s.handleStatus)
 			protected.GET("/account", s.handleAccount)
@@ -196,12 +201,12 @@ func (s *Server) setupRoutes() {
 			protected.GET("/statistics", s.handleStatistics)
 			protected.GET("/performance", s.handlePerformance)
 
-            // Deals API
-            protected.GET("/deals", s.handleListDeals)
-            protected.GET("/deals/count", s.handleCountDeals)
-            protected.GET("/deals/:id", s.handleGetDealByID)
-            protected.GET("/deals/export.csv", s.handleExportDealsCSV)
-            protected.GET("/deals/export.jsonl", s.handleExportDealsJSONL)
+			// Deals API
+			protected.GET("/deals", s.handleListDeals)
+			protected.GET("/deals/count", s.handleCountDeals)
+			protected.GET("/deals/:id", s.handleGetDealByID)
+			protected.GET("/deals/export.csv", s.handleExportDealsCSV)
+			protected.GET("/deals/export.jsonl", s.handleExportDealsJSONL)
 		}
 	}
 }
@@ -731,6 +736,8 @@ type UpdateTraderRequest struct {
 	OverrideBasePrompt   bool    `json:"override_base_prompt"`
 	SystemPromptTemplate string  `json:"system_prompt_template"`
 	IsCrossMargin        *bool   `json:"is_cross_margin"`
+	UseCoinPool          *bool   `json:"use_coin_pool"`
+	UseOITop             *bool   `json:"use_oi_top"`
 }
 
 // handleUpdateTrader 更新交易员配置
@@ -739,13 +746,13 @@ func (s *Server) handleUpdateTrader(c *gin.Context) {
 	traderID := c.Param("id")
 
 	var req UpdateTraderRequest
-    if err := c.ShouldBindJSON(&req); err != nil {
-        c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-        return
-    }
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
 
-    // 调试日志：记录前端传入的模板名
-    log.Printf("📝 UpdateTrader req: system_prompt_template='%s'", req.SystemPromptTemplate)
+	// 调试日志：记录前端传入的模板名
+	log.Printf("📝 UpdateTrader req: system_prompt_template='%s'", req.SystemPromptTemplate)
 
 	// 检查交易员是否存在且属于当前用户
 	traders, err := s.database.GetTraders(userID)
@@ -773,6 +780,16 @@ func (s *Server) handleUpdateTrader(c *gin.Context) {
 		isCrossMargin = *req.IsCrossMargin
 	}
 
+	useCoinPool := existingTrader.UseCoinPool
+	if req.UseCoinPool != nil {
+		useCoinPool = *req.UseCoinPool
+	}
+
+	useOITop := existingTrader.UseOITop
+	if req.UseOITop != nil {
+		useOITop = *req.UseOITop
+	}
+
 	// 设置杠杆默认值
 	btcEthLeverage := req.BTCETHLeverage
 	altcoinLeverage := req.AltcoinLeverage
@@ -797,6 +814,11 @@ func (s *Server) handleUpdateTrader(c *gin.Context) {
 		systemPromptTemplate = req.SystemPromptTemplate
 	}
 
+	initialBalance := existingTrader.InitialBalance
+	if req.InitialBalance > 0 {
+		initialBalance = req.InitialBalance
+	}
+
 	// 更新交易员配置
 	trader := &config.TraderRecord{
 		ID:                   traderID,
@@ -804,14 +826,17 @@ func (s *Server) handleUpdateTrader(c *gin.Context) {
 		Name:                 req.Name,
 		AIModelID:            req.AIModelID,
 		ExchangeID:           req.ExchangeID,
-		InitialBalance:       req.InitialBalance,
+		InitialBalance:       initialBalance,
 		BTCETHLeverage:       btcEthLeverage,
 		AltcoinLeverage:      altcoinLeverage,
 		TradingSymbols:       req.TradingSymbols,
+		UseCoinPool:          useCoinPool,
+		UseOITop:             useOITop,
 		CustomPrompt:         req.CustomPrompt,
 		OverrideBasePrompt:   req.OverrideBasePrompt,
 		SystemPromptTemplate: systemPromptTemplate,
 		IsCrossMargin:        isCrossMargin,
+		MaxPositions:         existingTrader.MaxPositions,
 		ScanIntervalMinutes:  scanIntervalMinutes,
 		IsRunning:            existingTrader.IsRunning, // 保持原值
 	}
@@ -906,7 +931,7 @@ func (s *Server) handleStartTrader(c *gin.Context) {
 	balance, err := trader.GetBalance()
 	hasBalance := false
 	var balanceInfo map[string]interface{}
-	
+
 	if err == nil {
 		// 检查可用余额是否 > 0
 		availableBalance := 0.0
@@ -917,20 +942,20 @@ func (s *Server) handleStartTrader(c *gin.Context) {
 		if val, ok := balance["totalWalletBalance"].(float64); ok {
 			totalWalletBalance = val
 		}
-		
+
 		hasBalance = availableBalance > 0 || totalWalletBalance > 0
-		
+
 		balanceInfo = map[string]interface{}{
 			"has_balance":          hasBalance,
 			"available_balance":    availableBalance,
 			"total_wallet_balance": totalWalletBalance,
 		}
-		
+
 		// Für Hyperliquid: Spot Balance separat anzeigen
 		if spotBalance, ok := balance["spotBalance"].(float64); ok {
 			balanceInfo["spot_balance"] = spotBalance
 		}
-		
+
 		if !hasBalance {
 			log.Printf("⚠️  警告: 交易员 %s 的账户余额为 0，无法进行交易", trader.GetName())
 		} else {
@@ -1315,7 +1340,7 @@ func (s *Server) handleUpdateExchangeConfigs(c *gin.Context) {
 // handleUpdateExchangeConfigsEncrypted 更新交易所配置（加密版本）
 func (s *Server) handleUpdateExchangeConfigsEncrypted(c *gin.Context) {
 	userID := c.GetString("user_id")
-	
+
 	// 解析加密的 payload
 	var encryptedPayload crypto.EncryptedPayload
 	if err := c.ShouldBindJSON(&encryptedPayload); err != nil {
@@ -1396,6 +1421,207 @@ func (s *Server) handleSaveUserSignalSource(c *gin.Context) {
 
 	log.Printf("✓ 用户信号源配置已保存: user=%s, oi_symbols=%s", userID, req.OISymbols)
 	c.JSON(http.StatusOK, gin.H{"message": "用户信号源配置已保存"})
+}
+
+// handleGetTrailingStopConfig 获取Trailing Stop配置
+func (s *Server) handleGetTrailingStopConfig(c *gin.Context) {
+	userID := c.GetString("user_id")
+	traderID := c.Query("trader_id")
+
+	if traderID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "缺少trader_id参数"})
+		return
+	}
+
+	// 校验交易员是否属于当前用户
+	_, _, _, err := s.database.GetTraderConfig(userID, traderID)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "交易员不存在或无访问权限"})
+		return
+	}
+
+	// 优先从运行中的交易员获取实时配置
+	trader, err := s.traderManager.GetTrader(traderID)
+	if err == nil {
+		status := trader.GetStatus()
+		trailingStop := status["trailing_stop"]
+		if trailingStop != nil {
+			c.JSON(http.StatusOK, trailingStop)
+			return
+		}
+	}
+
+	// 如果交易员未运行或没有trailing_stop状态，从数据库读取
+	enabled, _ := s.database.GetSystemConfig(fmt.Sprintf("trailing_stop_%s_enabled", traderID))
+	tiers, _ := s.database.GetSystemConfig(fmt.Sprintf("trailing_stop_%s_tiers", traderID))
+	updateThresholdStr, _ := s.database.GetSystemConfig(fmt.Sprintf("trailing_stop_%s_update_threshold_pct", traderID))
+	checkIntervalStr, _ := s.database.GetSystemConfig(fmt.Sprintf("trailing_stop_%s_check_interval_sec", traderID))
+	allowAIOverrideStr, _ := s.database.GetSystemConfig(fmt.Sprintf("trailing_stop_%s_allow_ai_override", traderID))
+
+	// 解析配置值，使用默认值
+	enabledBool := enabled == "true"
+	updateThreshold := 0.3
+	if val, err := strconv.ParseFloat(updateThresholdStr, 64); err == nil && val > 0 {
+		updateThreshold = val
+	}
+	checkInterval := 30
+	if val, err := strconv.Atoi(checkIntervalStr); err == nil && val > 0 {
+		checkInterval = val
+	}
+	allowAIOverride := allowAIOverrideStr == "true"
+
+	// 如果tiers为空，使用默认值
+	if tiers == "" {
+		tiers = "0.5:-0.2,1.0:0.5,3.0:1.0,10.0:3.0"
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"enabled":              enabledBool,
+		"tiers":                tiers,
+		"update_threshold_pct": updateThreshold,
+		"check_interval_sec":   checkInterval,
+		"allow_ai_override":    allowAIOverride,
+	})
+}
+
+// handleUpdateTrailingStopConfig 更新Trailing Stop配置
+func (s *Server) handleUpdateTrailingStopConfig(c *gin.Context) {
+	userID := c.GetString("user_id")
+	traderID := c.Query("trader_id")
+
+	if traderID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "缺少trader_id参数"})
+		return
+	}
+
+	// 校验交易员是否属于当前用户
+	_, _, _, err := s.database.GetTraderConfig(userID, traderID)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "交易员不存在或无访问权限"})
+		return
+	}
+
+	var req struct {
+		Enabled            bool    `json:"enabled"`
+		Tiers              string  `json:"tiers"`
+		UpdateThresholdPct float64 `json:"update_threshold_pct"`
+		CheckIntervalSec   int     `json:"check_interval_sec"`
+		AllowAIOverride    bool    `json:"allow_ai_override"`
+	}
+
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	// Validierung
+	if req.CheckIntervalSec < 10 || req.CheckIntervalSec > 300 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "检查间隔必须在10-300秒之间"})
+		return
+	}
+
+	if req.UpdateThresholdPct < 0.1 || req.UpdateThresholdPct > 5.0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "更新阈值必须在0.1-5.0%之间"})
+		return
+	}
+
+	// Speichere Konfiguration in Systemkonfiguration
+	err = s.database.SetSystemConfig(fmt.Sprintf("trailing_stop_%s_enabled", traderID), fmt.Sprintf("%v", req.Enabled))
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("保存配置失败: %v", err)})
+		return
+	}
+
+	s.database.SetSystemConfig(fmt.Sprintf("trailing_stop_%s_tiers", traderID), req.Tiers)
+	s.database.SetSystemConfig(fmt.Sprintf("trailing_stop_%s_update_threshold_pct", traderID), fmt.Sprintf("%.2f", req.UpdateThresholdPct))
+	s.database.SetSystemConfig(fmt.Sprintf("trailing_stop_%s_check_interval_sec", traderID), fmt.Sprintf("%d", req.CheckIntervalSec))
+	s.database.SetSystemConfig(fmt.Sprintf("trailing_stop_%s_allow_ai_override", traderID), fmt.Sprintf("%v", req.AllowAIOverride))
+
+	log.Printf("✅ Trailing Stop配置已更新 (trader_id=%s): enabled=%v, tiers=%s, threshold=%.2f%%, interval=%ds",
+		traderID, req.Enabled, req.Tiers, req.UpdateThresholdPct, req.CheckIntervalSec)
+
+	c.JSON(http.StatusOK, gin.H{"message": "配置已更新"})
+}
+
+func (s *Server) handleGetTrailingStopLogs(c *gin.Context) {
+	userID := c.GetString("user_id")
+	if userID == "" {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "未授权"})
+		return
+	}
+
+	traderID := c.Query("trader_id")
+	dealIDStr := c.Query("deal_id")
+	limitStr := c.DefaultQuery("limit", "100")
+	
+	limit, err := strconv.Atoi(limitStr)
+	if err != nil || limit < 1 || limit > 1000 {
+		limit = 100
+	}
+
+	// Query trailing stop logs using raw database access
+	db := s.database.GetDB()
+	if db == nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "数据库不可用"})
+		return
+	}
+
+	query := `
+		SELECT id, user_id, trader_id, deal_id, symbol, side, action,
+		       current_price, entry_price, profit_pct, tier_index, tier_threshold,
+		       old_stop_price, new_stop_price, target_stop_profit_pct,
+		       price_change_pct, update_threshold_pct, should_update,
+		       api_success, api_error, skip_reason, created_at
+		FROM trailing_stop_logs
+		WHERE user_id = ?
+	`
+	args := []interface{}{userID}
+
+	if traderID != "" {
+		query += " AND trader_id = ?"
+		args = append(args, traderID)
+	}
+
+	if dealIDStr != "" {
+		dealID, err := strconv.ParseInt(dealIDStr, 10, 64)
+		if err == nil {
+			query += " AND deal_id = ?"
+			args = append(args, dealID)
+		}
+	}
+
+	query += " ORDER BY created_at DESC LIMIT ?"
+	args = append(args, limit)
+
+	rows, err := db.Query(query, args...)
+	if err != nil {
+		log.Printf("⚠️ 查询追踪止损日志失败: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "查询失败"})
+		return
+	}
+	defer rows.Close()
+
+	logs := []config.TrailingStopLog{}
+	for rows.Next() {
+		var l config.TrailingStopLog
+		err := rows.Scan(
+			&l.ID, &l.UserID, &l.TraderID, &l.DealID, &l.Symbol, &l.Side, &l.Action,
+			&l.CurrentPrice, &l.EntryPrice, &l.ProfitPct, &l.TierIndex, &l.TierThreshold,
+			&l.OldStopPrice, &l.NewStopPrice, &l.TargetStopProfitPct,
+			&l.PriceChangePct, &l.UpdateThresholdPct, &l.ShouldUpdate,
+			&l.APISuccess, &l.APIError, &l.SkipReason, &l.CreatedAt,
+		)
+		if err != nil {
+			log.Printf("⚠️ 扫描追踪止损日志失败: %v", err)
+			continue
+		}
+		logs = append(logs, l)
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"logs": logs,
+		"count": len(logs),
+	})
 }
 
 // handleTraderList trader列表
@@ -1583,11 +1809,11 @@ func (s *Server) handleDecisions(c *gin.Context) {
 		return
 	}
 
-    // Disable caching to ensure frontend always sees the latest decisions
-    c.Header("Cache-Control", "no-cache, no-store, must-revalidate")
-    c.Header("Pragma", "no-cache")
-    c.Header("Expires", "0")
-    c.JSON(http.StatusOK, records)
+	// Disable caching to ensure frontend always sees the latest decisions
+	c.Header("Cache-Control", "no-cache, no-store, must-revalidate")
+	c.Header("Pragma", "no-cache")
+	c.Header("Expires", "0")
+	c.JSON(http.StatusOK, records)
 }
 
 // handleLatestDecisions 最新决策日志（最近5条，最新的在前）
@@ -1604,26 +1830,26 @@ func (s *Server) handleLatestDecisions(c *gin.Context) {
 		return
 	}
 
-    // 读取更大的窗口，再按时间降序取前5，避免因文件排序或周期重置导致遗漏
-    records, err := trader.GetDecisionLogger().GetLatestRecords(100)
-    if err != nil {
-        c.JSON(http.StatusInternalServerError, gin.H{
-            "error": fmt.Sprintf("获取决策日志失败: %v", err),
-        })
-        return
-    }
+	// 读取更大的窗口，再按时间降序取前5，避免因文件排序或周期重置导致遗漏
+	records, err := trader.GetDecisionLogger().GetLatestRecords(100)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": fmt.Sprintf("获取决策日志失败: %v", err),
+		})
+		return
+	}
 
-    // 按时间降序排序，确保最新的在最上面
-    sort.Slice(records, func(i, j int) bool { return records[i].Timestamp.After(records[j].Timestamp) })
-    if len(records) > 5 {
-        records = records[:5]
-    }
+	// 按时间降序排序，确保最新的在最上面
+	sort.Slice(records, func(i, j int) bool { return records[i].Timestamp.After(records[j].Timestamp) })
+	if len(records) > 5 {
+		records = records[:5]
+	}
 
-    // Disable caching to ensure frontend always sees the latest decisions
-    c.Header("Cache-Control", "no-cache, no-store, must-revalidate")
-    c.Header("Pragma", "no-cache")
-    c.Header("Expires", "0")
-    c.JSON(http.StatusOK, records)
+	// Disable caching to ensure frontend always sees the latest decisions
+	c.Header("Cache-Control", "no-cache, no-store, must-revalidate")
+	c.Header("Pragma", "no-cache")
+	c.Header("Expires", "0")
+	c.JSON(http.StatusOK, records)
 }
 
 // handleStatistics 统计信息
@@ -1796,7 +2022,9 @@ func (s *Server) handlePerformance(c *gin.Context) {
 				perf.TotalTrades++
 
 				pnl := 0.0
-				if d.RealizedPnL.Valid { pnl = d.RealizedPnL.Float64 }
+				if d.RealizedPnL.Valid {
+					pnl = d.RealizedPnL.Float64
+				}
 				if pnl > 0 {
 					perf.WinningTrades++
 					perf.AvgWin += pnl
@@ -1809,10 +2037,14 @@ func (s *Server) handlePerformance(c *gin.Context) {
 
 				openPrice := d.OpenPrice
 				closePrice := 0.0
-				if d.ClosePrice.Valid { closePrice = d.ClosePrice.Float64 }
+				if d.ClosePrice.Valid {
+					closePrice = d.ClosePrice.Float64
+				}
 				positionValue := d.Quantity * openPrice
 				marginUsed := 0.0
-				if d.Leverage > 0 { marginUsed = positionValue / float64(d.Leverage) }
+				if d.Leverage > 0 {
+					marginUsed = positionValue / float64(d.Leverage)
+				}
 				pnlPct := 0.0
 				if d.RealizedPnLPct.Valid {
 					pnlPct = d.RealizedPnLPct.Float64
@@ -1825,7 +2057,9 @@ func (s *Server) handlePerformance(c *gin.Context) {
 				}
 				openTime := d.OpenTime
 				closeTime := openTime
-				if d.CloseTime.Valid { closeTime = d.CloseTime.Time }
+				if d.CloseTime.Valid {
+					closeTime = d.CloseTime.Time
+				}
 
 				perf.RecentTrades = append(perf.RecentTrades, logger.TradeOutcome{
 					Symbol:        d.Symbol,
@@ -1842,6 +2076,7 @@ func (s *Server) handlePerformance(c *gin.Context) {
 					OpenTime:      openTime,
 					CloseTime:     closeTime,
 					WasStopLoss:   d.WasStopLoss.Valid && d.WasStopLoss.Bool,
+					CloseReason:   d.CloseReason.String,
 				})
 
 				// 更新币种统计
@@ -1852,13 +2087,27 @@ func (s *Server) handlePerformance(c *gin.Context) {
 				}
 				st.TotalTrades++
 				st.TotalPnL += pnl
-				if pnl > 0 { st.WinningTrades++ } else if pnl < 0 { st.LosingTrades++ }
+				if pnl > 0 {
+					st.WinningTrades++
+				} else if pnl < 0 {
+					st.LosingTrades++
+				}
 			}
 
-			if perf.WinningTrades > 0 { perf.AvgWin /= float64(perf.WinningTrades) }
-			if perf.LosingTrades > 0 { perf.AvgLoss /= float64(perf.LosingTrades) }
-			if totalLossAmt != 0 { perf.ProfitFactor = totalWinAmt / (-totalLossAmt) } else if totalWinAmt > 0 { perf.ProfitFactor = 999.0 }
-			if perf.TotalTrades > 0 { perf.WinRate = (float64(perf.WinningTrades) / float64(perf.TotalTrades)) * 100 }
+			if perf.WinningTrades > 0 {
+				perf.AvgWin /= float64(perf.WinningTrades)
+			}
+			if perf.LosingTrades > 0 {
+				perf.AvgLoss /= float64(perf.LosingTrades)
+			}
+			if totalLossAmt != 0 {
+				perf.ProfitFactor = totalWinAmt / (-totalLossAmt)
+			} else if totalWinAmt > 0 {
+				perf.ProfitFactor = 999.0
+			}
+			if perf.TotalTrades > 0 {
+				perf.WinRate = (float64(perf.WinningTrades) / float64(perf.TotalTrades)) * 100
+			}
 
 			// 币种胜率/均值 + 最优最差
 			bestPnL := -1e18
@@ -1867,55 +2116,67 @@ func (s *Server) handlePerformance(c *gin.Context) {
 				if st.TotalTrades > 0 {
 					st.WinRate = (float64(st.WinningTrades) / float64(st.TotalTrades)) * 100
 					st.AvgPnL = st.TotalPnL / float64(st.TotalTrades)
-					if st.TotalPnL > float64(bestPnL) { bestPnL = st.TotalPnL; perf.BestSymbol = sym }
-					if st.TotalPnL < float64(worstPnL) { worstPnL = st.TotalPnL; perf.WorstSymbol = sym }
+					if st.TotalPnL > float64(bestPnL) {
+						bestPnL = st.TotalPnL
+						perf.BestSymbol = sym
+					}
+					if st.TotalPnL < float64(worstPnL) {
+						worstPnL = st.TotalPnL
+						perf.WorstSymbol = sym
+					}
 				}
 			}
 
 			// 仅保留最近10笔（按关闭时间倒序）
 			sort.Slice(perf.RecentTrades, func(i, j int) bool { return perf.RecentTrades[i].CloseTime.After(perf.RecentTrades[j].CloseTime) })
-			if len(perf.RecentTrades) > 10 { perf.RecentTrades = perf.RecentTrades[:10] }
-
-				// Sharpe：若AnalyzePerformance已基于净值序列计算出Sharpe，即使无完整交易，也沿用其值
-				perf.SharpeRatio = performance.SharpeRatio
-				performance = perf
+			if len(perf.RecentTrades) > 10 {
+				perf.RecentTrades = perf.RecentTrades[:10]
 			}
+
+			// Sharpe：若AnalyzePerformance已基于净值序列计算出Sharpe，即使无完整交易，也沿用其值
+			perf.SharpeRatio = performance.SharpeRatio
+			performance = perf
 		}
+	}
 
 	c.JSON(http.StatusOK, performance)
 }
 
 // handleListDeals 列出当前用户的交易记录（支持过滤和分页）
 func (s *Server) handleListDeals(c *gin.Context) {
-    userID := c.GetString("user_id")
-    traderID := strings.TrimSpace(c.Query("trader_id"))
-    status := strings.TrimSpace(c.Query("status"))
-    symbol := strings.TrimSpace(c.Query("symbol"))
-    side := strings.TrimSpace(c.Query("side"))
-    from := strings.TrimSpace(c.Query("from")) // e.g. 2025-01-01 00:00:00
-    to := strings.TrimSpace(c.Query("to"))
-    q := strings.TrimSpace(c.Query("q"))
-    pnl := strings.TrimSpace(c.Query("pnl")) // win|loss
-    pnlMinStr := strings.TrimSpace(c.Query("pnl_min"))
-    pnlMaxStr := strings.TrimSpace(c.Query("pnl_max"))
-    pnlMin, err := parseOptionalFloat(pnlMinStr)
-    if err != nil {
-        c.JSON(http.StatusBadRequest, gin.H{"error": "无效的 pnl_min"})
-        return
-    }
-    pnlMax, err := parseOptionalFloat(pnlMaxStr)
-    if err != nil {
-        c.JSON(http.StatusBadRequest, gin.H{"error": "无效的 pnl_max"})
-        return
-    }
-    limit := 50
-    offset := 0
-    if v := c.Query("limit"); v != "" {
-        if n, err := strconv.Atoi(v); err == nil { limit = n }
-    }
-    if v := c.Query("offset"); v != "" {
-        if n, err := strconv.Atoi(v); err == nil { offset = n }
-    }
+	userID := c.GetString("user_id")
+	traderID := strings.TrimSpace(c.Query("trader_id"))
+	status := strings.TrimSpace(c.Query("status"))
+	symbol := strings.TrimSpace(c.Query("symbol"))
+	side := strings.TrimSpace(c.Query("side"))
+	from := strings.TrimSpace(c.Query("from")) // e.g. 2025-01-01 00:00:00
+	to := strings.TrimSpace(c.Query("to"))
+	q := strings.TrimSpace(c.Query("q"))
+	pnl := strings.TrimSpace(c.Query("pnl")) // win|loss
+	pnlMinStr := strings.TrimSpace(c.Query("pnl_min"))
+	pnlMaxStr := strings.TrimSpace(c.Query("pnl_max"))
+	pnlMin, err := parseOptionalFloat(pnlMinStr)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "无效的 pnl_min"})
+		return
+	}
+	pnlMax, err := parseOptionalFloat(pnlMaxStr)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "无效的 pnl_max"})
+		return
+	}
+	limit := 50
+	offset := 0
+	if v := c.Query("limit"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			limit = n
+		}
+	}
+	if v := c.Query("offset"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			offset = n
+		}
+	}
 
 	deals, err := s.database.ListDeals(userID, traderID, status, symbol, side, from, to, q, pnl, pnlMin, pnlMax, limit, offset)
 	if err != nil {
@@ -1927,57 +2188,57 @@ func (s *Server) handleListDeals(c *gin.Context) {
 
 // handleCountDeals 获取符合筛选条件的总数（用于分页）
 func (s *Server) handleCountDeals(c *gin.Context) {
-    userID := c.GetString("user_id")
-    traderID := strings.TrimSpace(c.Query("trader_id"))
-    status := strings.TrimSpace(c.Query("status"))
-    symbol := strings.TrimSpace(c.Query("symbol"))
-    side := strings.TrimSpace(c.Query("side"))
-    from := strings.TrimSpace(c.Query("from"))
-    to := strings.TrimSpace(c.Query("to"))
-    q := strings.TrimSpace(c.Query("q"))
-    pnl := strings.TrimSpace(c.Query("pnl"))
-    pnlMinStr := strings.TrimSpace(c.Query("pnl_min"))
-    pnlMaxStr := strings.TrimSpace(c.Query("pnl_max"))
-    pnlMin, err := parseOptionalFloat(pnlMinStr)
-    if err != nil {
-        c.JSON(http.StatusBadRequest, gin.H{"error": "无效的 pnl_min"})
-        return
-    }
-    pnlMax, err := parseOptionalFloat(pnlMaxStr)
-    if err != nil {
-        c.JSON(http.StatusBadRequest, gin.H{"error": "无效的 pnl_max"})
-        return
-    }
+	userID := c.GetString("user_id")
+	traderID := strings.TrimSpace(c.Query("trader_id"))
+	status := strings.TrimSpace(c.Query("status"))
+	symbol := strings.TrimSpace(c.Query("symbol"))
+	side := strings.TrimSpace(c.Query("side"))
+	from := strings.TrimSpace(c.Query("from"))
+	to := strings.TrimSpace(c.Query("to"))
+	q := strings.TrimSpace(c.Query("q"))
+	pnl := strings.TrimSpace(c.Query("pnl"))
+	pnlMinStr := strings.TrimSpace(c.Query("pnl_min"))
+	pnlMaxStr := strings.TrimSpace(c.Query("pnl_max"))
+	pnlMin, err := parseOptionalFloat(pnlMinStr)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "无效的 pnl_min"})
+		return
+	}
+	pnlMax, err := parseOptionalFloat(pnlMaxStr)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "无效的 pnl_max"})
+		return
+	}
 
-    total, err := s.database.CountDeals(userID, traderID, status, symbol, side, from, to, q, pnl, pnlMin, pnlMax)
-    if err != nil {
-        c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("统计失败: %v", err)})
-        return
-    }
-    c.JSON(http.StatusOK, gin.H{"total": total})
+	total, err := s.database.CountDeals(userID, traderID, status, symbol, side, from, to, q, pnl, pnlMin, pnlMax)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("统计失败: %v", err)})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"total": total})
 }
 
 // handleGetDealByID 获取指定交易详情（包含事件时间线）
 func (s *Server) handleGetDealByID(c *gin.Context) {
-    userID := c.GetString("user_id")
-    idStr := c.Param("id")
-    traderID := strings.TrimSpace(c.Query("trader_id"))
-    if traderID == "" {
-        c.JSON(http.StatusBadRequest, gin.H{"error": "缺少 trader_id 参数"})
-        return
-    }
-    id, err := strconv.ParseInt(idStr, 10, 64)
-    if err != nil || id <= 0 {
-        c.JSON(http.StatusBadRequest, gin.H{"error": "无效的ID"})
-        return
-    }
+	userID := c.GetString("user_id")
+	idStr := c.Param("id")
+	traderID := strings.TrimSpace(c.Query("trader_id"))
+	if traderID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "缺少 trader_id 参数"})
+		return
+	}
+	id, err := strconv.ParseInt(idStr, 10, 64)
+	if err != nil || id <= 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "无效的ID"})
+		return
+	}
 
-    deal, err := s.database.GetDealByID(userID, traderID, id)
-    if err != nil {
-        c.JSON(http.StatusNotFound, gin.H{"error": "交易不存在"})
-        return
-    }
-    events, _ := s.database.ListDealEvents(userID, traderID, id)
+	deal, err := s.database.GetDealByID(userID, traderID, id)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "交易不存在"})
+		return
+	}
+	events, _ := s.database.ListDealEvents(userID, traderID, id)
 
 	c.JSON(http.StatusOK, gin.H{
 		"deal":   makeDealResponse(deal),
@@ -1987,166 +2248,212 @@ func (s *Server) handleGetDealByID(c *gin.Context) {
 
 // handleExportDealsCSV 导出交易记录为CSV（含核心字段）
 func (s *Server) handleExportDealsCSV(c *gin.Context) {
-    userID := c.GetString("user_id")
-    traderID := strings.TrimSpace(c.Query("trader_id"))
-    status := strings.TrimSpace(c.Query("status"))
-    symbol := strings.TrimSpace(c.Query("symbol"))
-    side := strings.TrimSpace(c.Query("side"))
-    from := strings.TrimSpace(c.Query("from"))
-    to := strings.TrimSpace(c.Query("to"))
-    q := strings.TrimSpace(c.Query("q"))
-    pnl := strings.TrimSpace(c.Query("pnl"))
-    pnlMinStr := strings.TrimSpace(c.Query("pnl_min"))
-    pnlMaxStr := strings.TrimSpace(c.Query("pnl_max"))
-    pnlMin, err := parseOptionalFloat(pnlMinStr)
-    if err != nil {
-        c.JSON(http.StatusBadRequest, gin.H{"error": "无效的 pnl_min"})
-        return
-    }
-    pnlMax, err := parseOptionalFloat(pnlMaxStr)
-    if err != nil {
-        c.JSON(http.StatusBadRequest, gin.H{"error": "无效的 pnl_max"})
-        return
-    }
-    columnsParam := strings.TrimSpace(c.Query("columns"))
-    limit := 10000
-    deals, err := s.database.ListDeals(userID, traderID, status, symbol, side, from, to, q, pnl, pnlMin, pnlMax, limit, 0)
-    if err != nil {
-        c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("导出失败: %v", err)})
-        return
-    }
+	userID := c.GetString("user_id")
+	traderID := strings.TrimSpace(c.Query("trader_id"))
+	status := strings.TrimSpace(c.Query("status"))
+	symbol := strings.TrimSpace(c.Query("symbol"))
+	side := strings.TrimSpace(c.Query("side"))
+	from := strings.TrimSpace(c.Query("from"))
+	to := strings.TrimSpace(c.Query("to"))
+	q := strings.TrimSpace(c.Query("q"))
+	pnl := strings.TrimSpace(c.Query("pnl"))
+	pnlMinStr := strings.TrimSpace(c.Query("pnl_min"))
+	pnlMaxStr := strings.TrimSpace(c.Query("pnl_max"))
+	pnlMin, err := parseOptionalFloat(pnlMinStr)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "无效的 pnl_min"})
+		return
+	}
+	pnlMax, err := parseOptionalFloat(pnlMaxStr)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "无效的 pnl_max"})
+		return
+	}
+	columnsParam := strings.TrimSpace(c.Query("columns"))
+	limit := 10000
+	deals, err := s.database.ListDeals(userID, traderID, status, symbol, side, from, to, q, pnl, pnlMin, pnlMax, limit, 0)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("导出失败: %v", err)})
+		return
+	}
 
 	c.Header("Content-Type", "text/csv; charset=utf-8")
 	c.Header("Content-Disposition", "attachment; filename=deals.csv")
 
-    // Columns selection
-    allCols := []string{"id","user_id","trader_id","exchange","symbol","side","leverage","position_size_usd","quantity","open_price","open_time","open_order_id","stop_loss","take_profit","close_price","close_time","realized_pnl","realized_pnl_pct","status"}
-    cols := allCols
-    if columnsParam != "" {
-        reqCols := strings.Split(columnsParam, ",")
-        var filtered []string
-        for _, c := range reqCols {
-            c = strings.TrimSpace(c)
-            for _, a := range allCols { if a == c { filtered = append(filtered, c); break } }
-        }
-        if len(filtered) > 0 { cols = filtered }
-    }
-    // header
-    c.Writer.Write([]byte(strings.Join(cols, ",") + "\n"))
-    // rows
-    for _, d := range deals {
-        var line []string
-        for _, c := range cols {
-            switch c {
-            case "id": line = append(line, fmt.Sprintf("%d", d.ID))
-            case "user_id": line = append(line, escapeCSV(d.UserID))
-            case "trader_id": line = append(line, escapeCSV(d.TraderID))
-            case "exchange": line = append(line, escapeCSV(d.Exchange))
-            case "symbol": line = append(line, d.Symbol)
-            case "side": line = append(line, d.Side)
-            case "leverage": line = append(line, fmt.Sprintf("%d", d.Leverage))
-            case "position_size_usd": line = append(line, fmt.Sprintf("%.8f", d.PositionSizeUSD))
-            case "quantity": line = append(line, fmt.Sprintf("%.8f", d.Quantity))
-            case "open_price": line = append(line, fmt.Sprintf("%.8f", d.OpenPrice))
-            case "open_time": line = append(line, d.OpenTime.Format("2006-01-02 15:04:05"))
-            case "open_order_id": line = append(line, escapeCSV(d.OpenOrderID))
-            case "stop_loss": line = append(line, fmt.Sprintf("%.8f", d.StopLoss))
-            case "take_profit": line = append(line, fmt.Sprintf("%.8f", d.TakeProfit))
-            case "close_price": if d.ClosePrice.Valid { line = append(line, fmt.Sprintf("%.8f", d.ClosePrice.Float64)) } else { line = append(line, "") }
-            case "close_time": if d.CloseTime.Valid { line = append(line, d.CloseTime.Time.Format("2006-01-02 15:04:05")) } else { line = append(line, "") }
-            case "realized_pnl": if d.RealizedPnL.Valid { line = append(line, fmt.Sprintf("%.8f", d.RealizedPnL.Float64)) } else { line = append(line, "") }
-            case "realized_pnl_pct": if d.RealizedPnLPct.Valid { line = append(line, fmt.Sprintf("%.6f", d.RealizedPnLPct.Float64)) } else { line = append(line, "") }
-            case "status": line = append(line, d.Status)
-            }
-        }
-        c.Writer.Write([]byte(strings.Join(line, ",") + "\n"))
-    }
+	// Columns selection
+	allCols := []string{"id", "user_id", "trader_id", "exchange", "symbol", "side", "leverage", "position_size_usd", "quantity", "open_price", "open_time", "open_order_id", "stop_loss", "take_profit", "close_price", "close_time", "realized_pnl", "realized_pnl_pct", "status"}
+	cols := allCols
+	if columnsParam != "" {
+		reqCols := strings.Split(columnsParam, ",")
+		var filtered []string
+		for _, c := range reqCols {
+			c = strings.TrimSpace(c)
+			for _, a := range allCols {
+				if a == c {
+					filtered = append(filtered, c)
+					break
+				}
+			}
+		}
+		if len(filtered) > 0 {
+			cols = filtered
+		}
+	}
+	// header
+	c.Writer.Write([]byte(strings.Join(cols, ",") + "\n"))
+	// rows
+	for _, d := range deals {
+		var line []string
+		for _, c := range cols {
+			switch c {
+			case "id":
+				line = append(line, fmt.Sprintf("%d", d.ID))
+			case "user_id":
+				line = append(line, escapeCSV(d.UserID))
+			case "trader_id":
+				line = append(line, escapeCSV(d.TraderID))
+			case "exchange":
+				line = append(line, escapeCSV(d.Exchange))
+			case "symbol":
+				line = append(line, d.Symbol)
+			case "side":
+				line = append(line, d.Side)
+			case "leverage":
+				line = append(line, fmt.Sprintf("%d", d.Leverage))
+			case "position_size_usd":
+				line = append(line, fmt.Sprintf("%.8f", d.PositionSizeUSD))
+			case "quantity":
+				line = append(line, fmt.Sprintf("%.8f", d.Quantity))
+			case "open_price":
+				line = append(line, fmt.Sprintf("%.8f", d.OpenPrice))
+			case "open_time":
+				line = append(line, d.OpenTime.Format("2006-01-02 15:04:05"))
+			case "open_order_id":
+				line = append(line, escapeCSV(d.OpenOrderID))
+			case "stop_loss":
+				line = append(line, fmt.Sprintf("%.8f", d.StopLoss))
+			case "take_profit":
+				line = append(line, fmt.Sprintf("%.8f", d.TakeProfit))
+			case "close_price":
+				if d.ClosePrice.Valid {
+					line = append(line, fmt.Sprintf("%.8f", d.ClosePrice.Float64))
+				} else {
+					line = append(line, "")
+				}
+			case "close_time":
+				if d.CloseTime.Valid {
+					line = append(line, d.CloseTime.Time.Format("2006-01-02 15:04:05"))
+				} else {
+					line = append(line, "")
+				}
+			case "realized_pnl":
+				if d.RealizedPnL.Valid {
+					line = append(line, fmt.Sprintf("%.8f", d.RealizedPnL.Float64))
+				} else {
+					line = append(line, "")
+				}
+			case "realized_pnl_pct":
+				if d.RealizedPnLPct.Valid {
+					line = append(line, fmt.Sprintf("%.6f", d.RealizedPnLPct.Float64))
+				} else {
+					line = append(line, "")
+				}
+			case "status":
+				line = append(line, d.Status)
+			}
+		}
+		c.Writer.Write([]byte(strings.Join(line, ",") + "\n"))
+	}
 }
 
 // handleExportDealsJSONL 导出交易记录为JSONL（每行一个deal JSON）
 func (s *Server) handleExportDealsJSONL(c *gin.Context) {
-    userID := c.GetString("user_id")
-    traderID := strings.TrimSpace(c.Query("trader_id"))
-    status := strings.TrimSpace(c.Query("status"))
-    symbol := strings.TrimSpace(c.Query("symbol"))
-    side := strings.TrimSpace(c.Query("side"))
-    from := strings.TrimSpace(c.Query("from"))
-    to := strings.TrimSpace(c.Query("to"))
-    q := strings.TrimSpace(c.Query("q"))
-    mode := strings.TrimSpace(c.Query("mode")) // full|slim|train
-    pnl := strings.TrimSpace(c.Query("pnl"))
-    pnlMinStr := strings.TrimSpace(c.Query("pnl_min"))
-    pnlMaxStr := strings.TrimSpace(c.Query("pnl_max"))
-    pnlMin, err := parseOptionalFloat(pnlMinStr)
-    if err != nil {
-        c.JSON(http.StatusBadRequest, gin.H{"error": "无效的 pnl_min"})
-        return
-    }
-    pnlMax, err := parseOptionalFloat(pnlMaxStr)
-    if err != nil {
-        c.JSON(http.StatusBadRequest, gin.H{"error": "无效的 pnl_max"})
-        return
-    }
-    trainActions := strings.TrimSpace(c.Query("train_actions"))
-    limit := 10000
-    deals, err := s.database.ListDeals(userID, traderID, status, symbol, side, from, to, q, pnl, pnlMin, pnlMax, limit, 0)
-    if err != nil {
-        c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("导出失败: %v", err)})
-        return
-    }
+	userID := c.GetString("user_id")
+	traderID := strings.TrimSpace(c.Query("trader_id"))
+	status := strings.TrimSpace(c.Query("status"))
+	symbol := strings.TrimSpace(c.Query("symbol"))
+	side := strings.TrimSpace(c.Query("side"))
+	from := strings.TrimSpace(c.Query("from"))
+	to := strings.TrimSpace(c.Query("to"))
+	q := strings.TrimSpace(c.Query("q"))
+	mode := strings.TrimSpace(c.Query("mode")) // full|slim|train
+	pnl := strings.TrimSpace(c.Query("pnl"))
+	pnlMinStr := strings.TrimSpace(c.Query("pnl_min"))
+	pnlMaxStr := strings.TrimSpace(c.Query("pnl_max"))
+	pnlMin, err := parseOptionalFloat(pnlMinStr)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "无效的 pnl_min"})
+		return
+	}
+	pnlMax, err := parseOptionalFloat(pnlMaxStr)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "无效的 pnl_max"})
+		return
+	}
+	trainActions := strings.TrimSpace(c.Query("train_actions"))
+	limit := 10000
+	deals, err := s.database.ListDeals(userID, traderID, status, symbol, side, from, to, q, pnl, pnlMin, pnlMax, limit, 0)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("导出失败: %v", err)})
+		return
+	}
 
-    c.Header("Content-Type", "application/x-ndjson; charset=utf-8")
-    c.Header("Content-Disposition", "attachment; filename=deals.jsonl")
-    for _, d := range deals {
-        switch mode {
-        case "slim":
-            obj := map[string]interface{}{
-                "id": d.ID,
-                "trader_id": d.TraderID,
-                "exchange": d.Exchange,
-                "symbol": d.Symbol,
-                "side": d.Side,
-                "leverage": d.Leverage,
-                "qty": d.Quantity,
-                "open_price": d.OpenPrice,
-                "open_time": d.OpenTime,
-                "close_price": nullableFloat(d.ClosePrice),
-                "close_time": nullableTime(d.CloseTime),
-                "pnl": nullableFloat(d.RealizedPnL),
-                "pnl_pct": nullableFloat(d.RealizedPnLPct),
-                "status": d.Status,
-            }
-            b, _ := json.Marshal(obj)
-            c.Writer.Write(b)
-            c.Writer.Write([]byte("\n"))
-        case "train":
-            obj := buildTrainSample(d, trainActions)
-            b, _ := json.Marshal(obj)
-            c.Writer.Write(b)
-            c.Writer.Write([]byte("\n"))
-        default:
-            b, _ := json.Marshal(d)
-            c.Writer.Write(b)
-            c.Writer.Write([]byte("\n"))
-        }
-    }
+	c.Header("Content-Type", "application/x-ndjson; charset=utf-8")
+	c.Header("Content-Disposition", "attachment; filename=deals.jsonl")
+	for _, d := range deals {
+		switch mode {
+		case "slim":
+			obj := map[string]interface{}{
+				"id":          d.ID,
+				"trader_id":   d.TraderID,
+				"exchange":    d.Exchange,
+				"symbol":      d.Symbol,
+				"side":        d.Side,
+				"leverage":    d.Leverage,
+				"qty":         d.Quantity,
+				"open_price":  d.OpenPrice,
+				"open_time":   d.OpenTime,
+				"close_price": nullableFloat(d.ClosePrice),
+				"close_time":  nullableTime(d.CloseTime),
+				"pnl":         nullableFloat(d.RealizedPnL),
+				"pnl_pct":     nullableFloat(d.RealizedPnLPct),
+				"status":      d.Status,
+			}
+			b, _ := json.Marshal(obj)
+			c.Writer.Write(b)
+			c.Writer.Write([]byte("\n"))
+		case "train":
+			obj := buildTrainSample(d, trainActions)
+			b, _ := json.Marshal(obj)
+			c.Writer.Write(b)
+			c.Writer.Write([]byte("\n"))
+		default:
+			b, _ := json.Marshal(d)
+			c.Writer.Write(b)
+			c.Writer.Write([]byte("\n"))
+		}
+	}
 }
 
 func escapeCSV(s string) string {
-    if strings.ContainsAny(s, ",\"\n") {
-        s = strings.ReplaceAll(s, "\"", "\"\"")
-        return "\"" + s + "\""
-    }
-    return s
+	if strings.ContainsAny(s, ",\"\n") {
+		s = strings.ReplaceAll(s, "\"", "\"\"")
+		return "\"" + s + "\""
+	}
+	return s
 }
 
 func nullableFloat(v sql.NullFloat64) interface{} {
-    if v.Valid { return v.Float64 }
-    return nil
+	if v.Valid {
+		return v.Float64
+	}
+	return nil
 }
 
 func nullableTime(v sql.NullTime) interface{} {
-	if v.Valid { return v.Time }
+	if v.Valid {
+		return v.Time
+	}
 	return nil
 }
 
@@ -2240,61 +2547,61 @@ func timePtr(v sql.NullTime) *time.Time {
 }
 
 func parseOptionalFloat(value string) (*float64, error) {
-    if value == "" {
-        return nil, nil
-    }
-    f, err := strconv.ParseFloat(value, 64)
-    if err != nil {
-        return nil, err
-    }
-    return &f, nil
+	if value == "" {
+		return nil, nil
+	}
+	f, err := strconv.ParseFloat(value, 64)
+	if err != nil {
+		return nil, err
+	}
+	return &f, nil
 }
 
 func buildTrainSample(d *config.DealRecord, trainActions string) map[string]interface{} {
-    output := map[string]interface{}{
-        "reasoning":     d.Reasoning,
-        "decision_json": d.DecisionJSON,
-    }
-    if actions := extractActions(d.DecisionJSON, trainActions); len(actions) > 0 {
-        output["actions"] = actions
-    }
+	output := map[string]interface{}{
+		"reasoning":     d.Reasoning,
+		"decision_json": d.DecisionJSON,
+	}
+	if actions := extractActions(d.DecisionJSON, trainActions); len(actions) > 0 {
+		output["actions"] = actions
+	}
 
-    return map[string]interface{}{
-        "input": map[string]interface{}{
-            "system_prompt": d.SystemPrompt,
-            "user_prompt":   d.UserPrompt,
-            "market_context": d.MarketContextJSON,
-        },
-        "output": output,
-        "meta": map[string]interface{}{
-            "symbol":     d.Symbol,
-            "side":       d.Side,
-            "leverage":   d.Leverage,
-            "status":     d.Status,
-            "pnl":        nullableFloat(d.RealizedPnL),
-            "pnl_pct":    nullableFloat(d.RealizedPnLPct),
-            "open_time":  d.OpenTime,
-            "close_time": nullableTime(d.CloseTime),
-        },
-    }
+	return map[string]interface{}{
+		"input": map[string]interface{}{
+			"system_prompt":  d.SystemPrompt,
+			"user_prompt":    d.UserPrompt,
+			"market_context": d.MarketContextJSON,
+		},
+		"output": output,
+		"meta": map[string]interface{}{
+			"symbol":     d.Symbol,
+			"side":       d.Side,
+			"leverage":   d.Leverage,
+			"status":     d.Status,
+			"pnl":        nullableFloat(d.RealizedPnL),
+			"pnl_pct":    nullableFloat(d.RealizedPnLPct),
+			"open_time":  d.OpenTime,
+			"close_time": nullableTime(d.CloseTime),
+		},
+	}
 }
 
 func extractActions(decisionJSON string, trainActions string) []interface{} {
-    if decisionJSON == "" {
-        return nil
-    }
-    var parsed interface{}
-    if err := json.Unmarshal([]byte(decisionJSON), &parsed); err != nil {
-        return nil
-    }
-    arr, ok := parsed.([]interface{})
-    if !ok {
-        return nil
-    }
-    if trainActions == "final" && len(arr) > 0 {
-        return []interface{}{arr[len(arr)-1]}
-    }
-    return arr
+	if decisionJSON == "" {
+		return nil
+	}
+	var parsed interface{}
+	if err := json.Unmarshal([]byte(decisionJSON), &parsed); err != nil {
+		return nil
+	}
+	arr, ok := parsed.([]interface{})
+	if !ok {
+		return nil
+	}
+	if trainActions == "final" && len(arr) > 0 {
+		return []interface{}{arr[len(arr)-1]}
+	}
+	return arr
 }
 
 // authMiddleware JWT认证中间件
@@ -3011,7 +3318,7 @@ func (s *Server) handleGetPublicTraderConfig(c *gin.Context) {
 func (s *Server) handleOIRanking(c *gin.Context) {
 	// 从查询参数获取币种列表（逗号分隔）
 	symbolsParam := c.Query("symbols")
-	
+
 	var symbols []string
 	if symbolsParam != "" {
 		// 分割并清理空格

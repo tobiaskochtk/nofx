@@ -272,6 +272,13 @@ func main() {
 		log.Fatalf("❌ 加载交易员失败: %v", err)
 	}
 
+	// 🔄 自动恢复所有运行中的交易员（重启后恢复状态）
+	log.Printf("🔄🔄🔄 [MAIN] 准备调用 RestoreRunningTraders...")
+	if err := traderManager.RestoreRunningTraders(database); err != nil {
+		log.Printf("⚠️ 恢复运行中交易员时出错: %v", err)
+	}
+	log.Printf("✅✅✅ [MAIN] RestoreRunningTraders 调用完成")
+
 	// 获取数据库中的所有交易员配置（用于显示，使用default用户）
 	traders, err := database.GetTraders("default")
 	if err != nil {

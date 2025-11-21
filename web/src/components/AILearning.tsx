@@ -30,6 +30,7 @@ interface TradeOutcome {
   open_time: string
   close_time: string
   was_stop_loss: boolean
+  close_reason: string
 }
 
 interface SymbolPerformance {
@@ -1014,17 +1015,45 @@ export default function AILearning({ traderId }: AILearningProps) {
                         style={{ color: '#94A3B8' }}
                       >
                         <span>⏱️ {formatDuration(trade.duration)}</span>
-                        {trade.was_stop_loss && (
-                          <span
-                            className="px-2 py-0.5 rounded font-semibold"
-                            style={{
-                              background: 'rgba(248, 113, 113, 0.2)',
-                              color: '#FCA5A5',
-                            }}
-                          >
-                            {t('stopLoss', language)}
-                          </span>
-                        )}
+                        <div className="flex gap-1">
+                          {trade.was_stop_loss && (
+                            <span
+                              className="px-2 py-0.5 rounded font-semibold"
+                              style={{
+                                background: 'rgba(248, 113, 113, 0.2)',
+                                color: '#FCA5A5',
+                              }}
+                            >
+                              {t('stopLoss', language)}
+                            </span>
+                          )}
+                          {trade.close_reason && (
+                            <span
+                              className="px-2 py-0.5 rounded font-semibold text-[10px]"
+                              style={{
+                                background: trade.close_reason.startsWith('trailing_stop') 
+                                  ? 'rgba(16, 185, 129, 0.2)' 
+                                  : trade.close_reason.startsWith('ai_close')
+                                  ? 'rgba(96, 165, 250, 0.2)'
+                                  : 'rgba(148, 163, 184, 0.2)',
+                                color: trade.close_reason.startsWith('trailing_stop')
+                                  ? '#10B981'
+                                  : trade.close_reason.startsWith('ai_close')
+                                  ? '#60A5FA'
+                                  : '#94A3B8',
+                              }}
+                              title={trade.close_reason}
+                            >
+                              {trade.close_reason.startsWith('trailing_stop_tier') 
+                                ? `🎯 T${trade.close_reason.replace('trailing_stop_tier', '')}`
+                                : trade.close_reason.startsWith('ai_close')
+                                ? '🤖 AI'
+                                : trade.close_reason === 'position_missing'
+                                ? '⚠️ Manual'
+                                : trade.close_reason}
+                            </span>
+                          )}
+                        </div>
                       </div>
 
                       <div

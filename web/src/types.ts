@@ -11,6 +11,18 @@ export interface SystemStatus {
   stop_until: string
   last_reset_time: string
   ai_provider: string
+  trailing_stop?: {
+    enabled: boolean
+    tiers: Array<{
+      profit_threshold: number
+      stop_offset: number
+    }>
+    update_threshold_pct: number
+    check_interval_sec: number
+    allow_ai_override: boolean
+    ai_managed_positions: string[]
+    auto_managed_positions: string[]
+  }
 }
 
 export interface AccountInfo {

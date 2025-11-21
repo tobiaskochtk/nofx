@@ -110,6 +110,17 @@ func NewDatabase(dbPath string) (*Database, error) {
 		return nil, fmt.Errorf("初始化默认数据失败: %w", err)
 	}
 
+	// Run migrations
+	if err := database.migrateAddCloseReason(); err != nil {
+		log.Printf("⚠️ close_reason迁移失败: %v", err)
+		// Don't fail if migration fails, just log it
+	}
+
+	if err := database.migrateAddTrailingStopLogs(); err != nil {
+		log.Printf("⚠️ trailing_stop_logs迁移失败: %v", err)
+		// Don't fail if migration fails, just log it
+	}
+
 	log.Printf("✅ 数据库已启用 WAL 模式和 FULL 同步,数据持久性得到保证")
 	return database, nil
 }
@@ -310,6 +321,36 @@ func (d *Database) createTables() error {
         )`,
 
 		`CREATE INDEX IF NOT EXISTS idx_deal_events_deal ON deal_events(deal_id)`,
+
+		// Trailing Stop Logs - umfassendes Logging aller Trailing Stop Aktionen
+		`CREATE TABLE IF NOT EXISTS trailing_stop_logs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id TEXT NOT NULL,
+            trader_id TEXT NOT NULL,
+            deal_id INTEGER NOT NULL,
+            symbol TEXT NOT NULL,
+            side TEXT NOT NULL,
+            action TEXT NOT NULL, -- check|update|trigger|skip|error
+            current_price REAL NOT NULL,
+            entry_price REAL NOT NULL,
+            profit_pct REAL NOT NULL,
+            tier_index INTEGER, -- 0=tier1, 1=tier2, 2=tier3, 3=tier4, -1=none
+            tier_threshold REAL,
+            old_stop_price REAL,
+            new_stop_price REAL,
+            target_stop_profit_pct REAL,
+            price_change_pct REAL,
+            update_threshold_pct REAL,
+            should_update BOOLEAN,
+            api_success BOOLEAN,
+            api_error TEXT,
+            skip_reason TEXT,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (deal_id) REFERENCES deals(id) ON DELETE CASCADE
+        )`,
+
+		`CREATE INDEX IF NOT EXISTS idx_trailing_logs_deal ON trailing_stop_logs(deal_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_trailing_logs_trader ON trailing_stop_logs(trader_id, created_at)`,
 	}
 
 	for _, query := range queries {
@@ -505,6 +546,119 @@ func (d *Database) migrateExchangesTable() error {
 	return nil
 }
 
+// migrateAddCloseReason adds close_reason column to deals table if it doesn't exist
+func (d *Database) migrateAddCloseReason() error {
+	// Check if column already exists
+	var columnExists int
+	err := d.db.QueryRow(`
+		SELECT COUNT(*) 
+		FROM pragma_table_info('deals') 
+		WHERE name = 'close_reason'
+	`).Scan(&columnExists)
+	if err != nil {
+		return fmt.Errorf("检查close_reason列失败: %w", err)
+	}
+
+	if columnExists > 0 {
+		log.Printf("✓ close_reason列已存在,跳过迁移")
+		return nil
+	}
+
+	log.Printf("🔄 开始添加close_reason列到deals表...")
+
+	// Add column
+	_, err = d.db.Exec(`ALTER TABLE deals ADD COLUMN close_reason TEXT`)
+	if err != nil {
+		return fmt.Errorf("添加close_reason列失败: %w", err)
+	}
+
+	log.Printf("✅ close_reason列添加成功")
+
+	// Update existing closed deals with default reason
+	result, err := d.db.Exec(`
+		UPDATE deals 
+		SET close_reason = 'unknown' 
+		WHERE status = 'closed' AND close_reason IS NULL
+	`)
+	if err != nil {
+		log.Printf("⚠️ 更新现有已关闭交易失败: %v", err)
+	} else {
+		affected, _ := result.RowsAffected()
+		if affected > 0 {
+			log.Printf("✓ 已更新 %d 条现有交易的close_reason为'unknown'", affected)
+		}
+	}
+
+	return nil
+}
+
+// migrateAddTrailingStopLogs creates the trailing_stop_logs table if it doesn't exist
+func (d *Database) migrateAddTrailingStopLogs() error {
+	// Check if table already exists
+	var tableName string
+	err := d.db.QueryRow(`
+		SELECT name 
+		FROM sqlite_master 
+		WHERE type='table' AND name='trailing_stop_logs'
+	`).Scan(&tableName)
+	
+	if err == nil {
+		log.Printf("✓ trailing_stop_logs表已存在,跳过迁移")
+		return nil
+	}
+	
+	if err != sql.ErrNoRows {
+		return fmt.Errorf("检查trailing_stop_logs表失败: %w", err)
+	}
+
+	log.Printf("🔄 开始创建trailing_stop_logs表...")
+
+	// Create the table
+	_, err = d.db.Exec(`
+		CREATE TABLE trailing_stop_logs (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			user_id TEXT NOT NULL,
+			trader_id TEXT NOT NULL,
+			deal_id TEXT,
+			symbol TEXT NOT NULL,
+			side TEXT NOT NULL,
+			action TEXT NOT NULL,
+			current_price REAL,
+			entry_price REAL,
+			profit_pct REAL,
+			tier_index INTEGER,
+			tier_threshold REAL,
+			old_stop_price REAL,
+			new_stop_price REAL,
+			target_stop_profit_pct REAL,
+			price_change_pct REAL,
+			update_threshold_pct REAL,
+			should_update INTEGER,
+			api_success INTEGER,
+			api_error TEXT,
+			skip_reason TEXT,
+			created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+		)
+	`)
+	if err != nil {
+		return fmt.Errorf("创建trailing_stop_logs表失败: %w", err)
+	}
+
+	// Create indexes
+	_, err = d.db.Exec(`CREATE INDEX idx_trailing_logs_deal ON trailing_stop_logs(deal_id)`)
+	if err != nil {
+		log.Printf("⚠️ 创建deal_id索引失败: %v", err)
+	}
+
+	_, err = d.db.Exec(`CREATE INDEX idx_trailing_logs_trader ON trailing_stop_logs(trader_id, created_at)`)
+	if err != nil {
+		log.Printf("⚠️ 创建trader_id索引失败: %v", err)
+	}
+
+	log.Printf("✅ trailing_stop_logs表创建成功")
+	return nil
+}
+
 // User 用户配置
 type User struct {
 	ID           string    `json:"id"`
@@ -613,6 +767,7 @@ type DealRecord struct {
 	RealizedPnLPct    sql.NullFloat64 `json:"realized_pnl_pct"`
 	DurationSeconds   sql.NullInt64   `json:"duration_seconds"`
 	WasStopLoss       sql.NullBool    `json:"was_stop_loss"`
+	CloseReason       sql.NullString  `json:"close_reason"`
 	Status            string          `json:"status"`
 	CreatedAt         time.Time       `json:"created_at"`
 	UpdatedAt         time.Time       `json:"updated_at"`
@@ -632,6 +787,31 @@ type DealEvent struct {
 	Price      float64   `json:"price"`
 	OrderID    string    `json:"order_id"`
 	CreatedAt  time.Time `json:"created_at"`
+}
+
+type TrailingStopLog struct {
+	ID                  int64           `json:"id"`
+	UserID              string          `json:"user_id"`
+	TraderID            string          `json:"trader_id"`
+	DealID              int64           `json:"deal_id"`
+	Symbol              string          `json:"symbol"`
+	Side                string          `json:"side"`
+	Action              string          `json:"action"` // check|update|trigger|skip|error
+	CurrentPrice        float64         `json:"current_price"`
+	EntryPrice          float64         `json:"entry_price"`
+	ProfitPct           float64         `json:"profit_pct"`
+	TierIndex           int             `json:"tier_index"` // 0=tier1, 1=tier2, 2=tier3, 3=tier4, -1=none
+	TierThreshold       sql.NullFloat64 `json:"tier_threshold"`
+	OldStopPrice        sql.NullFloat64 `json:"old_stop_price"`
+	NewStopPrice        sql.NullFloat64 `json:"new_stop_price"`
+	TargetStopProfitPct sql.NullFloat64 `json:"target_stop_profit_pct"`
+	PriceChangePct      sql.NullFloat64 `json:"price_change_pct"`
+	UpdateThresholdPct  sql.NullFloat64 `json:"update_threshold_pct"`
+	ShouldUpdate        sql.NullBool    `json:"should_update"`
+	APISuccess          sql.NullBool    `json:"api_success"`
+	APIError            sql.NullString  `json:"api_error"`
+	SkipReason          sql.NullString  `json:"skip_reason"`
+	CreatedAt           time.Time       `json:"created_at"`
 }
 
 // CreateDeal 插入一条开仓记录
@@ -663,7 +843,7 @@ func (d *Database) FindOpenDeal(userID, traderID, symbol, side string) (*DealRec
                position_size_usd, quantity, open_price, open_time, open_order_id,
                system_prompt, user_prompt, reasoning, cot_trace, decision_json, market_context_json,
                stop_loss, take_profit, close_price, close_time, close_order_id,
-               realized_pnl, realized_pnl_pct, duration_seconds, was_stop_loss, status,
+               realized_pnl, realized_pnl_pct, duration_seconds, was_stop_loss, close_reason, status,
                created_at, updated_at
         FROM deals
         WHERE user_id = ? AND trader_id = ? AND symbol = ? AND side = ? AND status = 'open'
@@ -676,7 +856,7 @@ func (d *Database) FindOpenDeal(userID, traderID, symbol, side string) (*DealRec
 		&r.PositionSizeUSD, &r.Quantity, &r.OpenPrice, &r.OpenTime, &r.OpenOrderID,
 		&r.SystemPrompt, &r.UserPrompt, &r.Reasoning, &r.CoTTrace, &r.DecisionJSON, &r.MarketContextJSON,
 		&r.StopLoss, &r.TakeProfit, &r.ClosePrice, &r.CloseTime, &r.CloseOrderID,
-		&r.RealizedPnL, &r.RealizedPnLPct, &r.DurationSeconds, &r.WasStopLoss, &r.Status,
+		&r.RealizedPnL, &r.RealizedPnLPct, &r.DurationSeconds, &r.WasStopLoss, &r.CloseReason, &r.Status,
 		&r.CreatedAt, &r.UpdatedAt,
 	)
 	if err != nil {
@@ -692,7 +872,7 @@ func (d *Database) GetDealByID(userID, traderID string, id int64) (*DealRecord, 
                position_size_usd, quantity, open_price, open_time, open_order_id,
                system_prompt, user_prompt, reasoning, cot_trace, decision_json, market_context_json,
                stop_loss, take_profit, close_price, close_time, close_order_id,
-               realized_pnl, realized_pnl_pct, duration_seconds, was_stop_loss, status,
+               realized_pnl, realized_pnl_pct, duration_seconds, was_stop_loss, close_reason, status,
                created_at, updated_at
         FROM deals
         WHERE id = ? AND user_id = ? AND trader_id = ?
@@ -704,7 +884,7 @@ func (d *Database) GetDealByID(userID, traderID string, id int64) (*DealRecord, 
 		&r.PositionSizeUSD, &r.Quantity, &r.OpenPrice, &r.OpenTime, &r.OpenOrderID,
 		&r.SystemPrompt, &r.UserPrompt, &r.Reasoning, &r.CoTTrace, &r.DecisionJSON, &r.MarketContextJSON,
 		&r.StopLoss, &r.TakeProfit, &r.ClosePrice, &r.CloseTime, &r.CloseOrderID,
-		&r.RealizedPnL, &r.RealizedPnLPct, &r.DurationSeconds, &r.WasStopLoss, &r.Status,
+		&r.RealizedPnL, &r.RealizedPnLPct, &r.DurationSeconds, &r.WasStopLoss, &r.CloseReason, &r.Status,
 		&r.CreatedAt, &r.UpdatedAt,
 	)
 	if err != nil {
@@ -730,14 +910,14 @@ func (d *Database) UpdateDealTakeProfit(userID, traderID string, id int64, takeP
 }
 
 // CloseDeal 关闭交易并写入P/L信息
-func (d *Database) CloseDeal(userID, traderID string, id int64, closePrice float64, closeOrderID string, realizedPnL, realizedPnLPct float64, durationSeconds int64, wasStopLoss bool) error {
+func (d *Database) CloseDeal(userID, traderID string, id int64, closePrice float64, closeOrderID string, realizedPnL, realizedPnLPct float64, durationSeconds int64, wasStopLoss bool, closeReason string) error {
 	_, err := d.db.Exec(`
         UPDATE deals
         SET close_price = ?, close_time = CURRENT_TIMESTAMP, close_order_id = ?,
-            realized_pnl = ?, realized_pnl_pct = ?, duration_seconds = ?, was_stop_loss = ?,
+            realized_pnl = ?, realized_pnl_pct = ?, duration_seconds = ?, was_stop_loss = ?, close_reason = ?,
             status = 'closed'
         WHERE id = ? AND user_id = ? AND trader_id = ? AND status = 'open'
-    `, closePrice, closeOrderID, realizedPnL, realizedPnLPct, durationSeconds, wasStopLoss, id, userID, traderID)
+    `, closePrice, closeOrderID, realizedPnL, realizedPnLPct, durationSeconds, wasStopLoss, closeReason, id, userID, traderID)
 	return err
 }
 
@@ -748,7 +928,7 @@ func (d *Database) ListDeals(userID, traderID, status, symbol, side, from, to, q
                      position_size_usd, quantity, open_price, open_time, open_order_id,
                      system_prompt, user_prompt, reasoning, cot_trace, decision_json, market_context_json,
                      stop_loss, take_profit, close_price, close_time, close_order_id,
-                     realized_pnl, realized_pnl_pct, duration_seconds, was_stop_loss, status,
+                     realized_pnl, realized_pnl_pct, duration_seconds, was_stop_loss, close_reason, status,
                      created_at, updated_at
               FROM deals WHERE user_id = ?`
 	args := []interface{}{userID}
@@ -820,7 +1000,7 @@ func (d *Database) ListDeals(userID, traderID, status, symbol, side, from, to, q
 			&r.PositionSizeUSD, &r.Quantity, &r.OpenPrice, &r.OpenTime, &r.OpenOrderID,
 			&r.SystemPrompt, &r.UserPrompt, &r.Reasoning, &r.CoTTrace, &r.DecisionJSON, &r.MarketContextJSON,
 			&r.StopLoss, &r.TakeProfit, &r.ClosePrice, &r.CloseTime, &r.CloseOrderID,
-			&r.RealizedPnL, &r.RealizedPnLPct, &r.DurationSeconds, &r.WasStopLoss, &r.Status,
+			&r.RealizedPnL, &r.RealizedPnLPct, &r.DurationSeconds, &r.WasStopLoss, &r.CloseReason, &r.Status,
 			&r.CreatedAt, &r.UpdatedAt,
 		); err != nil {
 			return nil, err
@@ -890,6 +1070,30 @@ func (d *Database) CreateDealEvent(event *DealEvent) error {
         INSERT INTO deal_events (user_id, trader_id, deal_id, type, symbol, side, quantity, percentage, price, order_id)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `, event.UserID, event.TraderID, event.DealID, event.Type, event.Symbol, event.Side, event.Quantity, event.Percentage, event.Price, event.OrderID)
+	return err
+}
+
+func (d *Database) LogTrailingStopAction(log *TrailingStopLog) error {
+	if log == nil {
+		return fmt.Errorf("log is nil")
+	}
+
+	_, err := d.db.Exec(`
+        INSERT INTO trailing_stop_logs (
+            user_id, trader_id, deal_id, symbol, side, action,
+            current_price, entry_price, profit_pct, tier_index, tier_threshold,
+            old_stop_price, new_stop_price, target_stop_profit_pct,
+            price_change_pct, update_threshold_pct, should_update,
+            api_success, api_error, skip_reason
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `,
+		log.UserID, log.TraderID, log.DealID, log.Symbol, log.Side, log.Action,
+		log.CurrentPrice, log.EntryPrice, log.ProfitPct, log.TierIndex, log.TierThreshold,
+		log.OldStopPrice, log.NewStopPrice, log.TargetStopProfitPct,
+		log.PriceChangePct, log.UpdateThresholdPct, log.ShouldUpdate,
+		log.APISuccess, log.APIError, log.SkipReason)
+
 	return err
 }
 
@@ -1370,14 +1574,16 @@ func (d *Database) UpdateTrader(trader *TraderRecord) error {
 	_, err := d.db.Exec(`
 		UPDATE traders SET
 			name = ?, ai_model_id = ?, exchange_id = ?,
-			scan_interval_minutes = ?, btc_eth_leverage = ?, altcoin_leverage = ?,
+			initial_balance = ?, scan_interval_minutes = ?, btc_eth_leverage = ?, altcoin_leverage = ?,
 			max_positions = ?, trading_symbols = ?, custom_prompt = ?, override_base_prompt = ?,
-			system_prompt_template = ?, is_cross_margin = ?, updated_at = CURRENT_TIMESTAMP
+			system_prompt_template = ?, is_cross_margin = ?, use_coin_pool = ?, use_oi_top = ?,
+			updated_at = CURRENT_TIMESTAMP
 		WHERE id = ? AND user_id = ?
 	`, trader.Name, trader.AIModelID, trader.ExchangeID,
-		trader.ScanIntervalMinutes, trader.BTCETHLeverage, trader.AltcoinLeverage,
+		trader.InitialBalance, trader.ScanIntervalMinutes, trader.BTCETHLeverage, trader.AltcoinLeverage,
 		trader.MaxPositions, trader.TradingSymbols, trader.CustomPrompt, trader.OverrideBasePrompt,
-		trader.SystemPromptTemplate, trader.IsCrossMargin, trader.ID, trader.UserID)
+		trader.SystemPromptTemplate, trader.IsCrossMargin, trader.UseCoinPool, trader.UseOITop,
+		trader.ID, trader.UserID)
 	return err
 }
 
@@ -1557,6 +1763,11 @@ func normalizeSymbol(symbol string) string {
 // Close 关闭数据库连接
 func (d *Database) Close() error {
 	return d.db.Close()
+}
+
+// GetDB exposes the underlying database connection for raw queries
+func (d *Database) GetDB() *sql.DB {
+	return d.db
 }
 
 // LoadBetaCodesFromFile 从文件加载内测码到数据库

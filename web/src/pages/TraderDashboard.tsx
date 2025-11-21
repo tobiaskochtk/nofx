@@ -19,6 +19,7 @@ import {
   Check,
   X,
   XCircle,
+  Settings,
 } from 'lucide-react'
 import { stripLeadingIcons } from '../lib/text'
 import type {
@@ -53,6 +54,14 @@ export default function TraderDashboard() {
     searchParams.get('trader') || undefined
   )
   const [lastUpdate, setLastUpdate] = useState<string>('--:--:--')
+  const [showTrailingStopModal, setShowTrailingStopModal] = useState(false)
+  const [trailingStopConfig, setTrailingStopConfig] = useState({
+    enabled: false,
+    tiers: '0.5:-0.2,1.0:0.5,3.0:1.0,10.0:3.0',
+    update_threshold_pct: 0.3,
+    check_interval_sec: 30,
+    allow_ai_override: false,
+  })
 
   // 决策记录数量选择（从 localStorage 读取，默认 5）
   const [decisionLimit, setDecisionLimit] = useState<number>(() => {
@@ -415,6 +424,88 @@ export default function TraderDashboard() {
         />
       </div>
 
+      {/* Trailing Stop Configuration - nur anzeigen wenn aktiviert */}
+      {status?.trailing_stop?.enabled && (
+        <div
+          className="mb-6 p-4 rounded animate-slide-in"
+          style={{
+            background: '#0B0E11',
+            border: '1px solid #2B3139',
+            animationDelay: '0.05s',
+          }}
+        >
+          <div className="flex items-center justify-between mb-3">
+            <div className="flex items-center gap-2">
+              <TrendingUp className="w-5 h-5" style={{ color: '#0ECB81' }} />
+              <h3 className="font-semibold" style={{ color: '#EAECEF' }}>
+                {language === 'zh' ? '自动追踪止损' : 'Automated Trailing Stop'}
+              </h3>
+              <span
+                className="text-xs px-2 py-1 rounded font-bold"
+                style={{ background: 'rgba(14, 203, 129, 0.1)', color: '#0ECB81' }}
+              >
+                {language === 'zh' ? '已启用' : 'ACTIVE'}
+              </span>
+            </div>
+            <button
+              onClick={() => {
+                if (status?.trailing_stop) {
+                  setTrailingStopConfig({
+                    enabled: status.trailing_stop.enabled,
+                    tiers: status.trailing_stop.tiers.map(t => `${t.profit_threshold}:${t.stop_offset}`).join(','),
+                    update_threshold_pct: status.trailing_stop.update_threshold_pct,
+                    check_interval_sec: status.trailing_stop.check_interval_sec,
+                    allow_ai_override: status.trailing_stop.allow_ai_override,
+                  })
+                  setShowTrailingStopModal(true)
+                }
+              }}
+              className="flex items-center gap-1 px-3 py-1.5 rounded text-sm hover:opacity-80 transition-opacity"
+              style={{ background: '#2B3139', color: '#EAECEF' }}
+            >
+              <Settings className="w-4 h-4" />
+              {language === 'zh' ? '编辑' : 'Edit'}
+            </button>
+          </div>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-xs">
+            {status.trailing_stop.tiers.map((tier, idx) => (
+              <div
+                key={idx}
+                className="p-3 rounded"
+                style={{ background: '#1E2329', border: '1px solid #2B3139' }}
+              >
+                <div className="font-semibold mb-1" style={{ color: '#F0B90B' }}>
+                  {language === 'zh' ? '档位' : 'Tier'} {idx + 1}
+                </div>
+                <div style={{ color: '#848E9C' }}>
+                  ≥{tier.profit_threshold}% {language === 'zh' ? '利润' : 'profit'}
+                </div>
+                <div style={{ color: '#EAECEF' }}>
+                  → {tier.stop_offset < 0 ? `${language === 'zh' ? '固定' : 'fixed'} ${-tier.stop_offset}%` : `${language === 'zh' ? '利润' : 'profit'}-${tier.stop_offset}%`}
+                </div>
+              </div>
+            ))}
+          </div>
+          <div className="mt-3 flex flex-wrap gap-3 text-xs" style={{ color: '#848E9C' }}>
+            <span>
+              {language === 'zh' ? '检查间隔' : 'Check Interval'}: {status.trailing_stop.check_interval_sec}s
+            </span>
+            <span>•</span>
+            <span>
+              {language === 'zh' ? 'AI覆盖' : 'AI Override'}: {status.trailing_stop.allow_ai_override ? (language === 'zh' ? '允许' : 'Yes') : (language === 'zh' ? '禁止' : 'No')}
+            </span>
+            {status.trailing_stop.auto_managed_positions.length > 0 && (
+              <>
+                <span>•</span>
+                <span style={{ color: '#0ECB81' }}>
+                  {language === 'zh' ? '自动管理' : 'Auto-managed'}: {status.trailing_stop.auto_managed_positions.length} {language === 'zh' ? '个' : 'pos'}
+                </span>
+              </>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* 主要内容区：左右分屏 */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
         {/* 左侧：图表 + 持仓 */}
@@ -673,6 +764,180 @@ export default function TraderDashboard() {
       <div className="mb-6 animate-slide-in" style={{ animationDelay: '0.3s' }}>
         <AILearning traderId={selectedTrader.trader_id} />
       </div>
+
+      {/* Trailing Stop Configuration Modal */}
+      {showTrailingStopModal && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-4"
+          style={{ background: 'rgba(0, 0, 0, 0.7)' }}
+          onClick={() => setShowTrailingStopModal(false)}
+        >
+          <div
+            className="max-w-2xl w-full rounded-lg p-6"
+            style={{ background: '#181A20', border: '1px solid #2B3139' }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h2 className="text-xl font-bold mb-4" style={{ color: '#EAECEF' }}>
+              {language === 'zh' ? '编辑追踪止损配置' : 'Edit Trailing Stop Configuration'}
+            </h2>
+
+            <div className="space-y-4">
+              {/* Enabled Toggle */}
+              <div>
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={trailingStopConfig.enabled}
+                    onChange={(e) =>
+                      setTrailingStopConfig({ ...trailingStopConfig, enabled: e.target.checked })
+                    }
+                    className="w-4 h-4"
+                  />
+                  <span style={{ color: '#EAECEF' }}>
+                    {language === 'zh' ? '启用自动追踪止损' : 'Enable Automated Trailing Stop'}
+                  </span>
+                </label>
+              </div>
+
+              {/* Tiers Configuration */}
+              <div>
+                <label className="block mb-2" style={{ color: '#EAECEF' }}>
+                  {language === 'zh' ? '档位配置' : 'Tiers Configuration'}
+                  <span className="ml-2 text-xs" style={{ color: '#848E9C' }}>
+                    {language === 'zh'
+                      ? '格式: 利润阈值:止损偏移,... (例: 0.5:-0.2,1.0:0.5)'
+                      : 'Format: threshold:offset,... (e.g., 0.5:-0.2,1.0:0.5)'}
+                  </span>
+                </label>
+                <input
+                  type="text"
+                  value={trailingStopConfig.tiers}
+                  onChange={(e) =>
+                    setTrailingStopConfig({ ...trailingStopConfig, tiers: e.target.value })
+                  }
+                  className="w-full px-3 py-2 rounded"
+                  style={{
+                    background: '#2B3139',
+                    border: '1px solid #373d47',
+                    color: '#EAECEF',
+                  }}
+                  placeholder="0.5:-0.2,1.0:0.5,3.0:1.0,10.0:3.0"
+                />
+              </div>
+
+              {/* Update Threshold */}
+              <div>
+                <label className="block mb-2" style={{ color: '#EAECEF' }}>
+                  {language === 'zh' ? '更新阈值 (%)' : 'Update Threshold (%)'}
+                  <span className="ml-2 text-xs" style={{ color: '#848E9C' }}>
+                    {language === 'zh' ? '防止频繁API调用' : 'Prevents frequent API calls'}
+                  </span>
+                </label>
+                <input
+                  type="number"
+                  step="0.1"
+                  min="0.1"
+                  max="5.0"
+                  value={trailingStopConfig.update_threshold_pct}
+                  onChange={(e) =>
+                    setTrailingStopConfig({
+                      ...trailingStopConfig,
+                      update_threshold_pct: parseFloat(e.target.value) || 0.3,
+                    })
+                  }
+                  className="w-full px-3 py-2 rounded"
+                  style={{
+                    background: '#2B3139',
+                    border: '1px solid #373d47',
+                    color: '#EAECEF',
+                  }}
+                />
+              </div>
+
+              {/* Check Interval */}
+              <div>
+                <label className="block mb-2" style={{ color: '#EAECEF' }}>
+                  {language === 'zh' ? '检查间隔 (秒)' : 'Check Interval (seconds)'}
+                </label>
+                <input
+                  type="number"
+                  step="10"
+                  min="10"
+                  max="300"
+                  value={trailingStopConfig.check_interval_sec}
+                  onChange={(e) =>
+                    setTrailingStopConfig({
+                      ...trailingStopConfig,
+                      check_interval_sec: parseInt(e.target.value) || 30,
+                    })
+                  }
+                  className="w-full px-3 py-2 rounded"
+                  style={{
+                    background: '#2B3139',
+                    border: '1px solid #373d47',
+                    color: '#EAECEF',
+                  }}
+                />
+              </div>
+
+              {/* Allow AI Override */}
+              <div>
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={trailingStopConfig.allow_ai_override}
+                    onChange={(e) =>
+                      setTrailingStopConfig({
+                        ...trailingStopConfig,
+                        allow_ai_override: e.target.checked,
+                      })
+                    }
+                    className="w-4 h-4"
+                  />
+                  <span style={{ color: '#EAECEF' }}>
+                    {language === 'zh' ? '允许AI覆盖自动止损' : 'Allow AI to Override Auto Stop-Loss'}
+                  </span>
+                </label>
+              </div>
+            </div>
+
+            {/* Action Buttons */}
+            <div className="flex gap-3 mt-6">
+              <button
+                onClick={async () => {
+                  try {
+                    if (!selectedTraderId) return
+                    await api.updateTrailingStopConfig(selectedTraderId, trailingStopConfig)
+                    alert(
+                      language === 'zh'
+                        ? '配置已更新！请重启交易员以应用新配置。'
+                        : 'Configuration updated! Please restart the trader to apply changes.'
+                    )
+                    setShowTrailingStopModal(false)
+                  } catch (error) {
+                    alert(
+                      language === 'zh'
+                        ? `更新失败: ${error}`
+                        : `Update failed: ${error}`
+                    )
+                  }
+                }}
+                className="flex-1 py-2 px-4 rounded font-semibold hover:opacity-90 transition-opacity"
+                style={{ background: '#0ECB81', color: '#0B0E11' }}
+              >
+                {language === 'zh' ? '保存' : 'Save'}
+              </button>
+              <button
+                onClick={() => setShowTrailingStopModal(false)}
+                className="flex-1 py-2 px-4 rounded font-semibold hover:opacity-90 transition-opacity"
+                style={{ background: '#2B3139', color: '#EAECEF' }}
+              >
+                {language === 'zh' ? '取消' : 'Cancel'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

@@ -23,10 +23,19 @@ services:
       - ./secrets:/app/secrets  # RSA密钥文件 (read-write für Generierung)
       - /etc/localtime:/etc/localtime:ro  # Sync host time
     environment:
-      - TZ=${NOFX_TIMEZONE:-Asia/Shanghai}  # Set timezone
+      - TZ=${NOFX_TIMEZONE:-Europe/Berlin}  # Set timezone from .env
       - AI_MAX_TOKENS=4000  # AI响应的最大token数（默认2000，建议4000-8000）
       - DATA_ENCRYPTION_KEY=${DATA_ENCRYPTION_KEY}  # 数据库加密密钥
       - JWT_SECRET=${JWT_SECRET}  # JWT认证密钥
+      # PnL Calculation Settings
+      - NOFX_PNL_TAKER_FEE_RATE=${NOFX_PNL_TAKER_FEE_RATE:-0.0004}
+      - NOFX_PNL_SLIPPAGE_RATE=${NOFX_PNL_SLIPPAGE_RATE:-0.0005}
+      # Trailing Stop Configuration
+      - TRAILING_STOP_ENABLED=${TRAILING_STOP_ENABLED:-false}
+      - TRAILING_STOP_TIERS=${TRAILING_STOP_TIERS:-0.5:-0.2,1.0:0.5,3.0:1.0,10.0:3.0}
+      - TRAILING_STOP_UPDATE_THRESHOLD_PCT=${TRAILING_STOP_UPDATE_THRESHOLD_PCT:-0.3}
+      - TRAILING_STOP_CHECK_INTERVAL_SEC=${TRAILING_STOP_CHECK_INTERVAL_SEC:-30}
+      - TRAILING_STOP_ALLOW_AI_OVERRIDE=${TRAILING_STOP_ALLOW_AI_OVERRIDE:-false}
     depends_on:
       - redis
       - derivs-ingest

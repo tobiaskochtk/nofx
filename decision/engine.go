@@ -435,7 +435,20 @@ func buildSystemPrompt(ctx *Context, templateName string) string {
 		accountEquity*0.8, accountEquity*1.5, accountEquity*5, accountEquity*10))
 	sb.WriteString(fmt.Sprintf("4. 杠杆限制: **山寨币最大%dx杠杆** | **BTC/ETH最大%dx杠杆** (⚠️ 严格执行，不可超过)\n", altcoinLeverage, btcEthLeverage))
 	sb.WriteString("5. 保证金: 总使用率 ≤ 90%\n")
-	sb.WriteString("6. 开仓金额: 建议 **≥12 USDT** (交易所最小名义价值 10 USDT + 安全边际)\n")
+	sb.WriteString("6. 开仓金额: 建议 **≥12 USDT** (交易所最小名义价值 10 USDT + 安全边际)\n\n")
+
+	// 🎯 自动追踪止损系统说明
+	sb.WriteString("7. **自动追踪止损 (Automated Tiered Trailing Stop)**\n")
+	sb.WriteString("   - 系统已启用分级自动追踪止损，根据利润阶段自动保护收益\n")
+	sb.WriteString("   - 分级配置: \n")
+	sb.WriteString("     * 利润 ≥0.5%: 止损设在 +0.2% 利润（锁定小盈利）\n")
+	sb.WriteString("     * 利润 ≥1.0%: 止损设在 当前利润-0.5%（动态追踪）\n")
+	sb.WriteString("     * 利润 ≥3.0%: 止损设在 当前利润-1.0%（加大保护）\n")
+	sb.WriteString("     * 利润 ≥10%: 止损设在 当前利润-3.0%（深度保护）\n")
+	sb.WriteString("   - 示例: 11.5%利润 → 自动止损在8.5%利润处\n")
+	sb.WriteString("   - **重要**: 系统不允许AI修改止损（TRAILING_STOP_ALLOW_AI_OVERRIDE=false）\n")
+	sb.WriteString("   - 自动系统每30秒检查并更新，无需AI干预\n")
+	sb.WriteString("   - 建议: 专注于开仓/平仓决策，止损保护由系统自动管理\n\n")
 
 	// 🔥 新增: 如果已达到最大持仓，明确告知AI只能管理现有持仓
 	if len(ctx.CandidateCoins) == 0 && len(ctx.Positions) >= maxPositions {

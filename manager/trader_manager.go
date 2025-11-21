@@ -24,6 +24,7 @@ type CompetitionCache struct {
 // TraderManager 管理多个trader实例
 type TraderManager struct {
 	traders          map[string]*trader.AutoTrader // key: trader ID
+	traderUserIDs    map[string]string              // key: trader ID, value: user ID
 	competitionCache *CompetitionCache
 	mu               sync.RWMutex
 }
@@ -31,7 +32,8 @@ type TraderManager struct {
 // NewTraderManager 创建trader管理器
 func NewTraderManager() *TraderManager {
 	return &TraderManager{
-		traders: make(map[string]*trader.AutoTrader),
+		traders:       make(map[string]*trader.AutoTrader),
+		traderUserIDs: make(map[string]string),
 		competitionCache: &CompetitionCache{
 			data: make(map[string]interface{}),
 		},
@@ -290,7 +292,130 @@ func (tm *TraderManager) addTraderFromDB(traderCfg *config.TraderRecord, aiModel
 	}
 
 	tm.traders[traderCfg.ID] = at
+	tm.traderUserIDs[traderCfg.ID] = userID // Speichere userID für späteren Zugriff
 	log.Printf("✓ Trader '%s' (%s + %s) 已加载到内存", traderCfg.Name, aiModelCfg.Provider, exchangeCfg.ID)
+	return nil
+}
+
+// RestoreRunningTraders 在系统启动时自动恢复所有运行中的交易员
+func (tm *TraderManager) RestoreRunningTraders(database *config.Database) error {
+	log.Printf("🐛 [RestoreRunning] ENTRY - tm.traders size: %d", len(tm.traders))
+	
+	tm.mu.RLock()
+	allTraders := make(map[string]*trader.AutoTrader)
+	allUserIDs := make(map[string]string)
+	for id, t := range tm.traders {
+		allTraders[id] = t
+		allUserIDs[id] = tm.traderUserIDs[id]
+	}
+	tm.mu.RUnlock()
+
+	log.Printf("🐛 [RestoreRunning] Copied %d traders, %d userIDs", len(allTraders), len(allUserIDs))
+	log.Printf("🔄 检查需要恢复的运行中交易员...")
+	
+	restoredCount := 0
+	log.Printf("🐛 [RestoreRunning] Starting loop over %d traders", len(allTraders))
+	
+	for traderID, traderInstance := range allTraders {
+		func() {
+			defer func() {
+				if r := recover(); r != nil {
+					log.Printf("🚨 PANIC in RestoreRunningTraders loop for %s: %v", traderID, r)
+				}
+			}()
+			
+			log.Printf("🐛 [RestoreRunning] Loop iteration - traderID: %s", traderID)
+			userID := allUserIDs[traderID]
+			if userID == "" {
+				log.Printf("🐛 [RestoreRunning] Skip - no userID for %s", traderID)
+				return
+			}
+			
+			log.Printf("🐛 [RestoreRunning] UserID: %s", userID)
+			
+			// 检查trader当前运行状态
+			log.Printf("🐛 [RestoreRunning] Getting status...")
+			status := traderInstance.GetStatus()
+			log.Printf("🐛 [RestoreRunning] Got status: %v", status)
+			isCurrentlyRunning, ok := status["is_running"].(bool)
+			log.Printf("🐛 [RestoreRunning] isCurrentlyRunning=%v, ok=%v", isCurrentlyRunning, ok)
+			
+			// 如果trader已经在运行，跳过
+			if ok && isCurrentlyRunning {
+				log.Printf("🐛 [RestoreRunning] Already running, skip")
+				return
+			}
+			
+			// 从数据库获取trader配置和状态
+			log.Printf("🐛 [RestoreRunning] Getting traders from DB...")
+			traders, err := database.GetTraders(userID)
+			if err != nil {
+				log.Printf("🐛 [RestoreRunning] Error getting traders: %v", err)
+				return
+			}
+			log.Printf("🐛 [RestoreRunning] Got %d traders from DB", len(traders))
+			
+			// 查找匹配的trader记录
+			var traderRecord *config.TraderRecord
+			for _, tr := range traders {
+				if tr.ID == traderID {
+					traderRecord = tr
+					break
+				}
+			}
+			
+			if traderRecord == nil {
+				log.Printf("🐛 [RestoreRunning] No trader record found for %s", traderID)
+				return
+			}
+			
+			log.Printf("🐛 [RestoreRunning] Found trader record: %s, IsRunning=%v", traderRecord.Name, traderRecord.IsRunning)
+			
+			// 如果trader在数据库中标记为运行中，则启动它
+			// WORKAROUND: Go-Compiler-Bug umgehen - IMMER starten wenn IsRunning in DB
+			log.Printf("🔄 恢复运行中的交易员: %s (%s), DB.IsRunning=%v", traderRecord.Name, traderID, traderRecord.IsRunning)
+			
+			// 启动trader（这会启动所有goroutines包括trailing stop）
+			go func(t *trader.AutoTrader, name string, id string, uid string, dbIsRunning bool) {
+				defer func() {
+					if r := recover(); r != nil {
+						log.Printf("🚨 PANIC in trader.Run() for %s: %v", name, r)
+					}
+				}()
+				
+				// Nur starten wenn DB sagt es soll laufen
+				if !dbIsRunning {
+					log.Printf("⚠️ Trader %s DB.IsRunning=false, skip", name)
+					return
+				}
+				
+				log.Printf("🎯 [GOROUTINE START] 启动交易员 %s 的所有监控...", name)
+				
+				err := t.Run()
+				
+				log.Printf("🔍 [AFTER RUN] trader.Run() returned for %s, err=%v", name, err)
+				
+				if err != nil {
+					log.Printf("❌ 恢复trader %s 失败: %v", name, err)
+					database.UpdateTraderStatus(uid, id, false)
+				} else {
+					log.Printf("✅ 交易员 %s 启动成功", name)
+				}
+			}(traderInstance, traderRecord.Name, traderID, userID, traderRecord.IsRunning)
+			
+			if traderRecord.IsRunning {
+				restoredCount++
+			}
+			log.Printf("✅ 交易员 %s 已提交启动 (DB.IsRunning=%v)", traderRecord.Name, traderRecord.IsRunning)
+		}()  // Close the panic-recovery function
+	}
+	
+	if restoredCount > 0 {
+		log.Printf("✅ 成功提交 %d 个运行中交易员的恢复", restoredCount)
+	} else {
+		log.Printf("ℹ️  没有需要恢复的运行中交易员")
+	}
+	
 	return nil
 }
 
@@ -406,6 +531,7 @@ func (tm *TraderManager) AddTraderFromDB(traderCfg *config.TraderRecord, aiModel
 	}
 
 	tm.traders[traderCfg.ID] = at
+	tm.traderUserIDs[traderCfg.ID] = userID // Speichere userID für späteren Zugriff
 	log.Printf("✓ Trader '%s' (%s + %s) 已添加", traderCfg.Name, aiModelCfg.Provider, exchangeCfg.ID)
 	return nil
 }

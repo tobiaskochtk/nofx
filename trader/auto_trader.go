@@ -1,11 +1,13 @@
 package trader
 
 import (
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"log"
 	"math"
 	"os"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -82,6 +84,21 @@ type AutoTraderConfig struct {
 	SystemPromptTemplate string // 系统提示词模板名称（如 "default", "aggressive"）
 }
 
+// TrailingStopConfig 自动追踪止损配置
+type TrailingStopConfig struct {
+	Enabled            bool               // 是否启用自动追踪止损
+	Tiers              []TrailingStopTier // 分级止损配置（按利润阈值升序排列）
+	UpdateThresholdPct float64            // 最小更新阈值百分比（防止频繁API调用）
+	CheckIntervalSec   int                // 检查间隔（秒）
+	AllowAIOverride    bool               // 是否允许AI覆盖自动止损
+}
+
+// TrailingStopTier 追踪止损分级配置
+type TrailingStopTier struct {
+	ProfitThreshold float64 // 利润阈值（%）- 达到此利润时激活此档位
+	StopOffset      float64 // 止损偏移量（%）- 负值表示固定利润目标，正值表示当前利润减去此值
+}
+
 // AutoTrader 自动交易器
 type AutoTrader struct {
 	id                    string // Trader唯一标识
@@ -118,9 +135,56 @@ type AutoTrader struct {
 	lastCoTTrace     string
 	lastDecisionJSON string
 	openDealIDs      map[string]int64 // symbol_side -> dealID
+	// Trailing Stop Management
+	trailingStopConfig     TrailingStopConfig // 追踪止损配置
+	trailingStopManaged    map[string]bool    // AI是否管理此止损 (symbol_side -> true if AI-managed)
+	trailingStopLastUpdate map[string]float64 // 上次设置的止损价格 (symbol_side -> stopPrice)
+	trailingStopActiveTier map[string]int     // 当前激活的档位 (symbol_side -> tier index, -1 if none)
+	trailingStopMutex      sync.RWMutex       // 追踪止损状态锁
+	trailingStopMonitorCh  chan struct{}      // 追踪止损监控停止信号
 }
 
 const manualDealCloseGrace = 2 * time.Minute
+
+// parseTrailingStopTiers 解析追踪止损分级配置
+// 格式: "threshold1:offset1,threshold2:offset2,..."
+// 例如: "0.5:-0.2,1.0:0.5,3.0:1.0,10.0:3.0"
+// 负offset表示固定利润目标，正offset表示当前利润减去此值
+func parseTrailingStopTiers(tiersStr string) []TrailingStopTier {
+	if tiersStr == "" {
+		// 默认配置
+		return []TrailingStopTier{
+			{ProfitThreshold: 0.5, StopOffset: -0.2}, // >=0.5% → 止损在0.2%利润
+			{ProfitThreshold: 1.0, StopOffset: 0.5},  // >=1.0% → 止损在利润-0.5%
+			{ProfitThreshold: 3.0, StopOffset: 1.0},  // >=3.0% → 止损在利润-1.0%
+			{ProfitThreshold: 10.0, StopOffset: 3.0}, // >=10.0% → 止损在利润-3.0%
+		}
+	}
+
+	var tiers []TrailingStopTier
+	pairs := strings.Split(tiersStr, ",")
+	for _, pair := range pairs {
+		parts := strings.Split(strings.TrimSpace(pair), ":")
+		if len(parts) != 2 {
+			continue
+		}
+		threshold, err1 := strconv.ParseFloat(strings.TrimSpace(parts[0]), 64)
+		offset, err2 := strconv.ParseFloat(strings.TrimSpace(parts[1]), 64)
+		if err1 == nil && err2 == nil {
+			tiers = append(tiers, TrailingStopTier{
+				ProfitThreshold: threshold,
+				StopOffset:      offset,
+			})
+		}
+	}
+
+	// 按利润阈值升序排序
+	sort.Slice(tiers, func(i, j int) bool {
+		return tiers[i].ProfitThreshold < tiers[j].ProfitThreshold
+	})
+
+	return tiers
+}
 
 // getEnvFloat 从环境变量读取浮点数（支持 .env 注入）
 func getEnvFloat(name string, def float64) float64 {
@@ -230,40 +294,119 @@ func NewAutoTrader(config AutoTraderConfig, database interface{}, userID string)
 		systemPromptTemplate = "adaptive"
 	}
 
+	// 从数据库加载追踪止损配置（trader-specific），如果数据库中没有则使用环境变量
+	var trailingStopConfig TrailingStopConfig
+	if db, ok := database.(interface {
+		GetSystemConfig(key string) (string, error)
+	}); ok {
+		enabled, _ := db.GetSystemConfig(fmt.Sprintf("trailing_stop_%s_enabled", config.ID))
+		tiers, _ := db.GetSystemConfig(fmt.Sprintf("trailing_stop_%s_tiers", config.ID))
+		updateThresholdStr, _ := db.GetSystemConfig(fmt.Sprintf("trailing_stop_%s_update_threshold_pct", config.ID))
+		checkIntervalStr, _ := db.GetSystemConfig(fmt.Sprintf("trailing_stop_%s_check_interval_sec", config.ID))
+		allowAIOverrideStr, _ := db.GetSystemConfig(fmt.Sprintf("trailing_stop_%s_allow_ai_override", config.ID))
+
+		// 如果数据库中有配置，使用数据库配置
+		if enabled != "" {
+			trailingStopConfig.Enabled = enabled == "true"
+			trailingStopConfig.Tiers = parseTrailingStopTiers(tiers)
+			if val, err := strconv.ParseFloat(updateThresholdStr, 64); err == nil && val > 0 {
+				trailingStopConfig.UpdateThresholdPct = val
+			} else {
+				trailingStopConfig.UpdateThresholdPct = 0.3
+			}
+			if val, err := strconv.Atoi(checkIntervalStr); err == nil && val > 0 {
+				trailingStopConfig.CheckIntervalSec = val
+			} else {
+				trailingStopConfig.CheckIntervalSec = 30
+			}
+			trailingStopConfig.AllowAIOverride = allowAIOverrideStr == "true"
+		} else {
+			// 数据库中没有配置，使用环境变量作为后备
+			trailingStopConfig = TrailingStopConfig{
+				Enabled:            os.Getenv("TRAILING_STOP_ENABLED") == "true",
+				Tiers:              parseTrailingStopTiers(os.Getenv("TRAILING_STOP_TIERS")),
+				UpdateThresholdPct: getEnvFloat("TRAILING_STOP_UPDATE_THRESHOLD_PCT", 0.3),
+				CheckIntervalSec:   int(getEnvFloat("TRAILING_STOP_CHECK_INTERVAL_SEC", 30)),
+				AllowAIOverride:    os.Getenv("TRAILING_STOP_ALLOW_AI_OVERRIDE") == "true",
+			}
+		}
+	} else {
+		// 如果数据库不支持GetSystemConfig，使用环境变量
+		trailingStopConfig = TrailingStopConfig{
+			Enabled:            os.Getenv("TRAILING_STOP_ENABLED") == "true",
+			Tiers:              parseTrailingStopTiers(os.Getenv("TRAILING_STOP_TIERS")),
+			UpdateThresholdPct: getEnvFloat("TRAILING_STOP_UPDATE_THRESHOLD_PCT", 0.3),
+			CheckIntervalSec:   int(getEnvFloat("TRAILING_STOP_CHECK_INTERVAL_SEC", 30)),
+			AllowAIOverride:    os.Getenv("TRAILING_STOP_ALLOW_AI_OVERRIDE") == "true",
+		}
+	}
+
+	// 日志输出配置状态
+	if trailingStopConfig.Enabled {
+		log.Printf("🎯 [%s] 自动追踪止损已启用 (分级系统):", config.Name)
+		for i, tier := range trailingStopConfig.Tiers {
+			if tier.StopOffset < 0 {
+				log.Printf("   档位%d: 利润≥%.1f%% → 止损固定在 %.1f%% 利润",
+					i+1, tier.ProfitThreshold, -tier.StopOffset)
+			} else {
+				log.Printf("   档位%d: 利润≥%.1f%% → 止损在 利润-%.1f%%",
+					i+1, tier.ProfitThreshold, tier.StopOffset)
+			}
+		}
+		log.Printf("   更新阈值: %.1f%%, 检查间隔: %d秒, AI覆盖: %v",
+			trailingStopConfig.UpdateThresholdPct,
+			trailingStopConfig.CheckIntervalSec,
+			trailingStopConfig.AllowAIOverride)
+	} else {
+		log.Printf("⏸️ [%s] 自动追踪止损已禁用", config.Name)
+	}
+
 	return &AutoTrader{
-		id:                    config.ID,
-		name:                  config.Name,
-		aiModel:               config.AIModel,
-		exchange:              config.Exchange,
-		config:                config,
-		trader:                trader,
-		mcpClient:             mcpClient,
-		decisionLogger:        decisionLogger,
-		initialBalance:        config.InitialBalance,
-		systemPromptTemplate:  systemPromptTemplate,
-		defaultCoins:          config.DefaultCoins,
-		tradingCoins:          config.TradingCoins,
-		lastResetTime:         time.Now(),
-		startTime:             time.Now(),
-		callCount:             0,
-		isRunning:             false,
-		positionFirstSeenTime: make(map[string]int64),
-		stopMonitorCh:         make(chan struct{}),
-		monitorWg:             sync.WaitGroup{},
-		peakPnLCache:          make(map[string]float64),
-		peakPnLCacheMutex:     sync.RWMutex{},
-		lastBalanceSyncTime:   time.Now(), // 初始化为当前时间
-		database:              database,
-		userID:                userID,
-		openDealIDs:           make(map[string]int64),
+		id:                     config.ID,
+		name:                   config.Name,
+		aiModel:                config.AIModel,
+		exchange:               config.Exchange,
+		config:                 config,
+		trader:                 trader,
+		mcpClient:              mcpClient,
+		decisionLogger:         decisionLogger,
+		initialBalance:         config.InitialBalance,
+		systemPromptTemplate:   systemPromptTemplate,
+		defaultCoins:           config.DefaultCoins,
+		tradingCoins:           config.TradingCoins,
+		lastResetTime:          time.Now(),
+		startTime:              time.Now(),
+		callCount:              0,
+		isRunning:              false,
+		positionFirstSeenTime:  make(map[string]int64),
+		stopMonitorCh:          make(chan struct{}),
+		monitorWg:              sync.WaitGroup{},
+		peakPnLCache:           make(map[string]float64),
+		peakPnLCacheMutex:      sync.RWMutex{},
+		lastBalanceSyncTime:    time.Now(), // 初始化为当前时间
+		database:               database,
+		userID:                 userID,
+		openDealIDs:            make(map[string]int64),
+		trailingStopConfig:     trailingStopConfig,
+		trailingStopManaged:    make(map[string]bool),
+		trailingStopLastUpdate: make(map[string]float64),
+		trailingStopActiveTier: make(map[string]int),
+		trailingStopMutex:      sync.RWMutex{},
 	}, nil
 }
 
 // Run 运行自动交易主循环
 func (at *AutoTrader) Run() error {
+	log.Printf("🐛 [Run] ENTRY - at==nil: %v", at == nil)
+	
 	at.isRunning = true
+	log.Printf("🐛 [Run] Set isRunning=true")
+	
 	at.stopMonitorCh = make(chan struct{})
+	log.Printf("🐛 [Run] Created stopMonitorCh")
+	
 	at.startTime = time.Now()
+	log.Printf("🐛 [Run] Set startTime")
 
 	log.Println("🚀 AI驱动自动交易系统启动")
 	log.Printf("💰 初始余额: %.2f USDT", at.initialBalance)
@@ -274,6 +417,11 @@ func (at *AutoTrader) Run() error {
 
 	// 启动回撤监控
 	at.startDrawdownMonitor()
+
+	// 启动追踪止损监控（如果启用）
+	if at.trailingStopConfig.Enabled {
+		at.startTrailingStopMonitor()
+	}
 
 	ticker := time.NewTicker(at.config.ScanInterval)
 	defer ticker.Stop()
@@ -1071,6 +1219,14 @@ func (at *AutoTrader) executeCloseLongWithRecord(decision *decision.Decision, ac
 
 	log.Printf("  ✓ 平仓成功")
 	at.closeDealInternal(decision.Symbol, "long", fillPrice, fmt.Sprintf("%v", order["orderId"]), false, "ai_close_long")
+
+	// Cleanup Trailing-Stop-State
+	posKey := makePositionKey(decision.Symbol, "long")
+	at.trailingStopMutex.Lock()
+	delete(at.trailingStopManaged, posKey)
+	delete(at.trailingStopLastUpdate, posKey)
+	at.trailingStopMutex.Unlock()
+
 	return nil
 }
 
@@ -1103,6 +1259,14 @@ func (at *AutoTrader) executeCloseShortWithRecord(decision *decision.Decision, a
 
 	log.Printf("  ✓ 平仓成功")
 	at.closeDealInternal(decision.Symbol, "short", fillPrice, fmt.Sprintf("%v", order["orderId"]), false, "ai_close_short")
+
+	// Cleanup Trailing-Stop-State
+	posKey := makePositionKey(decision.Symbol, "short")
+	at.trailingStopMutex.Lock()
+	delete(at.trailingStopManaged, posKey)
+	delete(at.trailingStopLastUpdate, posKey)
+	at.trailingStopMutex.Unlock()
+
 	return nil
 }
 
@@ -1187,6 +1351,40 @@ func (at *AutoTrader) executeUpdateStopLossWithRecord(decision *decision.Decisio
 	}
 
 	log.Printf("  ✓ 止损已调整: %.2f (当前价格: %.2f)", decision.NewStopLoss, marketData.CurrentPrice)
+
+	// 检查是否允许AI覆盖自动追踪止损
+	if at.trailingStopConfig.Enabled && !at.trailingStopConfig.AllowAIOverride {
+		log.Printf("  🚫 [AI·跳过止损] %s %s 正由自动追踪系统管理（TRAILING_STOP_ALLOW_AI_OVERRIDE=false）", normalizedSymbol, side)
+		log.Printf("  🚫 AI决策已忽略，自动追踪将继续按配置工作")
+		
+		// 回滚：恢复旧的止损单（因为我们已经取消了）
+		// 使用追踪系统记录的最后一次止损价格
+		posKey := makePositionKey(decision.Symbol, side)
+		at.trailingStopMutex.RLock()
+		lastStopPrice, hasLastPrice := at.trailingStopLastUpdate[posKey]
+		at.trailingStopMutex.RUnlock()
+		
+		if hasLastPrice && lastStopPrice > 0 {
+			// 恢复旧的止损
+			log.Printf("  🔄 [恢复止损] 恢复自动追踪止损价格: %.4f", lastStopPrice)
+			if err := at.trader.SetStopLoss(decision.Symbol, positionSide, quantity, lastStopPrice); err != nil {
+				log.Printf("  ⚠️ [恢复失败] 无法恢复止损单: %v", err)
+			}
+		}
+		
+		return fmt.Errorf("AI止损更新已拒绝：自动追踪系统正在管理此持仓")
+	}
+	
+	// 标记为AI管理（如果允许AI覆盖）
+	if at.trailingStopConfig.Enabled && at.trailingStopConfig.AllowAIOverride {
+		posKey := makePositionKey(decision.Symbol, side)
+		at.trailingStopMutex.Lock()
+		at.trailingStopManaged[posKey] = true
+		at.trailingStopLastUpdate[posKey] = decision.NewStopLoss
+		at.trailingStopMutex.Unlock()
+		log.Printf("  🤖 [AI接管] %s %s 的止损管理已由AI接管", normalizedSymbol, side)
+	}
+
 	// 更新数据库止损
 	if at.database != nil {
 		// symbol_side -> id
@@ -1508,9 +1706,9 @@ func (at *AutoTrader) closeDealInternalWithRecord(symbol, side string, dealID in
 	realizedPnL, realizedPnLPct := at.computeDealPnL(openRec, closePrice)
 	duration := time.Since(openRec.OpenTime).Seconds()
 	if closer, ok := at.database.(interface {
-		CloseDeal(userID, traderID string, id int64, closePrice float64, closeOrderID string, realizedPnL, realizedPnLPct float64, durationSeconds int64, wasStopLoss bool) error
+		CloseDeal(userID, traderID string, id int64, closePrice float64, closeOrderID string, realizedPnL, realizedPnLPct float64, durationSeconds int64, wasStopLoss bool, closeReason string) error
 	}); ok {
-		if err := closer.CloseDeal(at.userID, at.id, dealID, closePrice, orderID, realizedPnL, realizedPnLPct, int64(duration), wasStopLoss); err != nil {
+		if err := closer.CloseDeal(at.userID, at.id, dealID, closePrice, orderID, realizedPnL, realizedPnLPct, int64(duration), wasStopLoss, reason); err != nil {
 			log.Printf("⚠️ [%s] 更新交易P/L失败 (%s %s): %v", at.name, symbol, side, err)
 			return
 		}
@@ -1699,7 +1897,26 @@ func (at *AutoTrader) reconcileDealsWithPositions(current map[string]bool) {
 			log.Printf("⚠️ [%s] 无法获取 %s 的最新价格以强制关闭交易", at.name, symbol)
 			continue
 		}
-		at.closeDealInternalWithRecord(symbol, side, dealID, openRec, price, "manual_close", false, "position_missing")
+
+		// 确定关闭原因：检查是否是追踪止损触发
+		closeReason := "position_missing"
+		at.trailingStopMutex.RLock()
+		tierIndex, hasTier := at.trailingStopActiveTier[key]
+		at.trailingStopMutex.RUnlock()
+
+		if hasTier && tierIndex >= 0 && tierIndex < len(at.trailingStopConfig.Tiers) {
+			// 追踪止损触发
+			closeReason = fmt.Sprintf("trailing_stop_tier%d", tierIndex+1)
+		}
+
+		at.closeDealInternalWithRecord(symbol, side, dealID, openRec, price, "manual_close", false, closeReason)
+
+		// 清理追踪止损状态
+		at.trailingStopMutex.Lock()
+		delete(at.trailingStopActiveTier, key)
+		delete(at.trailingStopLastUpdate, key)
+		delete(at.trailingStopManaged, key)
+		at.trailingStopMutex.Unlock()
 	}
 }
 
@@ -1814,6 +2031,39 @@ func (at *AutoTrader) GetStatus() map[string]interface{} {
 		aiProvider = "Qwen"
 	}
 
+	// Trailing-Stop-Status sammeln
+	tiersInfo := make([]map[string]interface{}, len(at.trailingStopConfig.Tiers))
+	for i, tier := range at.trailingStopConfig.Tiers {
+		tiersInfo[i] = map[string]interface{}{
+			"profit_threshold": tier.ProfitThreshold,
+			"stop_offset":      tier.StopOffset,
+		}
+	}
+
+	trailingStopStatus := map[string]interface{}{
+		"enabled":              at.trailingStopConfig.Enabled,
+		"tiers":                tiersInfo,
+		"update_threshold_pct": at.trailingStopConfig.UpdateThresholdPct,
+		"check_interval_sec":   at.trailingStopConfig.CheckIntervalSec,
+		"allow_ai_override":    at.trailingStopConfig.AllowAIOverride,
+	}
+
+	// Aktive Trailing-Stops (AI-managed vs Auto-managed)
+	at.trailingStopMutex.RLock()
+	aiManagedPositions := make([]string, 0)
+	autoManagedPositions := make([]string, 0)
+	for posKey, isAIManaged := range at.trailingStopManaged {
+		if isAIManaged {
+			aiManagedPositions = append(aiManagedPositions, posKey)
+		} else {
+			autoManagedPositions = append(autoManagedPositions, posKey)
+		}
+	}
+	at.trailingStopMutex.RUnlock()
+
+	trailingStopStatus["ai_managed_positions"] = aiManagedPositions
+	trailingStopStatus["auto_managed_positions"] = autoManagedPositions
+
 	return map[string]interface{}{
 		"trader_id":       at.id,
 		"trader_name":     at.name,
@@ -1828,6 +2078,7 @@ func (at *AutoTrader) GetStatus() map[string]interface{} {
 		"stop_until":      at.stopUntil.Format(time.RFC3339),
 		"last_reset_time": at.lastResetTime.Format(time.RFC3339),
 		"ai_provider":     aiProvider,
+		"trailing_stop":   trailingStopStatus,
 	}
 }
 
@@ -2238,3 +2489,350 @@ func (at *AutoTrader) ClearPeakPnLCache(symbol, side string) {
 	posKey := makePositionKey(symbol, side)
 	delete(at.peakPnLCache, posKey)
 }
+
+// startTrailingStopMonitor 启动追踪止损监控
+func (at *AutoTrader) startTrailingStopMonitor() {
+	at.monitorWg.Add(1)
+	at.trailingStopMonitorCh = make(chan struct{})
+
+	go func() {
+		defer at.monitorWg.Done()
+
+		interval := time.Duration(at.trailingStopConfig.CheckIntervalSec) * time.Second
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+
+		log.Printf("🎯 启动自动追踪止损监控（每%d秒检查一次）", at.trailingStopConfig.CheckIntervalSec)
+
+		for {
+			select {
+			case <-ticker.C:
+				at.updateTrailingStops()
+			case <-at.trailingStopMonitorCh:
+				log.Println("⏹ 停止追踪止损监控")
+				return
+			case <-at.stopMonitorCh:
+				log.Println("⏹ 停止追踪止损监控（主循环停止）")
+				return
+			}
+		}
+	}()
+}
+
+// updateTrailingStops 更新所有符合条件的持仓的追踪止损
+func (at *AutoTrader) updateTrailingStops() {
+	// 获取当前持仓
+	positions, err := at.trader.GetPositions()
+	if err != nil {
+		log.Printf("⚠️ 追踪止损：获取持仓失败: %v", err)
+		return
+	}
+
+	if len(positions) == 0 {
+		return // 无持仓，不需要处理
+	}
+
+	for _, pos := range positions {
+		symbol, ok := pos["symbol"].(string)
+		if !ok {
+			continue
+		}
+
+		side, ok := pos["side"].(string)
+		if !ok {
+			continue
+		}
+
+		entryPrice, ok := pos["entryPrice"].(float64)
+		if !ok || entryPrice <= 0 {
+			continue
+		}
+
+		markPrice, ok := pos["markPrice"].(float64)
+		if !ok || markPrice <= 0 {
+			continue
+		}
+
+		quantity, ok := pos["positionAmt"].(float64)
+		if !ok {
+			continue
+		}
+		quantity = math.Abs(quantity)
+
+		leverage := 10.0
+		if lev, ok := pos["leverage"].(float64); ok {
+			leverage = lev
+		}
+
+		posKey := makePositionKey(symbol, side)
+
+		// 检查AI是否管理此止损
+		at.trailingStopMutex.RLock()
+		aiManaged := at.trailingStopManaged[posKey]
+		at.trailingStopMutex.RUnlock()
+
+		if aiManaged {
+			// AI已接管，跳过自动追踪 - Log it
+			shouldUpdateFalse := false
+			at.logTrailingStopAction(symbol, side, "skip", markPrice, entryPrice, 0, -1, nil, nil, nil, nil, nil, nil, &shouldUpdateFalse, nil, nil, "AI已接管止损管理")
+			continue
+		}
+
+		// 计算当前盈亏百分比（考虑杠杆）
+		var profitPct float64
+		if side == "long" {
+			profitPct = ((markPrice - entryPrice) / entryPrice) * leverage * 100
+		} else {
+			profitPct = ((entryPrice - markPrice) / entryPrice) * leverage * 100
+		}
+
+		// 查找基于当前利润的档位
+		var currentTierIndex int = -1
+		for i := len(at.trailingStopConfig.Tiers) - 1; i >= 0; i-- {
+			tier := &at.trailingStopConfig.Tiers[i]
+			if profitPct >= tier.ProfitThreshold {
+				currentTierIndex = i
+				break
+			}
+		}
+
+		// 获取历史最高档位（Ratchet-Only-Up原则：只升不降）
+		at.trailingStopMutex.RLock()
+		previousTierIndex, hasPreviousTier := at.trailingStopActiveTier[posKey]
+		at.trailingStopMutex.RUnlock()
+
+		// 选择较高档位（确保不会降级）
+		var activeTierIndex int
+		if hasPreviousTier && previousTierIndex > currentTierIndex {
+			// 已经达到过更高档位，保持不降级
+			activeTierIndex = previousTierIndex
+		} else {
+			// 使用当前档位（可能是首次激活或升级）
+			activeTierIndex = currentTierIndex
+		}
+
+		// 如果没有达到任何档位的触发阈值，跳过
+		if activeTierIndex < 0 {
+			skipReason := fmt.Sprintf("利润%.2f%%未达到任何档位阈值", profitPct)
+			shouldUpdateFalse := false
+			at.logTrailingStopAction(symbol, side, "skip", markPrice, entryPrice, profitPct, -1, nil, nil, nil, nil, nil, nil, &shouldUpdateFalse, nil, nil, skipReason)
+			continue
+		}
+
+		// 获取激活的档位配置
+		activeTier := &at.trailingStopConfig.Tiers[activeTierIndex]
+
+		// 更新存储的档位（可能升级，但不会降级）
+		at.trailingStopMutex.Lock()
+		at.trailingStopActiveTier[posKey] = activeTierIndex
+		at.trailingStopMutex.Unlock()
+
+		// 根据档位配置计算目标止损利润百分比
+		var targetStopProfitPct float64
+		if activeTier.StopOffset < 0 {
+			// 负值表示固定利润目标
+			targetStopProfitPct = -activeTier.StopOffset
+		} else {
+			// 正值表示当前利润减去偏移量
+			targetStopProfitPct = profitPct - activeTier.StopOffset
+			// 确保不低于0（不能设置为亏损）
+			if targetStopProfitPct < 0 {
+				targetStopProfitPct = 0
+			}
+		}
+
+		// 将目标止损利润百分比转换为价格
+		// WICHTIG: profitPct ist bereits MIT Leverage multipliziert (Zeile 2563)!
+		// targetStopProfitPct ist z.B. 7% (bei 10% Profit - 3% Offset)
+		// Wir müssen zurück zum realen Preis-Profit rechnen: 7% / leverage = 0.7% realer Preis-Move
+		// Dann: entryPrice * (1 + 0.007) für Long
+		var newStopPrice float64
+		stopProfitRatio := targetStopProfitPct / (leverage * 100)
+
+		if side == "long" {
+			newStopPrice = entryPrice * (1 + stopProfitRatio)
+			
+			// Stop darf nicht über aktuellem Preis sein (würde sofort triggern)
+			if newStopPrice >= markPrice {
+				log.Printf("⚠️ Long Stop %.4f >= Mark %.4f für %s! Setze auf Mark - 0.1%%", 
+					newStopPrice, markPrice, symbol)
+				newStopPrice = markPrice * 0.999
+			}
+		} else {
+			newStopPrice = entryPrice * (1 - stopProfitRatio)
+			
+			// Stop darf nicht unter aktuellem Preis sein (würde sofort triggern)
+			if newStopPrice <= markPrice {
+				log.Printf("⚠️ Short Stop %.4f <= Mark %.4f für %s! Setze auf Mark + 0.1%%", 
+					newStopPrice, markPrice, symbol)
+				newStopPrice = markPrice * 1.001
+			}
+		}
+
+		// 检查是否需要更新（避免频繁API调用）
+		at.trailingStopMutex.RLock()
+		lastStopPrice, hasLastPrice := at.trailingStopLastUpdate[posKey]
+		at.trailingStopMutex.RUnlock()
+
+		var priceChangePct float64
+		shouldUpdate := false
+		skipReason := ""
+		
+		if !hasLastPrice {
+			// 第一次设置
+			shouldUpdate = true
+		} else {
+			// 计算价格变化百分比
+			priceChangePct = math.Abs((newStopPrice-lastStopPrice)/lastStopPrice) * 100
+
+			// 只有止损价格向有利方向移动超过阈值时才更新
+			if side == "long" {
+				if newStopPrice > lastStopPrice {
+					if priceChangePct >= at.trailingStopConfig.UpdateThresholdPct {
+						shouldUpdate = true
+					} else {
+						skipReason = fmt.Sprintf("价格变化%.4f%%未达到更新阈值%.2f%%", priceChangePct, at.trailingStopConfig.UpdateThresholdPct)
+					}
+				} else {
+					skipReason = fmt.Sprintf("新止损价%.4f <= 旧止损价%.4f，不向有利方向移动", newStopPrice, lastStopPrice)
+				}
+			} else if side == "short" {
+				if newStopPrice < lastStopPrice {
+					if priceChangePct >= at.trailingStopConfig.UpdateThresholdPct {
+						shouldUpdate = true
+					} else {
+						skipReason = fmt.Sprintf("价格变化%.4f%%未达到更新阈值%.2f%%", priceChangePct, at.trailingStopConfig.UpdateThresholdPct)
+					}
+				} else {
+					skipReason = fmt.Sprintf("新止损价%.4f >= 旧止损价%.4f，不向有利方向移动", newStopPrice, lastStopPrice)
+				}
+			}
+		}
+
+		// Log the check action
+		oldStopPtr := &lastStopPrice
+		if !hasLastPrice {
+			oldStopPtr = nil
+		}
+		priceChangePctPtr := &priceChangePct
+		updateThresholdPtr := &at.trailingStopConfig.UpdateThresholdPct
+		
+		at.logTrailingStopAction(symbol, side, "check", markPrice, entryPrice, profitPct, activeTierIndex, 
+			&activeTier.ProfitThreshold, oldStopPtr, &newStopPrice, &targetStopProfitPct, 
+			priceChangePctPtr, updateThresholdPtr, &shouldUpdate, nil, nil, skipReason)
+
+		if !shouldUpdate {
+			continue
+		}
+
+		// 执行止损更新
+		normalizedSymbol := normalizeDealSymbol(symbol)
+		positionSide := strings.ToUpper(side)
+
+		log.Printf("🎯 [自动追踪·档位%.1f%%] %s %s | 当前利润: %.2f%% | 目标止损利润: %.2f%% | 止损价: %.4f",
+			activeTier.ProfitThreshold, normalizedSymbol, side, profitPct, targetStopProfitPct, newStopPrice)
+
+		// 取消旧的止损单
+		if err := at.trader.CancelStopLossOrders(symbol); err != nil {
+			log.Printf("⚠️ [自动追踪] 取消旧止损单失败 (%s %s): %v", normalizedSymbol, side, err)
+			apiError := fmt.Sprintf("取消旧止损单失败: %v", err)
+			at.logTrailingStopAction(symbol, side, "error", markPrice, entryPrice, profitPct, activeTierIndex,
+				&activeTier.ProfitThreshold, oldStopPtr, &newStopPrice, &targetStopProfitPct,
+				priceChangePctPtr, updateThresholdPtr, &shouldUpdate, nil, &apiError, "")
+			continue
+		}
+
+		// 设置新的止损单
+		err = at.trader.SetStopLoss(symbol, positionSide, quantity, newStopPrice)
+		if err != nil {
+			log.Printf("⚠️ [自动追踪] 设置止损失败 (%s %s): %v", normalizedSymbol, side, err)
+			apiError := fmt.Sprintf("设置止损失败: %v", err)
+			apiSuccess := false
+			at.logTrailingStopAction(symbol, side, "update", markPrice, entryPrice, profitPct, activeTierIndex,
+				&activeTier.ProfitThreshold, oldStopPtr, &newStopPrice, &targetStopProfitPct,
+				priceChangePctPtr, updateThresholdPtr, &shouldUpdate, &apiSuccess, &apiError, "")
+			continue
+		}
+
+		// 更新最后设置的止损价格
+		at.trailingStopMutex.Lock()
+		at.trailingStopLastUpdate[posKey] = newStopPrice
+		at.trailingStopMutex.Unlock()
+
+		log.Printf("✅ [自动追踪] 止损已更新: %s %s → %.4f", normalizedSymbol, side, newStopPrice)
+		
+		// Log successful update
+		apiSuccess := true
+		at.logTrailingStopAction(symbol, side, "update", markPrice, entryPrice, profitPct, activeTierIndex,
+			&activeTier.ProfitThreshold, oldStopPtr, &newStopPrice, &targetStopProfitPct,
+			priceChangePctPtr, updateThresholdPtr, &shouldUpdate, &apiSuccess, nil, "")
+	}
+}
+
+// logTrailingStopAction logs trailing stop actions to database
+func (at *AutoTrader) logTrailingStopAction(symbol, side, action string, currentPrice, entryPrice, profitPct float64,
+	tierIndex int, tierThreshold, oldStopPrice, newStopPrice, targetStopProfitPct, priceChangePct, updateThresholdPct *float64,
+	shouldUpdate, apiSuccess *bool, apiError *string, skipReason string) {
+	
+	// Get deal ID for this position
+	dealID, openRec := at.getOpenDealRecord(symbol, side)
+	if openRec == nil {
+		return // No deal found, skip logging
+	}
+
+	logger, ok := at.database.(interface {
+		LogTrailingStopAction(log *config.TrailingStopLog) error
+	})
+	if !ok {
+		return // Database doesn't support trailing stop logging
+	}
+
+	logEntry := &config.TrailingStopLog{
+		UserID:       at.userID,
+		TraderID:     at.id,
+		DealID:       dealID,
+		Symbol:       normalizeDealSymbol(symbol),
+		Side:         side,
+		Action:       action,
+		CurrentPrice: currentPrice,
+		EntryPrice:   entryPrice,
+		ProfitPct:    profitPct,
+		TierIndex:    tierIndex,
+	}
+
+	if tierThreshold != nil {
+		logEntry.TierThreshold = sql.NullFloat64{Float64: *tierThreshold, Valid: true}
+	}
+	if oldStopPrice != nil {
+		logEntry.OldStopPrice = sql.NullFloat64{Float64: *oldStopPrice, Valid: true}
+	}
+	if newStopPrice != nil {
+		logEntry.NewStopPrice = sql.NullFloat64{Float64: *newStopPrice, Valid: true}
+	}
+	if targetStopProfitPct != nil {
+		logEntry.TargetStopProfitPct = sql.NullFloat64{Float64: *targetStopProfitPct, Valid: true}
+	}
+	if priceChangePct != nil {
+		logEntry.PriceChangePct = sql.NullFloat64{Float64: *priceChangePct, Valid: true}
+	}
+	if updateThresholdPct != nil {
+		logEntry.UpdateThresholdPct = sql.NullFloat64{Float64: *updateThresholdPct, Valid: true}
+	}
+	if shouldUpdate != nil {
+		logEntry.ShouldUpdate = sql.NullBool{Bool: *shouldUpdate, Valid: true}
+	}
+	if apiSuccess != nil {
+		logEntry.APISuccess = sql.NullBool{Bool: *apiSuccess, Valid: true}
+	}
+	if apiError != nil && *apiError != "" {
+		logEntry.APIError = sql.NullString{String: *apiError, Valid: true}
+	}
+	if skipReason != "" {
+		logEntry.SkipReason = sql.NullString{String: skipReason, Valid: true}
+	}
+
+	if err := logger.LogTrailingStopAction(logEntry); err != nil {
+		log.Printf("⚠️ 记录追踪止损日志失败: %v", err)
+	}
+}
+

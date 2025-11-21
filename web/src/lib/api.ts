@@ -481,6 +481,38 @@ export const api = {
     if (!res.ok) throw new Error('保存用户信号源配置失败')
   },
 
+  // Trailing Stop配置接口
+  async getTrailingStopConfig(traderId: string): Promise<any> {
+    const res = await httpClient.get(
+      `${API_BASE}/trailing-stop/config?trader_id=${encodeURIComponent(traderId)}`,
+      getAuthHeaders()
+    )
+    if (!res.ok) throw new Error('获取Trailing Stop配置失败')
+    return res.json()
+  },
+
+  async updateTrailingStopConfig(
+    traderId: string,
+    config: {
+      enabled: boolean
+      tiers: string
+      update_threshold_pct: number
+      check_interval_sec: number
+      allow_ai_override: boolean
+    }
+  ): Promise<{ message: string; restart_required: boolean }> {
+    const res = await fetch(
+      `${API_BASE}/trailing-stop/config?trader_id=${encodeURIComponent(traderId)}`,
+      {
+        method: 'PUT',
+        headers: getAuthHeaders(),
+        body: JSON.stringify(config),
+      }
+    )
+    if (!res.ok) throw new Error('更新Trailing Stop配置失败')
+    return res.json()
+  },
+
   // 获取服务器IP（需要认证，用于白名单配置）
   async getServerIP(): Promise<{
     public_ip: string
