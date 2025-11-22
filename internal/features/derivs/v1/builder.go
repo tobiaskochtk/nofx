@@ -30,11 +30,11 @@ func NewBuilder(cfg *config.DerivsV1Config, store Store) *Builder {
 	for _, sym := range cfg.Symbols {
 		enabled[SanitizeSymbol(sym)] = struct{}{}
 	}
-	
+
 	// Load Binance API credentials from environment
 	apiKey := os.Getenv("BINANCE_API_KEY")
 	apiSecret := os.Getenv("BINANCE_API_SECRET")
-	
+
 	var microFetcher *microFetcher
 	if apiKey != "" && apiSecret != "" {
 		log.Printf("[NewBuilder] Initializing microFetcher with Binance API credentials")
@@ -43,7 +43,7 @@ func NewBuilder(cfg *config.DerivsV1Config, store Store) *Builder {
 		log.Printf("[NewBuilder] Initializing microFetcher without API credentials (liquidation data unavailable)")
 		microFetcher = newMicroFetcher()
 	}
-	
+
 	return &Builder{
 		cfg:            cfg,
 		oiHistory:      NewCacheOIHistory(store),
@@ -63,7 +63,7 @@ func (b *Builder) Build(symbol string) (*types.DerivsFeatures, error) {
 	}
 	norm := SanitizeSymbol(symbol)
 	log.Printf("[Builder.Build] %s: normalized to %s", symbol, norm)
-	
+
 	if _, ok := b.enabledSymbols[norm]; !ok {
 		log.Printf("[Builder.Build] %s: NOT in enabled list (have %d symbols)", norm, len(b.enabledSymbols))
 		return nil, nil
