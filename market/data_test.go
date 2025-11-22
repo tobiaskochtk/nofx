@@ -500,3 +500,23 @@ func TestIsStaleData_EmptyKlines(t *testing.T) {
 		t.Error("Expected false for empty klines, got true")
 	}
 }
+
+func TestNormalize(t *testing.T) {
+	testCases := []struct {
+		input string
+		want  string
+	}{
+		{"BNBUSDT", "BNBUSDT"},
+		{"bnbusdt", "BNBUSDT"},
+		{"BNBUSDC", "BNBUSDT"},
+		{"BNBUSDCUSDT", "BNBUSDT"},
+		{"btc", "BTCUSDT"},
+		{" BTCusdc ", "BTCUSDT"},
+	}
+
+	for _, tc := range testCases {
+		if got := Normalize(tc.input); got != tc.want {
+			t.Errorf("Normalize(%q) = %q, want %q", tc.input, got, tc.want)
+		}
+	}
+}

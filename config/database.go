@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"log"
 	"nofx/crypto"
-	"nofx/market"
 	"os"
 	"slices"
 	"strings"
@@ -28,7 +27,7 @@ type DatabaseInterface interface {
 	GetAIModels(userID string) ([]*AIModelConfig, error)
 	UpdateAIModel(userID, id string, enabled bool, apiKey, customAPIURL, customModelName string) error
 	GetExchanges(userID string) ([]*ExchangeConfig, error)
-	UpdateExchange(userID, id string, enabled bool, apiKey, secretKey string, testnet bool, hyperliquidWalletAddr, asterUser, asterSigner, asterPrivateKey, lighterWalletAddr, lighterPrivateKey string) error
+	UpdateExchange(userID, id string, enabled bool, apiKey, secretKey string, testnet bool, hyperliquidWalletAddr, asterUser, asterSigner, asterPrivateKey string, lighterFields ...string) error
 	CreateAIModel(userID, id, name, provider string, enabled bool, apiKey, customAPIURL string) error
 	CreateExchange(userID, id, name, typ string, enabled bool, apiKey, secretKey string, testnet bool, hyperliquidWalletAddr, asterUser, asterSigner, asterPrivateKey string) error
 	CreateTrader(trader *TraderRecord) error
@@ -41,9 +40,14 @@ type DatabaseInterface interface {
 	GetTraderConfig(userID, traderID string) (*TraderRecord, *AIModelConfig, *ExchangeConfig, error)
 	GetSystemConfig(key string) (string, error)
 	SetSystemConfig(key, value string) error
-	CreateUserSignalSource(userID, coinPoolURL, oiTopURL string) error
+	CreateUserSignalSource(userID, oiSymbols string) error
 	GetUserSignalSource(userID string) (*UserSignalSource, error)
-	UpdateUserSignalSource(userID, coinPoolURL, oiTopURL string) error
+	UpdateUserSignalSource(userID, oiSymbols string) error
+	GetDB() *sql.DB
+	ListDeals(userID, traderID, status, symbol, side, from, to, q, pnl string, pnlMin, pnlMax *float64, limit, offset int) ([]*DealRecord, error)
+	CountDeals(userID, traderID, status, symbol, side, from, to, q, pnl string, pnlMin, pnlMax *float64) (int64, error)
+	GetDealByID(userID, traderID string, id int64) (*DealRecord, error)
+	ListDealEvents(userID, traderID string, dealID int64) ([]DealEvent, error)
 	GetCustomCoins() []string
 	LoadBetaCodesFromFile(filePath string) error
 	ValidateBetaCode(code string) (bool, error)
@@ -143,6 +147,7 @@ func (d *Database) createTables() error {
 			user_id TEXT NOT NULL,
 			coin_pool_url TEXT DEFAULT '',
 			oi_top_url TEXT DEFAULT '',
+			oi_symbols TEXT DEFAULT '',
 			created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
 			updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
 			FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
@@ -164,6 +169,7 @@ func (d *Database) createTables() error {
 			trading_symbols TEXT DEFAULT '',
 			use_coin_pool BOOLEAN DEFAULT 0,
 			use_oi_top BOOLEAN DEFAULT 0,
+			max_positions INTEGER DEFAULT 3,
 			created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
 			updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
 			FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
@@ -460,27 +466,27 @@ type AIModelConfig struct {
 
 // ExchangeConfig 交易所配置
 type ExchangeConfig struct {
-	ID        string `json:"id"`
-	UserID    string `json:"user_id"`
-	Name      string `json:"name"`
-	Type      string `json:"type"`
-	Enabled   bool   `json:"enabled"`
-	APIKey    string `json:"apiKey"`    // For Binance: API Key; For Hyperliquid: Agent Private Key (should have ~0 balance)
-	SecretKey string `json:"secretKey"` // For Binance: Secret Key; Not used for Hyperliquid
-	Testnet   bool   `json:"testnet"`
+	ID        string    `json:"id"`
+	UserID    string    `json:"user_id"`
+	Name      string    `json:"name"`
+	Type      string    `json:"type"`
+	Enabled   bool      `json:"enabled"`
+	APIKey    string    `json:"apiKey"`    // For Binance: API Key; For Hyperliquid: Agent Private Key (should have ~0 balance)
+	SecretKey string    `json:"secretKey"` // For Binance: Secret Key; Not used for Hyperliquid
+	Testnet   bool      `json:"testnet"`
 	// Hyperliquid Agent Wallet configuration (following official best practices)
 	// Reference: https://hyperliquid.gitbook.io/hyperliquid-docs/for-developers/api/nonces-and-api-wallets
-	HyperliquidWalletAddr string `json:"hyperliquidWalletAddr"` // Main Wallet Address (holds funds, never expose private key)
+	HyperliquidWalletAddr string    `json:"hyperliquidWalletAddr"` // Main Wallet Address (holds funds, never expose private key)
 	// Aster 特定字段
-	AsterUser       string `json:"asterUser"`
-	AsterSigner     string `json:"asterSigner"`
-	AsterPrivateKey string `json:"asterPrivateKey"`
+	AsterUser       string    `json:"asterUser"`
+	AsterSigner     string    `json:"asterSigner"`
+	AsterPrivateKey string    `json:"asterPrivateKey"`
 	// LIGHTER 特定字段
-	LighterWalletAddr       string `json:"lighterWalletAddr"`       // Ethereum 钱包地址 (L1)
-	LighterPrivateKey       string `json:"lighterPrivateKey"`       // L1私钥（用于识别账户）
-	LighterAPIKeyPrivateKey string `json:"lighterAPIKeyPrivateKey"` // API Key私钥（40字节，用于签名交易）
-	CreatedAt          time.Time `json:"created_at"`
-	UpdatedAt          time.Time `json:"updated_at"`
+	LighterWalletAddr       string    `json:"lighterWalletAddr"`       // Ethereum 钱包地址 (L1)
+	LighterPrivateKey       string    `json:"lighterPrivateKey"`       // L1私钥（用于识别账户）
+	LighterAPIKeyPrivateKey string    `json:"lighterAPIKeyPrivateKey"` // API Key私钥（40字节，用于签名交易）
+	CreatedAt               time.Time `json:"created_at"`
+	UpdatedAt               time.Time `json:"updated_at"`
 }
 
 // TraderRecord 交易员配置（数据库实体）
@@ -502,6 +508,7 @@ type TraderRecord struct {
 	OverrideBasePrompt   bool      `json:"override_base_prompt"`   // 是否覆盖基础prompt
 	SystemPromptTemplate string    `json:"system_prompt_template"` // 系统提示词模板名称
 	IsCrossMargin        bool      `json:"is_cross_margin"`        // 是否为全仓模式（true=全仓，false=逐仓）
+	MaxPositions         int       `json:"max_positions"`          // 最大持仓数量
 	CreatedAt            time.Time `json:"created_at"`
 	UpdatedAt            time.Time `json:"updated_at"`
 }
@@ -512,6 +519,7 @@ type UserSignalSource struct {
 	UserID      string    `json:"user_id"`
 	CoinPoolURL string    `json:"coin_pool_url"`
 	OITopURL    string    `json:"oi_top_url"`
+	OISymbols   string    `json:"oi_symbols"`
 	CreatedAt   time.Time `json:"created_at"`
 	UpdatedAt   time.Time `json:"updated_at"`
 }
@@ -756,6 +764,7 @@ func (d *Database) GetExchanges(userID string) ([]*ExchangeConfig, error) {
 		       COALESCE(aster_private_key, '') as aster_private_key,
 		       COALESCE(lighter_wallet_addr, '') as lighter_wallet_addr,
 		       COALESCE(lighter_private_key, '') as lighter_private_key,
+		       COALESCE(lighter_api_key_private_key, '') as lighter_api_key_private_key,
 		       created_at, updated_at
 		FROM exchanges WHERE user_id = ? ORDER BY id
 	`, userID)
@@ -768,16 +777,24 @@ func (d *Database) GetExchanges(userID string) ([]*ExchangeConfig, error) {
 	exchanges := make([]*ExchangeConfig, 0)
 	for rows.Next() {
 		var exchange ExchangeConfig
+		var createdAtRaw, updatedAtRaw interface{}
 		err := rows.Scan(
 			&exchange.ID, &exchange.UserID, &exchange.Name, &exchange.Type,
 			&exchange.Enabled, &exchange.APIKey, &exchange.SecretKey, &exchange.Testnet,
 			&exchange.HyperliquidWalletAddr, &exchange.AsterUser,
 			&exchange.AsterSigner, &exchange.AsterPrivateKey,
-			&exchange.LighterWalletAddr, &exchange.LighterPrivateKey,
-			&exchange.CreatedAt, &exchange.UpdatedAt,
+			&exchange.LighterWalletAddr, &exchange.LighterPrivateKey, &exchange.LighterAPIKeyPrivateKey,
+			&createdAtRaw, &updatedAtRaw,
 		)
 		if err != nil {
 			return nil, err
+		}
+
+		if exchange.CreatedAt, err = normalizeTime(createdAtRaw); err != nil {
+			log.Printf("⚠️ 解析交易所 created_at 时间失败: %v (value=%v)", err, createdAtRaw)
+		}
+		if exchange.UpdatedAt, err = normalizeTime(updatedAtRaw); err != nil {
+			log.Printf("⚠️ 解析交易所 updated_at 时间失败: %v (value=%v)", err, updatedAtRaw)
 		}
 
 		// 解密敏感字段
@@ -785,6 +802,7 @@ func (d *Database) GetExchanges(userID string) ([]*ExchangeConfig, error) {
 		exchange.SecretKey = d.decryptSensitiveData(exchange.SecretKey)
 		exchange.AsterPrivateKey = d.decryptSensitiveData(exchange.AsterPrivateKey)
 		exchange.LighterPrivateKey = d.decryptSensitiveData(exchange.LighterPrivateKey)
+		exchange.LighterAPIKeyPrivateKey = d.decryptSensitiveData(exchange.LighterAPIKeyPrivateKey)
 
 		exchanges = append(exchanges, &exchange)
 	}
@@ -794,7 +812,18 @@ func (d *Database) GetExchanges(userID string) ([]*ExchangeConfig, error) {
 
 // UpdateExchange 更新交易所配置，如果不存在则创建用户特定配置
 // 🔒 安全特性：空值不会覆盖现有的敏感字段（api_key, secret_key, aster_private_key, lighter_private_key）
-func (d *Database) UpdateExchange(userID, id string, enabled bool, apiKey, secretKey string, testnet bool, hyperliquidWalletAddr, asterUser, asterSigner, asterPrivateKey, lighterWalletAddr, lighterPrivateKey string) error {
+// lighterWalletAddr, lighterPrivateKey, lighterAPIKeyPrivateKey are optional trailing params for backward compatibility.
+func (d *Database) UpdateExchange(userID, id string, enabled bool, apiKey, secretKey string, testnet bool, hyperliquidWalletAddr, asterUser, asterSigner, asterPrivateKey string, lighterFields ...string) error {
+	var lighterWalletAddr, lighterPrivateKey, lighterAPIKey string
+	if len(lighterFields) > 0 {
+		lighterWalletAddr = lighterFields[0]
+	}
+	if len(lighterFields) > 1 {
+		lighterPrivateKey = lighterFields[1]
+	}
+	if len(lighterFields) > 2 {
+		lighterAPIKey = lighterFields[2]
+	}
 	log.Printf("🔧 UpdateExchange: userID=%s, id=%s, enabled=%v", userID, id, enabled)
 
 	// 构建动态 UPDATE SET 子句
@@ -827,6 +856,13 @@ func (d *Database) UpdateExchange(userID, id string, enabled bool, apiKey, secre
 		encryptedAsterPrivateKey := d.encryptSensitiveData(asterPrivateKey)
 		setClauses = append(setClauses, "aster_private_key = ?")
 		args = append(args, encryptedAsterPrivateKey)
+	}
+
+	var encryptedLighterAPIKey string
+	if lighterAPIKey != "" {
+		encryptedLighterAPIKey = d.encryptSensitiveData(lighterAPIKey)
+		setClauses = append(setClauses, "lighter_api_key_private_key = ?")
+		args = append(args, encryptedLighterAPIKey)
 	}
 
 	if lighterPrivateKey != "" {
@@ -890,14 +926,18 @@ func (d *Database) UpdateExchange(userID, id string, enabled bool, apiKey, secre
 		encryptedSecretKey := d.encryptSensitiveData(secretKey)
 		encryptedAsterPrivateKey := d.encryptSensitiveData(asterPrivateKey)
 		encryptedLighterPrivateKey := d.encryptSensitiveData(lighterPrivateKey)
+		encryptedLighterAPIKey := ""
+		if lighterAPIKey != "" {
+			encryptedLighterAPIKey = d.encryptSensitiveData(lighterAPIKey)
+		}
 
 		// 创建用户特定的配置，使用原始的交易所ID
 		_, err = d.db.Exec(`
 			INSERT INTO exchanges (id, user_id, name, type, enabled, api_key, secret_key, testnet,
 			                       hyperliquid_wallet_addr, aster_user, aster_signer, aster_private_key,
-			                       lighter_wallet_addr, lighter_private_key, created_at, updated_at)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
-		`, id, userID, name, typ, enabled, encryptedAPIKey, encryptedSecretKey, testnet, hyperliquidWalletAddr, asterUser, asterSigner, encryptedAsterPrivateKey, lighterWalletAddr, encryptedLighterPrivateKey)
+			                       lighter_wallet_addr, lighter_private_key, lighter_api_key_private_key, created_at, updated_at)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
+		`, id, userID, name, typ, enabled, encryptedAPIKey, encryptedSecretKey, testnet, hyperliquidWalletAddr, asterUser, asterSigner, encryptedAsterPrivateKey, lighterWalletAddr, encryptedLighterPrivateKey, encryptedLighterAPIKey)
 
 		if err != nil {
 			log.Printf("❌ UpdateExchange: 创建记录失败: %v", err)
@@ -937,9 +977,9 @@ func (d *Database) CreateExchange(userID, id, name, typ string, enabled bool, ap
 // CreateTrader 创建交易员
 func (d *Database) CreateTrader(trader *TraderRecord) error {
 	_, err := d.db.Exec(`
-		INSERT INTO traders (id, user_id, name, ai_model_id, exchange_id, initial_balance, scan_interval_minutes, is_running, btc_eth_leverage, altcoin_leverage, trading_symbols, use_coin_pool, use_oi_top, custom_prompt, override_base_prompt, system_prompt_template, is_cross_margin)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-	`, trader.ID, trader.UserID, trader.Name, trader.AIModelID, trader.ExchangeID, trader.InitialBalance, trader.ScanIntervalMinutes, trader.IsRunning, trader.BTCETHLeverage, trader.AltcoinLeverage, trader.TradingSymbols, trader.UseCoinPool, trader.UseOITop, trader.CustomPrompt, trader.OverrideBasePrompt, trader.SystemPromptTemplate, trader.IsCrossMargin)
+		INSERT INTO traders (id, user_id, name, ai_model_id, exchange_id, initial_balance, scan_interval_minutes, is_running, btc_eth_leverage, altcoin_leverage, trading_symbols, use_coin_pool, use_oi_top, custom_prompt, override_base_prompt, system_prompt_template, is_cross_margin, max_positions)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`, trader.ID, trader.UserID, trader.Name, trader.AIModelID, trader.ExchangeID, trader.InitialBalance, trader.ScanIntervalMinutes, trader.IsRunning, trader.BTCETHLeverage, trader.AltcoinLeverage, trader.TradingSymbols, trader.UseCoinPool, trader.UseOITop, trader.CustomPrompt, trader.OverrideBasePrompt, trader.SystemPromptTemplate, trader.IsCrossMargin, trader.MaxPositions)
 	return err
 }
 
@@ -952,7 +992,9 @@ func (d *Database) GetTraders(userID string) ([]*TraderRecord, error) {
 		       COALESCE(use_coin_pool, 0) as use_coin_pool, COALESCE(use_oi_top, 0) as use_oi_top,
 		       COALESCE(custom_prompt, '') as custom_prompt, COALESCE(override_base_prompt, 0) as override_base_prompt,
 		       COALESCE(system_prompt_template, 'default') as system_prompt_template,
-		       COALESCE(is_cross_margin, 1) as is_cross_margin, created_at, updated_at
+		       COALESCE(is_cross_margin, 1) as is_cross_margin,
+		       COALESCE(max_positions, 3) as max_positions,
+		       created_at, updated_at
 		FROM traders WHERE user_id = ? ORDER BY created_at DESC
 	`, userID)
 	if err != nil {
@@ -969,7 +1011,7 @@ func (d *Database) GetTraders(userID string) ([]*TraderRecord, error) {
 			&trader.BTCETHLeverage, &trader.AltcoinLeverage, &trader.TradingSymbols,
 			&trader.UseCoinPool, &trader.UseOITop,
 			&trader.CustomPrompt, &trader.OverrideBasePrompt, &trader.SystemPromptTemplate,
-			&trader.IsCrossMargin,
+			&trader.IsCrossMargin, &trader.MaxPositions,
 			&trader.CreatedAt, &trader.UpdatedAt,
 		)
 		if err != nil {
@@ -992,14 +1034,18 @@ func (d *Database) UpdateTrader(trader *TraderRecord) error {
 	_, err := d.db.Exec(`
 		UPDATE traders SET
 			name = ?, ai_model_id = ?, exchange_id = ?,
+			initial_balance = ?,
 			scan_interval_minutes = ?, btc_eth_leverage = ?, altcoin_leverage = ?,
 			trading_symbols = ?, custom_prompt = ?, override_base_prompt = ?,
-			system_prompt_template = ?, is_cross_margin = ?, updated_at = CURRENT_TIMESTAMP
+			system_prompt_template = ?, is_cross_margin = ?, use_coin_pool = ?, use_oi_top = ?,
+			max_positions = ?, updated_at = CURRENT_TIMESTAMP
 		WHERE id = ? AND user_id = ?
 	`, trader.Name, trader.AIModelID, trader.ExchangeID,
+		trader.InitialBalance,
 		trader.ScanIntervalMinutes, trader.BTCETHLeverage, trader.AltcoinLeverage,
 		trader.TradingSymbols, trader.CustomPrompt, trader.OverrideBasePrompt,
-		trader.SystemPromptTemplate, trader.IsCrossMargin, trader.ID, trader.UserID)
+		trader.SystemPromptTemplate, trader.IsCrossMargin, trader.UseCoinPool, trader.UseOITop,
+		trader.MaxPositions, trader.ID, trader.UserID)
 	return err
 }
 
@@ -1027,6 +1073,10 @@ func (d *Database) GetTraderConfig(userID, traderID string) (*TraderRecord, *AIM
 	var trader TraderRecord
 	var aiModel AIModelConfig
 	var exchange ExchangeConfig
+
+	var traderCreatedRaw, traderUpdatedRaw interface{}
+	var aiCreatedRaw, aiUpdatedRaw interface{}
+	var exchangeCreatedRaw, exchangeUpdatedRaw interface{}
 
 	err := d.db.QueryRow(`
 		SELECT
@@ -1064,19 +1114,38 @@ func (d *Database) GetTraderConfig(userID, traderID string) (*TraderRecord, *AIM
 		&trader.UseCoinPool, &trader.UseOITop,
 		&trader.CustomPrompt, &trader.OverrideBasePrompt, &trader.SystemPromptTemplate,
 		&trader.IsCrossMargin,
-		&trader.CreatedAt, &trader.UpdatedAt,
+		&traderCreatedRaw, &traderUpdatedRaw,
 		&aiModel.ID, &aiModel.UserID, &aiModel.Name, &aiModel.Provider, &aiModel.Enabled, &aiModel.APIKey,
 		&aiModel.CustomAPIURL, &aiModel.CustomModelName,
-		&aiModel.CreatedAt, &aiModel.UpdatedAt,
+		&aiCreatedRaw, &aiUpdatedRaw,
 		&exchange.ID, &exchange.UserID, &exchange.Name, &exchange.Type, &exchange.Enabled,
 		&exchange.APIKey, &exchange.SecretKey, &exchange.Testnet,
 		&exchange.HyperliquidWalletAddr, &exchange.AsterUser, &exchange.AsterSigner, &exchange.AsterPrivateKey,
 		&exchange.LighterWalletAddr, &exchange.LighterPrivateKey,
-		&exchange.CreatedAt, &exchange.UpdatedAt,
+		&exchangeCreatedRaw, &exchangeUpdatedRaw,
 	)
 
 	if err != nil {
 		return nil, nil, nil, err
+	}
+
+	if trader.CreatedAt, err = normalizeTime(traderCreatedRaw); err != nil {
+		log.Printf("⚠️ 解析交易员 created_at 时间失败: %v (value=%v)", err, traderCreatedRaw)
+	}
+	if trader.UpdatedAt, err = normalizeTime(traderUpdatedRaw); err != nil {
+		log.Printf("⚠️ 解析交易员 updated_at 时间失败: %v (value=%v)", err, traderUpdatedRaw)
+	}
+	if aiModel.CreatedAt, err = normalizeTime(aiCreatedRaw); err != nil {
+		log.Printf("⚠️ 解析模型 created_at 时间失败: %v (value=%v)", err, aiCreatedRaw)
+	}
+	if aiModel.UpdatedAt, err = normalizeTime(aiUpdatedRaw); err != nil {
+		log.Printf("⚠️ 解析模型 updated_at 时间失败: %v (value=%v)", err, aiUpdatedRaw)
+	}
+	if exchange.CreatedAt, err = normalizeTime(exchangeCreatedRaw); err != nil {
+		log.Printf("⚠️ 解析交易所 created_at 时间失败: %v (value=%v)", err, exchangeCreatedRaw)
+	}
+	if exchange.UpdatedAt, err = normalizeTime(exchangeUpdatedRaw); err != nil {
+		log.Printf("⚠️ 解析交易所 updated_at 时间失败: %v (value=%v)", err, exchangeUpdatedRaw)
 	}
 
 	// 解密敏感数据
@@ -1087,6 +1156,48 @@ func (d *Database) GetTraderConfig(userID, traderID string) (*TraderRecord, *AIM
 	exchange.LighterPrivateKey = d.decryptSensitiveData(exchange.LighterPrivateKey)
 
 	return &trader, &aiModel, &exchange, nil
+}
+
+// normalizeTime attempts to parse various SQLite time representations into time.Time.
+func normalizeTime(raw interface{}) (time.Time, error) {
+	switch v := raw.(type) {
+	case nil:
+		return time.Time{}, nil
+	case time.Time:
+		return v, nil
+	case string:
+		return parseTimeString(v)
+	case []byte:
+		return parseTimeString(string(v))
+	default:
+		return time.Time{}, fmt.Errorf("unsupported time type %T", raw)
+	}
+}
+
+func parseTimeString(value string) (time.Time, error) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return time.Time{}, nil
+	}
+
+	layouts := []string{
+		time.RFC3339Nano,
+		time.RFC3339,
+		"2006-01-02 15:04:05",
+		"2006-01-02 15:04:05.000",
+		"2006-01-02T15:04:05",
+		"2006-01-02T15:04:05.000",
+		"2006-01-02 15:04:05Z07:00",
+		"2006-01-02T15:04:05Z07:00",
+	}
+
+	for _, layout := range layouts {
+		if t, err := time.Parse(layout, value); err == nil {
+			return t, nil
+		}
+	}
+
+	return time.Time{}, fmt.Errorf("cannot parse time: %s", value)
 }
 
 // GetSystemConfig 获取系统配置
@@ -1105,11 +1216,11 @@ func (d *Database) SetSystemConfig(key, value string) error {
 }
 
 // CreateUserSignalSource 创建用户信号源配置
-func (d *Database) CreateUserSignalSource(userID, coinPoolURL, oiTopURL string) error {
+func (d *Database) CreateUserSignalSource(userID, oiSymbols string) error {
 	_, err := d.db.Exec(`
-		INSERT OR REPLACE INTO user_signal_sources (user_id, coin_pool_url, oi_top_url, updated_at)
-		VALUES (?, ?, ?, CURRENT_TIMESTAMP)
-	`, userID, coinPoolURL, oiTopURL)
+		INSERT OR REPLACE INTO user_signal_sources (user_id, oi_symbols, updated_at)
+		VALUES (?, ?, CURRENT_TIMESTAMP)
+	`, userID, oiSymbols)
 	return err
 }
 
@@ -1117,10 +1228,10 @@ func (d *Database) CreateUserSignalSource(userID, coinPoolURL, oiTopURL string) 
 func (d *Database) GetUserSignalSource(userID string) (*UserSignalSource, error) {
 	var source UserSignalSource
 	err := d.db.QueryRow(`
-		SELECT id, user_id, coin_pool_url, oi_top_url, created_at, updated_at
+		SELECT id, user_id, coin_pool_url, oi_top_url, oi_symbols, created_at, updated_at
 		FROM user_signal_sources WHERE user_id = ?
 	`, userID).Scan(
-		&source.ID, &source.UserID, &source.CoinPoolURL, &source.OITopURL,
+		&source.ID, &source.UserID, &source.CoinPoolURL, &source.OITopURL, &source.OISymbols,
 		&source.CreatedAt, &source.UpdatedAt,
 	)
 	if err != nil {
@@ -1130,11 +1241,11 @@ func (d *Database) GetUserSignalSource(userID string) (*UserSignalSource, error)
 }
 
 // UpdateUserSignalSource 更新用户信号源配置
-func (d *Database) UpdateUserSignalSource(userID, coinPoolURL, oiTopURL string) error {
+func (d *Database) UpdateUserSignalSource(userID, oiSymbols string) error {
 	_, err := d.db.Exec(`
-		UPDATE user_signal_sources SET coin_pool_url = ?, oi_top_url = ?, updated_at = CURRENT_TIMESTAMP
+		UPDATE user_signal_sources SET oi_symbols = ?, updated_at = CURRENT_TIMESTAMP
 		WHERE user_id = ?
-	`, coinPoolURL, oiTopURL, userID)
+	`, oiSymbols, userID)
 	return err
 }
 
@@ -1159,7 +1270,7 @@ func (d *Database) GetCustomCoins() []string {
 		if s == "" {
 			continue
 		}
-		coin := market.Normalize(s)
+		coin := normalizeSymbol(s)
 		if !slices.Contains(symbols, coin) {
 			symbols = append(symbols, coin)
 		}
@@ -1222,6 +1333,14 @@ func (d *Database) LoadBetaCodesFromFile(filePath string) error {
 
 	log.Printf("✅ 成功加载 %d 个内测码到数据库 (总计 %d 个)", insertedCount, len(codes))
 	return nil
+}
+
+func normalizeSymbol(symbol string) string {
+	trimmed := strings.ToUpper(strings.TrimSpace(symbol))
+	if strings.HasSuffix(trimmed, "USDT") {
+		return trimmed
+	}
+	return trimmed + "USDT"
 }
 
 // ValidateBetaCode 验证内测码是否有效且未使用

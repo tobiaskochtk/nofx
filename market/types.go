@@ -1,6 +1,16 @@
 package market
 
-import "time"
+import (
+	"nofx/internal/snapshot"
+	"time"
+)
+
+const (
+	FeatureKeyF4 = "f4"
+	FeatureKeyF5 = "f5"
+	FeatureKeyF6 = "f6"
+	FeatureKeyF7 = "f7"
+)
 
 // Data 市场数据结构
 type Data struct {
@@ -15,6 +25,9 @@ type Data struct {
 	FundingRate       float64
 	IntradaySeries    *IntradayData
 	LongerTermContext *LongerTermData
+	Snapshot          *snapshot.Snapshot
+	CollectedAt       time.Time
+	FeatureStats      map[string]FeatureStat
 }
 
 // OIData Open Interest数据
@@ -88,6 +101,12 @@ type Ticker24hr struct {
 	PriceChangePercent string `json:"priceChangePercent"`
 	Volume             string `json:"volume"`
 	QuoteVolume        string `json:"quoteVolume"`
+}
+
+// FeatureStat captures coverage metadata used for QoS reporting.
+type FeatureStat struct {
+	Coverage  float64
+	UpdatedAt time.Time
 }
 
 // 特征数据结构

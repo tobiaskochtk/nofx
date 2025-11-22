@@ -31,7 +31,11 @@ async function main() {
     cycle().catch((err) => console.error('[DerivsIngest] cycle error', err))
   }
 
-  await cycle()
+  try {
+    await cycle()
+  } catch (err) {
+    console.error('[DerivsIngest] cycle error', err)
+  }
   const timer = setInterval(schedule, intervalMs)
 
   const gracefulShutdown = async () => {

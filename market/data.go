@@ -6,6 +6,8 @@ import (
 	"io"
 	"log"
 	"math"
+	snap "nofx/internal/snapshot"
+	"nofx/pkg/types"
 	"strconv"
 	"strings"
 	"sync"
@@ -97,7 +99,8 @@ func Get(symbol string) (*Data, error) {
 	// 计算长期数据
 	longerTermData := calculateLongerTermData(klines4h)
 
-	return &Data{
+	now := time.Now().UTC()
+	data := &Data{
 		Symbol:            symbol,
 		CurrentPrice:      currentPrice,
 		PriceChange1h:     priceChange1h,
@@ -109,7 +112,43 @@ func Get(symbol string) (*Data, error) {
 		FundingRate:       fundingRate,
 		IntradaySeries:    intradayData,
 		LongerTermContext: longerTermData,
-	}, nil
+		CollectedAt:       now,
+	}
+
+	var derivsTarget *types.DerivsFeatures
+	if snap := buildDerivsSnapshot(symbol); snap != nil {
+		data.Snapshot = snap
+		if snap.Features.Derivs != nil {
+			derivsTarget = snap.Features.Derivs
+		}
+	}
+	if data.Snapshot == nil {
+		data.Snapshot = &snap.Snapshot{Symbol: symbol}
+	}
+	if data.Snapshot.Features.Derivs == nil {
+		data.Snapshot.Features.Derivs = &types.DerivsFeatures{}
+	}
+	derivsTarget = data.Snapshot.Features.Derivs
+
+	if err := enrichStructuralFeatures(symbol, klines3m, derivsTarget); err != nil {
+		log.Printf("⚠️ enrichStructuralFeatures %s failed: %v", symbol, err)
+	}
+
+	timestamp := time.Now()
+	if hasFeature4Values(derivsTarget) {
+		data.markFeatureFresh(FeatureKeyF4, 1, timestamp)
+	}
+	if hasFeature5Values(derivsTarget) {
+		data.markFeatureFresh(FeatureKeyF5, 1, timestamp)
+	}
+	if hasFeature6Values(derivsTarget) {
+		data.markFeatureFresh(FeatureKeyF6, 1, timestamp)
+	}
+	if hasFeature7Values(derivsTarget) {
+		data.markFeatureFresh(FeatureKeyF7, 1, timestamp)
+	}
+
+	return data, nil
 }
 
 // calculateEMA 计算EMA
@@ -408,6 +447,34 @@ func getFundingRate(symbol string) (float64, error) {
 	return rate, nil
 }
 
+func hasFeature4Values(d *types.DerivsFeatures) bool {
+	if d == nil {
+		return false
+	}
+	return d.CVDNotionalZ3mShort != nil || d.ImbNotionalZ3mShort != nil || d.ConfidenceCVD3m != nil
+}
+
+func hasFeature5Values(d *types.DerivsFeatures) bool {
+	if d == nil {
+		return false
+	}
+	return d.DistUpAtr3m != nil || d.DistDnAtr3m != nil || d.PreferDirection3m != nil || d.ConfidenceLiq3m != nil
+}
+
+func hasFeature6Values(d *types.DerivsFeatures) bool {
+	if d == nil {
+		return false
+	}
+	return d.AVWAPUpDistAtr3m != nil || d.AVWAPDnDistAtr3m != nil || d.ConfidenceAVWAP3m != nil
+}
+
+func hasFeature7Values(d *types.DerivsFeatures) bool {
+	if d == nil {
+		return false
+	}
+	return d.BBW3m != nil || d.SqueezeOn3m != nil || d.ConfidenceVol3m != nil
+}
+
 // Format 格式化输出市场数据
 func Format(data *Data) string {
 	var sb strings.Builder
@@ -526,11 +593,14 @@ func formatFloatSlice(values []float64) string {
 
 // Normalize 标准化symbol,确保是USDT交易对
 func Normalize(symbol string) string {
-	symbol = strings.ToUpper(symbol)
-	if strings.HasSuffix(symbol, "USDT") {
-		return symbol
-	}
-	return symbol + "USDT"
+	symbol = strings.ToUpper(strings.TrimSpace(symbol))
+
+	// Strip known quote suffixes first to avoid double-appending (e.g., "BNBUSDC" or "BNBUSDCUSDT")
+	base := strings.TrimSuffix(symbol, "USDT")
+	base = strings.TrimSuffix(base, "USDC")
+
+	// Default to USDT quote because all internal market feeds (WS/REST) are USDT-margined
+	return base + "USDT"
 }
 
 // parseFloat 解析float值

@@ -18,6 +18,17 @@ import { httpClient } from './httpClient'
 
 const API_BASE = '/api'
 
+function getAuthHeaders(): Record<string, string> {
+  const token = localStorage.getItem('auth_token')
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json'
+  }
+  if (token) {
+    headers.Authorization = `Bearer ${token}`
+  }
+  return headers
+}
+
 export const api = {
   // AI交易员管理接口
   async getTraders(): Promise<TraderInfo[]> {
@@ -427,22 +438,27 @@ export const api = {
 
   // 用户信号源配置接口
   async getUserSignalSource(): Promise<{
-    oi_symbols: string
+    coin_pool_url?: string
+    oi_top_url?: string
   }> {
     const result = await httpClient.get<{
-      coin_pool_url: string
-      oi_top_url: string
+      coin_pool_url?: string
+      oi_top_url?: string
     }>(`${API_BASE}/user/signal-sources`)
     if (!result.success) throw new Error('获取用户信号源配置失败')
-    return result.data!
+    return result.data ?? {}
   },
 
-  async saveUserSignalSource(oiSymbols: string): Promise<void> {
+  async saveUserSignalSource(
+    coinPoolUrl: string,
+    oiTopUrl: string
+  ): Promise<void> {
     const res = await fetch(`${API_BASE}/user/signal-sources`, {
       method: 'POST',
       headers: getAuthHeaders(),
       body: JSON.stringify({
-        oi_symbols: oiSymbols,
+        coin_pool_url: coinPoolUrl,
+        oi_top_url: oiTopUrl,
       }),
     })
     if (!res.ok) throw new Error('保存用户信号源配置失败')
@@ -450,9 +466,9 @@ export const api = {
 
   // Trailing Stop配置接口
   async getTrailingStopConfig(traderId: string): Promise<any> {
-    const res = await httpClient.get(
+    const res = await fetch(
       `${API_BASE}/trailing-stop/config?trader_id=${encodeURIComponent(traderId)}`,
-      getAuthHeaders()
+      { headers: getAuthHeaders() }
     )
     if (!res.ok) throw new Error('获取Trailing Stop配置失败')
     return res.json()

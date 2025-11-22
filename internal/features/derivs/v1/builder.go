@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"log"
 	"math"
+	"os"
+	"time"
 
 	"nofx/config"
 	"nofx/pkg/types"
@@ -16,6 +18,7 @@ type Builder struct {
 	fundingHistory FundingHistory
 	basisHistory   BasisHistory
 	enabledSymbols map[string]struct{}
+	micro          *microFetcher
 }
 
 // NewBuilder wires history readers using the provided store.
@@ -27,12 +30,27 @@ func NewBuilder(cfg *config.DerivsV1Config, store Store) *Builder {
 	for _, sym := range cfg.Symbols {
 		enabled[SanitizeSymbol(sym)] = struct{}{}
 	}
+	
+	// Load Binance API credentials from environment
+	apiKey := os.Getenv("BINANCE_API_KEY")
+	apiSecret := os.Getenv("BINANCE_API_SECRET")
+	
+	var microFetcher *microFetcher
+	if apiKey != "" && apiSecret != "" {
+		log.Printf("[NewBuilder] Initializing microFetcher with Binance API credentials")
+		microFetcher = newMicroFetcherWithAuth(apiKey, apiSecret)
+	} else {
+		log.Printf("[NewBuilder] Initializing microFetcher without API credentials (liquidation data unavailable)")
+		microFetcher = newMicroFetcher()
+	}
+	
 	return &Builder{
 		cfg:            cfg,
 		oiHistory:      NewCacheOIHistory(store),
 		fundingHistory: NewCacheFundingHistory(store),
 		basisHistory:   NewCacheBasisHistory(store),
 		enabledSymbols: enabled,
+		micro:          microFetcher,
 	}
 }
 
@@ -83,7 +101,18 @@ func (b *Builder) Build(symbol string) (*types.DerivsFeatures, error) {
 		return nil, fmt.Errorf("compute basis features: %w", err)
 	}
 
-	return mergeFeatures(oiFeatures, fundingFeatures, basisFeatures), nil
+	microFeatures, err := ComputeMicrostructureFeatures(MicroFeatureConfig{
+		Symbol:  norm,
+		Fetcher: b.micro,
+	})
+	if err != nil {
+		log.Printf("[Builder.Build] %s: microstructure compute warning: %v", norm, err)
+	}
+
+	// Avoid hammering the upstream APIs: a small delay keeps aggregate rate within limits when iterating symbols.
+	time.Sleep(50 * time.Millisecond)
+
+	return mergeFeatures(oiFeatures, fundingFeatures, basisFeatures, microFeatures), nil
 }
 
 func mergeFeatures(parts ...map[string]interface{}) *types.DerivsFeatures {

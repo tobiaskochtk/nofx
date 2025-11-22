@@ -561,6 +561,13 @@ func buildConfirmF5(derivs *types.DerivsFeatures) *confirmationF5 {
 	return conf
 }
 
+func microDerivs(data *market.Data) *types.DerivsFeatures {
+	if data == nil || data.Snapshot == nil || data.Snapshot.Features.Derivs == nil {
+		return nil
+	}
+	return data.Snapshot.Features.Derivs
+}
+
 func computeRank(data *market.Data) float64 {
 	if data == nil {
 		return 0

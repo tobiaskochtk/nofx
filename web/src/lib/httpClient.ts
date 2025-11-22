@@ -7,11 +7,28 @@
  * - Network errors and system errors are intercepted and shown via toast
  * - Only business logic errors are returned to the caller
  * - Automatic 401 token expiration handling
- * - Auth state cleanup on unauthorized
- * - Automatic redirect to login page
- * - Notification shown on login page after redirect
  */
 
+import axios, {
+  type AxiosInstance,
+  type AxiosError,
+  type AxiosResponse,
+  type InternalAxiosRequestConfig
+} from 'axios'
+import { toast } from 'sonner'
+
+/**
+ * Business response format - only business errors reach the caller
+ */
+export interface ApiResponse<T = any> {
+  success: boolean
+  data?: T
+  message?: string
+}
+
+/**
+ * HTTP Client Class
+ */
 export class HttpClient {
   private axiosInstance: AxiosInstance
   private static isHandling401 = false
@@ -38,11 +55,40 @@ export class HttpClient {
   }
 
   /**
-   * Response interceptor - handles common HTTP errors
-   *
-   * @param response - Fetch Response object
-   * @returns Response if successful
-   * @throws Error with user-friendly message
+   * Setup request and response interceptors
+   */
+  private setupInterceptors(): void {
+    // Request interceptor - add auth token
+    this.axiosInstance.interceptors.request.use(
+      (config: InternalAxiosRequestConfig) => {
+        const token = localStorage.getItem('auth_token')
+        if (token) {
+          config.headers = config.headers ?? {}
+          config.headers.Authorization = `Bearer ${token}`
+        }
+        return config
+      },
+      (error: AxiosError) => {
+        return Promise.reject(error)
+      }
+    )
+
+    // Response interceptor - handle errors
+    this.axiosInstance.interceptors.response.use(
+      (response: AxiosResponse) => {
+        // Success response - pass through
+        return response
+      },
+      (error: AxiosError) => {
+        return this.handleError(error)
+      }
+    )
+  }
+
+  /**
+   * Handle different types of errors
+   * Network and system errors are intercepted and shown via toast
+   * Only business errors are returned to caller
    */
   private async handleError(error: AxiosError): Promise<any> {
     // Network error (no response from server)
@@ -75,22 +121,10 @@ export class HttpClient {
 
       // Only redirect if not already on login page
       if (!window.location.pathname.includes('/login')) {
-        // Save current location for post-login redirect
         const returnUrl = window.location.pathname + window.location.search
         if (returnUrl !== '/login' && returnUrl !== '/') {
           sessionStorage.setItem('returnUrl', returnUrl)
         }
-
-        // Mark that user came from 401 (login page will show notification)
-        sessionStorage.setItem('from401', 'true')
-
-        // Redirect immediately to login page
-        window.location.href = '/login'
-
-        // Return pending promise to prevent error from being caught by SWR/React
-        // The notification will be shown on the login page
-        return new Promise(() => {}) as Promise<Response>
-      }
 
         sessionStorage.setItem('from401', 'true')
         window.location.href = '/login'
@@ -160,7 +194,7 @@ export class HttpClient {
         data: response.data,
         message: (response.data as any)?.message,
       }
-    } catch (error) {
+    } catch (error: unknown) {
       // If we get here, it's a business logic error (4xx except 401/403/404)
       // System errors were already intercepted and toasted
       if (axios.isAxiosError(error) && error.response) {

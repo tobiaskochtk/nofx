@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/ethereum/go-ethereum/crypto"
@@ -43,31 +44,59 @@ func createMockLighterServer() *httptest.Server {
 		path := r.URL.Path
 		var respBody interface{}
 
-		switch path {
+		switch {
 		// Mock GetBalance
-		case "/api/v1/account":
+		case path == "/api/v1/account":
 			respBody = map[string]interface{}{
-				"totalBalance":      "10000.00",
-				"availableBalance":  "8000.00",
-				"marginUsed":        "2000.00",
-				"unrealizedPnl":     "100.50",
+				"totalBalance":     "10000.00",
+				"availableBalance": "8000.00",
+				"marginUsed":       "2000.00",
+				"unrealizedPnl":    "100.50",
+			}
+		case strings.HasPrefix(path, "/api/v1/account/") && strings.HasSuffix(path, "/balance"):
+			respBody = map[string]interface{}{
+				"total_equity":       10100.0,
+				"available_balance":  8000.0,
+				"margin_used":        2000.0,
+				"unrealized_pnl":     100.5,
+				"maintenance_margin": 500.0,
 			}
 
 		// Mock GetPositions
-		case "/api/v1/positions":
+		case path == "/api/v1/positions":
 			respBody = []map[string]interface{}{
 				{
-					"symbol":          "BTC_USDT",
-					"side":            "long",
-					"positionSize":    "0.5",
-					"entryPrice":      "50000.00",
-					"markPrice":       "50500.00",
-					"unrealizedPnl":   "250.00",
+					"symbol":        "BTC_USDT",
+					"side":          "long",
+					"positionSize":  "0.5",
+					"entryPrice":    "50000.00",
+					"markPrice":     "50500.00",
+					"unrealizedPnl": "250.00",
+				},
+			}
+		case strings.HasPrefix(path, "/api/v1/account/") && strings.HasSuffix(path, "/positions"):
+			respBody = []map[string]interface{}{
+				{
+					"symbol":            "BTC_USDT",
+					"side":              "long",
+					"size":              0.5,
+					"entry_price":       50000.0,
+					"mark_price":        50500.0,
+					"unrealized_pnl":    250.0,
+					"liquidation_price": 45000.0,
+					"leverage":          10,
+					"margin_used":       2500.0,
 				},
 			}
 
 		// Mock GetMarketPrice
-		case "/api/v1/ticker/price":
+		case path == "/api/v1/ticker/price":
+			symbol := r.URL.Query().Get("symbol")
+			respBody = map[string]interface{}{
+				"symbol":     symbol,
+				"last_price": "50000.00",
+			}
+		case path == "/api/v1/market/ticker":
 			symbol := r.URL.Query().Get("symbol")
 			respBody = map[string]interface{}{
 				"symbol":     symbol,
@@ -75,7 +104,7 @@ func createMockLighterServer() *httptest.Server {
 			}
 
 		// Mock OrderBooks (for market index)
-		case "/api/v1/orderBooks":
+		case path == "/api/v1/orderBooks":
 			respBody = map[string]interface{}{
 				"data": []map[string]interface{}{
 					{"symbol": "BTC_USDT", "marketIndex": 0},
@@ -84,7 +113,7 @@ func createMockLighterServer() *httptest.Server {
 			}
 
 		// Mock SendTx (submit/cancel orders)
-		case "/api/v1/sendTx":
+		case path == "/api/v1/sendTx":
 			respBody = map[string]interface{}{
 				"success": true,
 				"data": map[string]interface{}{

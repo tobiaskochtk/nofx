@@ -35,27 +35,31 @@ export class DerivsCachePublisher {
   }
 
   async publish<T>(type: CacheType, symbol: string, payload: CachePayload<T>): Promise<void> {
-    const client = this.ensureClient()
-    const key = this.key(type, symbol)
-    const existing = await this.fetchPayload<T>(client, key)
-    const mergedSamples: Record<string, T[]> = {}
-    const venues = new Set([...Object.keys(existing.samples), ...Object.keys(payload.samples)])
-    for (const venue of venues) {
-      const previous = existing.samples[venue] ?? []
-      const incoming = payload.samples[venue] ?? []
-      mergedSamples[venue] = trimSeries([...previous, ...incoming])
+    try {
+      const client = this.ensureClient()
+      const key = this.key(type, symbol)
+      const existing = await this.fetchPayload<T>(client, key)
+      const mergedSamples: Record<string, T[]> = {}
+      const venues = new Set([...Object.keys(existing.samples), ...Object.keys(payload.samples)])
+      for (const venue of venues) {
+        const previous = existing.samples[venue] ?? []
+        const incoming = payload.samples[venue] ?? []
+        mergedSamples[venue] = trimSeries([...previous, ...incoming])
+      }
+      const mergedStatus = { ...existing.status }
+      for (const [venue, state] of Object.entries(payload.status ?? {})) {
+        mergedStatus[venue] = state ?? DEFAULT_STATUS
+      }
+      const body = {
+        symbol,
+        updated_at: Date.now(),
+        samples: mergedSamples,
+        status: mergedStatus
+      }
+      await client.set(key, JSON.stringify(body))
+    } catch (err) {
+      console.error(`[DerivsCachePublisher] failed to publish ${type}:${symbol}`, err)
     }
-    const mergedStatus = { ...existing.status }
-    for (const [venue, state] of Object.entries(payload.status ?? {})) {
-      mergedStatus[venue] = state ?? DEFAULT_STATUS
-    }
-    const body = {
-      symbol,
-      updated_at: Date.now(),
-      samples: mergedSamples,
-      status: mergedStatus
-    }
-    await client.set(key, JSON.stringify(body))
   }
 
   private ensureClient(): RedisClientType {

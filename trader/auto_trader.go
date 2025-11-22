@@ -40,6 +40,12 @@ type AutoTraderConfig struct {
 	HyperliquidWalletAddr string
 	HyperliquidTestnet    bool
 
+	// Lighter 配置
+	LighterPrivateKey       string
+	LighterWalletAddr       string
+	LighterAPIKeyPrivateKey string
+	LighterTestnet          bool
+
 	// Aster配置
 	AsterUser       string // Aster主钱包地址
 	AsterSigner     string // Aster API钱包地址
@@ -421,13 +427,13 @@ func NewAutoTrader(config AutoTraderConfig, database interface{}, userID string)
 // Run 运行自动交易主循环
 func (at *AutoTrader) Run() error {
 	log.Printf("🐛 [Run] ENTRY - at==nil: %v", at == nil)
-	
+
 	at.isRunning = true
 	log.Printf("🐛 [Run] Set isRunning=true")
-	
+
 	at.stopMonitorCh = make(chan struct{})
 	log.Printf("🐛 [Run] Created stopMonitorCh")
-	
+
 	at.startTime = time.Now()
 	log.Printf("🐛 [Run] Set startTime")
 
@@ -705,19 +711,21 @@ func (at *AutoTrader) buildTradingContext() (*decision.Context, error) {
 
 	// 获取账户字段（只需可用余额）
 	availableBalance := 0.0
+	totalWalletBalance := 0.0
+	unrealizedBalance := 0.0
 	if avail, ok := balance["availableBalance"].(float64); ok {
 		availableBalance = avail
 	}
+	if wallet, ok := balance["totalWalletBalance"].(float64); ok {
+		totalWalletBalance = wallet
+	}
+	if unrealized, ok := balance["totalUnrealizedProfit"].(float64); ok {
+		unrealizedBalance = unrealized
+	}
 
 	// Total Equity（账户净值）
-	// 对于合约账户更贴近实际的口径：可用余额 + 已占用保证金
-	// Hyperliquid / 合约场景: accountValue ≈ available + marginUsed
-	// 如果没有持仓（marginUsed=0），则退化为 totalEquity = availableBalance
-	// 注意：totalWalletBalance = (accountValue - unrealizedPnl) + spotBalance
-	// 旧口径（wallet+unrealized）在存在 Spot 余额时会把 Spot 也计入，从而与前端显示不一致
-	// 统一改为 available + marginUsed，保持与用户期望一致
-	// 先占位，待计算出 totalMarginUsed 后再赋值
-	totalEquity := 0.0
+	// 默认采用 钱包余额 + 未实现盈亏，更贴近交易所口径；缺失时回退到 available+marginUsed
+	totalEquity := totalWalletBalance + unrealizedBalance
 
 	// 2. 获取持仓信息
 	positions, err := at.trader.GetPositions()
@@ -727,7 +735,7 @@ func (at *AutoTrader) buildTradingContext() (*decision.Context, error) {
 
 	var positionInfos []decision.PositionInfo
 	totalMarginUsed := 0.0
-	totalUnrealizedProfit := 0.0
+	totalUnrealizedProfit := unrealizedBalance
 
 	// 当前持仓的key集合（用于清理已平仓的记录）
 	currentPositionKeys := make(map[string]bool)
@@ -827,7 +835,9 @@ func (at *AutoTrader) buildTradingContext() (*decision.Context, error) {
 
 	// 4. 计算总盈亏
 	// 现在可以计算总权益
-	totalEquity = availableBalance + totalMarginUsed
+	if totalEquity == 0 {
+		totalEquity = availableBalance + totalMarginUsed
+	}
 
 	totalPnL := totalEquity - at.initialBalance
 	totalPnLPct := 0.0
@@ -1329,6 +1339,11 @@ func (at *AutoTrader) executeUpdateStopLossWithRecord(decision *decision.Decisio
 	positionSide := strings.ToUpper(side)
 	normalizedSymbol := normalizeDealSymbol(decision.Symbol)
 	positionAmt, _ := targetPosition["positionAmt"].(float64)
+	entryPrice, _ := targetPosition["entryPrice"].(float64)
+	leverage := 10.0
+	if lev, ok := targetPosition["leverage"].(float64); ok && lev > 0 {
+		leverage = lev
+	}
 
 	// 验证新止损价格合理性
 	if positionSide == "LONG" && decision.NewStopLoss >= marketData.CurrentPrice {
@@ -1359,6 +1374,39 @@ func (at *AutoTrader) executeUpdateStopLossWithRecord(decision *decision.Decisio
 		log.Printf("  🚨 建议：手动平掉其中一个方向的持仓，或检查系统是否有BUG")
 	}
 
+	// 当追踪止损已触发（达到档位1或已有自动止损）时，禁止AI再调整止损，避免抢占管理权
+	if at.trailingStopConfig.Enabled {
+		currentPrice := marketData.CurrentPrice
+		profitPct := 0.0
+		if entryPrice > 0 {
+			if positionSide == "LONG" {
+				profitPct = ((currentPrice - entryPrice) / entryPrice) * leverage * 100
+			} else {
+				profitPct = ((entryPrice - currentPrice) / entryPrice) * leverage * 100
+			}
+		}
+
+		firstTierThreshold := 0.0
+		if len(at.trailingStopConfig.Tiers) > 0 {
+			firstTierThreshold = at.trailingStopConfig.Tiers[0].ProfitThreshold
+		}
+
+		posKey := makePositionKey(decision.Symbol, side)
+		at.trailingStopMutex.RLock()
+		activeTierIdx, hasTier := at.trailingStopActiveTier[posKey]
+		_, hasLastStop := at.trailingStopLastUpdate[posKey]
+		at.trailingStopMutex.RUnlock()
+
+		autoTrailingActive := (hasTier && activeTierIdx >= 0) || hasLastStop
+		firstTierReached := firstTierThreshold > 0 && profitPct >= firstTierThreshold
+
+		if !at.trailingStopConfig.AllowAIOverride || autoTrailingActive || firstTierReached {
+			log.Printf("  🚫 [AI·跳过止损] %s %s 已由追踪止损管理（当前收益: %.2f%%, 档位1阈值: %.2f%%，auto=%v）",
+				normalizedSymbol, side, profitPct, firstTierThreshold, autoTrailingActive)
+			return fmt.Errorf("自动追踪已接管止损（利润%.2f%%，阈值%.2f%%）", profitPct, firstTierThreshold)
+		}
+	}
+
 	// 取消旧的止损单（只删除止损单，不影响止盈单）
 	// 注意：如果存在双向持仓，这会删除两个方向的止损单
 	if err := at.trader.CancelStopLossOrders(decision.Symbol); err != nil {
@@ -1379,14 +1427,14 @@ func (at *AutoTrader) executeUpdateStopLossWithRecord(decision *decision.Decisio
 	if at.trailingStopConfig.Enabled && !at.trailingStopConfig.AllowAIOverride {
 		log.Printf("  🚫 [AI·跳过止损] %s %s 正由自动追踪系统管理（TRAILING_STOP_ALLOW_AI_OVERRIDE=false）", normalizedSymbol, side)
 		log.Printf("  🚫 AI决策已忽略，自动追踪将继续按配置工作")
-		
+
 		// 回滚：恢复旧的止损单（因为我们已经取消了）
 		// 使用追踪系统记录的最后一次止损价格
 		posKey := makePositionKey(decision.Symbol, side)
 		at.trailingStopMutex.RLock()
 		lastStopPrice, hasLastPrice := at.trailingStopLastUpdate[posKey]
 		at.trailingStopMutex.RUnlock()
-		
+
 		if hasLastPrice && lastStopPrice > 0 {
 			// 恢复旧的止损
 			log.Printf("  🔄 [恢复止损] 恢复自动追踪止损价格: %.4f", lastStopPrice)
@@ -1394,10 +1442,10 @@ func (at *AutoTrader) executeUpdateStopLossWithRecord(decision *decision.Decisio
 				log.Printf("  ⚠️ [恢复失败] 无法恢复止损单: %v", err)
 			}
 		}
-		
+
 		return fmt.Errorf("AI止损更新已拒绝：自动追踪系统正在管理此持仓")
 	}
-	
+
 	// 标记为AI管理（如果允许AI覆盖）
 	if at.trailingStopConfig.Enabled && at.trailingStopConfig.AllowAIOverride {
 		posKey := makePositionKey(decision.Symbol, side)
@@ -2127,9 +2175,8 @@ func (at *AutoTrader) GetAccountInfo() (map[string]interface{}, error) {
 		availableBalance = avail
 	}
 
-	// Total Equity 账户净值：在合约账户口径下使用 可用余额 + 已占用保证金
-	// 注意：这里先占位，待计算出 totalMarginUsed 后再赋值
-	totalEquity := 0.0
+	// Total Equity 账户净值：钱包余额 + 未实现盈亏（更贴近交易所口径）
+	totalEquity := totalWalletBalance + totalUnrealizedProfit
 
 	// 获取持仓计算总保证金
 	positions, err := at.trader.GetPositions()
@@ -2157,7 +2204,10 @@ func (at *AutoTrader) GetAccountInfo() (map[string]interface{}, error) {
 	}
 
 	// 计算总权益（available + marginUsed）
-	totalEquity = availableBalance + totalMarginUsed
+	if totalEquity == 0 {
+		// fallback: 如果钱包余额缺失，使用可用+保证金估算
+		totalEquity = availableBalance + totalMarginUsed
+	}
 
 	totalPnL := totalEquity - at.initialBalance
 	totalPnLPct := 0.0
@@ -2587,26 +2637,38 @@ func (at *AutoTrader) updateTrailingStops() {
 			leverage = lev
 		}
 
-		posKey := makePositionKey(symbol, side)
-
-		// 检查AI是否管理此止损
-		at.trailingStopMutex.RLock()
-		aiManaged := at.trailingStopManaged[posKey]
-		at.trailingStopMutex.RUnlock()
-
-		if aiManaged {
-			// AI已接管，跳过自动追踪 - Log it
-			shouldUpdateFalse := false
-			at.logTrailingStopAction(symbol, side, "skip", markPrice, entryPrice, 0, -1, nil, nil, nil, nil, nil, nil, &shouldUpdateFalse, nil, nil, "AI已接管止损管理")
-			continue
-		}
-
 		// 计算当前盈亏百分比（考虑杠杆）
 		var profitPct float64
 		if side == "long" {
 			profitPct = ((markPrice - entryPrice) / entryPrice) * leverage * 100
 		} else {
 			profitPct = ((entryPrice - markPrice) / entryPrice) * leverage * 100
+		}
+
+		posKey := makePositionKey(symbol, side)
+
+		// 若AI曾接管止损，但收益已达到档位1，则释放AI管理，交还给自动追踪
+		firstTierThreshold := 0.0
+		if len(at.trailingStopConfig.Tiers) > 0 {
+			firstTierThreshold = at.trailingStopConfig.Tiers[0].ProfitThreshold
+		}
+		firstTierReached := firstTierThreshold > 0 && profitPct >= firstTierThreshold
+
+		at.trailingStopMutex.RLock()
+		aiManaged := at.trailingStopManaged[posKey]
+		at.trailingStopMutex.RUnlock()
+
+		if aiManaged && !firstTierReached {
+			// AI已接管，跳过自动追踪 - Log it
+			shouldUpdateFalse := false
+			at.logTrailingStopAction(symbol, side, "skip", markPrice, entryPrice, profitPct, -1, nil, nil, nil, nil, nil, nil, &shouldUpdateFalse, nil, nil, "AI已接管止损管理")
+			continue
+		}
+		if aiManaged && firstTierReached {
+			log.Printf("🔄 [自动追踪接管] %s %s 达到档位阈值 %.2f%%（当前收益 %.2f%%），释放AI管理权交由追踪止损", normalizeDealSymbol(symbol), side, firstTierThreshold, profitPct)
+			at.trailingStopMutex.Lock()
+			at.trailingStopManaged[posKey] = false
+			at.trailingStopMutex.Unlock()
 		}
 
 		// 查找基于当前利润的档位
@@ -2674,19 +2736,19 @@ func (at *AutoTrader) updateTrailingStops() {
 
 		if side == "long" {
 			newStopPrice = entryPrice * (1 + stopProfitRatio)
-			
+
 			// Stop darf nicht über aktuellem Preis sein (würde sofort triggern)
 			if newStopPrice >= markPrice {
-				log.Printf("⚠️ Long Stop %.4f >= Mark %.4f für %s! Setze auf Mark - 0.1%%", 
+				log.Printf("⚠️ Long Stop %.4f >= Mark %.4f für %s! Setze auf Mark - 0.1%%",
 					newStopPrice, markPrice, symbol)
 				newStopPrice = markPrice * 0.999
 			}
 		} else {
 			newStopPrice = entryPrice * (1 - stopProfitRatio)
-			
+
 			// Stop darf nicht unter aktuellem Preis sein (würde sofort triggern)
 			if newStopPrice <= markPrice {
-				log.Printf("⚠️ Short Stop %.4f <= Mark %.4f für %s! Setze auf Mark + 0.1%%", 
+				log.Printf("⚠️ Short Stop %.4f <= Mark %.4f für %s! Setze auf Mark + 0.1%%",
 					newStopPrice, markPrice, symbol)
 				newStopPrice = markPrice * 1.001
 			}
@@ -2700,7 +2762,7 @@ func (at *AutoTrader) updateTrailingStops() {
 		var priceChangePct float64
 		shouldUpdate := false
 		skipReason := ""
-		
+
 		if !hasLastPrice {
 			// 第一次设置
 			shouldUpdate = true
@@ -2739,9 +2801,9 @@ func (at *AutoTrader) updateTrailingStops() {
 		}
 		priceChangePctPtr := &priceChangePct
 		updateThresholdPtr := &at.trailingStopConfig.UpdateThresholdPct
-		
-		at.logTrailingStopAction(symbol, side, "check", markPrice, entryPrice, profitPct, activeTierIndex, 
-			&activeTier.ProfitThreshold, oldStopPtr, &newStopPrice, &targetStopProfitPct, 
+
+		at.logTrailingStopAction(symbol, side, "check", markPrice, entryPrice, profitPct, activeTierIndex,
+			&activeTier.ProfitThreshold, oldStopPtr, &newStopPrice, &targetStopProfitPct,
 			priceChangePctPtr, updateThresholdPtr, &shouldUpdate, nil, nil, skipReason)
 
 		if !shouldUpdate {
@@ -2783,7 +2845,7 @@ func (at *AutoTrader) updateTrailingStops() {
 		at.trailingStopMutex.Unlock()
 
 		log.Printf("✅ [自动追踪] 止损已更新: %s %s → %.4f", normalizedSymbol, side, newStopPrice)
-		
+
 		// Log successful update
 		apiSuccess := true
 		at.logTrailingStopAction(symbol, side, "update", markPrice, entryPrice, profitPct, activeTierIndex,
@@ -2796,7 +2858,7 @@ func (at *AutoTrader) updateTrailingStops() {
 func (at *AutoTrader) logTrailingStopAction(symbol, side, action string, currentPrice, entryPrice, profitPct float64,
 	tierIndex int, tierThreshold, oldStopPrice, newStopPrice, targetStopProfitPct, priceChangePct, updateThresholdPct *float64,
 	shouldUpdate, apiSuccess *bool, apiError *string, skipReason string) {
-	
+
 	// Get deal ID for this position
 	dealID, openRec := at.getOpenDealRecord(symbol, side)
 	if openRec == nil {
@@ -2858,4 +2920,3 @@ func (at *AutoTrader) logTrailingStopAction(symbol, side, action string, current
 		log.Printf("⚠️ 记录追踪止损日志失败: %v", err)
 	}
 }
-
