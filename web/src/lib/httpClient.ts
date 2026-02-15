@@ -9,12 +9,7 @@
  * - Automatic 401 token expiration handling
  */
 
-import axios, {
-  type AxiosInstance,
-  type AxiosError,
-  type AxiosResponse,
-  type InternalAxiosRequestConfig
-} from 'axios'
+import axios, { AxiosInstance, AxiosError, AxiosResponse } from 'axios'
 import { toast } from 'sonner'
 
 /**
@@ -60,15 +55,14 @@ export class HttpClient {
   private setupInterceptors(): void {
     // Request interceptor - add auth token
     this.axiosInstance.interceptors.request.use(
-      (config: InternalAxiosRequestConfig) => {
+      (config) => {
         const token = localStorage.getItem('auth_token')
         if (token) {
-          config.headers = config.headers ?? {}
           config.headers.Authorization = `Bearer ${token}`
         }
         return config
       },
-      (error: AxiosError) => {
+      (error) => {
         return Promise.reject(error)
       }
     )
@@ -194,7 +188,7 @@ export class HttpClient {
         data: response.data,
         message: (response.data as any)?.message,
       }
-    } catch (error: unknown) {
+    } catch (error) {
       // If we get here, it's a business logic error (4xx except 401/403/404)
       // System errors were already intercepted and toasted
       if (axios.isAxiosError(error) && error.response) {

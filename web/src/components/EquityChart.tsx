@@ -33,14 +33,15 @@ interface EquityPoint {
 
 interface EquityChartProps {
   traderId?: string
+  embedded?: boolean // 嵌入模式（不显示外层卡片）
 }
 
-export function EquityChart({ traderId }: EquityChartProps) {
+export function EquityChart({ traderId, embedded = false }: EquityChartProps) {
   const { language } = useLanguage()
   const { user, token } = useAuth()
   const [displayMode, setDisplayMode] = useState<'dollar' | 'percent'>('dollar')
 
-  const { data: history, error } = useSWR<EquityPoint[]>(
+  const { data: history, error, isLoading } = useSWR<EquityPoint[]>(
     user && token && traderId ? `equity-history-${traderId}` : null,
     () => api.getEquityHistory(traderId),
     {
@@ -60,9 +61,25 @@ export function EquityChart({ traderId }: EquityChartProps) {
     }
   )
 
+  // Loading state - show skeleton
+  if (isLoading) {
+    return (
+      <div className={embedded ? 'p-6' : 'binance-card p-6'}>
+        {!embedded && (
+          <h3 className="text-lg font-semibold mb-6" style={{ color: '#EAECEF' }}>
+            {t('accountEquityCurve', language)}
+          </h3>
+        )}
+        <div className="animate-pulse">
+          <div className="skeleton h-64 w-full rounded"></div>
+        </div>
+      </div>
+    )
+  }
+
   if (error) {
     return (
-      <div className="binance-card p-6">
+      <div className={embedded ? 'p-6' : 'binance-card p-6'}>
         <div
           className="flex items-center gap-3 p-4 rounded"
           style={{
@@ -89,10 +106,12 @@ export function EquityChart({ traderId }: EquityChartProps) {
 
   if (!validHistory || validHistory.length === 0) {
     return (
-      <div className="binance-card p-6">
-        <h3 className="text-lg font-semibold mb-6" style={{ color: '#EAECEF' }}>
-          {t('accountEquityCurve', language)}
-        </h3>
+      <div className={embedded ? 'p-6' : 'binance-card p-6'}>
+        {!embedded && (
+          <h3 className="text-lg font-semibold mb-6" style={{ color: '#EAECEF' }}>
+            {t('accountEquityCurve', language)}
+          </h3>
+        )}
         <div className="text-center py-16" style={{ color: '#848E9C' }}>
           <div className="mb-4 flex justify-center opacity-50">
             <BarChart3 className="w-16 h-16" />
@@ -122,23 +141,25 @@ export function EquityChart({ traderId }: EquityChartProps) {
       : undefined) || // 备选：淨值 - 盈亏
     1000 // 默认值（与创建交易员时的默认配置一致）
 
-  // 转换数据格式 - 使用后端计算好的 pnl 和 pnl_pct
+  // 转换数据格式
   const chartData = displayHistory.map((point) => {
+    const pnl = point.total_equity - initialBalance
+    const pnlPct = ((pnl / initialBalance) * 100).toFixed(2)
     return {
       time: new Date(point.timestamp).toLocaleTimeString('zh-CN', {
         hour: '2-digit',
         minute: '2-digit',
       }),
-      value: displayMode === 'dollar' ? point.total_equity : point.pnl_pct,
+      value: displayMode === 'dollar' ? point.total_equity : parseFloat(pnlPct),
       cycle: point.cycle_number,
       raw_equity: point.total_equity,
-      raw_pnl: point.pnl || 0,
-      raw_pnl_pct: Number(point.pnl_pct || 0).toFixed(2),
+      raw_pnl: pnl,
+      raw_pnl_pct: parseFloat(pnlPct),
     }
   })
 
-  const currentValue = chartData.length > 0 ? chartData[chartData.length - 1] : null
-  const isProfit = currentValue && currentValue.raw_pnl >= 0
+  const currentValue = chartData[chartData.length - 1]
+  const isProfit = currentValue.raw_pnl >= 0
 
   // 计算Y轴范围
   const calculateYDomain = () => {
@@ -165,8 +186,6 @@ export function EquityChart({ traderId }: EquityChartProps) {
   const CustomTooltip = ({ active, payload }: any) => {
     if (active && payload && payload.length) {
       const data = payload[0].payload
-      const rawPnl = data.raw_pnl || 0
-      const rawPnlPct = data.raw_pnl_pct || '0.00'
       return (
         <div
           className="rounded p-3 shadow-xl"
@@ -176,15 +195,15 @@ export function EquityChart({ traderId }: EquityChartProps) {
             Cycle #{data.cycle}
           </div>
           <div className="font-bold mono" style={{ color: '#EAECEF' }}>
-            {(data.raw_equity || 0).toFixed(2)} USDT
+            {data.raw_equity.toFixed(2)} USDT
           </div>
           <div
             className="text-sm mono font-bold"
-            style={{ color: rawPnl >= 0 ? '#0ECB81' : '#F6465D' }}
+            style={{ color: data.raw_pnl >= 0 ? '#0ECB81' : '#F6465D' }}
           >
-            {rawPnl >= 0 ? '+' : ''}
-            {rawPnl.toFixed(2)} USDT ({rawPnlPct >= 0 ? '+' : ''}
-            {rawPnlPct}%)
+            {data.raw_pnl >= 0 ? '+' : ''}
+            {data.raw_pnl.toFixed(2)} USDT ({data.raw_pnl_pct >= 0 ? '+' : ''}
+            {data.raw_pnl_pct}%)
           </div>
         </div>
       )
@@ -193,16 +212,18 @@ export function EquityChart({ traderId }: EquityChartProps) {
   }
 
   return (
-    <div className="binance-card p-3 sm:p-5 animate-fade-in">
+    <div className={embedded ? 'p-3 sm:p-5' : 'binance-card p-3 sm:p-5 animate-fade-in'}>
       {/* Header */}
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between mb-4">
         <div className="flex-1">
-          <h3
-            className="text-base sm:text-lg font-bold mb-2"
-            style={{ color: '#EAECEF' }}
-          >
-            {t('accountEquityCurve', language)}
-          </h3>
+          {!embedded && (
+            <h3
+              className="text-base sm:text-lg font-bold mb-2"
+              style={{ color: '#EAECEF' }}
+            >
+              {t('accountEquityCurve', language)}
+            </h3>
+          )}
           <div className="flex flex-col sm:flex-row sm:items-baseline gap-2 sm:gap-4">
             <span
               className="text-2xl sm:text-3xl font-bold mono"
@@ -217,39 +238,35 @@ export function EquityChart({ traderId }: EquityChartProps) {
               </span>
             </span>
             <div className="flex items-center gap-2 flex-wrap">
-              {currentValue && (
-                <>
-                  <span
-                    className="text-sm sm:text-lg font-bold mono px-2 sm:px-3 py-1 rounded flex items-center gap-1"
-                    style={{
-                      color: isProfit ? '#0ECB81' : '#F6465D',
-                      background: isProfit
-                        ? 'rgba(14, 203, 129, 0.1)'
-                        : 'rgba(246, 70, 93, 0.1)',
-                      border: `1px solid ${
-                        isProfit
-                          ? 'rgba(14, 203, 129, 0.2)'
-                          : 'rgba(246, 70, 93, 0.2)'
-                      }`,
-                    }}
-                  >
-                    {isProfit ? (
-                      <ArrowUp className="w-4 h-4" />
-                    ) : (
-                      <ArrowDown className="w-4 h-4" />
-                    )}
-                    {isProfit ? '+' : ''}
-                    {currentValue.raw_pnl_pct}%
-                  </span>
-                  <span
-                    className="text-xs sm:text-sm mono"
-                    style={{ color: '#848E9C' }}
-                  >
-                    ({isProfit ? '+' : ''}
-                    {currentValue.raw_pnl.toFixed(2)} USDT)
-                  </span>
-                </>
-              )}
+              <span
+                className="text-sm sm:text-lg font-bold mono px-2 sm:px-3 py-1 rounded flex items-center gap-1"
+                style={{
+                  color: isProfit ? '#0ECB81' : '#F6465D',
+                  background: isProfit
+                    ? 'rgba(14, 203, 129, 0.1)'
+                    : 'rgba(246, 70, 93, 0.1)',
+                  border: `1px solid ${
+                    isProfit
+                      ? 'rgba(14, 203, 129, 0.2)'
+                      : 'rgba(246, 70, 93, 0.2)'
+                  }`,
+                }}
+              >
+                {isProfit ? (
+                  <ArrowUp className="w-4 h-4" />
+                ) : (
+                  <ArrowDown className="w-4 h-4" />
+                )}
+                {isProfit ? '+' : ''}
+                {currentValue.raw_pnl_pct}%
+              </span>
+              <span
+                className="text-xs sm:text-sm mono"
+                style={{ color: '#848E9C' }}
+              >
+                ({isProfit ? '+' : ''}
+                {currentValue.raw_pnl.toFixed(2)} USDT)
+              </span>
             </div>
           </div>
         </div>
@@ -416,7 +433,7 @@ export function EquityChart({ traderId }: EquityChartProps) {
             className="text-xs sm:text-sm font-bold mono"
             style={{ color: '#EAECEF' }}
           >
-            {currentValue?.raw_equity.toFixed(2) || '0.00'} USDT
+            {currentValue.raw_equity.toFixed(2)} USDT
           </div>
         </div>
         <div

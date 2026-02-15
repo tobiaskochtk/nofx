@@ -1,212 +1,153 @@
 package trader
 
 import (
-	"database/sql"
 	"encoding/json"
 	"fmt"
-	"log"
 	"math"
-	"os"
-	"sort"
-	"strconv"
-	"strings"
-	"sync"
-	"time"
-
-	"nofx/config"
-	"nofx/decision"
+	"nofx/experience"
+	"nofx/kernel"
 	"nofx/logger"
 	"nofx/market"
 	"nofx/mcp"
-	"nofx/pool"
+	"nofx/store"
+	"nofx/trader/aster"
+	"nofx/trader/binance"
+	"nofx/trader/bitget"
+	"nofx/trader/bybit"
+	"nofx/trader/gate"
+	"nofx/trader/hyperliquid"
+	"nofx/trader/kucoin"
+	"nofx/trader/lighter"
+	"nofx/trader/okx"
+	"strings"
+	"sync"
+	"time"
 )
 
-// AutoTraderConfig 自动交易配置（简化版 - AI全权决策）
+// AutoTraderConfig auto trading configuration (simplified version - AI makes all decisions)
 type AutoTraderConfig struct {
-	// Trader标识
-	ID      string // Trader唯一标识（用于日志目录等）
-	Name    string // Trader显示名称
-	AIModel string // AI模型: "qwen" 或 "deepseek"
+	// Trader identification
+	ID      string // Trader unique identifier (for log directory, etc.)
+	Name    string // Trader display name
+	AIModel string // AI model: "qwen" or "deepseek"
 
-	// 交易平台选择
-	Exchange string // "binance", "hyperliquid", "aster" 或 "lighter"
+	// Trading platform selection
+	Exchange   string // Exchange type: "binance", "bybit", "okx", "bitget", "gate", "hyperliquid", "aster" or "lighter"
+	ExchangeID string // Exchange account UUID (for multi-account support)
 
-	// 币安API配置
+	// Binance API configuration
 	BinanceAPIKey    string
 	BinanceSecretKey string
 
-	// Hyperliquid配置
+	// Bybit API configuration
+	BybitAPIKey    string
+	BybitSecretKey string
+
+	// OKX API configuration
+	OKXAPIKey    string
+	OKXSecretKey string
+	OKXPassphrase string
+
+	// Bitget API configuration
+	BitgetAPIKey    string
+	BitgetSecretKey string
+	BitgetPassphrase string
+
+	// Gate API configuration
+	GateAPIKey    string
+	GateSecretKey string
+
+	// KuCoin API configuration
+	KuCoinAPIKey    string
+	KuCoinSecretKey string
+	KuCoinPassphrase string
+
+	// Hyperliquid configuration
 	HyperliquidPrivateKey string
 	HyperliquidWalletAddr string
 	HyperliquidTestnet    bool
 
-	// Lighter 配置
-	LighterPrivateKey       string
-	LighterWalletAddr       string
-	LighterAPIKeyPrivateKey string
-	LighterTestnet          bool
+	// Aster configuration
+	AsterUser       string // Aster main wallet address
+	AsterSigner     string // Aster API wallet address
+	AsterPrivateKey string // Aster API wallet private key
 
-	// Aster配置
-	AsterUser       string // Aster主钱包地址
-	AsterSigner     string // Aster API钱包地址
-	AsterPrivateKey string // Aster API钱包私钥
+	// LIGHTER configuration
+	LighterWalletAddr       string // LIGHTER wallet address (L1 wallet)
+	LighterPrivateKey       string // LIGHTER L1 private key (for account identification)
+	LighterAPIKeyPrivateKey string // LIGHTER API Key private key (40 bytes, for transaction signing)
+	LighterAPIKeyIndex      int    // LIGHTER API Key index (0-255)
+	LighterTestnet          bool   // Whether to use testnet
 
-	// AI配置
+	// AI configuration
 	UseQwen     bool
 	DeepSeekKey string
 	QwenKey     string
 
-	// 自定义AI API配置
+	// Custom AI API configuration
 	CustomAPIURL    string
 	CustomAPIKey    string
 	CustomModelName string
 
-	// 扫描配置
-	ScanInterval time.Duration // 扫描间隔（建议3分钟）
+	// Scan configuration
+	ScanInterval time.Duration // Scan interval (recommended 3 minutes)
 
-	// 账户配置
-	InitialBalance float64 // 初始金额（用于计算盈亏，需手动设置）
+	// Account configuration
+	InitialBalance float64 // Initial balance (for P&L calculation, must be set manually)
 
-	// 杠杆配置
-	BTCETHLeverage  int // BTC和ETH的杠杆倍数
-	AltcoinLeverage int // 山寨币的杠杆倍数
+	// Risk control (only as hints, AI can make autonomous decisions)
+	MaxDailyLoss    float64       // Maximum daily loss percentage (hint)
+	MaxDrawdown     float64       // Maximum drawdown percentage (hint)
+	StopTradingTime time.Duration // Pause duration after risk control triggers
 
-	// 风险控制（仅作为提示，AI可自主决定）
-	MaxDailyLoss    float64       // 最大日亏损百分比（提示）
-	MaxDrawdown     float64       // 最大回撤百分比（提示）
-	StopTradingTime time.Duration // 触发风控后暂停时长
+	// Position mode
+	IsCrossMargin bool // true=cross margin mode, false=isolated margin mode
 
-	// 仓位模式
-	IsCrossMargin bool // true=全仓模式, false=逐仓模式
+	// Competition visibility
+	ShowInCompetition bool // Whether to show in competition page
 
-	// 币种配置
-	DefaultCoins []string // 默认币种列表（从数据库获取）
-	TradingCoins []string // 实际交易币种列表
-
-	// 持仓限制
-	MaxPositions int // 最大持仓数量（默认: 3）
-
-	// 系统提示词模板
-	SystemPromptTemplate string // 系统提示词模板名称（如 "default", "aggressive"）
+	// Strategy configuration (use complete strategy config)
+	StrategyConfig *store.StrategyConfig // Strategy configuration (includes coin sources, indicators, risk control, prompts, etc.)
 }
 
-// TrailingStopConfig 自动追踪止损配置
-type TrailingStopConfig struct {
-	Enabled            bool               // 是否启用自动追踪止损
-	Tiers              []TrailingStopTier // 分级止损配置（按利润阈值升序排列）
-	UpdateThresholdPct float64            // 最小更新阈值百分比（防止频繁API调用）
-	CheckIntervalSec   int                // 检查间隔（秒）
-	AllowAIOverride    bool               // 是否允许AI覆盖自动止损
-}
-
-// TrailingStopTier 追踪止损分级配置
-type TrailingStopTier struct {
-	ProfitThreshold float64 // 利润阈值（%）- 达到此利润时激活此档位
-	StopOffset      float64 // 止损偏移量（%）- 负值表示固定利润目标，正值表示当前利润减去此值
-}
-
-// AutoTrader 自动交易器
+// AutoTrader automatic trader
 type AutoTrader struct {
-	id                    string // Trader唯一标识
-	name                  string // Trader显示名称
-	aiModel               string // AI模型名称
-	exchange              string // 交易平台名称
+	id                    string // Trader unique identifier
+	name                  string // Trader display name
+	aiModel               string // AI model name
+	exchange              string // Trading platform type (binance/bybit/etc)
+	exchangeID            string // Exchange account UUID
+	showInCompetition     bool   // Whether to show in competition page
 	config                AutoTraderConfig
-	trader                Trader // 使用Trader接口（支持多平台）
+	trader                Trader // Use Trader interface (supports multiple platforms)
 	mcpClient             mcp.AIClient
-	decisionLogger        logger.IDecisionLogger // 决策日志记录器
+	store                 *store.Store             // Data storage (decision records, etc.)
+	strategyEngine        *kernel.StrategyEngine // Strategy engine (uses strategy configuration)
+	cycleNumber           int                      // Current cycle number
 	initialBalance        float64
 	dailyPnL              float64
-	customPrompt          string   // 自定义交易策略prompt
-	overrideBasePrompt    bool     // 是否覆盖基础prompt
-	systemPromptTemplate  string   // 系统提示词模板名称
-	defaultCoins          []string // 默认币种列表（从数据库获取）
-	tradingCoins          []string // 实际交易币种列表
+	customPrompt          string // Custom trading strategy prompt
+	overrideBasePrompt    bool   // Whether to override base prompt
 	lastResetTime         time.Time
 	stopUntil             time.Time
 	isRunning             bool
-	startTime             time.Time          // 系统启动时间
-	callCount             int                // AI调用次数
-	positionFirstSeenTime map[string]int64   // 持仓首次出现时间 (symbol_side -> timestamp毫秒)
-	stopMonitorCh         chan struct{}      // 用于停止监控goroutine
-	monitorWg             sync.WaitGroup     // 用于等待监控goroutine结束
-	peakPnLCache          map[string]float64 // 最高收益缓存 (symbol -> 峰值盈亏百分比)
-	peakPnLCacheMutex     sync.RWMutex       // 缓存读写锁
-	lastBalanceSyncTime   time.Time          // 上次余额同步时间
-	database              interface{}        // 数据库引用（用于自动更新余额）
-	userID                string             // 用户ID
-	// deals persistence helpers
-	lastSystemPrompt string
-	lastUserPrompt   string
-	lastCoTTrace     string
-	lastDecisionJSON string
-	openDealIDs      map[string]int64 // symbol_side -> dealID
-	// Trailing Stop Management
-	trailingStopConfig     TrailingStopConfig // 追踪止损配置
-	trailingStopManaged    map[string]bool    // AI是否管理此止损 (symbol_side -> true if AI-managed)
-	trailingStopLastUpdate map[string]float64 // 上次设置的止损价格 (symbol_side -> stopPrice)
-	trailingStopActiveTier map[string]int     // 当前激活的档位 (symbol_side -> tier index, -1 if none)
-	trailingStopMutex      sync.RWMutex       // 追踪止损状态锁
-	trailingStopMonitorCh  chan struct{}      // 追踪止损监控停止信号
+	isRunningMutex        sync.RWMutex       // Mutex to protect isRunning flag
+	startTime             time.Time          // System start time
+	callCount             int                // AI call count
+	positionFirstSeenTime map[string]int64   // Position first seen time (symbol_side -> timestamp in milliseconds)
+	stopMonitorCh         chan struct{}      // Used to stop monitoring goroutine
+	monitorWg             sync.WaitGroup     // Used to wait for monitoring goroutine to finish
+	peakPnLCache          map[string]float64 // Peak profit cache (symbol -> peak P&L percentage)
+	peakPnLCacheMutex     sync.RWMutex       // Cache read-write lock
+	lastBalanceSyncTime   time.Time          // Last balance sync time
+	userID                string             // User ID
+	gridState             *GridState         // Grid trading state (only used when StrategyType == "grid_trading")
 }
 
-const manualDealCloseGrace = 2 * time.Minute
-
-// parseTrailingStopTiers 解析追踪止损分级配置
-// 格式: "threshold1:offset1,threshold2:offset2,..."
-// 例如: "0.5:-0.2,1.0:0.5,3.0:1.0,10.0:3.0"
-// 负offset表示固定利润目标，正offset表示当前利润减去此值
-func parseTrailingStopTiers(tiersStr string) []TrailingStopTier {
-	if tiersStr == "" {
-		// 默认配置
-		return []TrailingStopTier{
-			{ProfitThreshold: 0.5, StopOffset: -0.2}, // >=0.5% → 止损在0.2%利润
-			{ProfitThreshold: 1.0, StopOffset: 0.5},  // >=1.0% → 止损在利润-0.5%
-			{ProfitThreshold: 3.0, StopOffset: 1.0},  // >=3.0% → 止损在利润-1.0%
-			{ProfitThreshold: 10.0, StopOffset: 3.0}, // >=10.0% → 止损在利润-3.0%
-		}
-	}
-
-	var tiers []TrailingStopTier
-	pairs := strings.Split(tiersStr, ",")
-	for _, pair := range pairs {
-		parts := strings.Split(strings.TrimSpace(pair), ":")
-		if len(parts) != 2 {
-			continue
-		}
-		threshold, err1 := strconv.ParseFloat(strings.TrimSpace(parts[0]), 64)
-		offset, err2 := strconv.ParseFloat(strings.TrimSpace(parts[1]), 64)
-		if err1 == nil && err2 == nil {
-			tiers = append(tiers, TrailingStopTier{
-				ProfitThreshold: threshold,
-				StopOffset:      offset,
-			})
-		}
-	}
-
-	// 按利润阈值升序排序
-	sort.Slice(tiers, func(i, j int) bool {
-		return tiers[i].ProfitThreshold < tiers[j].ProfitThreshold
-	})
-
-	return tiers
-}
-
-// getEnvFloat 从环境变量读取浮点数（支持 .env 注入）
-func getEnvFloat(name string, def float64) float64 {
-	v := os.Getenv(name)
-	if v == "" {
-		return def
-	}
-	if f, err := strconv.ParseFloat(v, 64); err == nil {
-		return f
-	}
-	return def
-}
-
-// NewAutoTrader 创建自动交易器
-func NewAutoTrader(config AutoTraderConfig, database interface{}, userID string) (*AutoTrader, error) {
-	// 设置默认值
+// NewAutoTrader creates an automatic trader
+// st parameter is used to store decision records to database
+func NewAutoTrader(config AutoTraderConfig, st *store.Store, userID string) (*AutoTrader, error) {
+	// Set default values
 	if config.ID == "" {
 		config.ID = "default_trader"
 	}
@@ -221,253 +162,347 @@ func NewAutoTrader(config AutoTraderConfig, database interface{}, userID string)
 		}
 	}
 
-	mcpClient := mcp.New()
-
-	// 初始化AI
-	if config.AIModel == "custom" {
-		// 使用自定义API
-		mcpClient.SetAPIKey(config.CustomAPIKey, config.CustomAPIURL, config.CustomModelName)
-		log.Printf("🤖 [%s] 使用自定义AI API: %s (模型: %s)", config.Name, config.CustomAPIURL, config.CustomModelName)
-	} else if config.UseQwen || config.AIModel == "qwen" {
-		// 使用Qwen (支持自定义URL和Model)
-		mcpClient = mcp.NewQwenClient()
-		mcpClient.SetAPIKey(config.QwenKey, config.CustomAPIURL, config.CustomModelName)
-		if config.CustomAPIURL != "" || config.CustomModelName != "" {
-			log.Printf("🤖 [%s] 使用阿里云Qwen AI (自定义URL: %s, 模型: %s)", config.Name, config.CustomAPIURL, config.CustomModelName)
-		} else {
-			log.Printf("🤖 [%s] 使用阿里云Qwen AI", config.Name)
-		}
-	} else {
-		// 默认使用DeepSeek (支持自定义URL和Model)
-		mcpClient = mcp.NewDeepSeekClient()
-		mcpClient.SetAPIKey(config.DeepSeekKey, config.CustomAPIURL, config.CustomModelName)
-		if config.CustomAPIURL != "" || config.CustomModelName != "" {
-			log.Printf("🤖 [%s] 使用DeepSeek AI (自定义URL: %s, 模型: %s)", config.Name, config.CustomAPIURL, config.CustomModelName)
-		} else {
-			log.Printf("🤖 [%s] 使用DeepSeek AI", config.Name)
-		}
+	// Initialize AI client based on provider
+	var mcpClient mcp.AIClient
+	aiModel := config.AIModel
+	if config.UseQwen && aiModel == "" {
+		aiModel = "qwen"
 	}
 
-	// 设置默认交易平台
+	switch aiModel {
+	case "claude":
+		mcpClient = mcp.NewClaudeClient()
+		mcpClient.SetAPIKey(config.CustomAPIKey, config.CustomAPIURL, config.CustomModelName)
+		logger.Infof("🤖 [%s] Using Claude AI", config.Name)
+
+	case "kimi":
+		mcpClient = mcp.NewKimiClient()
+		mcpClient.SetAPIKey(config.CustomAPIKey, config.CustomAPIURL, config.CustomModelName)
+		logger.Infof("🤖 [%s] Using Kimi (Moonshot) AI", config.Name)
+
+	case "gemini":
+		mcpClient = mcp.NewGeminiClient()
+		mcpClient.SetAPIKey(config.CustomAPIKey, config.CustomAPIURL, config.CustomModelName)
+		logger.Infof("🤖 [%s] Using Google Gemini AI", config.Name)
+
+	case "grok":
+		mcpClient = mcp.NewGrokClient()
+		mcpClient.SetAPIKey(config.CustomAPIKey, config.CustomAPIURL, config.CustomModelName)
+		logger.Infof("🤖 [%s] Using xAI Grok AI", config.Name)
+
+	case "openai":
+		mcpClient = mcp.NewOpenAIClient()
+		mcpClient.SetAPIKey(config.CustomAPIKey, config.CustomAPIURL, config.CustomModelName)
+		logger.Infof("🤖 [%s] Using OpenAI", config.Name)
+
+	case "qwen":
+		mcpClient = mcp.NewQwenClient()
+		apiKey := config.QwenKey
+		if apiKey == "" {
+			apiKey = config.CustomAPIKey
+		}
+		mcpClient.SetAPIKey(apiKey, config.CustomAPIURL, config.CustomModelName)
+		logger.Infof("🤖 [%s] Using Alibaba Cloud Qwen AI", config.Name)
+
+	case "custom":
+		mcpClient = mcp.New()
+		mcpClient.SetAPIKey(config.CustomAPIKey, config.CustomAPIURL, config.CustomModelName)
+		logger.Infof("🤖 [%s] Using custom AI API: %s (model: %s)", config.Name, config.CustomAPIURL, config.CustomModelName)
+
+	default: // deepseek or empty
+		mcpClient = mcp.NewDeepSeekClient()
+		apiKey := config.DeepSeekKey
+		if apiKey == "" {
+			apiKey = config.CustomAPIKey
+		}
+		mcpClient.SetAPIKey(apiKey, config.CustomAPIURL, config.CustomModelName)
+		logger.Infof("🤖 [%s] Using DeepSeek AI", config.Name)
+	}
+
+	if config.CustomAPIURL != "" || config.CustomModelName != "" {
+		logger.Infof("🔧 [%s] Custom config - URL: %s, Model: %s", config.Name, config.CustomAPIURL, config.CustomModelName)
+	}
+
+	// Set default trading platform
 	if config.Exchange == "" {
 		config.Exchange = "binance"
 	}
 
-	// 根据配置创建对应的交易器
+	// Create corresponding trader based on configuration
 	var trader Trader
 	var err error
 
-	// 记录仓位模式（通用）
-	marginModeStr := "全仓"
+	// Record position mode (general)
+	marginModeStr := "Cross Margin"
 	if !config.IsCrossMargin {
-		marginModeStr = "逐仓"
+		marginModeStr = "Isolated Margin"
 	}
-	log.Printf("📊 [%s] 仓位模式: %s", config.Name, marginModeStr)
+	logger.Infof("📊 [%s] Position mode: %s", config.Name, marginModeStr)
 
 	switch config.Exchange {
 	case "binance":
-		log.Printf("🏦 [%s] 使用币安合约交易", config.Name)
-		trader = NewFuturesTrader(config.BinanceAPIKey, config.BinanceSecretKey, userID)
+		logger.Infof("🏦 [%s] Using Binance Futures trading", config.Name)
+		trader = binance.NewFuturesTrader(config.BinanceAPIKey, config.BinanceSecretKey, userID)
+	case "bybit":
+		logger.Infof("🏦 [%s] Using Bybit Futures trading", config.Name)
+		trader = bybit.NewBybitTrader(config.BybitAPIKey, config.BybitSecretKey)
+	case "okx":
+		logger.Infof("🏦 [%s] Using OKX Futures trading", config.Name)
+		trader = okx.NewOKXTrader(config.OKXAPIKey, config.OKXSecretKey, config.OKXPassphrase)
+	case "bitget":
+		logger.Infof("🏦 [%s] Using Bitget Futures trading", config.Name)
+		trader = bitget.NewBitgetTrader(config.BitgetAPIKey, config.BitgetSecretKey, config.BitgetPassphrase)
+	case "gate":
+		logger.Infof("🏦 [%s] Using Gate.io Futures trading", config.Name)
+		trader = gate.NewGateTrader(config.GateAPIKey, config.GateSecretKey)
+	case "kucoin":
+		logger.Infof("🏦 [%s] Using KuCoin Futures trading", config.Name)
+		trader = kucoin.NewKuCoinTrader(config.KuCoinAPIKey, config.KuCoinSecretKey, config.KuCoinPassphrase)
 	case "hyperliquid":
-		log.Printf("🏦 [%s] 使用Hyperliquid交易", config.Name)
-		trader, err = NewHyperliquidTrader(config.HyperliquidPrivateKey, config.HyperliquidWalletAddr, config.HyperliquidTestnet)
+		logger.Infof("🏦 [%s] Using Hyperliquid trading", config.Name)
+		trader, err = hyperliquid.NewHyperliquidTrader(config.HyperliquidPrivateKey, config.HyperliquidWalletAddr, config.HyperliquidTestnet)
 		if err != nil {
-			return nil, fmt.Errorf("初始化Hyperliquid交易器失败: %w", err)
+			return nil, fmt.Errorf("failed to initialize Hyperliquid trader: %w", err)
 		}
 	case "aster":
-		log.Printf("🏦 [%s] 使用Aster交易", config.Name)
-		trader, err = NewAsterTrader(config.AsterUser, config.AsterSigner, config.AsterPrivateKey)
+		logger.Infof("🏦 [%s] Using Aster trading", config.Name)
+		trader, err = aster.NewAsterTrader(config.AsterUser, config.AsterSigner, config.AsterPrivateKey)
 		if err != nil {
-			return nil, fmt.Errorf("初始化Aster交易器失败: %w", err)
+			return nil, fmt.Errorf("failed to initialize Aster trader: %w", err)
 		}
 	case "lighter":
-		log.Printf("🏦 [%s] 使用LIGHTER交易", config.Name)
+		logger.Infof("🏦 [%s] Using LIGHTER trading", config.Name)
 
-		// 優先使用 V2（需要 API Key）
-		if config.LighterAPIKeyPrivateKey != "" {
-			log.Printf("✓ 使用 LIGHTER SDK (V2) - 完整簽名支持")
-			trader, err = NewLighterTraderV2(
-				config.LighterPrivateKey,
-				config.LighterWalletAddr,
-				config.LighterAPIKeyPrivateKey,
-				config.LighterTestnet,
-			)
-			if err != nil {
-				return nil, fmt.Errorf("初始化LIGHTER交易器(V2)失败: %w", err)
-			}
-		} else {
-			// 降級使用 V1（基本HTTP實現）
-			log.Printf("⚠️  使用 LIGHTER 基本實現 (V1) - 功能受限，請配置 API Key")
-			trader, err = NewLighterTrader(config.LighterPrivateKey, config.LighterWalletAddr, config.LighterTestnet)
-			if err != nil {
-				return nil, fmt.Errorf("初始化LIGHTER交易器(V1)失败: %w", err)
-			}
+		if config.LighterWalletAddr == "" || config.LighterAPIKeyPrivateKey == "" {
+			return nil, fmt.Errorf("Lighter requires wallet address and API Key private key")
 		}
+
+		// Lighter only supports mainnet (testnet disabled)
+		trader, err = lighter.NewLighterTraderV2(
+			config.LighterWalletAddr,
+			config.LighterAPIKeyPrivateKey,
+			config.LighterAPIKeyIndex,
+			false, // Always use mainnet for Lighter
+		)
+		if err != nil {
+			return nil, fmt.Errorf("failed to initialize LIGHTER trader: %w", err)
+		}
+		logger.Infof("✓ LIGHTER trader initialized successfully")
 	default:
-		return nil, fmt.Errorf("不支持的交易平台: %s", config.Exchange)
+		return nil, fmt.Errorf("unsupported trading platform: %s", config.Exchange)
 	}
 
-	// 验证初始金额配置
+	// Validate initial balance configuration, auto-fetch from exchange if 0
 	if config.InitialBalance <= 0 {
-		return nil, fmt.Errorf("初始金额必须大于0，请在配置中设置InitialBalance")
-	}
-
-	// 初始化决策日志记录器（使用trader ID创建独立目录）
-	logDir := fmt.Sprintf("decision_logs/%s", config.ID)
-	decisionLogger := logger.NewDecisionLogger(logDir)
-
-	// 设置默认系统提示词模板
-	systemPromptTemplate := config.SystemPromptTemplate
-	if systemPromptTemplate == "" {
-		// feature/partial-close-dynamic-tpsl 分支默认使用 adaptive（支持动态止盈止损）
-		systemPromptTemplate = "adaptive"
-	}
-
-	// 从数据库加载追踪止损配置（trader-specific），如果数据库中没有则使用环境变量
-	var trailingStopConfig TrailingStopConfig
-	if db, ok := database.(interface {
-		GetSystemConfig(key string) (string, error)
-	}); ok {
-		enabled, _ := db.GetSystemConfig(fmt.Sprintf("trailing_stop_%s_enabled", config.ID))
-		tiers, _ := db.GetSystemConfig(fmt.Sprintf("trailing_stop_%s_tiers", config.ID))
-		updateThresholdStr, _ := db.GetSystemConfig(fmt.Sprintf("trailing_stop_%s_update_threshold_pct", config.ID))
-		checkIntervalStr, _ := db.GetSystemConfig(fmt.Sprintf("trailing_stop_%s_check_interval_sec", config.ID))
-		allowAIOverrideStr, _ := db.GetSystemConfig(fmt.Sprintf("trailing_stop_%s_allow_ai_override", config.ID))
-
-		// 如果数据库中有配置，使用数据库配置
-		if enabled != "" {
-			trailingStopConfig.Enabled = enabled == "true"
-			trailingStopConfig.Tiers = parseTrailingStopTiers(tiers)
-			if val, err := strconv.ParseFloat(updateThresholdStr, 64); err == nil && val > 0 {
-				trailingStopConfig.UpdateThresholdPct = val
-			} else {
-				trailingStopConfig.UpdateThresholdPct = 0.3
+		logger.Infof("📊 [%s] Initial balance not set, attempting to fetch current balance from exchange...", config.Name)
+		account, err := trader.GetBalance()
+		if err != nil {
+			return nil, fmt.Errorf("initial balance not set and unable to fetch balance from exchange: %w", err)
+		}
+		// Try multiple balance field names (different exchanges return different formats)
+		balanceKeys := []string{"total_equity", "totalWalletBalance", "wallet_balance", "totalEq", "balance"}
+		var foundBalance float64
+		for _, key := range balanceKeys {
+			if balance, ok := account[key].(float64); ok && balance > 0 {
+				foundBalance = balance
+				break
 			}
-			if val, err := strconv.Atoi(checkIntervalStr); err == nil && val > 0 {
-				trailingStopConfig.CheckIntervalSec = val
-			} else {
-				trailingStopConfig.CheckIntervalSec = 30
+		}
+		if foundBalance > 0 {
+			config.InitialBalance = foundBalance
+			logger.Infof("✓ [%s] Auto-fetched initial balance: %.2f USDT", config.Name, foundBalance)
+			// Save to database so it persists across restarts
+			if st != nil {
+				if err := st.Trader().UpdateInitialBalance(userID, config.ID, foundBalance); err != nil {
+					logger.Infof("⚠️  [%s] Failed to save initial balance to database: %v", config.Name, err)
+				} else {
+					logger.Infof("✓ [%s] Initial balance saved to database", config.Name)
+				}
 			}
-			trailingStopConfig.AllowAIOverride = allowAIOverrideStr == "true"
 		} else {
-			// 数据库中没有配置，使用环境变量作为后备
-			trailingStopConfig = TrailingStopConfig{
-				Enabled:            os.Getenv("TRAILING_STOP_ENABLED") == "true",
-				Tiers:              parseTrailingStopTiers(os.Getenv("TRAILING_STOP_TIERS")),
-				UpdateThresholdPct: getEnvFloat("TRAILING_STOP_UPDATE_THRESHOLD_PCT", 0.3),
-				CheckIntervalSec:   int(getEnvFloat("TRAILING_STOP_CHECK_INTERVAL_SEC", 30)),
-				AllowAIOverride:    os.Getenv("TRAILING_STOP_ALLOW_AI_OVERRIDE") == "true",
-			}
-		}
-	} else {
-		// 如果数据库不支持GetSystemConfig，使用环境变量
-		trailingStopConfig = TrailingStopConfig{
-			Enabled:            os.Getenv("TRAILING_STOP_ENABLED") == "true",
-			Tiers:              parseTrailingStopTiers(os.Getenv("TRAILING_STOP_TIERS")),
-			UpdateThresholdPct: getEnvFloat("TRAILING_STOP_UPDATE_THRESHOLD_PCT", 0.3),
-			CheckIntervalSec:   int(getEnvFloat("TRAILING_STOP_CHECK_INTERVAL_SEC", 30)),
-			AllowAIOverride:    os.Getenv("TRAILING_STOP_ALLOW_AI_OVERRIDE") == "true",
+			return nil, fmt.Errorf("initial balance must be greater than 0, please set InitialBalance in config or ensure exchange account has balance")
 		}
 	}
 
-	// 日志输出配置状态
-	if trailingStopConfig.Enabled {
-		log.Printf("🎯 [%s] 自动追踪止损已启用 (分级系统):", config.Name)
-		for i, tier := range trailingStopConfig.Tiers {
-			if tier.StopOffset < 0 {
-				log.Printf("   档位%d: 利润≥%.1f%% → 止损固定在 %.1f%% 利润",
-					i+1, tier.ProfitThreshold, -tier.StopOffset)
-			} else {
-				log.Printf("   档位%d: 利润≥%.1f%% → 止损在 利润-%.1f%%",
-					i+1, tier.ProfitThreshold, tier.StopOffset)
-			}
-		}
-		log.Printf("   更新阈值: %.1f%%, 检查间隔: %d秒, AI覆盖: %v",
-			trailingStopConfig.UpdateThresholdPct,
-			trailingStopConfig.CheckIntervalSec,
-			trailingStopConfig.AllowAIOverride)
-	} else {
-		log.Printf("⏸️ [%s] 自动追踪止损已禁用", config.Name)
+	// Get last cycle number (for recovery)
+	var cycleNumber int
+	if st != nil {
+		cycleNumber, _ = st.Decision().GetLastCycleNumber(config.ID)
+		logger.Infof("📊 [%s] Decision records will be stored to database", config.Name)
 	}
+
+	// Create strategy engine (must have strategy config)
+	if config.StrategyConfig == nil {
+		return nil, fmt.Errorf("[%s] strategy not configured", config.Name)
+	}
+	strategyEngine := kernel.NewStrategyEngine(config.StrategyConfig)
+	logger.Infof("✓ [%s] Using strategy engine (strategy configuration loaded)", config.Name)
 
 	return &AutoTrader{
-		id:                     config.ID,
-		name:                   config.Name,
-		aiModel:                config.AIModel,
-		exchange:               config.Exchange,
-		config:                 config,
-		trader:                 trader,
-		mcpClient:              mcpClient,
-		decisionLogger:         decisionLogger,
-		initialBalance:         config.InitialBalance,
-		systemPromptTemplate:   systemPromptTemplate,
-		defaultCoins:           config.DefaultCoins,
-		tradingCoins:           config.TradingCoins,
-		lastResetTime:          time.Now(),
-		startTime:              time.Now(),
-		callCount:              0,
-		isRunning:              false,
-		positionFirstSeenTime:  make(map[string]int64),
-		stopMonitorCh:          make(chan struct{}),
-		monitorWg:              sync.WaitGroup{},
-		peakPnLCache:           make(map[string]float64),
-		peakPnLCacheMutex:      sync.RWMutex{},
-		lastBalanceSyncTime:    time.Now(), // 初始化为当前时间
-		database:               database,
-		userID:                 userID,
-		openDealIDs:            make(map[string]int64),
-		trailingStopConfig:     trailingStopConfig,
-		trailingStopManaged:    make(map[string]bool),
-		trailingStopLastUpdate: make(map[string]float64),
-		trailingStopActiveTier: make(map[string]int),
-		trailingStopMutex:      sync.RWMutex{},
+		id:                    config.ID,
+		name:                  config.Name,
+		aiModel:               config.AIModel,
+		exchange:              config.Exchange,
+		exchangeID:            config.ExchangeID,
+		showInCompetition:     config.ShowInCompetition,
+		config:                config,
+		trader:                trader,
+		mcpClient:             mcpClient,
+		store:                 st,
+		strategyEngine:        strategyEngine,
+		cycleNumber:           cycleNumber,
+		initialBalance:        config.InitialBalance,
+		lastResetTime:         time.Now(),
+		startTime:             time.Now(),
+		callCount:             0,
+		isRunning:             false,
+		positionFirstSeenTime: make(map[string]int64),
+		stopMonitorCh:         make(chan struct{}),
+		monitorWg:             sync.WaitGroup{},
+		peakPnLCache:          make(map[string]float64),
+		peakPnLCacheMutex:     sync.RWMutex{},
+		lastBalanceSyncTime:   time.Now(),
+		userID:                userID,
 	}, nil
 }
 
-// Run 运行自动交易主循环
+// Run runs the automatic trading main loop
 func (at *AutoTrader) Run() error {
-	log.Printf("🐛 [Run] ENTRY - at==nil: %v", at == nil)
-
+	at.isRunningMutex.Lock()
 	at.isRunning = true
-	log.Printf("🐛 [Run] Set isRunning=true")
+	at.isRunningMutex.Unlock()
 
 	at.stopMonitorCh = make(chan struct{})
-	log.Printf("🐛 [Run] Created stopMonitorCh")
-
 	at.startTime = time.Now()
-	log.Printf("🐛 [Run] Set startTime")
 
-	log.Println("🚀 AI驱动自动交易系统启动")
-	log.Printf("💰 初始余额: %.2f USDT", at.initialBalance)
-	log.Printf("⚙️  扫描间隔: %v", at.config.ScanInterval)
-	log.Println("🤖 AI将全权决定杠杆、仓位大小、止损止盈等参数")
+	logger.Info("🚀 AI-driven automatic trading system started")
+	logger.Infof("💰 Initial balance: %.2f USDT", at.initialBalance)
+	logger.Infof("⚙️  Scan interval: %v", at.config.ScanInterval)
+	logger.Info("🤖 AI will make full decisions on leverage, position size, stop loss/take profit, etc.")
 	at.monitorWg.Add(1)
 	defer at.monitorWg.Done()
 
-	// 启动回撤监控
+	// Start drawdown monitoring
 	at.startDrawdownMonitor()
 
-	// 启动追踪止损监控（如果启用）
-	if at.trailingStopConfig.Enabled {
-		at.startTrailingStopMonitor()
+	// Start Lighter order sync if using Lighter exchange
+	if at.exchange == "lighter" {
+		if lighterTrader, ok := at.trader.(*lighter.LighterTraderV2); ok && at.store != nil {
+			lighterTrader.StartOrderSync(at.id, at.exchangeID, at.exchange, at.store, 30*time.Second)
+			logger.Infof("🔄 [%s] Lighter order+position sync enabled (every 30s)", at.name)
+		}
+	}
+
+	// Start Hyperliquid order sync if using Hyperliquid exchange
+	if at.exchange == "hyperliquid" {
+		if hyperliquidTrader, ok := at.trader.(*hyperliquid.HyperliquidTrader); ok && at.store != nil {
+			hyperliquidTrader.StartOrderSync(at.id, at.exchangeID, at.exchange, at.store, 30*time.Second)
+			logger.Infof("🔄 [%s] Hyperliquid order+position sync enabled (every 30s)", at.name)
+		}
+	}
+
+	// Start Bybit order sync if using Bybit exchange
+	if at.exchange == "bybit" {
+		if bybitTrader, ok := at.trader.(*bybit.BybitTrader); ok && at.store != nil {
+			bybitTrader.StartOrderSync(at.id, at.exchangeID, at.exchange, at.store, 30*time.Second)
+			logger.Infof("🔄 [%s] Bybit order+position sync enabled (every 30s)", at.name)
+		}
+	}
+
+	// Start OKX order sync if using OKX exchange
+	if at.exchange == "okx" {
+		if okxTrader, ok := at.trader.(*okx.OKXTrader); ok && at.store != nil {
+			okxTrader.StartOrderSync(at.id, at.exchangeID, at.exchange, at.store, 30*time.Second)
+			logger.Infof("🔄 [%s] OKX order+position sync enabled (every 30s)", at.name)
+		}
+	}
+
+	// Start Bitget order sync if using Bitget exchange
+	if at.exchange == "bitget" {
+		if bitgetTrader, ok := at.trader.(*bitget.BitgetTrader); ok && at.store != nil {
+			bitgetTrader.StartOrderSync(at.id, at.exchangeID, at.exchange, at.store, 30*time.Second)
+			logger.Infof("🔄 [%s] Bitget order+position sync enabled (every 30s)", at.name)
+		}
+	}
+
+	// Start Aster order sync if using Aster exchange
+	if at.exchange == "aster" {
+		if asterTrader, ok := at.trader.(*aster.AsterTrader); ok && at.store != nil {
+			asterTrader.StartOrderSync(at.id, at.exchangeID, at.exchange, at.store, 30*time.Second)
+			logger.Infof("🔄 [%s] Aster order+position sync enabled (every 30s)", at.name)
+		}
+	}
+
+	// Start Binance order sync if using Binance exchange
+	if at.exchange == "binance" {
+		if binanceTrader, ok := at.trader.(*binance.FuturesTrader); ok && at.store != nil {
+			binanceTrader.StartOrderSync(at.id, at.exchangeID, at.exchange, at.store, 30*time.Second)
+			logger.Infof("🔄 [%s] Binance order+position sync enabled (every 30s)", at.name)
+		}
+	}
+
+	// Start Gate order sync if using Gate exchange
+	if at.exchange == "gate" {
+		if gateTrader, ok := at.trader.(*gate.GateTrader); ok && at.store != nil {
+			gateTrader.StartOrderSync(at.id, at.exchangeID, at.exchange, at.store, 30*time.Second)
+			logger.Infof("🔄 [%s] Gate order+position sync enabled (every 30s)", at.name)
+		}
+	}
+
+	// Start KuCoin order sync if using KuCoin exchange
+	if at.exchange == "kucoin" {
+		if kucoinTrader, ok := at.trader.(*kucoin.KuCoinTrader); ok && at.store != nil {
+			kucoinTrader.StartOrderSync(at.id, at.exchangeID, at.exchange, at.store, 30*time.Second)
+			logger.Infof("🔄 [%s] KuCoin order+position sync enabled (every 30s)", at.name)
+		}
 	}
 
 	ticker := time.NewTicker(at.config.ScanInterval)
 	defer ticker.Stop()
 
-	// 首次立即执行
-	if err := at.runCycle(); err != nil {
-		log.Printf("❌ 执行失败: %v", err)
+	// Check if this is a grid trading strategy
+	isGridStrategy := at.IsGridStrategy()
+	if isGridStrategy {
+		logger.Infof("🔲 [%s] Grid trading strategy detected, initializing grid...", at.name)
+		if err := at.InitializeGrid(); err != nil {
+			logger.Errorf("❌ [%s] Failed to initialize grid: %v", at.name, err)
+			return fmt.Errorf("grid initialization failed: %w", err)
+		}
 	}
 
-	for at.isRunning {
+	// Execute immediately on first run
+	if isGridStrategy {
+		if err := at.RunGridCycle(); err != nil {
+			logger.Infof("❌ Grid execution failed: %v", err)
+		}
+	} else {
+		if err := at.runCycle(); err != nil {
+			logger.Infof("❌ Execution failed: %v", err)
+		}
+	}
+
+	for {
+		at.isRunningMutex.RLock()
+		running := at.isRunning
+		at.isRunningMutex.RUnlock()
+
+		if !running {
+			break
+		}
+
 		select {
 		case <-ticker.C:
-			if err := at.runCycle(); err != nil {
-				log.Printf("❌ 执行失败: %v", err)
+			if isGridStrategy {
+				if err := at.RunGridCycle(); err != nil {
+					logger.Infof("❌ Grid execution failed: %v", err)
+				}
+			} else {
+				if err := at.runCycle(); err != nil {
+					logger.Infof("❌ Execution failed: %v", err)
+				}
 			}
 		case <-at.stopMonitorCh:
-			log.Printf("[%s] ⏹ 收到停止信号，退出自动交易主循环", at.name)
+			logger.Infof("[%s] ⏹ Stop signal received, exiting automatic trading main loop", at.name)
 			return nil
 		}
 	}
@@ -475,316 +510,345 @@ func (at *AutoTrader) Run() error {
 	return nil
 }
 
-// Stop 停止自动交易
+// Stop stops the automatic trading
 func (at *AutoTrader) Stop() {
+	at.isRunningMutex.Lock()
 	if !at.isRunning {
+		at.isRunningMutex.Unlock()
 		return
 	}
 	at.isRunning = false
-	close(at.stopMonitorCh) // 通知监控goroutine停止
+	at.isRunningMutex.Unlock()
 
-	// 等待监控goroutine结束，但最多等待10秒
-	done := make(chan struct{})
-	go func() {
-		at.monitorWg.Wait()
-		close(done)
-	}()
-
-	timeout := time.NewTimer(10 * time.Second)
-	defer timeout.Stop()
-
-	select {
-	case <-done:
-		log.Println("⏹ 自动交易系统停止")
-	case <-timeout.C:
-		log.Println("⚠️  监控goroutine停止超时，强制退出")
-	}
+	close(at.stopMonitorCh) // Notify monitoring goroutine to stop
+	at.monitorWg.Wait()     // Wait for monitoring goroutine to finish
+	logger.Info("⏹ Automatic trading system stopped")
 }
 
-// runCycle 运行一个交易周期（使用AI全权决策）
+// runCycle runs one trading cycle (using AI full decision-making)
 func (at *AutoTrader) runCycle() error {
 	at.callCount++
 
-	log.Print("\n" + strings.Repeat("=", 70) + "\n")
-	log.Printf("⏰ %s - AI决策周期 #%d", time.Now().Format("2006-01-02 15:04:05"), at.callCount)
-	log.Println(strings.Repeat("=", 70))
+	logger.Info("\n" + strings.Repeat("=", 70) + "\n")
+	logger.Infof("⏰ %s - AI decision cycle #%d", time.Now().Format("2006-01-02 15:04:05"), at.callCount)
+	logger.Info(strings.Repeat("=", 70))
 
-	// 创建决策记录
-	record := &logger.DecisionRecord{
+	// 0. Check if trader is stopped (early exit to prevent trades after Stop() is called)
+	at.isRunningMutex.RLock()
+	running := at.isRunning
+	at.isRunningMutex.RUnlock()
+	if !running {
+		logger.Infof("⏹ Trader is stopped, aborting cycle #%d", at.callCount)
+		return nil
+	}
+
+	// Create decision record
+	record := &store.DecisionRecord{
 		ExecutionLog: []string{},
 		Success:      true,
 	}
 
-	// 1. 检查是否需要停止交易
+	// 1. Check if trading needs to be stopped
 	if time.Now().Before(at.stopUntil) {
 		remaining := at.stopUntil.Sub(time.Now())
-		log.Printf("⏸ 风险控制：暂停交易中，剩余 %.0f 分钟", remaining.Minutes())
+		logger.Infof("⏸ Risk control: Trading paused, remaining %.0f minutes", remaining.Minutes())
 		record.Success = false
-		record.ErrorMessage = fmt.Sprintf("风险控制暂停中，剩余 %.0f 分钟", remaining.Minutes())
-		at.decisionLogger.LogDecision(record)
+		record.ErrorMessage = fmt.Sprintf("Risk control paused, remaining %.0f minutes", remaining.Minutes())
+		at.saveDecision(record)
 		return nil
 	}
 
-	// 2. 重置日盈亏（每天重置）
+	// 2. Reset daily P&L (reset every day)
 	if time.Since(at.lastResetTime) > 24*time.Hour {
 		at.dailyPnL = 0
 		at.lastResetTime = time.Now()
-		log.Println("📅 日盈亏已重置")
+		logger.Info("📅 Daily P&L reset")
 	}
 
-	// 3. 自动同步余额（每10分钟检查一次，充值/提现后自动更新）
-	// 暂时禁用：此功能会将初始余额错误地更新为可用余额，导致P&L计算错误
-	// TODO: 改进逻辑，使用钱包总余额(totalWalletBalance)而非可用余额进行比较
-	// at.autoSyncBalanceIfNeeded()
-
-	// 4. 收集交易上下文
+	// 4. Collect trading context
 	ctx, err := at.buildTradingContext()
 	if err != nil {
 		record.Success = false
-		record.ErrorMessage = fmt.Sprintf("构建交易上下文失败: %v", err)
-		at.decisionLogger.LogDecision(record)
-		return fmt.Errorf("构建交易上下文失败: %w", err)
+		record.ErrorMessage = fmt.Sprintf("Failed to build trading context: %v", err)
+		at.saveDecision(record)
+		return fmt.Errorf("failed to build trading context: %w", err)
 	}
 
-	// 保存账户状态快照
-	record.AccountState = logger.AccountSnapshot{
-		TotalBalance:          ctx.Account.TotalEquity - ctx.Account.UnrealizedPnL,
-		AvailableBalance:      ctx.Account.AvailableBalance,
-		TotalUnrealizedProfit: ctx.Account.UnrealizedPnL,
-		PositionCount:         ctx.Account.PositionCount,
-		MarginUsedPct:         ctx.Account.MarginUsedPct,
-		InitialBalance:        at.initialBalance, // 记录当时的初始余额基准
+	// Save equity snapshot independently (decoupled from AI decision, used for drawing profit curve)
+	// NOTE: Must be called BEFORE candidate coins check to ensure equity is always recorded
+	at.saveEquitySnapshot(ctx)
+
+	// 如果没有候选币种，记录但不报错
+	if len(ctx.CandidateCoins) == 0 {
+		logger.Infof("ℹ️  No candidate coins available, skipping this cycle")
+		record.Success = true // 不是错误，只是没有候选币
+		record.ExecutionLog = append(record.ExecutionLog, "No candidate coins available, cycle skipped")
+		record.AccountState = store.AccountSnapshot{
+			TotalBalance:          ctx.Account.TotalEquity,
+			AvailableBalance:      ctx.Account.AvailableBalance,
+			TotalUnrealizedProfit: ctx.Account.UnrealizedPnL,
+			PositionCount:         ctx.Account.PositionCount,
+			InitialBalance:        at.initialBalance,
+		}
+		at.saveDecision(record)
+		return nil
 	}
 
-	// 保存持仓快照
-	for _, pos := range ctx.Positions {
-		record.Positions = append(record.Positions, logger.PositionSnapshot{
-			Symbol:           pos.Symbol,
-			Side:             pos.Side,
-			PositionAmt:      pos.Quantity,
-			EntryPrice:       pos.EntryPrice,
-			MarkPrice:        pos.MarkPrice,
-			UnrealizedProfit: pos.UnrealizedPnL,
-			Leverage:         float64(pos.Leverage),
-			LiquidationPrice: pos.LiquidationPrice,
-		})
-	}
-
-	log.Print(strings.Repeat("=", 70))
+	logger.Info(strings.Repeat("=", 70))
 	for _, coin := range ctx.CandidateCoins {
 		record.CandidateCoins = append(record.CandidateCoins, coin.Symbol)
 	}
 
-	log.Printf("📊 账户净值: %.2f USDT | 可用: %.2f USDT | 持仓: %d",
+	logger.Infof("📊 Account equity: %.2f USDT | Available: %.2f USDT | Positions: %d",
 		ctx.Account.TotalEquity, ctx.Account.AvailableBalance, ctx.Account.PositionCount)
 
-	// 5. 调用AI获取完整决策
-	log.Printf("🤖 正在请求AI分析并决策... [模板: %s]", at.systemPromptTemplate)
-	decision, err := decision.GetFullDecisionWithCustomPrompt(ctx, at.mcpClient, at.customPrompt, at.overrideBasePrompt, at.systemPromptTemplate)
+	// 5. Use strategy engine to call AI for decision
+	logger.Infof("🤖 Requesting AI analysis and decision... [Strategy Engine]")
+	aiDecision, err := kernel.GetFullDecisionWithStrategy(ctx, at.mcpClient, at.strategyEngine, "balanced")
 
-	if decision != nil && decision.AIRequestDurationMs > 0 {
-		record.AIRequestDurationMs = decision.AIRequestDurationMs
-		log.Printf("⏱️ AI调用耗时: %.2f 秒", float64(record.AIRequestDurationMs)/1000)
+	if aiDecision != nil && aiDecision.AIRequestDurationMs > 0 {
+		record.AIRequestDurationMs = aiDecision.AIRequestDurationMs
+		logger.Infof("⏱️ AI call duration: %.2f seconds", float64(record.AIRequestDurationMs)/1000)
 		record.ExecutionLog = append(record.ExecutionLog,
-			fmt.Sprintf("AI调用耗时: %d ms", record.AIRequestDurationMs))
+			fmt.Sprintf("AI call duration: %d ms", record.AIRequestDurationMs))
 	}
 
-	// 即使有错误，也保存思维链、决策和输入prompt（用于debug）
-	if decision != nil {
-		record.SystemPrompt = decision.SystemPrompt // 保存系统提示词
-		record.InputPrompt = decision.UserPrompt
-		record.CoTTrace = decision.CoTTrace
-		if len(decision.Decisions) > 0 {
-			decisionJSON, _ := json.MarshalIndent(decision.Decisions, "", "  ")
+	// Save chain of thought, decisions, and input prompt even if there's an error (for debugging)
+	if aiDecision != nil {
+		record.SystemPrompt = aiDecision.SystemPrompt // Save system prompt
+		record.InputPrompt = aiDecision.UserPrompt
+		record.CoTTrace = aiDecision.CoTTrace
+		record.RawResponse = aiDecision.RawResponse // Save raw AI response for debugging
+		if len(aiDecision.Decisions) > 0 {
+			decisionJSON, _ := json.MarshalIndent(aiDecision.Decisions, "", "  ")
 			record.DecisionJSON = string(decisionJSON)
 		}
-		// 缓存到AutoTrader，便于持久化到deals
-		at.lastSystemPrompt = record.SystemPrompt
-		at.lastUserPrompt = record.InputPrompt
-		at.lastCoTTrace = record.CoTTrace
-		at.lastDecisionJSON = record.DecisionJSON
 	}
 
 	if err != nil {
 		record.Success = false
-		record.ErrorMessage = fmt.Sprintf("获取AI决策失败: %v", err)
+		record.ErrorMessage = fmt.Sprintf("Failed to get AI decision: %v", err)
 
-		// 打印系统提示词和AI思维链（即使有错误，也要输出以便调试）
-		if decision != nil {
-			log.Print("\n" + strings.Repeat("=", 70) + "\n")
-			log.Printf("📋 系统提示词 [模板: %s] (错误情况)", at.systemPromptTemplate)
-			log.Println(strings.Repeat("=", 70))
-			log.Println(decision.SystemPrompt)
-			log.Println(strings.Repeat("=", 70))
+		// Print system prompt and AI chain of thought (output even with errors for debugging)
+		if aiDecision != nil {
+			logger.Info("\n" + strings.Repeat("=", 70) + "\n")
+			logger.Infof("📋 System prompt (error case)")
+			logger.Info(strings.Repeat("=", 70))
+			logger.Info(aiDecision.SystemPrompt)
+			logger.Info(strings.Repeat("=", 70))
 
-			if decision.CoTTrace != "" {
-				log.Print("\n" + strings.Repeat("-", 70) + "\n")
-				log.Println("💭 AI思维链分析（错误情况）:")
-				log.Println(strings.Repeat("-", 70))
-				log.Println(decision.CoTTrace)
-				log.Println(strings.Repeat("-", 70))
+			if aiDecision.CoTTrace != "" {
+				logger.Info("\n" + strings.Repeat("-", 70) + "\n")
+				logger.Info("💭 AI chain of thought analysis (error case):")
+				logger.Info(strings.Repeat("-", 70))
+				logger.Info(aiDecision.CoTTrace)
+				logger.Info(strings.Repeat("-", 70))
 			}
 		}
 
-		at.decisionLogger.LogDecision(record)
-		return fmt.Errorf("获取AI决策失败: %w", err)
+		at.saveDecision(record)
+		return fmt.Errorf("failed to get AI decision: %w", err)
 	}
 
-	// // 5. 打印系统提示词
-	// log.Printf("\n" + strings.Repeat("=", 70))
-	// log.Printf("📋 系统提示词 [模板: %s]", at.systemPromptTemplate)
-	// log.Println(strings.Repeat("=", 70))
-	// log.Println(decision.SystemPrompt)
-	// log.Printf(strings.Repeat("=", 70) + "\n")
+	// // 5. Print system prompt
+	// logger.Infof("\n" + strings.Repeat("=", 70))
+	// logger.Infof("📋 System prompt [template: %s]", at.systemPromptTemplate)
+	// logger.Info(strings.Repeat("=", 70))
+	// logger.Info(decision.SystemPrompt)
+	// logger.Infof(strings.Repeat("=", 70) + "\n")
 
-	// 6. 打印AI思维链
-	// log.Printf("\n" + strings.Repeat("-", 70))
-	// log.Println("💭 AI思维链分析:")
-	// log.Println(strings.Repeat("-", 70))
-	// log.Println(decision.CoTTrace)
-	// log.Printf(strings.Repeat("-", 70) + "\n")
+	// 6. Print AI chain of thought
+	// logger.Infof("\n" + strings.Repeat("-", 70))
+	// logger.Info("💭 AI chain of thought analysis:")
+	// logger.Info(strings.Repeat("-", 70))
+	// logger.Info(decision.CoTTrace)
+	// logger.Infof(strings.Repeat("-", 70) + "\n")
 
-	// 7. 打印AI决策
-	// log.Printf("📋 AI决策列表 (%d 个):\n", len(decision.Decisions))
-	// for i, d := range decision.Decisions {
-	//     log.Printf("  [%d] %s: %s - %s", i+1, d.Symbol, d.Action, d.Reasoning)
+	// 7. Print AI decisions
+	// logger.Infof("📋 AI decision list (%d items):\n", len(kernel.Decisions))
+	// for i, d := range kernel.Decisions {
+	//     logger.Infof("  [%d] %s: %s - %s", i+1, d.Symbol, d.Action, d.Reasoning)
 	//     if d.Action == "open_long" || d.Action == "open_short" {
-	//        log.Printf("      杠杆: %dx | 仓位: %.2f USDT | 止损: %.4f | 止盈: %.4f",
+	//        logger.Infof("      Leverage: %dx | Position: %.2f USDT | Stop loss: %.4f | Take profit: %.4f",
 	//           d.Leverage, d.PositionSizeUSD, d.StopLoss, d.TakeProfit)
 	//     }
 	// }
-	log.Println()
-	log.Print(strings.Repeat("-", 70))
-	// 8. 对决策排序：确保先平仓后开仓（防止仓位叠加超限）
-	log.Print(strings.Repeat("-", 70))
+	logger.Info()
+	logger.Info(strings.Repeat("-", 70))
+	// 8. Sort decisions: ensure close positions first, then open positions (prevent position stacking overflow)
+	logger.Info(strings.Repeat("-", 70))
 
-	// 8. 对决策排序：确保先平仓后开仓（防止仓位叠加超限）
-	sortedDecisions := sortDecisionsByPriority(decision.Decisions)
+	// 8. Sort decisions: ensure close positions first, then open positions (prevent position stacking overflow)
+	sortedDecisions := sortDecisionsByPriority(aiDecision.Decisions)
 
-	log.Println("🔄 执行顺序（已优化）: 先平仓→后开仓")
+	logger.Info("🔄 Execution order (optimized): Close positions first → Open positions later")
 	for i, d := range sortedDecisions {
-		log.Printf("  [%d] %s %s", i+1, d.Symbol, d.Action)
+		logger.Infof("  [%d] %s %s", i+1, d.Symbol, d.Action)
 	}
-	log.Println()
+	logger.Info()
 
-	// 执行决策并记录结果
+	// Check if trader is stopped before executing any decisions (prevent trades after Stop())
+	at.isRunningMutex.RLock()
+	running = at.isRunning
+	at.isRunningMutex.RUnlock()
+	if !running {
+		logger.Infof("⏹ Trader stopped before decision execution, aborting cycle #%d", at.callCount)
+		return nil
+	}
+
+	// Execute decisions and record results
 	for _, d := range sortedDecisions {
-		actionRecord := logger.DecisionAction{
-			Action:    d.Action,
-			Symbol:    d.Symbol,
-			Quantity:  0,
-			Leverage:  d.Leverage,
-			Price:     0,
-			Timestamp: time.Now(),
-			Success:   false,
+		// Check if trader is stopped before each decision (allow immediate stop during execution)
+		at.isRunningMutex.RLock()
+		running = at.isRunning
+		at.isRunningMutex.RUnlock()
+		if !running {
+			logger.Infof("⏹ Trader stopped during decision execution, aborting remaining decisions")
+			break
+		}
+
+		actionRecord := store.DecisionAction{
+			Action:     d.Action,
+			Symbol:     d.Symbol,
+			Quantity:   0,
+			Leverage:   d.Leverage,
+			Price:      0,
+			StopLoss:   d.StopLoss,
+			TakeProfit: d.TakeProfit,
+			Confidence: d.Confidence,
+			Reasoning:  d.Reasoning,
+			Timestamp:  time.Now().UTC(),
+			Success:    false,
 		}
 
 		if err := at.executeDecisionWithRecord(&d, &actionRecord); err != nil {
-			log.Printf("❌ 执行决策失败 (%s %s): %v", d.Symbol, d.Action, err)
+			logger.Infof("❌ Failed to execute decision (%s %s): %v", d.Symbol, d.Action, err)
 			actionRecord.Error = err.Error()
-			record.ExecutionLog = append(record.ExecutionLog, fmt.Sprintf("❌ %s %s 失败: %v", d.Symbol, d.Action, err))
+			record.ExecutionLog = append(record.ExecutionLog, fmt.Sprintf("❌ %s %s failed: %v", d.Symbol, d.Action, err))
 		} else {
 			actionRecord.Success = true
-			record.ExecutionLog = append(record.ExecutionLog, fmt.Sprintf("✓ %s %s 成功", d.Symbol, d.Action))
-			// 成功执行后短暂延迟
+			record.ExecutionLog = append(record.ExecutionLog, fmt.Sprintf("✓ %s %s succeeded", d.Symbol, d.Action))
+			// Brief delay after successful execution
 			time.Sleep(1 * time.Second)
 		}
 
 		record.Decisions = append(record.Decisions, actionRecord)
 	}
 
-	// 9. 保存决策记录
-	if err := at.decisionLogger.LogDecision(record); err != nil {
-		log.Printf("⚠ 保存决策记录失败: %v", err)
+	// 9. Save decision record
+	if err := at.saveDecision(record); err != nil {
+		logger.Infof("⚠ Failed to save decision record: %v", err)
 	}
 
 	return nil
 }
 
-// buildTradingContext 构建交易上下文
-func (at *AutoTrader) buildTradingContext() (*decision.Context, error) {
-	// 1. 获取账户信息
+// buildTradingContext builds trading context
+func (at *AutoTrader) buildTradingContext() (*kernel.Context, error) {
+	// 1. Get account information
 	balance, err := at.trader.GetBalance()
 	if err != nil {
-		return nil, fmt.Errorf("获取账户余额失败: %w", err)
+		return nil, fmt.Errorf("failed to get account balance: %w", err)
 	}
 
-	// 获取账户字段（只需可用余额）
-	availableBalance := 0.0
+	// Get account fields
 	totalWalletBalance := 0.0
-	unrealizedBalance := 0.0
-	if avail, ok := balance["availableBalance"].(float64); ok {
-		availableBalance = avail
-	}
+	totalUnrealizedProfit := 0.0
+	availableBalance := 0.0
+	totalEquity := 0.0
+
 	if wallet, ok := balance["totalWalletBalance"].(float64); ok {
 		totalWalletBalance = wallet
 	}
 	if unrealized, ok := balance["totalUnrealizedProfit"].(float64); ok {
-		unrealizedBalance = unrealized
+		totalUnrealizedProfit = unrealized
+	}
+	if avail, ok := balance["availableBalance"].(float64); ok {
+		availableBalance = avail
 	}
 
-	// Total Equity（账户净值）
-	// 默认采用 钱包余额 + 未实现盈亏，更贴近交易所口径；缺失时回退到 available+marginUsed
-	totalEquity := totalWalletBalance + unrealizedBalance
+	// Use totalEquity directly if provided by trader (more accurate)
+	if eq, ok := balance["totalEquity"].(float64); ok && eq > 0 {
+		totalEquity = eq
+	} else {
+		// Fallback: Total Equity = Wallet balance + Unrealized profit
+		totalEquity = totalWalletBalance + totalUnrealizedProfit
+	}
 
-	// 2. 获取持仓信息
+	// 2. Get position information
 	positions, err := at.trader.GetPositions()
 	if err != nil {
-		return nil, fmt.Errorf("获取持仓失败: %w", err)
+		return nil, fmt.Errorf("failed to get positions: %w", err)
 	}
 
-	var positionInfos []decision.PositionInfo
+	var positionInfos []kernel.PositionInfo
 	totalMarginUsed := 0.0
-	totalUnrealizedProfit := unrealizedBalance
 
-	// 当前持仓的key集合（用于清理已平仓的记录）
+	// Current position key set (for cleaning up closed position records)
 	currentPositionKeys := make(map[string]bool)
 
 	for _, pos := range positions {
 		symbol := pos["symbol"].(string)
-		side := strings.ToLower(pos["side"].(string))
+		side := pos["side"].(string)
 		entryPrice := pos["entryPrice"].(float64)
 		markPrice := pos["markPrice"].(float64)
 		quantity := pos["positionAmt"].(float64)
 		if quantity < 0 {
-			quantity = -quantity // 空仓数量为负，转为正数
+			quantity = -quantity // Short position quantity is negative, convert to positive
 		}
 
-		// 跳过已平仓的持仓（quantity = 0），防止"幽灵持仓"传递给AI
+		// Skip closed positions (quantity = 0), prevent "ghost positions" from being passed to AI
 		if quantity == 0 {
 			continue
 		}
 
 		unrealizedPnl := pos["unRealizedProfit"].(float64)
 		liquidationPrice := pos["liquidationPrice"].(float64)
-		totalUnrealizedProfit += unrealizedPnl
 
-		// 计算占用保证金（估算）
-		leverage := 10 // 默认值，实际应该从持仓信息获取
+		// Calculate margin used (estimated)
+		leverage := 10 // Default value, should actually be fetched from position info
 		if lev, ok := pos["leverage"].(float64); ok {
 			leverage = int(lev)
 		}
 		marginUsed := (quantity * markPrice) / float64(leverage)
 		totalMarginUsed += marginUsed
 
-		// 计算盈亏百分比（基于保证金，考虑杠杆）
+		// Calculate P&L percentage (based on margin, considering leverage)
 		pnlPct := calculatePnLPercentage(unrealizedPnl, marginUsed)
 
-		// 跟踪持仓首次出现时间
-		posKey := makePositionKey(symbol, side)
+		// Get position open time from exchange (preferred) or fallback to local tracking
+		posKey := symbol + "_" + side
 		currentPositionKeys[posKey] = true
-		if _, exists := at.positionFirstSeenTime[posKey]; !exists {
-			// 新持仓，记录当前时间
-			at.positionFirstSeenTime[posKey] = time.Now().UnixMilli()
-		}
-		updateTime := at.positionFirstSeenTime[posKey]
 
-		// 获取该持仓的历史最高收益率
+		var updateTime int64
+		// Priority 1: Get from database (trader_positions table) - most accurate
+		if at.store != nil {
+			if dbPos, err := at.store.Position().GetOpenPositionBySymbol(at.id, symbol, side); err == nil && dbPos != nil {
+				if dbPos.EntryTime > 0 {
+					updateTime = dbPos.EntryTime
+				}
+			}
+		}
+		// Priority 2: Get from exchange API (Bybit: createdTime, OKX: createdTime)
+		if updateTime == 0 {
+			if createdTime, ok := pos["createdTime"].(int64); ok && createdTime > 0 {
+				updateTime = createdTime
+			}
+		}
+		// Priority 3: Fallback to local tracking
+		if updateTime == 0 {
+			if _, exists := at.positionFirstSeenTime[posKey]; !exists {
+				at.positionFirstSeenTime[posKey] = time.Now().UnixMilli()
+			}
+			updateTime = at.positionFirstSeenTime[posKey]
+		}
+
+		// Get peak profit rate for this position
 		at.peakPnLCacheMutex.RLock()
 		peakPnlPct := at.peakPnLCache[posKey]
 		at.peakPnLCacheMutex.RUnlock()
 
-		positionInfos = append(positionInfos, decision.PositionInfo{
+		positionInfos = append(positionInfos, kernel.PositionInfo{
 			Symbol:           symbol,
 			Side:             side,
 			EntryPrice:       entryPrice,
@@ -800,45 +864,29 @@ func (at *AutoTrader) buildTradingContext() (*decision.Context, error) {
 		})
 	}
 
-	// 清理已平仓的持仓记录
+	// Clean up closed position records
 	for key := range at.positionFirstSeenTime {
 		if !currentPositionKeys[key] {
 			delete(at.positionFirstSeenTime, key)
 		}
 	}
 
-	at.reconcileDealsWithPositions(currentPositionKeys)
-
-	// 3. 获取交易员的候选币种池
-	candidateCoins, err := at.getCandidateCoins()
-	if err != nil {
-		return nil, fmt.Errorf("获取候选币种失败: %w", err)
-	}
-
-	// 🔥 新增: 智能候选币种过滤（AI预算优化）
-	// 如果已经达到最大持仓数量，则不发送候选币种给AI
-	// 只发送持仓信息用于管理决策（平仓、调整止损止盈等）
-	maxPositions := at.config.MaxPositions
-	if maxPositions <= 0 {
-		maxPositions = 3 // 默认最大持仓3个
-	}
-
-	currentPositionCount := len(positionInfos)
-	if currentPositionCount >= maxPositions {
-		log.Printf("⚠️  已达到最大持仓数 (%d/%d)，跳过候选币种分析（AI预算优化）", currentPositionCount, maxPositions)
-		log.Printf("    仅分析现有持仓的管理决策（平仓/止损止盈调整）")
-		// 清空候选币种列表，只分析现有持仓
-		candidateCoins = []decision.CandidateCoin{}
+	// 3. Use strategy engine to get candidate coins (must have strategy engine)
+	var candidateCoins []kernel.CandidateCoin
+	if at.strategyEngine == nil {
+		logger.Infof("⚠️ [%s] No strategy engine configured, skipping candidate coins", at.name)
 	} else {
-		log.Printf("✓ 当前持仓 %d/%d，将分析 %d 个候选币种", currentPositionCount, maxPositions, len(candidateCoins))
+		coins, err := at.strategyEngine.GetCandidateCoins()
+		if err != nil {
+			// Log warning but don't fail - equity snapshot should still be saved
+			logger.Infof("⚠️ [%s] Failed to get candidate coins: %v (will use empty list)", at.name, err)
+		} else {
+			candidateCoins = coins
+			logger.Infof("📋 [%s] Strategy engine fetched candidate coins: %d", at.name, len(candidateCoins))
+		}
 	}
 
-	// 4. 计算总盈亏
-	// 现在可以计算总权益
-	if totalEquity == 0 {
-		totalEquity = availableBalance + totalMarginUsed
-	}
-
+	// 4. Calculate total P&L
 	totalPnL := totalEquity - at.initialBalance
 	totalPnLPct := 0.0
 	if at.initialBalance > 0 {
@@ -850,25 +898,20 @@ func (at *AutoTrader) buildTradingContext() (*decision.Context, error) {
 		marginUsedPct = (totalMarginUsed / totalEquity) * 100
 	}
 
-	// 5. 分析历史表现（最近100个周期，避免长期持仓的交易记录丢失）
-	// 假设每3分钟一个周期，100个周期 = 5小时，足够覆盖大部分交易
-	performance, err := at.decisionLogger.AnalyzePerformance(100)
-	if err != nil {
-		log.Printf("⚠️  分析历史表现失败: %v", err)
-		// 不影响主流程，继续执行（但设置performance为nil以避免传递错误数据）
-		performance = nil
-	}
+	// 5. Get leverage from strategy config
+	strategyConfig := at.strategyEngine.GetConfig()
+	btcEthLeverage := strategyConfig.RiskControl.BTCETHMaxLeverage
+	altcoinLeverage := strategyConfig.RiskControl.AltcoinMaxLeverage
+	logger.Infof("📋 [%s] Strategy leverage config: BTC/ETH=%dx, Altcoin=%dx", at.name, btcEthLeverage, altcoinLeverage)
 
-	// 6. 构建上下文
-	ctx := &decision.Context{
-		CurrentTime:     time.Now().Format("2006-01-02 15:04:05"),
+	// 6. Build context
+	ctx := &kernel.Context{
+		CurrentTime:     time.Now().UTC().Format("2006-01-02 15:04:05 UTC"),
 		RuntimeMinutes:  int(time.Since(at.startTime).Minutes()),
 		CallCount:       at.callCount,
-		BTCETHLeverage:  at.config.BTCETHLeverage,  // 使用配置的杠杆倍数
-		AltcoinLeverage: at.config.AltcoinLeverage, // 使用配置的杠杆倍数
-		MaxPositions:    maxPositions,              // 传递最大持仓数给Context
-		PayloadVersion:  decision.PayloadSchemaVersion,
-		Account: decision.AccountInfo{
+		BTCETHLeverage:  btcEthLeverage,
+		AltcoinLeverage: altcoinLeverage,
+		Account: kernel.AccountInfo{
 			TotalEquity:      totalEquity,
 			AvailableBalance: availableBalance,
 			UnrealizedPnL:    totalUnrealizedProfit,
@@ -880,14 +923,122 @@ func (at *AutoTrader) buildTradingContext() (*decision.Context, error) {
 		},
 		Positions:      positionInfos,
 		CandidateCoins: candidateCoins,
-		Performance:    performance, // 添加历史表现分析
+	}
+
+	// 7. Add recent closed trades (if store is available)
+	if at.store != nil {
+		// Get recent 10 closed trades for AI context
+		recentTrades, err := at.store.Position().GetRecentTrades(at.id, 10)
+		if err != nil {
+			logger.Infof("⚠️ [%s] Failed to get recent trades: %v", at.name, err)
+		} else {
+			logger.Infof("📊 [%s] Found %d recent closed trades for AI context", at.name, len(recentTrades))
+			for _, trade := range recentTrades {
+				// Convert Unix timestamps to formatted strings for AI readability
+				entryTimeStr := ""
+				if trade.EntryTime > 0 {
+					entryTimeStr = time.Unix(trade.EntryTime, 0).UTC().Format("01-02 15:04 UTC")
+				}
+				exitTimeStr := ""
+				if trade.ExitTime > 0 {
+					exitTimeStr = time.Unix(trade.ExitTime, 0).UTC().Format("01-02 15:04 UTC")
+				}
+
+				ctx.RecentOrders = append(ctx.RecentOrders, kernel.RecentOrder{
+					Symbol:       trade.Symbol,
+					Side:         trade.Side,
+					EntryPrice:   trade.EntryPrice,
+					ExitPrice:    trade.ExitPrice,
+					RealizedPnL:  trade.RealizedPnL,
+					PnLPct:       trade.PnLPct,
+					EntryTime:    entryTimeStr,
+					ExitTime:     exitTimeStr,
+					HoldDuration: trade.HoldDuration,
+				})
+			}
+		}
+		// Get trading statistics for AI context
+		stats, err := at.store.Position().GetFullStats(at.id)
+		if err != nil {
+			logger.Infof("⚠️ [%s] Failed to get trading stats: %v", at.name, err)
+		} else if stats == nil {
+			logger.Infof("⚠️ [%s] GetFullStats returned nil", at.name)
+		} else if stats.TotalTrades == 0 {
+			logger.Infof("⚠️ [%s] GetFullStats returned 0 trades (traderID=%s)", at.name, at.id)
+		} else {
+			ctx.TradingStats = &kernel.TradingStats{
+				TotalTrades:    stats.TotalTrades,
+				WinRate:        stats.WinRate,
+				ProfitFactor:   stats.ProfitFactor,
+				SharpeRatio:    stats.SharpeRatio,
+				TotalPnL:       stats.TotalPnL,
+				AvgWin:         stats.AvgWin,
+				AvgLoss:        stats.AvgLoss,
+				MaxDrawdownPct: stats.MaxDrawdownPct,
+			}
+			logger.Infof("📈 [%s] Trading stats: %d trades, %.1f%% win rate, PF=%.2f, Sharpe=%.2f, DD=%.1f%%",
+				at.name, stats.TotalTrades, stats.WinRate, stats.ProfitFactor, stats.SharpeRatio, stats.MaxDrawdownPct)
+		}
+	} else {
+		logger.Infof("⚠️ [%s] Store is nil, cannot get recent trades", at.name)
+	}
+
+	// 8. Get quantitative data (if enabled in strategy config)
+	if strategyConfig.Indicators.EnableQuantData {
+		// Collect symbols to query (candidate coins + position coins)
+		symbolsToQuery := make(map[string]bool)
+		for _, coin := range candidateCoins {
+			symbolsToQuery[coin.Symbol] = true
+		}
+		for _, pos := range positionInfos {
+			symbolsToQuery[pos.Symbol] = true
+		}
+
+		symbols := make([]string, 0, len(symbolsToQuery))
+		for sym := range symbolsToQuery {
+			symbols = append(symbols, sym)
+		}
+
+		logger.Infof("📊 [%s] Fetching quantitative data for %d symbols...", at.name, len(symbols))
+		ctx.QuantDataMap = at.strategyEngine.FetchQuantDataBatch(symbols)
+		logger.Infof("📊 [%s] Successfully fetched quantitative data for %d symbols", at.name, len(ctx.QuantDataMap))
+	}
+
+	// 9. Get OI ranking data (market-wide position changes)
+	if strategyConfig.Indicators.EnableOIRanking {
+		logger.Infof("📊 [%s] Fetching OI ranking data...", at.name)
+		ctx.OIRankingData = at.strategyEngine.FetchOIRankingData()
+		if ctx.OIRankingData != nil {
+			logger.Infof("📊 [%s] OI ranking data ready: %d top, %d low positions",
+				at.name, len(ctx.OIRankingData.TopPositions), len(ctx.OIRankingData.LowPositions))
+		}
+	}
+
+	// 10. Get NetFlow ranking data (market-wide fund flow)
+	if strategyConfig.Indicators.EnableNetFlowRanking {
+		logger.Infof("💰 [%s] Fetching NetFlow ranking data...", at.name)
+		ctx.NetFlowRankingData = at.strategyEngine.FetchNetFlowRankingData()
+		if ctx.NetFlowRankingData != nil {
+			logger.Infof("💰 [%s] NetFlow ranking data ready: inst_in=%d, inst_out=%d",
+				at.name, len(ctx.NetFlowRankingData.InstitutionFutureTop), len(ctx.NetFlowRankingData.InstitutionFutureLow))
+		}
+	}
+
+	// 11. Get Price ranking data (market-wide gainers/losers)
+	if strategyConfig.Indicators.EnablePriceRanking {
+		logger.Infof("📈 [%s] Fetching Price ranking data...", at.name)
+		ctx.PriceRankingData = at.strategyEngine.FetchPriceRankingData()
+		if ctx.PriceRankingData != nil {
+			logger.Infof("📈 [%s] Price ranking data ready for %d durations",
+				at.name, len(ctx.PriceRankingData.Durations))
+		}
 	}
 
 	return ctx, nil
 }
 
-// executeDecisionWithRecord 执行AI决策并记录详细信息
-func (at *AutoTrader) executeDecisionWithRecord(decision *decision.Decision, actionRecord *logger.DecisionAction) error {
+// executeDecisionWithRecord executes AI decision and records detailed information
+func (at *AutoTrader) executeDecisionWithRecord(decision *kernel.Decision, actionRecord *store.DecisionAction) error {
 	switch decision.Action {
 	case "open_long":
 		return at.executeOpenLongWithRecord(decision, actionRecord)
@@ -897,1250 +1048,526 @@ func (at *AutoTrader) executeDecisionWithRecord(decision *decision.Decision, act
 		return at.executeCloseLongWithRecord(decision, actionRecord)
 	case "close_short":
 		return at.executeCloseShortWithRecord(decision, actionRecord)
-	case "update_stop_loss":
-		return at.executeUpdateStopLossWithRecord(decision, actionRecord)
-	case "update_take_profit":
-		return at.executeUpdateTakeProfitWithRecord(decision, actionRecord)
-	case "update_sl_tp":
-		// 组合动作：先更新止损，再更新止盈；两步任一失败则整体失败
-		if err := at.executeUpdateStopLossWithRecord(decision, actionRecord); err != nil {
-			return err
-		}
-		return at.executeUpdateTakeProfitWithRecord(decision, actionRecord)
-	case "partial_close":
-		return at.executePartialCloseWithRecord(decision, actionRecord)
 	case "hold", "wait":
-		// 无需执行，仅记录
+		// No execution needed, just record
 		return nil
 	default:
-		return fmt.Errorf("未知的action: %s", decision.Action)
+		return fmt.Errorf("unknown action: %s", decision.Action)
 	}
 }
 
-// executeOpenLongWithRecord 执行开多仓并记录详细信息
-func (at *AutoTrader) executeOpenLongWithRecord(decision *decision.Decision, actionRecord *logger.DecisionAction) error {
-	log.Printf("  📈 开多仓: %s", decision.Symbol)
+// ExecuteDecision executes a trading decision from external sources (e.g., debate consensus)
+// This is a public method that can be called by other modules
+func (at *AutoTrader) ExecuteDecision(d *kernel.Decision) error {
+	logger.Infof("[%s] Executing external decision: %s %s", at.name, d.Action, d.Symbol)
 
-	// ⚠️ 关键：检查是否已有同币种同方向持仓，如果有则拒绝开仓（防止仓位叠加超限）
+	// Create a minimal action record for tracking
+	actionRecord := &store.DecisionAction{
+		Symbol:     d.Symbol,
+		Action:     d.Action,
+		Leverage:   d.Leverage,
+		StopLoss:   d.StopLoss,
+		TakeProfit: d.TakeProfit,
+		Confidence: d.Confidence,
+		Reasoning:  d.Reasoning,
+	}
+
+	// Execute the decision
+	err := at.executeDecisionWithRecord(d, actionRecord)
+	if err != nil {
+		logger.Errorf("[%s] External decision execution failed: %v", at.name, err)
+		return err
+	}
+
+	logger.Infof("[%s] External decision executed successfully: %s %s", at.name, d.Action, d.Symbol)
+	return nil
+}
+
+// executeOpenLongWithRecord executes open long position and records detailed information
+func (at *AutoTrader) executeOpenLongWithRecord(decision *kernel.Decision, actionRecord *store.DecisionAction) error {
+	logger.Infof("  📈 Open long: %s", decision.Symbol)
+
+	// ⚠️ Get current positions for multiple checks
 	positions, err := at.trader.GetPositions()
-	if err == nil {
-		for _, pos := range positions {
-			if pos["symbol"] == decision.Symbol && pos["side"] == "long" {
-				return fmt.Errorf("❌ %s 已有多仓，拒绝开仓以防止仓位叠加超限。如需换仓，请先给出 close_long 决策", decision.Symbol)
-			}
+	if err != nil {
+		return fmt.Errorf("failed to get positions: %w", err)
+	}
+
+	// [CODE ENFORCED] Check max positions limit
+	if err := at.enforceMaxPositions(len(positions)); err != nil {
+		return err
+	}
+
+	// Check if there's already a position in the same symbol and direction
+	for _, pos := range positions {
+		if pos["symbol"] == decision.Symbol && pos["side"] == "long" {
+			return fmt.Errorf("❌ %s already has long position, close it first", decision.Symbol)
 		}
 	}
 
-	// 获取当前价格
-	marketData, err := market.Get(decision.Symbol)
+	// Get current price
+	marketData, err := market.GetWithExchange(decision.Symbol, at.exchange)
 	if err != nil {
 		return err
 	}
 
-	// 计算数量
-	quantity := decision.PositionSizeUSD / marketData.CurrentPrice
-	actionRecord.Quantity = quantity
-	actionRecord.Price = marketData.CurrentPrice
-	dbSymbol := normalizeDealSymbol(decision.Symbol)
-
-	// ⚠️ 保证金验证：防止保证金不足错误（code=-2019）
-	requiredMargin := decision.PositionSizeUSD / float64(decision.Leverage)
-
+	// Get balance (needed for multiple checks)
 	balance, err := at.trader.GetBalance()
 	if err != nil {
-		return fmt.Errorf("获取账户余额失败: %w", err)
+		return fmt.Errorf("failed to get account balance: %w", err)
 	}
 	availableBalance := 0.0
 	if avail, ok := balance["availableBalance"].(float64); ok {
 		availableBalance = avail
 	}
 
-	// 手续费估算（Taker费率 0.04%）
-	estimatedFee := decision.PositionSizeUSD * 0.0004
-	totalRequired := requiredMargin + estimatedFee
-
-	if totalRequired > availableBalance {
-		return fmt.Errorf("❌ 保证金不足: 需要 %.2f USDT（保证金 %.2f + 手续费 %.2f），可用 %.2f USDT",
-			totalRequired, requiredMargin, estimatedFee, availableBalance)
+	// Get equity for position value ratio check
+	equity := 0.0
+	if eq, ok := balance["totalEquity"].(float64); ok && eq > 0 {
+		equity = eq
+	} else if eq, ok := balance["totalWalletBalance"].(float64); ok && eq > 0 {
+		equity = eq
+	} else {
+		equity = availableBalance // Fallback to available balance
 	}
 
-	// 设置仓位模式
+	// [CODE ENFORCED] Position Value Ratio Check: position_value <= equity × ratio
+	adjustedPositionSize, wasCapped := at.enforcePositionValueRatio(decision.PositionSizeUSD, equity, decision.Symbol)
+	if wasCapped {
+		decision.PositionSizeUSD = adjustedPositionSize
+	}
+
+	// ⚠️ Auto-adjust position size if insufficient margin
+	// Formula: totalRequired = positionSize/leverage + positionSize*0.001 + positionSize/leverage*0.01
+	//        = positionSize * (1.01/leverage + 0.001)
+	marginFactor := 1.01/float64(decision.Leverage) + 0.001
+	maxAffordablePositionSize := availableBalance / marginFactor
+
+	actualPositionSize := decision.PositionSizeUSD
+	if actualPositionSize > maxAffordablePositionSize {
+		// Use 98% of max to leave buffer for price fluctuation
+		adjustedSize := maxAffordablePositionSize * 0.98
+		logger.Infof("  ⚠️ Position size %.2f exceeds max affordable %.2f, auto-reducing to %.2f",
+			actualPositionSize, maxAffordablePositionSize, adjustedSize)
+		actualPositionSize = adjustedSize
+		decision.PositionSizeUSD = actualPositionSize
+	}
+
+	// [CODE ENFORCED] Minimum position size check
+	if err := at.enforceMinPositionSize(decision.PositionSizeUSD); err != nil {
+		return err
+	}
+
+	// Calculate quantity with adjusted position size
+	quantity := actualPositionSize / marketData.CurrentPrice
+	actionRecord.Quantity = quantity
+	actionRecord.Price = marketData.CurrentPrice
+
+	// Set margin mode
 	if err := at.trader.SetMarginMode(decision.Symbol, at.config.IsCrossMargin); err != nil {
-		log.Printf("  ⚠️ 设置仓位模式失败: %v", err)
-		// 继续执行，不影响交易
+		logger.Infof("  ⚠️ Failed to set margin mode: %v", err)
+		// Continue execution, doesn't affect trading
 	}
 
-	// 开仓
+	// Open position
 	order, err := at.trader.OpenLong(decision.Symbol, quantity, decision.Leverage)
 	if err != nil {
 		return err
 	}
 
-	filledQty := quantity
-	if v, ok := orderFloatValue(order, "filledSize"); ok && v > 0 {
-		filledQty = v
-	}
-	fillPrice := marketData.CurrentPrice
-	if v, ok := orderFloatValue(order, "avgPrice"); ok && v > 0 {
-		fillPrice = v
-	}
-	actionRecord.Quantity = filledQty
-	actionRecord.Price = fillPrice
-
-	// 记录订单ID
-	if orderID, ok := orderInt64Value(order, "orderId"); ok {
+	// Record order ID
+	if orderID, ok := order["orderId"].(int64); ok {
 		actionRecord.OrderID = orderID
 	}
 
-	log.Printf("  ✓ 开仓成功，订单ID: %v, 数量: %.4f (成交: %.4f @ %.4f)", order["orderId"], quantity, filledQty, fillPrice)
+	logger.Infof("  ✓ Position opened successfully, order ID: %v, quantity: %.4f", order["orderId"], quantity)
 
-	// 记录开仓时间
-	posKey := makePositionKey(decision.Symbol, "long")
+	// Record order to database and poll for confirmation
+	at.recordAndConfirmOrder(order, decision.Symbol, "open_long", quantity, marketData.CurrentPrice, decision.Leverage, 0)
+
+	// Record position opening time
+	posKey := decision.Symbol + "_long"
 	at.positionFirstSeenTime[posKey] = time.Now().UnixMilli()
 
-	// 设置止损止盈
+	// Set stop loss and take profit
 	if err := at.trader.SetStopLoss(decision.Symbol, "LONG", quantity, decision.StopLoss); err != nil {
-		log.Printf("  ⚠ 设置止损失败: %v", err)
+		logger.Infof("  ⚠ Failed to set stop loss: %v", err)
 	}
 	if err := at.trader.SetTakeProfit(decision.Symbol, "LONG", quantity, decision.TakeProfit); err != nil {
-		log.Printf("  ⚠ 设置止盈失败: %v", err)
-	}
-
-	// 持久化到数据库（deals）
-	if at.database != nil {
-		if db, ok := at.database.(interface {
-			CreateDeal(deal *config.DealRecord) (int64, error)
-		}); ok {
-			marketCtx := map[string]interface{}{
-				"symbol":          marketData.Symbol,
-				"current_price":   marketData.CurrentPrice,
-				"price_change_1h": marketData.PriceChange1h,
-				"price_change_4h": marketData.PriceChange4h,
-				"ema20":           marketData.CurrentEMA20,
-				"macd":            marketData.CurrentMACD,
-				"rsi7":            marketData.CurrentRSI7,
-				"funding_rate":    marketData.FundingRate,
-			}
-			if marketData.OpenInterest != nil {
-				marketCtx["oi_latest"] = marketData.OpenInterest.Latest
-				marketCtx["oi_average"] = marketData.OpenInterest.Average
-			}
-			ctxJSON, _ := json.Marshal(marketCtx)
-			openOrderID := fmt.Sprintf("%v", order["orderId"])
-			deal := &config.DealRecord{
-				UserID:            at.userID,
-				TraderID:          at.id,
-				Exchange:          at.exchange,
-				Symbol:            dbSymbol,
-				Side:              "long",
-				Leverage:          decision.Leverage,
-				PositionSizeUSD:   decision.PositionSizeUSD,
-				Quantity:          filledQty,
-				OpenPrice:         fillPrice,
-				OpenTime:          time.Now(),
-				OpenOrderID:       openOrderID,
-				SystemPrompt:      at.lastSystemPrompt,
-				UserPrompt:        at.lastUserPrompt,
-				Reasoning:         decision.Reasoning,
-				CoTTrace:          at.lastCoTTrace,
-				DecisionJSON:      at.lastDecisionJSON,
-				MarketContextJSON: string(ctxJSON),
-				StopLoss:          decision.StopLoss,
-				TakeProfit:        decision.TakeProfit,
-			}
-			if id, err := db.CreateDeal(deal); err != nil {
-				log.Printf("  ⚠️ 记录交易(deal)失败: %v", err)
-			} else {
-				at.openDealIDs[posKey] = id
-				log.Printf("  📝 已保存交易记录到数据库 (deal_id=%d)", id)
-				// 记录事件: open
-				if dbEvt, ok := at.database.(interface {
-					CreateDealEvent(event *config.DealEvent) error
-				}); ok {
-					_ = dbEvt.CreateDealEvent(&config.DealEvent{
-						UserID: at.userID, TraderID: at.id, DealID: id, Type: "open",
-						Symbol: dbSymbol, Side: "long", Quantity: filledQty, Price: fillPrice, OrderID: openOrderID,
-					})
-				}
-			}
-		}
+		logger.Infof("  ⚠ Failed to set take profit: %v", err)
 	}
 
 	return nil
 }
 
-// executeOpenShortWithRecord 执行开空仓并记录详细信息
-func (at *AutoTrader) executeOpenShortWithRecord(decision *decision.Decision, actionRecord *logger.DecisionAction) error {
-	log.Printf("  📉 开空仓: %s", decision.Symbol)
+// executeOpenShortWithRecord executes open short position and records detailed information
+func (at *AutoTrader) executeOpenShortWithRecord(decision *kernel.Decision, actionRecord *store.DecisionAction) error {
+	logger.Infof("  📉 Open short: %s", decision.Symbol)
 
-	// ⚠️ 关键：检查是否已有同币种同方向持仓，如果有则拒绝开仓（防止仓位叠加超限）
+	// ⚠️ Get current positions for multiple checks
 	positions, err := at.trader.GetPositions()
-	if err == nil {
-		for _, pos := range positions {
-			if pos["symbol"] == decision.Symbol && pos["side"] == "short" {
-				return fmt.Errorf("❌ %s 已有空仓，拒绝开仓以防止仓位叠加超限。如需换仓，请先给出 close_short 决策", decision.Symbol)
-			}
+	if err != nil {
+		return fmt.Errorf("failed to get positions: %w", err)
+	}
+
+	// [CODE ENFORCED] Check max positions limit
+	if err := at.enforceMaxPositions(len(positions)); err != nil {
+		return err
+	}
+
+	// Check if there's already a position in the same symbol and direction
+	for _, pos := range positions {
+		if pos["symbol"] == decision.Symbol && pos["side"] == "short" {
+			return fmt.Errorf("❌ %s already has short position, close it first", decision.Symbol)
 		}
 	}
 
-	// 获取当前价格
-	marketData, err := market.Get(decision.Symbol)
+	// Get current price
+	marketData, err := market.GetWithExchange(decision.Symbol, at.exchange)
 	if err != nil {
 		return err
 	}
 
-	// 计算数量
-	quantity := decision.PositionSizeUSD / marketData.CurrentPrice
-	actionRecord.Quantity = quantity
-	actionRecord.Price = marketData.CurrentPrice
-	dbSymbol := normalizeDealSymbol(decision.Symbol)
-
-	// ⚠️ 保证金验证：防止保证金不足错误（code=-2019）
-	requiredMargin := decision.PositionSizeUSD / float64(decision.Leverage)
-
+	// Get balance (needed for multiple checks)
 	balance, err := at.trader.GetBalance()
 	if err != nil {
-		return fmt.Errorf("获取账户余额失败: %w", err)
+		return fmt.Errorf("failed to get account balance: %w", err)
 	}
 	availableBalance := 0.0
 	if avail, ok := balance["availableBalance"].(float64); ok {
 		availableBalance = avail
 	}
 
-	// 手续费估算（Taker费率 0.04%）
-	estimatedFee := decision.PositionSizeUSD * 0.0004
-	totalRequired := requiredMargin + estimatedFee
-
-	if totalRequired > availableBalance {
-		return fmt.Errorf("❌ 保证金不足: 需要 %.2f USDT（保证金 %.2f + 手续费 %.2f），可用 %.2f USDT",
-			totalRequired, requiredMargin, estimatedFee, availableBalance)
+	// Get equity for position value ratio check
+	equity := 0.0
+	if eq, ok := balance["totalEquity"].(float64); ok && eq > 0 {
+		equity = eq
+	} else if eq, ok := balance["totalWalletBalance"].(float64); ok && eq > 0 {
+		equity = eq
+	} else {
+		equity = availableBalance // Fallback to available balance
 	}
 
-	// 设置仓位模式
+	// [CODE ENFORCED] Position Value Ratio Check: position_value <= equity × ratio
+	adjustedPositionSize, wasCapped := at.enforcePositionValueRatio(decision.PositionSizeUSD, equity, decision.Symbol)
+	if wasCapped {
+		decision.PositionSizeUSD = adjustedPositionSize
+	}
+
+	// ⚠️ Auto-adjust position size if insufficient margin
+	// Formula: totalRequired = positionSize/leverage + positionSize*0.001 + positionSize/leverage*0.01
+	//        = positionSize * (1.01/leverage + 0.001)
+	marginFactor := 1.01/float64(decision.Leverage) + 0.001
+	maxAffordablePositionSize := availableBalance / marginFactor
+
+	actualPositionSize := decision.PositionSizeUSD
+	if actualPositionSize > maxAffordablePositionSize {
+		// Use 98% of max to leave buffer for price fluctuation
+		adjustedSize := maxAffordablePositionSize * 0.98
+		logger.Infof("  ⚠️ Position size %.2f exceeds max affordable %.2f, auto-reducing to %.2f",
+			actualPositionSize, maxAffordablePositionSize, adjustedSize)
+		actualPositionSize = adjustedSize
+		decision.PositionSizeUSD = actualPositionSize
+	}
+
+	// [CODE ENFORCED] Minimum position size check
+	if err := at.enforceMinPositionSize(decision.PositionSizeUSD); err != nil {
+		return err
+	}
+
+	// Calculate quantity with adjusted position size
+	quantity := actualPositionSize / marketData.CurrentPrice
+	actionRecord.Quantity = quantity
+	actionRecord.Price = marketData.CurrentPrice
+
+	// Set margin mode
 	if err := at.trader.SetMarginMode(decision.Symbol, at.config.IsCrossMargin); err != nil {
-		log.Printf("  ⚠️ 设置仓位模式失败: %v", err)
-		// 继续执行，不影响交易
+		logger.Infof("  ⚠️ Failed to set margin mode: %v", err)
+		// Continue execution, doesn't affect trading
 	}
 
-	// 开仓
+	// Open position
 	order, err := at.trader.OpenShort(decision.Symbol, quantity, decision.Leverage)
 	if err != nil {
 		return err
 	}
 
-	filledQty := quantity
-	if v, ok := orderFloatValue(order, "filledSize"); ok && v > 0 {
-		filledQty = v
-	}
-	fillPrice := marketData.CurrentPrice
-	if v, ok := orderFloatValue(order, "avgPrice"); ok && v > 0 {
-		fillPrice = v
-	}
-	actionRecord.Quantity = filledQty
-	actionRecord.Price = fillPrice
-
-	// 记录订单ID
-	if orderID, ok := orderInt64Value(order, "orderId"); ok {
+	// Record order ID
+	if orderID, ok := order["orderId"].(int64); ok {
 		actionRecord.OrderID = orderID
 	}
 
-	log.Printf("  ✓ 开仓成功，订单ID: %v, 数量: %.4f (成交: %.4f @ %.4f)", order["orderId"], quantity, filledQty, fillPrice)
+	logger.Infof("  ✓ Position opened successfully, order ID: %v, quantity: %.4f", order["orderId"], quantity)
 
-	// 记录开仓时间
-	posKey := makePositionKey(decision.Symbol, "short")
+	// Record order to database and poll for confirmation
+	at.recordAndConfirmOrder(order, decision.Symbol, "open_short", quantity, marketData.CurrentPrice, decision.Leverage, 0)
+
+	// Record position opening time
+	posKey := decision.Symbol + "_short"
 	at.positionFirstSeenTime[posKey] = time.Now().UnixMilli()
 
-	// 设置止损止盈
+	// Set stop loss and take profit
 	if err := at.trader.SetStopLoss(decision.Symbol, "SHORT", quantity, decision.StopLoss); err != nil {
-		log.Printf("  ⚠ 设置止损失败: %v", err)
+		logger.Infof("  ⚠ Failed to set stop loss: %v", err)
 	}
 	if err := at.trader.SetTakeProfit(decision.Symbol, "SHORT", quantity, decision.TakeProfit); err != nil {
-		log.Printf("  ⚠ 设置止盈失败: %v", err)
-	}
-
-	// 持久化到数据库（deals）
-	if at.database != nil {
-		if db, ok := at.database.(interface {
-			CreateDeal(deal *config.DealRecord) (int64, error)
-		}); ok {
-			marketCtx := map[string]interface{}{
-				"symbol":          marketData.Symbol,
-				"current_price":   marketData.CurrentPrice,
-				"price_change_1h": marketData.PriceChange1h,
-				"price_change_4h": marketData.PriceChange4h,
-				"ema20":           marketData.CurrentEMA20,
-				"macd":            marketData.CurrentMACD,
-				"rsi7":            marketData.CurrentRSI7,
-				"funding_rate":    marketData.FundingRate,
-			}
-			if marketData.OpenInterest != nil {
-				marketCtx["oi_latest"] = marketData.OpenInterest.Latest
-				marketCtx["oi_average"] = marketData.OpenInterest.Average
-			}
-			ctxJSON, _ := json.Marshal(marketCtx)
-			openOrderID := fmt.Sprintf("%v", order["orderId"])
-			deal := &config.DealRecord{
-				UserID:            at.userID,
-				TraderID:          at.id,
-				Exchange:          at.exchange,
-				Symbol:            dbSymbol,
-				Side:              "short",
-				Leverage:          decision.Leverage,
-				PositionSizeUSD:   decision.PositionSizeUSD,
-				Quantity:          filledQty,
-				OpenPrice:         fillPrice,
-				OpenTime:          time.Now(),
-				OpenOrderID:       openOrderID,
-				SystemPrompt:      at.lastSystemPrompt,
-				UserPrompt:        at.lastUserPrompt,
-				Reasoning:         decision.Reasoning,
-				CoTTrace:          at.lastCoTTrace,
-				DecisionJSON:      at.lastDecisionJSON,
-				MarketContextJSON: string(ctxJSON),
-				StopLoss:          decision.StopLoss,
-				TakeProfit:        decision.TakeProfit,
-			}
-			if id, err := db.CreateDeal(deal); err != nil {
-				log.Printf("  ⚠️ 记录交易(deal)失败: %v", err)
-			} else {
-				posKey := makePositionKey(decision.Symbol, "short")
-				at.openDealIDs[posKey] = id
-				log.Printf("  📝 已保存交易记录到数据库 (deal_id=%d)", id)
-				// 记录事件: open
-				if dbEvt, ok := at.database.(interface {
-					CreateDealEvent(event *config.DealEvent) error
-				}); ok {
-					_ = dbEvt.CreateDealEvent(&config.DealEvent{
-						UserID: at.userID, TraderID: at.id, DealID: id, Type: "open",
-						Symbol: dbSymbol, Side: "short", Quantity: filledQty, Price: fillPrice, OrderID: openOrderID,
-					})
-				}
-			}
-		}
+		logger.Infof("  ⚠ Failed to set take profit: %v", err)
 	}
 
 	return nil
 }
 
-// executeCloseLongWithRecord 执行平多仓并记录详细信息
-func (at *AutoTrader) executeCloseLongWithRecord(decision *decision.Decision, actionRecord *logger.DecisionAction) error {
-	log.Printf("  🔄 平多仓: %s", decision.Symbol)
+// executeCloseLongWithRecord executes close long position and records detailed information
+func (at *AutoTrader) executeCloseLongWithRecord(decision *kernel.Decision, actionRecord *store.DecisionAction) error {
+	logger.Infof("  🔄 Close long: %s", decision.Symbol)
 
-	// 获取当前价格
-	marketData, err := market.Get(decision.Symbol)
+	// Get current price
+	marketData, err := market.GetWithExchange(decision.Symbol, at.exchange)
 	if err != nil {
 		return err
 	}
 	actionRecord.Price = marketData.CurrentPrice
 
-	// 平仓
-	order, err := at.trader.CloseLong(decision.Symbol, 0) // 0 = 全部平仓
+	// Normalize symbol for database lookup
+	normalizedSymbol := market.Normalize(decision.Symbol)
+
+	// Get entry price and quantity - prioritize local database for accurate quantity
+	var entryPrice float64
+	var quantity float64
+
+	// First try to get from local database (more accurate for quantity)
+	if at.store != nil {
+		if openPos, err := at.store.Position().GetOpenPositionBySymbol(at.id, normalizedSymbol, "LONG"); err == nil && openPos != nil {
+			quantity = openPos.Quantity
+			entryPrice = openPos.EntryPrice
+			logger.Infof("  📊 Using local position data: qty=%.8f, entry=%.2f", quantity, entryPrice)
+		}
+	}
+
+	// Fallback to exchange API if local data not found
+	if quantity == 0 {
+		positions, err := at.trader.GetPositions()
+		if err == nil {
+			for _, pos := range positions {
+				if pos["symbol"] == decision.Symbol && pos["side"] == "long" {
+					if ep, ok := pos["entryPrice"].(float64); ok {
+						entryPrice = ep
+					}
+					if amt, ok := pos["positionAmt"].(float64); ok && amt > 0 {
+						quantity = amt
+					}
+					break
+				}
+			}
+		}
+		logger.Infof("  📊 Using exchange position data: qty=%.8f, entry=%.2f", quantity, entryPrice)
+	}
+
+	// Close position
+	order, err := at.trader.CloseLong(decision.Symbol, 0) // 0 = close all
 	if err != nil {
 		return err
 	}
 
-	fillPrice := marketData.CurrentPrice
-	if v, ok := orderFloatValue(order, "avgPrice"); ok && v > 0 {
-		fillPrice = v
-	}
-	actionRecord.Price = fillPrice
-
-	// 记录订单ID
-	if orderID, ok := orderInt64Value(order, "orderId"); ok {
+	// Record order ID
+	if orderID, ok := order["orderId"].(int64); ok {
 		actionRecord.OrderID = orderID
 	}
 
-	log.Printf("  ✓ 平仓成功")
-	at.closeDealInternal(decision.Symbol, "long", fillPrice, fmt.Sprintf("%v", order["orderId"]), false, "ai_close_long")
+	// Record order to database and poll for confirmation
+	at.recordAndConfirmOrder(order, decision.Symbol, "close_long", quantity, marketData.CurrentPrice, 0, entryPrice)
 
-	// Cleanup Trailing-Stop-State
-	posKey := makePositionKey(decision.Symbol, "long")
-	at.trailingStopMutex.Lock()
-	delete(at.trailingStopManaged, posKey)
-	delete(at.trailingStopLastUpdate, posKey)
-	at.trailingStopMutex.Unlock()
-
+	logger.Infof("  ✓ Position closed successfully")
 	return nil
 }
 
-func (at *AutoTrader) executeCloseShortWithRecord(decision *decision.Decision, actionRecord *logger.DecisionAction) error {
-	log.Printf("  🔄 平空仓: %s", decision.Symbol)
+// executeCloseShortWithRecord executes close short position and records detailed information
+func (at *AutoTrader) executeCloseShortWithRecord(decision *kernel.Decision, actionRecord *store.DecisionAction) error {
+	logger.Infof("  🔄 Close short: %s", decision.Symbol)
 
-	// 获取当前价格
-	marketData, err := market.Get(decision.Symbol)
+	// Get current price
+	marketData, err := market.GetWithExchange(decision.Symbol, at.exchange)
 	if err != nil {
 		return err
 	}
 	actionRecord.Price = marketData.CurrentPrice
 
-	// 平仓
-	order, err := at.trader.CloseShort(decision.Symbol, 0) // 0 = 全部平仓
+	// Normalize symbol for database lookup
+	normalizedSymbol := market.Normalize(decision.Symbol)
+
+	// Get entry price and quantity - prioritize local database for accurate quantity
+	var entryPrice float64
+	var quantity float64
+
+	// First try to get from local database (more accurate for quantity)
+	if at.store != nil {
+		if openPos, err := at.store.Position().GetOpenPositionBySymbol(at.id, normalizedSymbol, "SHORT"); err == nil && openPos != nil {
+			quantity = openPos.Quantity
+			entryPrice = openPos.EntryPrice
+			logger.Infof("  📊 Using local position data: qty=%.8f, entry=%.2f", quantity, entryPrice)
+		}
+	}
+
+	// Fallback to exchange API if local data not found
+	if quantity == 0 {
+		positions, err := at.trader.GetPositions()
+		if err == nil {
+			for _, pos := range positions {
+				if pos["symbol"] == decision.Symbol && pos["side"] == "short" {
+					if ep, ok := pos["entryPrice"].(float64); ok {
+						entryPrice = ep
+					}
+					if amt, ok := pos["positionAmt"].(float64); ok {
+						quantity = -amt // positionAmt is negative for short
+					}
+					break
+				}
+			}
+		}
+		logger.Infof("  📊 Using exchange position data: qty=%.8f, entry=%.2f", quantity, entryPrice)
+	}
+
+	// Close position
+	order, err := at.trader.CloseShort(decision.Symbol, 0) // 0 = close all
 	if err != nil {
 		return err
 	}
 
-	fillPrice := marketData.CurrentPrice
-	if v, ok := orderFloatValue(order, "avgPrice"); ok && v > 0 {
-		fillPrice = v
-	}
-	actionRecord.Price = fillPrice
-
-	// 记录订单ID
-	if orderID, ok := orderInt64Value(order, "orderId"); ok {
+	// Record order ID
+	if orderID, ok := order["orderId"].(int64); ok {
 		actionRecord.OrderID = orderID
 	}
 
-	log.Printf("  ✓ 平仓成功")
-	at.closeDealInternal(decision.Symbol, "short", fillPrice, fmt.Sprintf("%v", order["orderId"]), false, "ai_close_short")
+	// Record order to database and poll for confirmation
+	at.recordAndConfirmOrder(order, decision.Symbol, "close_short", quantity, marketData.CurrentPrice, 0, entryPrice)
 
-	// Cleanup Trailing-Stop-State
-	posKey := makePositionKey(decision.Symbol, "short")
-	at.trailingStopMutex.Lock()
-	delete(at.trailingStopManaged, posKey)
-	delete(at.trailingStopLastUpdate, posKey)
-	at.trailingStopMutex.Unlock()
-
+	logger.Infof("  ✓ Position closed successfully")
 	return nil
 }
 
-func (at *AutoTrader) executeUpdateStopLossWithRecord(decision *decision.Decision, actionRecord *logger.DecisionAction) error {
-	log.Printf("  🎯 调整止损: %s → %.2f", decision.Symbol, decision.NewStopLoss)
-
-	// 获取当前价格
-	marketData, err := market.Get(decision.Symbol)
-	if err != nil {
-		return err
-	}
-	actionRecord.Price = marketData.CurrentPrice
-
-	// 获取当前持仓
-	positions, err := at.trader.GetPositions()
-	if err != nil {
-		return fmt.Errorf("获取持仓失败: %w", err)
-	}
-
-	// 查找目标持仓
-	var targetPosition map[string]interface{}
-	for _, pos := range positions {
-		symbol, _ := pos["symbol"].(string)
-		posAmt, _ := pos["positionAmt"].(float64)
-		if symbol == decision.Symbol && posAmt != 0 {
-			targetPosition = pos
-			break
-		}
-	}
-
-	if targetPosition == nil {
-		return fmt.Errorf("持仓不存在: %s", decision.Symbol)
-	}
-
-	// 获取持仓方向和数量
-	side, _ := targetPosition["side"].(string)
-	positionSide := strings.ToUpper(side)
-	normalizedSymbol := normalizeDealSymbol(decision.Symbol)
-	positionAmt, _ := targetPosition["positionAmt"].(float64)
-	entryPrice, _ := targetPosition["entryPrice"].(float64)
-	leverage := 10.0
-	if lev, ok := targetPosition["leverage"].(float64); ok && lev > 0 {
-		leverage = lev
-	}
-
-	// 验证新止损价格合理性
-	if positionSide == "LONG" && decision.NewStopLoss >= marketData.CurrentPrice {
-		return fmt.Errorf("多单止损必须低于当前价格 (当前: %.2f, 新止损: %.2f)", marketData.CurrentPrice, decision.NewStopLoss)
-	}
-	if positionSide == "SHORT" && decision.NewStopLoss <= marketData.CurrentPrice {
-		return fmt.Errorf("空单止损必须高于当前价格 (当前: %.2f, 新止损: %.2f)", marketData.CurrentPrice, decision.NewStopLoss)
-	}
-
-	// ⚠️ 防御性检查：检测是否存在双向持仓（不应该出现，但提供保护）
-	var hasOppositePosition bool
-	oppositeSide := ""
-	for _, pos := range positions {
-		symbol, _ := pos["symbol"].(string)
-		posSide, _ := pos["side"].(string)
-		posAmt, _ := pos["positionAmt"].(float64)
-		if symbol == decision.Symbol && posAmt != 0 && strings.ToUpper(posSide) != positionSide {
-			hasOppositePosition = true
-			oppositeSide = strings.ToUpper(posSide)
-			break
-		}
-	}
-
-	if hasOppositePosition {
-		log.Printf("  🚨 警告：检测到 %s 存在双向持仓（%s + %s），这违反了策略规则",
-			decision.Symbol, positionSide, oppositeSide)
-		log.Printf("  🚨 取消止损单将影响两个方向的订单，请检查是否为用户手动操作导致")
-		log.Printf("  🚨 建议：手动平掉其中一个方向的持仓，或检查系统是否有BUG")
-	}
-
-	// 当追踪止损已触发（达到档位1或已有自动止损）时，禁止AI再调整止损，避免抢占管理权
-	if at.trailingStopConfig.Enabled {
-		currentPrice := marketData.CurrentPrice
-		profitPct := 0.0
-		if entryPrice > 0 {
-			if positionSide == "LONG" {
-				profitPct = ((currentPrice - entryPrice) / entryPrice) * leverage * 100
-			} else {
-				profitPct = ((entryPrice - currentPrice) / entryPrice) * leverage * 100
-			}
-		}
-
-		firstTierThreshold := 0.0
-		if len(at.trailingStopConfig.Tiers) > 0 {
-			firstTierThreshold = at.trailingStopConfig.Tiers[0].ProfitThreshold
-		}
-
-		posKey := makePositionKey(decision.Symbol, side)
-		at.trailingStopMutex.RLock()
-		activeTierIdx, hasTier := at.trailingStopActiveTier[posKey]
-		_, hasLastStop := at.trailingStopLastUpdate[posKey]
-		at.trailingStopMutex.RUnlock()
-
-		autoTrailingActive := (hasTier && activeTierIdx >= 0) || hasLastStop
-		firstTierReached := firstTierThreshold > 0 && profitPct >= firstTierThreshold
-
-		if !at.trailingStopConfig.AllowAIOverride || autoTrailingActive || firstTierReached {
-			log.Printf("  🚫 [AI·跳过止损] %s %s 已由追踪止损管理（当前收益: %.2f%%, 档位1阈值: %.2f%%，auto=%v）",
-				normalizedSymbol, side, profitPct, firstTierThreshold, autoTrailingActive)
-			return fmt.Errorf("自动追踪已接管止损（利润%.2f%%，阈值%.2f%%）", profitPct, firstTierThreshold)
-		}
-	}
-
-	// 取消旧的止损单（只删除止损单，不影响止盈单）
-	// 注意：如果存在双向持仓，这会删除两个方向的止损单
-	if err := at.trader.CancelStopLossOrders(decision.Symbol); err != nil {
-		log.Printf("  ⚠ 取消旧止损单失败: %v", err)
-		// 不中断执行，继续设置新止损
-	}
-
-	// 调用交易所 API 修改止损
-	quantity := math.Abs(positionAmt)
-	err = at.trader.SetStopLoss(decision.Symbol, positionSide, quantity, decision.NewStopLoss)
-	if err != nil {
-		return fmt.Errorf("修改止损失败: %w", err)
-	}
-
-	log.Printf("  ✓ 止损已调整: %.2f (当前价格: %.2f)", decision.NewStopLoss, marketData.CurrentPrice)
-
-	// 检查是否允许AI覆盖自动追踪止损
-	if at.trailingStopConfig.Enabled && !at.trailingStopConfig.AllowAIOverride {
-		log.Printf("  🚫 [AI·跳过止损] %s %s 正由自动追踪系统管理（TRAILING_STOP_ALLOW_AI_OVERRIDE=false）", normalizedSymbol, side)
-		log.Printf("  🚫 AI决策已忽略，自动追踪将继续按配置工作")
-
-		// 回滚：恢复旧的止损单（因为我们已经取消了）
-		// 使用追踪系统记录的最后一次止损价格
-		posKey := makePositionKey(decision.Symbol, side)
-		at.trailingStopMutex.RLock()
-		lastStopPrice, hasLastPrice := at.trailingStopLastUpdate[posKey]
-		at.trailingStopMutex.RUnlock()
-
-		if hasLastPrice && lastStopPrice > 0 {
-			// 恢复旧的止损
-			log.Printf("  🔄 [恢复止损] 恢复自动追踪止损价格: %.4f", lastStopPrice)
-			if err := at.trader.SetStopLoss(decision.Symbol, positionSide, quantity, lastStopPrice); err != nil {
-				log.Printf("  ⚠️ [恢复失败] 无法恢复止损单: %v", err)
-			}
-		}
-
-		return fmt.Errorf("AI止损更新已拒绝：自动追踪系统正在管理此持仓")
-	}
-
-	// 标记为AI管理（如果允许AI覆盖）
-	if at.trailingStopConfig.Enabled && at.trailingStopConfig.AllowAIOverride {
-		posKey := makePositionKey(decision.Symbol, side)
-		at.trailingStopMutex.Lock()
-		at.trailingStopManaged[posKey] = true
-		at.trailingStopLastUpdate[posKey] = decision.NewStopLoss
-		at.trailingStopMutex.Unlock()
-		log.Printf("  🤖 [AI接管] %s %s 的止损管理已由AI接管", normalizedSymbol, side)
-	}
-
-	// 更新数据库止损
-	if at.database != nil {
-		// symbol_side -> id
-		posKey := makePositionKey(decision.Symbol, positionSide)
-		dealID, has := at.openDealIDs[posKey]
-		if !has {
-			if dbFind, ok := at.database.(interface {
-				FindOpenDeal(userID, traderID, symbol, side string) (*config.DealRecord, error)
-			}); ok {
-				if rec, err := dbFind.FindOpenDeal(at.userID, at.id, normalizedSymbol, strings.ToLower(positionSide)); err == nil && rec != nil {
-					dealID = rec.ID
-				}
-			}
-		}
-		if dealID != 0 {
-			if dbUpd, ok := at.database.(interface {
-				UpdateDealStopLoss(userID, traderID string, id int64, stopLoss float64) error
-			}); ok {
-				_ = dbUpd.UpdateDealStopLoss(at.userID, at.id, dealID, decision.NewStopLoss)
-			}
-			if dbEvt, ok := at.database.(interface {
-				CreateDealEvent(event *config.DealEvent) error
-			}); ok {
-				_ = dbEvt.CreateDealEvent(&config.DealEvent{UserID: at.userID, TraderID: at.id, DealID: dealID, Type: "update_stop_loss", Symbol: normalizedSymbol, Side: strings.ToLower(positionSide), Price: decision.NewStopLoss})
-			}
-		}
-	}
-	return nil
-}
-
-// executeUpdateTakeProfitWithRecord 执行调整止盈并记录详细信息
-func (at *AutoTrader) executeUpdateTakeProfitWithRecord(decision *decision.Decision, actionRecord *logger.DecisionAction) error {
-	log.Printf("  🎯 调整止盈: %s → %.2f", decision.Symbol, decision.NewTakeProfit)
-
-	// 获取当前价格
-	marketData, err := market.Get(decision.Symbol)
-	if err != nil {
-		return err
-	}
-	actionRecord.Price = marketData.CurrentPrice
-
-	// 获取当前持仓
-	positions, err := at.trader.GetPositions()
-	if err != nil {
-		return fmt.Errorf("获取持仓失败: %w", err)
-	}
-
-	// 查找目标持仓
-	var targetPosition map[string]interface{}
-	for _, pos := range positions {
-		symbol, _ := pos["symbol"].(string)
-		posAmt, _ := pos["positionAmt"].(float64)
-		if symbol == decision.Symbol && posAmt != 0 {
-			targetPosition = pos
-			break
-		}
-	}
-
-	if targetPosition == nil {
-		return fmt.Errorf("持仓不存在: %s", decision.Symbol)
-	}
-
-	// 获取持仓方向和数量
-	side, _ := targetPosition["side"].(string)
-	positionSide := strings.ToUpper(side)
-	normalizedSymbol := normalizeDealSymbol(decision.Symbol)
-	positionAmt, _ := targetPosition["positionAmt"].(float64)
-
-	// 验证新止盈价格合理性
-	if positionSide == "LONG" && decision.NewTakeProfit <= marketData.CurrentPrice {
-		return fmt.Errorf("多单止盈必须高于当前价格 (当前: %.2f, 新止盈: %.2f)", marketData.CurrentPrice, decision.NewTakeProfit)
-	}
-	if positionSide == "SHORT" && decision.NewTakeProfit >= marketData.CurrentPrice {
-		return fmt.Errorf("空单止盈必须低于当前价格 (当前: %.2f, 新止盈: %.2f)", marketData.CurrentPrice, decision.NewTakeProfit)
-	}
-
-	// ⚠️ 防御性检查：检测是否存在双向持仓（不应该出现，但提供保护）
-	var hasOppositePosition bool
-	oppositeSide := ""
-	for _, pos := range positions {
-		symbol, _ := pos["symbol"].(string)
-		posSide, _ := pos["side"].(string)
-		posAmt, _ := pos["positionAmt"].(float64)
-		if symbol == decision.Symbol && posAmt != 0 && strings.ToUpper(posSide) != positionSide {
-			hasOppositePosition = true
-			oppositeSide = strings.ToUpper(posSide)
-			break
-		}
-	}
-
-	if hasOppositePosition {
-		log.Printf("  🚨 警告：检测到 %s 存在双向持仓（%s + %s），这违反了策略规则",
-			decision.Symbol, positionSide, oppositeSide)
-		log.Printf("  🚨 取消止盈单将影响两个方向的订单，请检查是否为用户手动操作导致")
-		log.Printf("  🚨 建议：手动平掉其中一个方向的持仓，或检查系统是否有BUG")
-	}
-
-	// 取消旧的止盈单（只删除止盈单，不影响止损单）
-	// 注意：如果存在双向持仓，这会删除两个方向的止盈单
-	if err := at.trader.CancelTakeProfitOrders(decision.Symbol); err != nil {
-		log.Printf("  ⚠ 取消旧止盈单失败: %v", err)
-		// 不中断执行，继续设置新止盈
-	}
-
-	// 调用交易所 API 修改止盈
-	quantity := math.Abs(positionAmt)
-	err = at.trader.SetTakeProfit(decision.Symbol, positionSide, quantity, decision.NewTakeProfit)
-	if err != nil {
-		return fmt.Errorf("修改止盈失败: %w", err)
-	}
-
-	log.Printf("  ✓ 止盈已调整: %.2f (当前价格: %.2f)", decision.NewTakeProfit, marketData.CurrentPrice)
-	// 更新数据库止盈 + 记录事件
-	if at.database != nil {
-		posKey := makePositionKey(decision.Symbol, positionSide)
-		dealID, has := at.openDealIDs[posKey]
-		if !has {
-			if dbFind, ok := at.database.(interface {
-				FindOpenDeal(userID, traderID, symbol, side string) (*config.DealRecord, error)
-			}); ok {
-				if rec, err := dbFind.FindOpenDeal(at.userID, at.id, normalizedSymbol, strings.ToLower(positionSide)); err == nil && rec != nil {
-					dealID = rec.ID
-				}
-			}
-		}
-		if dealID != 0 {
-			if dbUpd, ok := at.database.(interface {
-				UpdateDealTakeProfit(userID, traderID string, id int64, takeProfit float64) error
-			}); ok {
-				_ = dbUpd.UpdateDealTakeProfit(at.userID, at.id, dealID, decision.NewTakeProfit)
-			}
-			if dbEvt, ok := at.database.(interface {
-				CreateDealEvent(event *config.DealEvent) error
-			}); ok {
-				_ = dbEvt.CreateDealEvent(&config.DealEvent{UserID: at.userID, TraderID: at.id, DealID: dealID, Type: "update_take_profit", Symbol: normalizedSymbol, Side: strings.ToLower(positionSide), Price: decision.NewTakeProfit})
-			}
-		}
-	}
-	return nil
-}
-
-// executePartialCloseWithRecord 执行部分平仓并记录详细信息
-func (at *AutoTrader) executePartialCloseWithRecord(decision *decision.Decision, actionRecord *logger.DecisionAction) error {
-	log.Printf("  📊 部分平仓: %s %.1f%%", decision.Symbol, decision.ClosePercentage)
-
-	// 验证百分比范围
-	if decision.ClosePercentage <= 0 || decision.ClosePercentage > 100 {
-		return fmt.Errorf("平仓百分比必须在 0-100 之间，当前: %.1f", decision.ClosePercentage)
-	}
-
-	// 获取当前价格
-	marketData, err := market.Get(decision.Symbol)
-	if err != nil {
-		return err
-	}
-	actionRecord.Price = marketData.CurrentPrice
-
-	// 获取当前持仓
-	positions, err := at.trader.GetPositions()
-	if err != nil {
-		return fmt.Errorf("获取持仓失败: %w", err)
-	}
-
-	// 查找目标持仓
-	var targetPosition map[string]interface{}
-	for _, pos := range positions {
-		symbol, _ := pos["symbol"].(string)
-		posAmt, _ := pos["positionAmt"].(float64)
-		if symbol == decision.Symbol && posAmt != 0 {
-			targetPosition = pos
-			break
-		}
-	}
-
-	if targetPosition == nil {
-		return fmt.Errorf("持仓不存在: %s", decision.Symbol)
-	}
-
-	// 获取持仓方向和数量
-	side, _ := targetPosition["side"].(string)
-	positionSide := strings.ToUpper(side)
-	normalizedSymbol := normalizeDealSymbol(decision.Symbol)
-	positionAmt, _ := targetPosition["positionAmt"].(float64)
-
-	// 计算平仓数量
-	totalQuantity := math.Abs(positionAmt)
-	closeQuantity := totalQuantity * (decision.ClosePercentage / 100.0)
-	actionRecord.Quantity = closeQuantity
-
-	// ✅ Layer 2: 最小仓位检查（防止产生小额剩余）
-	markPrice, ok := targetPosition["markPrice"].(float64)
-	if !ok || markPrice <= 0 {
-		return fmt.Errorf("无法解析当前价格，无法执行最小仓位检查")
-	}
-
-	currentPositionValue := totalQuantity * markPrice
-	remainingQuantity := totalQuantity - closeQuantity
-	remainingValue := remainingQuantity * markPrice
-
-	const MIN_POSITION_VALUE = 10.0 // 最小持仓价值 10 USDT（對齊交易所底线，小仓位建议直接全平）
-
-	if remainingValue > 0 && remainingValue <= MIN_POSITION_VALUE {
-		log.Printf("⚠️ 检测到 partial_close 后剩余仓位 %.2f USDT < %.0f USDT",
-			remainingValue, MIN_POSITION_VALUE)
-		log.Printf("  → 当前仓位价值: %.2f USDT, 平仓 %.1f%%, 剩余: %.2f USDT",
-			currentPositionValue, decision.ClosePercentage, remainingValue)
-		log.Printf("  → 自动修正为全部平仓，避免产生无法平仓的小额剩余")
-
-		// 🔄 自动修正为全部平仓
-		if positionSide == "LONG" {
-			decision.Action = "close_long"
-			log.Printf("  ✓ 已修正为: close_long")
-			return at.executeCloseLongWithRecord(decision, actionRecord)
-		} else {
-			decision.Action = "close_short"
-			log.Printf("  ✓ 已修正为: close_short")
-			return at.executeCloseShortWithRecord(decision, actionRecord)
-		}
-	}
-
-	// 执行平仓
-	var order map[string]interface{}
-	if positionSide == "LONG" {
-		order, err = at.trader.CloseLong(decision.Symbol, closeQuantity)
-	} else {
-		order, err = at.trader.CloseShort(decision.Symbol, closeQuantity)
-	}
-
-	if err != nil {
-		return fmt.Errorf("部分平仓失败: %w", err)
-	}
-
-	fillPrice := marketData.CurrentPrice
-	if v, ok := orderFloatValue(order, "avgPrice"); ok && v > 0 {
-		fillPrice = v
-	}
-	filledQuantity := closeQuantity
-	if v, ok := orderFloatValue(order, "filledSize"); ok && v > 0 {
-		filledQuantity = v
-	}
-	actionRecord.Price = fillPrice
-	actionRecord.Quantity = filledQuantity
-
-	// 记录订单ID
-	if orderID, ok := orderInt64Value(order, "orderId"); ok {
-		actionRecord.OrderID = orderID
-	}
-
-	remainingQuantity = totalQuantity - filledQuantity
-	log.Printf("  ✓ 部分平仓成功: 平仓 %.4f (%.1f%%), 剩余 %.4f",
-		filledQuantity, decision.ClosePercentage, remainingQuantity)
-
-	// 记录部分平仓事件
-	if at.database != nil {
-		posKey := makePositionKey(decision.Symbol, positionSide)
-		dealID, has := at.openDealIDs[posKey]
-		if !has {
-			if dbFind, ok := at.database.(interface {
-				FindOpenDeal(userID, traderID, symbol, side string) (*config.DealRecord, error)
-			}); ok {
-				if rec, err := dbFind.FindOpenDeal(at.userID, at.id, normalizedSymbol, strings.ToLower(positionSide)); err == nil && rec != nil {
-					dealID = rec.ID
-				}
-			}
-		}
-		if dealID != 0 {
-			if dbEvt, ok := at.database.(interface {
-				CreateDealEvent(event *config.DealEvent) error
-			}); ok {
-				_ = dbEvt.CreateDealEvent(&config.DealEvent{UserID: at.userID, TraderID: at.id, DealID: dealID, Type: "partial_close", Symbol: normalizedSymbol, Side: strings.ToLower(positionSide), Quantity: filledQuantity, Percentage: decision.ClosePercentage, Price: fillPrice, OrderID: fmt.Sprintf("%v", order["orderId"])})
-			}
-		}
-	}
-
-	// ✅ Step 4: 恢复止盈止损（防止剩余仓位裸奔）
-	// 重要：币安等交易所在部分平仓后会自动取消原有的 TP/SL 订单（因为数量不匹配）
-	// 如果 AI 提供了新的止损止盈价格，则为剩余仓位重新设置保护
-	if decision.NewStopLoss > 0 {
-		log.Printf("  → 为剩余仓位 %.4f 恢复止损单: %.2f", remainingQuantity, decision.NewStopLoss)
-		err = at.trader.SetStopLoss(decision.Symbol, positionSide, remainingQuantity, decision.NewStopLoss)
-		if err != nil {
-			log.Printf("  ⚠️ 恢复止损失败: %v（不影响平仓结果）", err)
-		}
-	}
-
-	if decision.NewTakeProfit > 0 {
-		log.Printf("  → 为剩余仓位 %.4f 恢复止盈单: %.2f", remainingQuantity, decision.NewTakeProfit)
-		err = at.trader.SetTakeProfit(decision.Symbol, positionSide, remainingQuantity, decision.NewTakeProfit)
-		if err != nil {
-			log.Printf("  ⚠️ 恢复止盈失败: %v（不影响平仓结果）", err)
-		}
-	}
-
-	// 如果 AI 没有提供新的止盈止损，记录警告
-	if decision.NewStopLoss <= 0 && decision.NewTakeProfit <= 0 {
-		log.Printf("  ⚠️⚠️⚠️ 警告: 部分平仓后AI未提供新的止盈止损价格")
-		log.Printf("  → 剩余仓位 %.4f (价值 %.2f USDT) 目前没有止盈止损保护", remainingQuantity, remainingValue)
-		log.Printf("  → 建议: 在 partial_close 决策中包含 new_stop_loss 和 new_take_profit 字段")
-	}
-
-	return nil
-}
-
-func (at *AutoTrader) closeDealInternal(symbol, side string, closePrice float64, orderID string, wasStopLoss bool, reason string) {
-	symbol = normalizeDealSymbol(symbol)
-	dealID, openRec := at.getOpenDealRecord(symbol, side)
-	at.closeDealInternalWithRecord(symbol, side, dealID, openRec, closePrice, orderID, wasStopLoss, reason)
-}
-
-func (at *AutoTrader) closeDealInternalWithRecord(symbol, side string, dealID int64, openRec *config.DealRecord, closePrice float64, orderID string, wasStopLoss bool, reason string) {
-	symbol = normalizeDealSymbol(symbol)
-	if dealID == 0 || openRec == nil {
-		log.Printf("⚠️ [%s] 未找到可关闭的交易记录 (%s %s)", at.name, symbol, side)
-		return
-	}
-	if closePrice <= 0 {
-		closePrice = openRec.OpenPrice
-	}
-	realizedPnL, realizedPnLPct := at.computeDealPnL(openRec, closePrice)
-	duration := time.Since(openRec.OpenTime).Seconds()
-	if closer, ok := at.database.(interface {
-		CloseDeal(userID, traderID string, id int64, closePrice float64, closeOrderID string, realizedPnL, realizedPnLPct float64, durationSeconds int64, wasStopLoss bool, closeReason string) error
-	}); ok {
-		if err := closer.CloseDeal(at.userID, at.id, dealID, closePrice, orderID, realizedPnL, realizedPnLPct, int64(duration), wasStopLoss, reason); err != nil {
-			log.Printf("⚠️ [%s] 更新交易P/L失败 (%s %s): %v", at.name, symbol, side, err)
-			return
-		}
-		posKey := makePositionKey(symbol, side)
-		delete(at.openDealIDs, posKey)
-		log.Printf("💾 [%s] 已更新交易P/L (deal_id=%d, reason=%s)", at.name, dealID, reason)
-		if evt, ok := at.database.(interface {
-			CreateDealEvent(event *config.DealEvent) error
-		}); ok {
-			_ = evt.CreateDealEvent(&config.DealEvent{
-				UserID: at.userID, TraderID: at.id, DealID: dealID, Type: "close",
-				Symbol: symbol, Side: strings.ToLower(side), Price: closePrice, OrderID: orderID,
-			})
-		}
-	}
-}
-
-func orderFloatValue(order map[string]interface{}, key string) (float64, bool) {
-	if order == nil {
-		return 0, false
-	}
-	value, ok := order[key]
-	if !ok || value == nil {
-		return 0, false
-	}
-	switch v := value.(type) {
-	case float64:
-		return v, true
-	case float32:
-		return float64(v), true
-	case int:
-		return float64(v), true
-	case int64:
-		return float64(v), true
-	case uint64:
-		return float64(v), true
-	case json.Number:
-		if f, err := v.Float64(); err == nil {
-			return f, true
-		}
-	case string:
-		if f, err := strconv.ParseFloat(v, 64); err == nil {
-			return f, true
-		}
-	}
-	return 0, false
-}
-
-func orderInt64Value(order map[string]interface{}, key string) (int64, bool) {
-	if order == nil {
-		return 0, false
-	}
-	value, ok := order[key]
-	if !ok || value == nil {
-		return 0, false
-	}
-	switch v := value.(type) {
-	case int64:
-		return v, true
-	case int:
-		return int64(v), true
-	case float64:
-		return int64(v), true
-	case float32:
-		return int64(v), true
-	case json.Number:
-		if i, err := v.Int64(); err == nil {
-			return i, true
-		}
-	case string:
-		if i, err := strconv.ParseInt(v, 10, 64); err == nil {
-			return i, true
-		}
-	}
-	return 0, false
-}
-
-func normalizeDealSymbol(symbol string) string {
-	s := strings.ToUpper(strings.TrimSpace(symbol))
-	switch {
-	case strings.HasSuffix(s, "USDC"):
-		return s[:len(s)-4] + "USDT"
-	case strings.HasSuffix(s, "USD"):
-		// Treat bare USD as USDT for consistency
-		return s + "T"
-	default:
-		return s
-	}
-}
-
-func makePositionKey(symbol, side string) string {
-	return normalizeDealSymbol(symbol) + "_" + strings.ToLower(strings.TrimSpace(side))
-}
-
-func (at *AutoTrader) getOpenDealRecord(symbol, side string) (int64, *config.DealRecord) {
-	symbol = normalizeDealSymbol(symbol)
-	side = strings.ToLower(side)
-	posKey := makePositionKey(symbol, side)
-	if dealID, ok := at.openDealIDs[posKey]; ok {
-		if rec := at.getDealByID(dealID); rec != nil {
-			return dealID, rec
-		}
-	}
-	if finder, ok := at.database.(interface {
-		FindOpenDeal(userID, traderID, symbol, side string) (*config.DealRecord, error)
-	}); ok {
-		if rec, err := finder.FindOpenDeal(at.userID, at.id, symbol, side); err == nil && rec != nil {
-			at.openDealIDs[posKey] = rec.ID
-			return rec.ID, rec
-		}
-	}
-	return 0, nil
-}
-
-func (at *AutoTrader) getDealByID(id int64) *config.DealRecord {
-	if getter, ok := at.database.(interface {
-		GetDealByID(userID, traderID string, id int64) (*config.DealRecord, error)
-	}); ok {
-		if rec, err := getter.GetDealByID(at.userID, at.id, id); err == nil {
-			return rec
-		}
-	}
-	return nil
-}
-
-func (at *AutoTrader) computeDealPnL(openRec *config.DealRecord, closePrice float64) (float64, float64) {
-	if openRec == nil {
-		return 0, 0
-	}
-	side := strings.ToLower(openRec.Side)
-	open := openRec.OpenPrice
-	slippageRate := getEnvFloat("NOFX_PNL_SLIPPAGE_RATE", 0.0005)
-	feeRate := getEnvFloat("NOFX_PNL_TAKER_FEE_RATE", 0.0004)
-	effOpen := open
-	effClose := closePrice
-	if side == "long" {
-		effOpen = open * (1 + slippageRate)
-		effClose = closePrice * (1 - slippageRate)
-	} else {
-		effOpen = open * (1 - slippageRate)
-		effClose = closePrice * (1 + slippageRate)
-	}
-	priceChangePct := 0.0
-	if effOpen > 0 {
-		if side == "long" {
-			priceChangePct = (effClose - effOpen) / effOpen
-		} else {
-			priceChangePct = (effOpen - effClose) / effOpen
-		}
-	}
-	positionValue := openRec.Quantity * effOpen
-	// Futures PnL = position notional * price change percentage (already leverage-adjusted in margin),
-	// leverage should not be applied again, otherwise the profit/loss is overstated.
-	grossPnL := positionValue * priceChangePct
-	fees := (openRec.Quantity*effOpen + openRec.Quantity*effClose) * feeRate
-	realizedPnL := grossPnL - fees
-	marginUsed := 0.0
-	if openRec.Leverage > 0 {
-		marginUsed = positionValue / float64(openRec.Leverage)
-	}
-	realizedPnLPct := 0.0
-	if marginUsed > 0 {
-		realizedPnLPct = (realizedPnL / marginUsed) * 100
-	}
-	return realizedPnL, realizedPnLPct
-}
-
-func (at *AutoTrader) reconcileDealsWithPositions(current map[string]bool) {
-	for key := range at.openDealIDs {
-		if current[key] {
-			continue
-		}
-		symbol, side, ok := splitSymbolSide(key)
-		if !ok {
-			continue
-		}
-		dealID, openRec := at.getOpenDealRecord(symbol, side)
-		if openRec == nil {
-			continue
-		}
-		if time.Since(openRec.OpenTime) < manualDealCloseGrace {
-			continue
-		}
-		price := at.getLatestPrice(symbol)
-		if price <= 0 {
-			log.Printf("⚠️ [%s] 无法获取 %s 的最新价格以强制关闭交易", at.name, symbol)
-			continue
-		}
-
-		// 确定关闭原因：检查是否是追踪止损触发
-		closeReason := "position_missing"
-		at.trailingStopMutex.RLock()
-		tierIndex, hasTier := at.trailingStopActiveTier[key]
-		at.trailingStopMutex.RUnlock()
-
-		if hasTier && tierIndex >= 0 && tierIndex < len(at.trailingStopConfig.Tiers) {
-			// 追踪止损触发
-			closeReason = fmt.Sprintf("trailing_stop_tier%d", tierIndex+1)
-		}
-
-		at.closeDealInternalWithRecord(symbol, side, dealID, openRec, price, "manual_close", false, closeReason)
-
-		// 清理追踪止损状态
-		at.trailingStopMutex.Lock()
-		delete(at.trailingStopActiveTier, key)
-		delete(at.trailingStopLastUpdate, key)
-		delete(at.trailingStopManaged, key)
-		at.trailingStopMutex.Unlock()
-	}
-}
-
-func splitSymbolSide(key string) (string, string, bool) {
-	idx := strings.LastIndex(key, "_")
-	if idx <= 0 || idx >= len(key)-1 {
-		return "", "", false
-	}
-	return key[:idx], key[idx+1:], true
-}
-
-func (at *AutoTrader) getLatestPrice(symbol string) float64 {
-	data, err := market.Get(symbol)
-	if err != nil || data == nil {
-		return 0
-	}
-	return data.CurrentPrice
-}
-
-// GetID 获取trader ID
+// GetID gets trader ID
 func (at *AutoTrader) GetID() string {
 	return at.id
 }
 
-// GetName 获取trader名称
+// GetUnderlyingTrader returns the underlying Trader interface implementation
+// This is used by grid trading and other components that need direct exchange access
+func (at *AutoTrader) GetUnderlyingTrader() Trader {
+	return at.trader
+}
+
+// GetName gets trader name
 func (at *AutoTrader) GetName() string {
 	return at.name
 }
 
-// GetAIModel 获取AI模型
+// GetAIModel gets AI model
 func (at *AutoTrader) GetAIModel() string {
 	return at.aiModel
 }
 
-// GetExchange 获取交易所
+// GetExchange gets exchange
 func (at *AutoTrader) GetExchange() string {
 	return at.exchange
 }
 
-// SetCustomPrompt 设置自定义交易策略prompt
+// GetShowInCompetition returns whether trader should be shown in competition
+func (at *AutoTrader) GetShowInCompetition() bool {
+	return at.showInCompetition
+}
+
+// SetShowInCompetition sets whether trader should be shown in competition
+func (at *AutoTrader) SetShowInCompetition(show bool) {
+	at.showInCompetition = show
+}
+
+// SetCustomPrompt sets custom trading strategy prompt
 func (at *AutoTrader) SetCustomPrompt(prompt string) {
 	at.customPrompt = prompt
 }
 
-// SetOverrideBasePrompt 设置是否覆盖基础prompt
+// SetOverrideBasePrompt sets whether to override base prompt
 func (at *AutoTrader) SetOverrideBasePrompt(override bool) {
 	at.overrideBasePrompt = override
 }
 
-// SetSystemPromptTemplate 设置系统提示词模板
-func (at *AutoTrader) SetSystemPromptTemplate(templateName string) {
-	at.systemPromptTemplate = templateName
-}
-
-// GetSystemPromptTemplate 获取当前系统提示词模板名称
+// GetSystemPromptTemplate gets current system prompt template name (from strategy config)
 func (at *AutoTrader) GetSystemPromptTemplate() string {
-	return at.systemPromptTemplate
+	if at.strategyEngine != nil {
+		config := at.strategyEngine.GetConfig()
+		if config.CustomPrompt != "" {
+			return "custom"
+		}
+	}
+	return "strategy"
 }
 
-// GetDecisionLogger 获取决策日志记录器
-func (at *AutoTrader) GetDecisionLogger() logger.IDecisionLogger {
-	return at.decisionLogger
-}
+// saveEquitySnapshot saves equity snapshot independently (for drawing profit curve, decoupled from AI decision)
+func (at *AutoTrader) saveEquitySnapshot(ctx *kernel.Context) {
+	if at.store == nil || ctx == nil {
+		return
+	}
 
-// UpdateAIModelConfig 动态更新AI提供商与密钥（热更新，不需重启trader）
-func (at *AutoTrader) UpdateAIModelConfig(provider, apiKey, customAPIURL, customModelName string) {
-	// 更新内部配置与状态
-	at.aiModel = provider
-	at.config.CustomAPIURL = customAPIURL
-	at.config.CustomModelName = customModelName
+	snapshot := &store.EquitySnapshot{
+		TraderID:      at.id,
+		Timestamp:     time.Now().UTC(),
+		TotalEquity:   ctx.Account.TotalEquity,
+		Balance:       ctx.Account.TotalEquity - ctx.Account.UnrealizedPnL,
+		UnrealizedPnL: ctx.Account.UnrealizedPnL,
+		PositionCount: ctx.Account.PositionCount,
+		MarginUsedPct: ctx.Account.MarginUsedPct,
+	}
 
-	switch strings.ToLower(provider) {
-	case "qwen":
-		at.config.UseQwen = true
-		at.config.QwenKey = apiKey
-		at.config.DeepSeekKey = ""
-		// 应用到 MCP 客户端
-		at.mcpClient.SetAPIKey(apiKey, customAPIURL, customModelName)
-		log.Printf("🔄 [%s] 已更新AI配置为 Qwen (自定义URL=%s, 模型=%s)", at.name, customAPIURL, customModelName)
-	case "deepseek":
-		at.config.UseQwen = false
-		at.config.DeepSeekKey = apiKey
-		at.config.QwenKey = ""
-		at.mcpClient.SetAPIKey(apiKey, customAPIURL, customModelName)
-		log.Printf("🔄 [%s] 已更新AI配置为 DeepSeek (自定义URL=%s, 模型=%s)", at.name, customAPIURL, customModelName)
-	case "custom":
-		at.config.UseQwen = false
-		at.config.CustomAPIKey = apiKey
-		at.config.DeepSeekKey = ""
-		at.config.QwenKey = ""
-		at.mcpClient.SetAPIKey(apiKey, customAPIURL, customModelName)
-		log.Printf("🔄 [%s] 已更新AI配置为 自定义API (URL=%s, 模型=%s)", at.name, customAPIURL, customModelName)
-	default:
-		// 未知提供商，默认按 DeepSeek 处理以保持兼容
-		at.config.UseQwen = false
-		at.config.DeepSeekKey = apiKey
-		at.config.QwenKey = ""
-		at.mcpClient.SetAPIKey(apiKey, customAPIURL, customModelName)
-		log.Printf("⚠️  [%s] 未知AI提供商 '%s'，按 DeepSeek 处理 (URL=%s, 模型=%s)", at.name, provider, customAPIURL, customModelName)
+	if err := at.store.Equity().Save(snapshot); err != nil {
+		logger.Infof("⚠️ Failed to save equity snapshot: %v", err)
 	}
 }
 
-// GetBalance 获取账户余额（用于API Balance Check）
-func (at *AutoTrader) GetBalance() (map[string]interface{}, error) {
-	return at.trader.GetBalance()
+// saveDecision saves AI decision log to database (only records AI input/output, for debugging)
+func (at *AutoTrader) saveDecision(record *store.DecisionRecord) error {
+	if at.store == nil {
+		return nil
+	}
+
+	at.cycleNumber++
+	record.CycleNumber = at.cycleNumber
+	record.TraderID = at.id
+
+	if record.Timestamp.IsZero() {
+		record.Timestamp = time.Now().UTC()
+	}
+
+	if err := at.store.Decision().LogDecision(record); err != nil {
+		logger.Infof("⚠️ Failed to save decision record: %v", err)
+		return err
+	}
+
+	logger.Infof("📝 Decision record saved: trader=%s, cycle=%d", at.id, at.cycleNumber)
+	return nil
 }
 
-// GetStatus 获取系统状态（用于API）
+// GetStore gets data store (for external access to decision records, etc.)
+func (at *AutoTrader) GetStore() *store.Store {
+	return at.store
+}
+
+// GetStatus gets system status (for API)
 func (at *AutoTrader) GetStatus() map[string]interface{} {
 	aiProvider := "DeepSeek"
 	if at.config.UseQwen {
 		aiProvider = "Qwen"
 	}
 
-	// Trailing-Stop-Status sammeln
-	tiersInfo := make([]map[string]interface{}, len(at.trailingStopConfig.Tiers))
-	for i, tier := range at.trailingStopConfig.Tiers {
-		tiersInfo[i] = map[string]interface{}{
-			"profit_threshold": tier.ProfitThreshold,
-			"stop_offset":      tier.StopOffset,
-		}
-	}
+	at.isRunningMutex.RLock()
+	isRunning := at.isRunning
+	at.isRunningMutex.RUnlock()
 
-	trailingStopStatus := map[string]interface{}{
-		"enabled":              at.trailingStopConfig.Enabled,
-		"tiers":                tiersInfo,
-		"update_threshold_pct": at.trailingStopConfig.UpdateThresholdPct,
-		"check_interval_sec":   at.trailingStopConfig.CheckIntervalSec,
-		"allow_ai_override":    at.trailingStopConfig.AllowAIOverride,
-	}
-
-	// Aktive Trailing-Stops (AI-managed vs Auto-managed)
-	at.trailingStopMutex.RLock()
-	aiManagedPositions := make([]string, 0)
-	autoManagedPositions := make([]string, 0)
-	for posKey, isAIManaged := range at.trailingStopManaged {
-		if isAIManaged {
-			aiManagedPositions = append(aiManagedPositions, posKey)
-		} else {
-			autoManagedPositions = append(autoManagedPositions, posKey)
-		}
-	}
-	at.trailingStopMutex.RUnlock()
-
-	trailingStopStatus["ai_managed_positions"] = aiManagedPositions
-	trailingStopStatus["auto_managed_positions"] = autoManagedPositions
-
-	return map[string]interface{}{
+	result := map[string]interface{}{
 		"trader_id":       at.id,
 		"trader_name":     at.name,
 		"ai_model":        at.aiModel,
 		"exchange":        at.exchange,
-		"is_running":      at.isRunning,
+		"is_running":      isRunning,
 		"start_time":      at.startTime.Format(time.RFC3339),
 		"runtime_minutes": int(time.Since(at.startTime).Minutes()),
 		"call_count":      at.callCount,
@@ -2149,21 +1576,31 @@ func (at *AutoTrader) GetStatus() map[string]interface{} {
 		"stop_until":      at.stopUntil.Format(time.RFC3339),
 		"last_reset_time": at.lastResetTime.Format(time.RFC3339),
 		"ai_provider":     aiProvider,
-		"trailing_stop":   trailingStopStatus,
 	}
+
+	// Add strategy info
+	if at.config.StrategyConfig != nil {
+		result["strategy_type"] = at.config.StrategyConfig.StrategyType
+		if at.config.StrategyConfig.GridConfig != nil {
+			result["grid_symbol"] = at.config.StrategyConfig.GridConfig.Symbol
+		}
+	}
+
+	return result
 }
 
-// GetAccountInfo 获取账户信息（用于API）
+// GetAccountInfo gets account information (for API)
 func (at *AutoTrader) GetAccountInfo() (map[string]interface{}, error) {
 	balance, err := at.trader.GetBalance()
 	if err != nil {
-		return nil, fmt.Errorf("获取余额失败: %w", err)
+		return nil, fmt.Errorf("failed to get balance: %w", err)
 	}
 
-	// 获取账户字段
+	// Get account fields
 	totalWalletBalance := 0.0
 	totalUnrealizedProfit := 0.0
 	availableBalance := 0.0
+	totalEquity := 0.0
 
 	if wallet, ok := balance["totalWalletBalance"].(float64); ok {
 		totalWalletBalance = wallet
@@ -2175,13 +1612,18 @@ func (at *AutoTrader) GetAccountInfo() (map[string]interface{}, error) {
 		availableBalance = avail
 	}
 
-	// Total Equity 账户净值：钱包余额 + 未实现盈亏（更贴近交易所口径）
-	totalEquity := totalWalletBalance + totalUnrealizedProfit
+	// Use totalEquity directly if provided by trader (more accurate)
+	if eq, ok := balance["totalEquity"].(float64); ok && eq > 0 {
+		totalEquity = eq
+	} else {
+		// Fallback: Total Equity = Wallet balance + Unrealized profit
+		totalEquity = totalWalletBalance + totalUnrealizedProfit
+	}
 
-	// 获取持仓计算总保证金
+	// Get positions to calculate total margin
 	positions, err := at.trader.GetPositions()
 	if err != nil {
-		return nil, fmt.Errorf("获取持仓失败: %w", err)
+		return nil, fmt.Errorf("failed to get positions: %w", err)
 	}
 
 	totalMarginUsed := 0.0
@@ -2203,10 +1645,12 @@ func (at *AutoTrader) GetAccountInfo() (map[string]interface{}, error) {
 		totalMarginUsed += marginUsed
 	}
 
-	// 计算总权益（available + marginUsed）
-	if totalEquity == 0 {
-		// fallback: 如果钱包余额缺失，使用可用+保证金估算
-		totalEquity = availableBalance + totalMarginUsed
+	// Verify unrealized P&L consistency (API value vs calculated from positions)
+	// Note: Lighter API may return 0 for unrealized PnL, this is a known limitation
+	diff := math.Abs(totalUnrealizedProfit - totalUnrealizedPnLCalculated)
+	if diff > 5.0 { // Only warn if difference is significant (> 5 USDT)
+		logger.Infof("⚠️ Unrealized P&L inconsistency (Lighter API limitation): API=%.4f, Calculated=%.4f, Diff=%.4f",
+			totalUnrealizedProfit, totalUnrealizedPnLCalculated, diff)
 	}
 
 	totalPnL := totalEquity - at.initialBalance
@@ -2214,7 +1658,7 @@ func (at *AutoTrader) GetAccountInfo() (map[string]interface{}, error) {
 	if at.initialBalance > 0 {
 		totalPnLPct = (totalPnL / at.initialBalance) * 100
 	} else {
-		log.Printf("⚠️ Initial Balance异常: %.2f，无法计算PNL百分比", at.initialBalance)
+		logger.Infof("⚠️ Initial Balance abnormal: %.2f, cannot calculate P&L percentage", at.initialBalance)
 	}
 
 	marginUsedPct := 0.0
@@ -2223,30 +1667,30 @@ func (at *AutoTrader) GetAccountInfo() (map[string]interface{}, error) {
 	}
 
 	return map[string]interface{}{
-		// 核心字段
-		"total_equity":      totalEquity,           // 账户净值 = available + margin_used（合约账户）
-		"wallet_balance":    totalWalletBalance,    // 钱包余额（不含未实现盈亏）
-		"unrealized_profit": totalUnrealizedProfit, // 未实现盈亏（交易所API官方值）
-		"available_balance": availableBalance,      // 可用余额
+		// Core fields
+		"total_equity":      totalEquity,           // Account equity = wallet + unrealized
+		"wallet_balance":    totalWalletBalance,    // Wallet balance (excluding unrealized P&L)
+		"unrealized_profit": totalUnrealizedProfit, // Unrealized P&L (official value from exchange API)
+		"available_balance": availableBalance,      // Available balance
 
-		// 盈亏统计
-		"total_pnl":       totalPnL,          // 总盈亏 = equity - initial
-		"total_pnl_pct":   totalPnLPct,       // 总盈亏百分比
-		"initial_balance": at.initialBalance, // 初始余额
-		"daily_pnl":       at.dailyPnL,       // 日盈亏
+		// P&L statistics
+		"total_pnl":       totalPnL,          // Total P&L = equity - initial
+		"total_pnl_pct":   totalPnLPct,       // Total P&L percentage
+		"initial_balance": at.initialBalance, // Initial balance
+		"daily_pnl":       at.dailyPnL,       // Daily P&L
 
-		// 持仓信息
-		"position_count":  len(positions),  // 持仓数量
-		"margin_used":     totalMarginUsed, // 保证金占用
-		"margin_used_pct": marginUsedPct,   // 保证金使用率
+		// Position information
+		"position_count":  len(positions),  // Position count
+		"margin_used":     totalMarginUsed, // Margin used
+		"margin_used_pct": marginUsedPct,   // Margin usage rate
 	}, nil
 }
 
-// GetPositions 获取持仓列表（用于API）
+// GetPositions gets position list (for API)
 func (at *AutoTrader) GetPositions() ([]map[string]interface{}, error) {
 	positions, err := at.trader.GetPositions()
 	if err != nil {
-		return nil, fmt.Errorf("获取持仓失败: %w", err)
+		return nil, fmt.Errorf("failed to get positions: %w", err)
 	}
 
 	var result []map[string]interface{}
@@ -2267,10 +1711,10 @@ func (at *AutoTrader) GetPositions() ([]map[string]interface{}, error) {
 			leverage = int(lev)
 		}
 
-		// 计算占用保证金
+		// Calculate margin used
 		marginUsed := (quantity * markPrice) / float64(leverage)
 
-		// 计算盈亏百分比（基于保证金）
+		// Calculate P&L percentage (based on margin)
 		pnlPct := calculatePnLPercentage(unrealizedPnl, marginUsed)
 
 		result = append(result, map[string]interface{}{
@@ -2290,8 +1734,8 @@ func (at *AutoTrader) GetPositions() ([]map[string]interface{}, error) {
 	return result, nil
 }
 
-// calculatePnLPercentage 计算盈亏百分比（基于保证金，自动考虑杠杆）
-// 收益率 = 未实现盈亏 / 保证金 × 100%
+// calculatePnLPercentage calculates P&L percentage (based on margin, automatically considers leverage)
+// Return rate = Unrealized P&L / Margin × 100%
 func calculatePnLPercentage(unrealizedPnl, marginUsed float64) float64 {
 	if marginUsed > 0 {
 		return (unrealizedPnl / marginUsed) * 100
@@ -2299,34 +1743,32 @@ func calculatePnLPercentage(unrealizedPnl, marginUsed float64) float64 {
 	return 0.0
 }
 
-// sortDecisionsByPriority 对决策排序：先平仓，再开仓，最后hold/wait
-// 这样可以避免换仓时仓位叠加超限
-func sortDecisionsByPriority(decisions []decision.Decision) []decision.Decision {
+// sortDecisionsByPriority sorts decisions: close positions first, then open positions, finally hold/wait
+// This avoids position stacking overflow when changing positions
+func sortDecisionsByPriority(decisions []kernel.Decision) []kernel.Decision {
 	if len(decisions) <= 1 {
 		return decisions
 	}
 
-	// 定义优先级
+	// Define priority
 	getActionPriority := func(action string) int {
 		switch action {
-		case "close_long", "close_short", "partial_close":
-			return 1 // 最高优先级：先平仓（包括部分平仓）
-		case "update_stop_loss", "update_take_profit", "update_sl_tp":
-			return 2 // 调整持仓止盈止损
+		case "close_long", "close_short":
+			return 1 // Highest priority: close positions first
 		case "open_long", "open_short":
-			return 3 // 次优先级：后开仓
+			return 2 // Second priority: open positions later
 		case "hold", "wait":
-			return 4 // 最低优先级：观望
+			return 3 // Lowest priority: wait
 		default:
-			return 999 // 未知动作放最后
+			return 999 // Unknown actions at the end
 		}
 	}
 
-	// 复制决策列表
-	sorted := make([]decision.Decision, len(decisions))
+	// Copy decision list
+	sorted := make([]kernel.Decision, len(decisions))
 	copy(sorted, decisions)
 
-	// 按优先级排序
+	// Sort by priority
 	for i := 0; i < len(sorted)-1; i++ {
 		for j := i + 1; j < len(sorted); j++ {
 			if getActionPriority(sorted[i].Action) > getActionPriority(sorted[j].Action) {
@@ -2338,115 +1780,50 @@ func sortDecisionsByPriority(decisions []decision.Decision) []decision.Decision 
 	return sorted
 }
 
-// getCandidateCoins 获取交易员的候选币种列表
-func (at *AutoTrader) getCandidateCoins() ([]decision.CandidateCoin, error) {
-	if len(at.tradingCoins) == 0 {
-		// 使用数据库配置的默认币种列表
-		var candidateCoins []decision.CandidateCoin
-
-		if len(at.defaultCoins) > 0 {
-			// 使用数据库中配置的默认币种
-			for _, coin := range at.defaultCoins {
-				symbol := normalizeSymbol(coin)
-				candidateCoins = append(candidateCoins, decision.CandidateCoin{
-					Symbol:  symbol,
-					Sources: []string{"default"}, // 标记为数据库默认币种
-				})
-			}
-			log.Printf("📋 [%s] 使用数据库默认币种: %d个币种 %v",
-				at.name, len(candidateCoins), at.defaultCoins)
-			return candidateCoins, nil
-		} else {
-			// 如果数据库中没有配置默认币种，则使用AI500+OI Top作为fallback
-			const ai500Limit = 20 // AI500取前20个评分最高的币种
-
-			mergedPool, err := pool.GetMergedCoinPool(ai500Limit)
-			if err != nil {
-				return nil, fmt.Errorf("获取合并币种池失败: %w", err)
-			}
-
-			// 构建候选币种列表（包含来源信息）
-			for _, symbol := range mergedPool.AllSymbols {
-				sources := mergedPool.SymbolSources[symbol]
-				candidateCoins = append(candidateCoins, decision.CandidateCoin{
-					Symbol:  symbol,
-					Sources: sources, // "ai500" 和/或 "oi_top"
-				})
-			}
-
-			log.Printf("📋 [%s] 数据库无默认币种配置，使用AI500+OI Top: AI500前%d + OI_Top20 = 总计%d个候选币种",
-				at.name, ai500Limit, len(candidateCoins))
-			return candidateCoins, nil
-		}
-	} else {
-		// 使用自定义币种列表
-		var candidateCoins []decision.CandidateCoin
-		for _, coin := range at.tradingCoins {
-			// 确保币种格式正确（转为大写USDT交易对）
-			symbol := normalizeSymbol(coin)
-			candidateCoins = append(candidateCoins, decision.CandidateCoin{
-				Symbol:  symbol,
-				Sources: []string{"custom"}, // 标记为自定义来源
-			})
-		}
-
-		log.Printf("📋 [%s] 使用自定义币种: %d个币种 %v",
-			at.name, len(candidateCoins), at.tradingCoins)
-		return candidateCoins, nil
-	}
-}
-
-// normalizeSymbol 标准化币种符号（确保以USDT结尾）
-func normalizeSymbol(symbol string) string {
-	// 统一归一化：USDC → USDT，其余无后缀追加USDT
-	return market.Normalize(symbol)
-}
-
-// 启动回撤监控
+// startDrawdownMonitor starts drawdown monitoring
 func (at *AutoTrader) startDrawdownMonitor() {
 	at.monitorWg.Add(1)
 	go func() {
 		defer at.monitorWg.Done()
 
-		ticker := time.NewTicker(1 * time.Minute) // 每分钟检查一次
+		ticker := time.NewTicker(1 * time.Minute) // Check every minute
 		defer ticker.Stop()
 
-		log.Println("📊 启动持仓回撤监控（每分钟检查一次）")
+		logger.Info("📊 Started position drawdown monitoring (check every minute)")
 
 		for {
 			select {
 			case <-ticker.C:
 				at.checkPositionDrawdown()
 			case <-at.stopMonitorCh:
-				log.Println("⏹ 停止持仓回撤监控")
+				logger.Info("⏹ Stopped position drawdown monitoring")
 				return
 			}
 		}
 	}()
 }
 
-// 检查持仓回撤情况
+// checkPositionDrawdown checks position drawdown situation
 func (at *AutoTrader) checkPositionDrawdown() {
-	// 获取当前持仓
+	// Get current positions
 	positions, err := at.trader.GetPositions()
 	if err != nil {
-		log.Printf("❌ 回撤监控：获取持仓失败: %v", err)
+		logger.Infof("❌ Drawdown monitoring: failed to get positions: %v", err)
 		return
 	}
 
 	for _, pos := range positions {
 		symbol := pos["symbol"].(string)
-		logSymbol := normalizeDealSymbol(symbol)
 		side := pos["side"].(string)
 		entryPrice := pos["entryPrice"].(float64)
 		markPrice := pos["markPrice"].(float64)
 		quantity := pos["positionAmt"].(float64)
 		if quantity < 0 {
-			quantity = -quantity // 空仓数量为负，转为正数
+			quantity = -quantity // Short position quantity is negative, convert to positive
 		}
 
-		// 计算当前盈亏百分比
-		leverage := 10 // 默认值
+		// Calculate current P&L percentage
+		leverage := 10 // Default value
 		if lev, ok := pos["leverage"].(float64); ok {
 			leverage = int(lev)
 		}
@@ -2458,78 +1835,78 @@ func (at *AutoTrader) checkPositionDrawdown() {
 			currentPnLPct = ((entryPrice - markPrice) / entryPrice) * float64(leverage) * 100
 		}
 
-		// 构造持仓唯一标识（区分多空）
-		posKey := makePositionKey(symbol, side)
+		// Construct unique position identifier (distinguish long/short)
+		posKey := symbol + "_" + side
 
-		// 获取该持仓的历史最高收益
+		// Get historical peak profit for this position
 		at.peakPnLCacheMutex.RLock()
 		peakPnLPct, exists := at.peakPnLCache[posKey]
 		at.peakPnLCacheMutex.RUnlock()
 
 		if !exists {
-			// 如果没有历史最高记录，使用当前盈亏作为初始值
+			// If no historical peak record, use current P&L as initial value
 			peakPnLPct = currentPnLPct
 			at.UpdatePeakPnL(symbol, side, currentPnLPct)
 		} else {
-			// 更新峰值缓存
+			// Update peak cache
 			at.UpdatePeakPnL(symbol, side, currentPnLPct)
 		}
 
-		// 计算回撤（从最高点下跌的幅度）
+		// Calculate drawdown (magnitude of decline from peak)
 		var drawdownPct float64
 		if peakPnLPct > 0 && currentPnLPct < peakPnLPct {
 			drawdownPct = ((peakPnLPct - currentPnLPct) / peakPnLPct) * 100
 		}
 
-		// 检查平仓条件：收益大于5%且回撤超过40%
+		// Check close position condition: profit > 5% and drawdown >= 40%
 		if currentPnLPct > 5.0 && drawdownPct >= 40.0 {
-			log.Printf("🚨 触发回撤平仓条件: %s %s | 当前收益: %.2f%% | 最高收益: %.2f%% | 回撤: %.2f%%",
-				logSymbol, side, currentPnLPct, peakPnLPct, drawdownPct)
+			logger.Infof("🚨 Drawdown close position condition triggered: %s %s | Current profit: %.2f%% | Peak profit: %.2f%% | Drawdown: %.2f%%",
+				symbol, side, currentPnLPct, peakPnLPct, drawdownPct)
 
-			// 执行平仓
+			// Execute close position
 			if err := at.emergencyClosePosition(symbol, side); err != nil {
-				log.Printf("❌ 回撤平仓失败 (%s %s): %v", symbol, side, err)
+				logger.Infof("❌ Drawdown close position failed (%s %s): %v", symbol, side, err)
 			} else {
-				log.Printf("✅ 回撤平仓成功: %s %s", logSymbol, side)
-				// 平仓后清理该持仓的缓存
+				logger.Infof("✅ Drawdown close position succeeded: %s %s", symbol, side)
+				// Clear cache for this position after closing
 				at.ClearPeakPnLCache(symbol, side)
 			}
 		} else if currentPnLPct > 5.0 {
-			// 记录接近平仓条件的情况（用于调试）
-			log.Printf("📊 回撤监控: %s %s | 收益: %.2f%% | 最高: %.2f%% | 回撤: %.2f%%",
-				logSymbol, side, currentPnLPct, peakPnLPct, drawdownPct)
+			// Record situations close to close position condition (for debugging)
+			logger.Infof("📊 Drawdown monitoring: %s %s | Profit: %.2f%% | Peak: %.2f%% | Drawdown: %.2f%%",
+				symbol, side, currentPnLPct, peakPnLPct, drawdownPct)
 		}
 	}
 }
 
-// 紧急平仓函数
+// emergencyClosePosition emergency close position function
 func (at *AutoTrader) emergencyClosePosition(symbol, side string) error {
 	switch side {
 	case "long":
-		order, err := at.trader.CloseLong(symbol, 0) // 0 = 全部平仓
+		order, err := at.trader.CloseLong(symbol, 0) // 0 = close all
 		if err != nil {
 			return err
 		}
-		log.Printf("✅ 紧急平多仓成功，订单ID: %v", order["orderId"])
+		logger.Infof("✅ Emergency close long position succeeded, order ID: %v", order["orderId"])
 	case "short":
-		order, err := at.trader.CloseShort(symbol, 0) // 0 = 全部平仓
+		order, err := at.trader.CloseShort(symbol, 0) // 0 = close all
 		if err != nil {
 			return err
 		}
-		log.Printf("✅ 紧急平空仓成功，订单ID: %v", order["orderId"])
+		logger.Infof("✅ Emergency close short position succeeded, order ID: %v", order["orderId"])
 	default:
-		return fmt.Errorf("未知的持仓方向: %s", side)
+		return fmt.Errorf("unknown position direction: %s", side)
 	}
 
 	return nil
 }
 
-// GetPeakPnLCache 获取最高收益缓存
+// GetPeakPnLCache gets peak profit cache
 func (at *AutoTrader) GetPeakPnLCache() map[string]float64 {
 	at.peakPnLCacheMutex.RLock()
 	defer at.peakPnLCacheMutex.RUnlock()
 
-	// 返回缓存的副本
+	// Return a copy of the cache
 	cache := make(map[string]float64)
 	for k, v := range at.peakPnLCache {
 		cache[k] = v
@@ -2537,386 +1914,413 @@ func (at *AutoTrader) GetPeakPnLCache() map[string]float64 {
 	return cache
 }
 
-// UpdatePeakPnL 更新最高收益缓存
+// UpdatePeakPnL updates peak profit cache
 func (at *AutoTrader) UpdatePeakPnL(symbol, side string, currentPnLPct float64) {
 	at.peakPnLCacheMutex.Lock()
 	defer at.peakPnLCacheMutex.Unlock()
 
-	posKey := makePositionKey(symbol, side)
+	posKey := symbol + "_" + side
 	if peak, exists := at.peakPnLCache[posKey]; exists {
-		// 更新峰值（如果是多头，取较大值；如果是空头，currentPnLPct为负，也要比较）
+		// Update peak (if long, take larger value; if short, currentPnLPct is negative, also compare)
 		if currentPnLPct > peak {
 			at.peakPnLCache[posKey] = currentPnLPct
 		}
 	} else {
-		// 首次记录
+		// First time recording
 		at.peakPnLCache[posKey] = currentPnLPct
 	}
 }
 
-// ClearPeakPnLCache 清除指定持仓的峰值缓存
+// ClearPeakPnLCache clears peak cache for specified position
 func (at *AutoTrader) ClearPeakPnLCache(symbol, side string) {
 	at.peakPnLCacheMutex.Lock()
 	defer at.peakPnLCacheMutex.Unlock()
 
-	posKey := makePositionKey(symbol, side)
+	posKey := symbol + "_" + side
 	delete(at.peakPnLCache, posKey)
 }
 
-// startTrailingStopMonitor 启动追踪止损监控
-func (at *AutoTrader) startTrailingStopMonitor() {
-	at.monitorWg.Add(1)
-	at.trailingStopMonitorCh = make(chan struct{})
-
-	go func() {
-		defer at.monitorWg.Done()
-
-		interval := time.Duration(at.trailingStopConfig.CheckIntervalSec) * time.Second
-		ticker := time.NewTicker(interval)
-		defer ticker.Stop()
-
-		log.Printf("🎯 启动自动追踪止损监控（每%d秒检查一次）", at.trailingStopConfig.CheckIntervalSec)
-
-		for {
-			select {
-			case <-ticker.C:
-				at.updateTrailingStops()
-			case <-at.trailingStopMonitorCh:
-				log.Println("⏹ 停止追踪止损监控")
-				return
-			case <-at.stopMonitorCh:
-				log.Println("⏹ 停止追踪止损监控（主循环停止）")
-				return
-			}
-		}
-	}()
-}
-
-// updateTrailingStops 更新所有符合条件的持仓的追踪止损
-func (at *AutoTrader) updateTrailingStops() {
-	// 获取当前持仓
-	positions, err := at.trader.GetPositions()
-	if err != nil {
-		log.Printf("⚠️ 追踪止损：获取持仓失败: %v", err)
+// recordAndConfirmOrder polls order status for actual fill data and records position
+// action: open_long, open_short, close_long, close_short
+// entryPrice: entry price when closing (0 when opening)
+func (at *AutoTrader) recordAndConfirmOrder(orderResult map[string]interface{}, symbol, action string, quantity float64, price float64, leverage int, entryPrice float64) {
+	if at.store == nil {
 		return
 	}
 
-	if len(positions) == 0 {
-		return // 无持仓，不需要处理
+	// Get order ID (supports multiple types)
+	var orderID string
+	switch v := orderResult["orderId"].(type) {
+	case int64:
+		orderID = fmt.Sprintf("%d", v)
+	case float64:
+		orderID = fmt.Sprintf("%.0f", v)
+	case string:
+		orderID = v
+	default:
+		orderID = fmt.Sprintf("%v", v)
 	}
 
-	for _, pos := range positions {
-		symbol, ok := pos["symbol"].(string)
-		if !ok {
-			continue
-		}
+	if orderID == "" || orderID == "0" {
+		logger.Infof("  ⚠️ Order ID is empty, skipping record")
+		return
+	}
 
-		side, ok := pos["side"].(string)
-		if !ok {
-			continue
-		}
+	// Determine positionSide
+	var positionSide string
+	switch action {
+	case "open_long", "close_long":
+		positionSide = "LONG"
+	case "open_short", "close_short":
+		positionSide = "SHORT"
+	}
 
-		entryPrice, ok := pos["entryPrice"].(float64)
-		if !ok || entryPrice <= 0 {
-			continue
-		}
+	var actualPrice = price
+	var actualQty = quantity
+	var fee float64
 
-		markPrice, ok := pos["markPrice"].(float64)
-		if !ok || markPrice <= 0 {
-			continue
-		}
+	// Exchanges with OrderSync: Skip immediate order recording, let OrderSync handle it
+	// This ensures accurate data from GetTrades API and avoids duplicate records
+	switch at.exchange {
+	case "binance", "lighter", "hyperliquid", "bybit", "okx", "bitget", "aster", "kucoin", "gate":
+		logger.Infof("  📝 Order submitted (id: %s), will be synced by OrderSync", orderID)
+		return
+	}
 
-		quantity, ok := pos["positionAmt"].(float64)
-		if !ok {
-			continue
-		}
-		quantity = math.Abs(quantity)
+	// For exchanges without OrderSync (e.g., Binance): record immediately and poll for fill data
+	orderRecord := at.createOrderRecord(orderID, symbol, action, positionSide, quantity, price, leverage)
+	if err := at.store.Order().CreateOrder(orderRecord); err != nil {
+		logger.Infof("  ⚠️ Failed to record order: %v", err)
+	} else {
+		logger.Infof("  📝 Order recorded: %s [%s] %s", orderID, action, symbol)
+	}
 
-		leverage := 10.0
-		if lev, ok := pos["leverage"].(float64); ok {
-			leverage = lev
-		}
+	// Wait for order to be filled and get actual fill data
+	time.Sleep(500 * time.Millisecond)
+	for i := 0; i < 5; i++ {
+		status, err := at.trader.GetOrderStatus(symbol, orderID)
+		if err == nil {
+			statusStr, _ := status["status"].(string)
+			if statusStr == "FILLED" {
+				// Get actual fill price
+				if avgPrice, ok := status["avgPrice"].(float64); ok && avgPrice > 0 {
+					actualPrice = avgPrice
+				}
+				// Get actual executed quantity
+				if execQty, ok := status["executedQty"].(float64); ok && execQty > 0 {
+					actualQty = execQty
+				}
+				// Get commission/fee
+				if commission, ok := status["commission"].(float64); ok {
+					fee = commission
+				}
+				logger.Infof("  ✅ Order filled: avgPrice=%.6f, qty=%.6f, fee=%.6f", actualPrice, actualQty, fee)
 
-		// 计算当前盈亏百分比（考虑杠杆）
-		var profitPct float64
-		if side == "long" {
-			profitPct = ((markPrice - entryPrice) / entryPrice) * leverage * 100
-		} else {
-			profitPct = ((entryPrice - markPrice) / entryPrice) * leverage * 100
-		}
+				// Update order status to FILLED
+				if err := at.store.Order().UpdateOrderStatus(orderRecord.ID, "FILLED", actualQty, actualPrice, fee); err != nil {
+					logger.Infof("  ⚠️ Failed to update order status: %v", err)
+				}
 
-		posKey := makePositionKey(symbol, side)
-
-		// 若AI曾接管止损，但收益已达到档位1，则释放AI管理，交还给自动追踪
-		firstTierThreshold := 0.0
-		if len(at.trailingStopConfig.Tiers) > 0 {
-			firstTierThreshold = at.trailingStopConfig.Tiers[0].ProfitThreshold
-		}
-		firstTierReached := firstTierThreshold > 0 && profitPct >= firstTierThreshold
-
-		at.trailingStopMutex.RLock()
-		aiManaged := at.trailingStopManaged[posKey]
-		at.trailingStopMutex.RUnlock()
-
-		if aiManaged && !firstTierReached {
-			// AI已接管，跳过自动追踪 - Log it
-			shouldUpdateFalse := false
-			at.logTrailingStopAction(symbol, side, "skip", markPrice, entryPrice, profitPct, -1, nil, nil, nil, nil, nil, nil, &shouldUpdateFalse, nil, nil, "AI已接管止损管理")
-			continue
-		}
-		if aiManaged && firstTierReached {
-			log.Printf("🔄 [自动追踪接管] %s %s 达到档位阈值 %.2f%%（当前收益 %.2f%%），释放AI管理权交由追踪止损", normalizeDealSymbol(symbol), side, firstTierThreshold, profitPct)
-			at.trailingStopMutex.Lock()
-			at.trailingStopManaged[posKey] = false
-			at.trailingStopMutex.Unlock()
-		}
-
-		// 查找基于当前利润的档位
-		var currentTierIndex int = -1
-		for i := len(at.trailingStopConfig.Tiers) - 1; i >= 0; i-- {
-			tier := &at.trailingStopConfig.Tiers[i]
-			if profitPct >= tier.ProfitThreshold {
-				currentTierIndex = i
+				// Record fill details
+				at.recordOrderFill(orderRecord.ID, orderID, symbol, action, actualPrice, actualQty, fee)
 				break
-			}
-		}
+			} else if statusStr == "CANCELED" || statusStr == "EXPIRED" || statusStr == "REJECTED" {
+				logger.Infof("  ⚠️ Order %s, skipping position record", statusStr)
 
-		// 获取历史最高档位（Ratchet-Only-Up原则：只升不降）
-		at.trailingStopMutex.RLock()
-		previousTierIndex, hasPreviousTier := at.trailingStopActiveTier[posKey]
-		at.trailingStopMutex.RUnlock()
-
-		// 选择较高档位（确保不会降级）
-		var activeTierIndex int
-		if hasPreviousTier && previousTierIndex > currentTierIndex {
-			// 已经达到过更高档位，保持不降级
-			activeTierIndex = previousTierIndex
-		} else {
-			// 使用当前档位（可能是首次激活或升级）
-			activeTierIndex = currentTierIndex
-		}
-
-		// 如果没有达到任何档位的触发阈值，跳过
-		if activeTierIndex < 0 {
-			skipReason := fmt.Sprintf("利润%.2f%%未达到任何档位阈值", profitPct)
-			shouldUpdateFalse := false
-			at.logTrailingStopAction(symbol, side, "skip", markPrice, entryPrice, profitPct, -1, nil, nil, nil, nil, nil, nil, &shouldUpdateFalse, nil, nil, skipReason)
-			continue
-		}
-
-		// 获取激活的档位配置
-		activeTier := &at.trailingStopConfig.Tiers[activeTierIndex]
-
-		// 更新存储的档位（可能升级，但不会降级）
-		at.trailingStopMutex.Lock()
-		at.trailingStopActiveTier[posKey] = activeTierIndex
-		at.trailingStopMutex.Unlock()
-
-		// 根据档位配置计算目标止损利润百分比
-		var targetStopProfitPct float64
-		if activeTier.StopOffset < 0 {
-			// 负值表示固定利润目标
-			targetStopProfitPct = -activeTier.StopOffset
-		} else {
-			// 正值表示当前利润减去偏移量
-			targetStopProfitPct = profitPct - activeTier.StopOffset
-			// 确保不低于0（不能设置为亏损）
-			if targetStopProfitPct < 0 {
-				targetStopProfitPct = 0
-			}
-		}
-
-		// 将目标止损利润百分比转换为价格
-		// WICHTIG: profitPct ist bereits MIT Leverage multipliziert (Zeile 2563)!
-		// targetStopProfitPct ist z.B. 7% (bei 10% Profit - 3% Offset)
-		// Wir müssen zurück zum realen Preis-Profit rechnen: 7% / leverage = 0.7% realer Preis-Move
-		// Dann: entryPrice * (1 + 0.007) für Long
-		var newStopPrice float64
-		stopProfitRatio := targetStopProfitPct / (leverage * 100)
-
-		if side == "long" {
-			newStopPrice = entryPrice * (1 + stopProfitRatio)
-
-			// Stop darf nicht über aktuellem Preis sein (würde sofort triggern)
-			if newStopPrice >= markPrice {
-				log.Printf("⚠️ Long Stop %.4f >= Mark %.4f für %s! Setze auf Mark - 0.1%%",
-					newStopPrice, markPrice, symbol)
-				newStopPrice = markPrice * 0.999
-			}
-		} else {
-			newStopPrice = entryPrice * (1 - stopProfitRatio)
-
-			// Stop darf nicht unter aktuellem Preis sein (würde sofort triggern)
-			if newStopPrice <= markPrice {
-				log.Printf("⚠️ Short Stop %.4f <= Mark %.4f für %s! Setze auf Mark + 0.1%%",
-					newStopPrice, markPrice, symbol)
-				newStopPrice = markPrice * 1.001
-			}
-		}
-
-		// 检查是否需要更新（避免频繁API调用）
-		at.trailingStopMutex.RLock()
-		lastStopPrice, hasLastPrice := at.trailingStopLastUpdate[posKey]
-		at.trailingStopMutex.RUnlock()
-
-		var priceChangePct float64
-		shouldUpdate := false
-		skipReason := ""
-
-		if !hasLastPrice {
-			// 第一次设置
-			shouldUpdate = true
-		} else {
-			// 计算价格变化百分比
-			priceChangePct = math.Abs((newStopPrice-lastStopPrice)/lastStopPrice) * 100
-
-			// 只有止损价格向有利方向移动超过阈值时才更新
-			if side == "long" {
-				if newStopPrice > lastStopPrice {
-					if priceChangePct >= at.trailingStopConfig.UpdateThresholdPct {
-						shouldUpdate = true
-					} else {
-						skipReason = fmt.Sprintf("价格变化%.4f%%未达到更新阈值%.2f%%", priceChangePct, at.trailingStopConfig.UpdateThresholdPct)
-					}
-				} else {
-					skipReason = fmt.Sprintf("新止损价%.4f <= 旧止损价%.4f，不向有利方向移动", newStopPrice, lastStopPrice)
+				// Update order status
+				if err := at.store.Order().UpdateOrderStatus(orderRecord.ID, statusStr, 0, 0, 0); err != nil {
+					logger.Infof("  ⚠️ Failed to update order status: %v", err)
 				}
-			} else if side == "short" {
-				if newStopPrice < lastStopPrice {
-					if priceChangePct >= at.trailingStopConfig.UpdateThresholdPct {
-						shouldUpdate = true
-					} else {
-						skipReason = fmt.Sprintf("价格变化%.4f%%未达到更新阈值%.2f%%", priceChangePct, at.trailingStopConfig.UpdateThresholdPct)
-					}
-				} else {
-					skipReason = fmt.Sprintf("新止损价%.4f >= 旧止损价%.4f，不向有利方向移动", newStopPrice, lastStopPrice)
-				}
+				return
 			}
 		}
-
-		// Log the check action
-		oldStopPtr := &lastStopPrice
-		if !hasLastPrice {
-			oldStopPtr = nil
-		}
-		priceChangePctPtr := &priceChangePct
-		updateThresholdPtr := &at.trailingStopConfig.UpdateThresholdPct
-
-		at.logTrailingStopAction(symbol, side, "check", markPrice, entryPrice, profitPct, activeTierIndex,
-			&activeTier.ProfitThreshold, oldStopPtr, &newStopPrice, &targetStopProfitPct,
-			priceChangePctPtr, updateThresholdPtr, &shouldUpdate, nil, nil, skipReason)
-
-		if !shouldUpdate {
-			continue
-		}
-
-		// 执行止损更新
-		normalizedSymbol := normalizeDealSymbol(symbol)
-		positionSide := strings.ToUpper(side)
-
-		log.Printf("🎯 [自动追踪·档位%.1f%%] %s %s | 当前利润: %.2f%% | 目标止损利润: %.2f%% | 止损价: %.4f",
-			activeTier.ProfitThreshold, normalizedSymbol, side, profitPct, targetStopProfitPct, newStopPrice)
-
-		// 取消旧的止损单
-		if err := at.trader.CancelStopLossOrders(symbol); err != nil {
-			log.Printf("⚠️ [自动追踪] 取消旧止损单失败 (%s %s): %v", normalizedSymbol, side, err)
-			apiError := fmt.Sprintf("取消旧止损单失败: %v", err)
-			at.logTrailingStopAction(symbol, side, "error", markPrice, entryPrice, profitPct, activeTierIndex,
-				&activeTier.ProfitThreshold, oldStopPtr, &newStopPrice, &targetStopProfitPct,
-				priceChangePctPtr, updateThresholdPtr, &shouldUpdate, nil, &apiError, "")
-			continue
-		}
-
-		// 设置新的止损单
-		err = at.trader.SetStopLoss(symbol, positionSide, quantity, newStopPrice)
-		if err != nil {
-			log.Printf("⚠️ [自动追踪] 设置止损失败 (%s %s): %v", normalizedSymbol, side, err)
-			apiError := fmt.Sprintf("设置止损失败: %v", err)
-			apiSuccess := false
-			at.logTrailingStopAction(symbol, side, "update", markPrice, entryPrice, profitPct, activeTierIndex,
-				&activeTier.ProfitThreshold, oldStopPtr, &newStopPrice, &targetStopProfitPct,
-				priceChangePctPtr, updateThresholdPtr, &shouldUpdate, &apiSuccess, &apiError, "")
-			continue
-		}
-
-		// 更新最后设置的止损价格
-		at.trailingStopMutex.Lock()
-		at.trailingStopLastUpdate[posKey] = newStopPrice
-		at.trailingStopMutex.Unlock()
-
-		log.Printf("✅ [自动追踪] 止损已更新: %s %s → %.4f", normalizedSymbol, side, newStopPrice)
-
-		// Log successful update
-		apiSuccess := true
-		at.logTrailingStopAction(symbol, side, "update", markPrice, entryPrice, profitPct, activeTierIndex,
-			&activeTier.ProfitThreshold, oldStopPtr, &newStopPrice, &targetStopProfitPct,
-			priceChangePctPtr, updateThresholdPtr, &shouldUpdate, &apiSuccess, nil, "")
-	}
-}
-
-// logTrailingStopAction logs trailing stop actions to database
-func (at *AutoTrader) logTrailingStopAction(symbol, side, action string, currentPrice, entryPrice, profitPct float64,
-	tierIndex int, tierThreshold, oldStopPrice, newStopPrice, targetStopProfitPct, priceChangePct, updateThresholdPct *float64,
-	shouldUpdate, apiSuccess *bool, apiError *string, skipReason string) {
-
-	// Get deal ID for this position
-	dealID, openRec := at.getOpenDealRecord(symbol, side)
-	if openRec == nil {
-		return // No deal found, skip logging
+		time.Sleep(500 * time.Millisecond)
 	}
 
-	logger, ok := at.database.(interface {
-		LogTrailingStopAction(log *config.TrailingStopLog) error
+	// Normalize symbol for position record consistency
+	normalizedSymbolForPosition := market.Normalize(symbol)
+
+	logger.Infof("  📝 Recording position (ID: %s, action: %s, price: %.6f, qty: %.6f, fee: %.4f)",
+		orderID, action, actualPrice, actualQty, fee)
+
+	// Record position change with actual fill data (use normalized symbol)
+	at.recordPositionChange(orderID, normalizedSymbolForPosition, positionSide, action, actualQty, actualPrice, leverage, entryPrice, fee)
+
+	// Send anonymous trade statistics for experience improvement (async, non-blocking)
+	// This helps us understand overall product usage across all deployments
+	experience.TrackTrade(experience.TradeEvent{
+		Exchange:  at.exchange,
+		TradeType: action,
+		Symbol:    symbol,
+		AmountUSD: actualPrice * actualQty,
+		Leverage:  leverage,
+		UserID:    at.userID,
+		TraderID:  at.id,
 	})
-	if !ok {
-		return // Database doesn't support trailing stop logging
+}
+
+// recordPositionChange records position change (create record on open, update record on close)
+func (at *AutoTrader) recordPositionChange(orderID, symbol, side, action string, quantity, price float64, leverage int, entryPrice float64, fee float64) {
+	if at.store == nil {
+		return
 	}
 
-	logEntry := &config.TrailingStopLog{
-		UserID:       at.userID,
-		TraderID:     at.id,
-		DealID:       dealID,
-		Symbol:       normalizeDealSymbol(symbol),
-		Side:         side,
-		Action:       action,
-		CurrentPrice: currentPrice,
-		EntryPrice:   entryPrice,
-		ProfitPct:    profitPct,
-		TierIndex:    tierIndex,
-	}
+	switch action {
+	case "open_long", "open_short":
+		// Open position: create new position record
+		nowMs := time.Now().UTC().UnixMilli()
+		pos := &store.TraderPosition{
+			TraderID:     at.id,
+			ExchangeID:   at.exchangeID, // Exchange account UUID
+			ExchangeType: at.exchange,   // Exchange type: binance/bybit/okx/etc
+			Symbol:       symbol,
+			Side:         side, // LONG or SHORT
+			Quantity:     quantity,
+			EntryPrice:   price,
+			EntryOrderID: orderID,
+			EntryTime:    nowMs,
+			Leverage:     leverage,
+			Status:       "OPEN",
+			CreatedAt:    nowMs,
+			UpdatedAt:    nowMs,
+		}
+		if err := at.store.Position().Create(pos); err != nil {
+			logger.Infof("  ⚠️ Failed to record position: %v", err)
+		} else {
+			logger.Infof("  📊 Position recorded [%s] %s %s @ %.4f", at.id[:8], symbol, side, price)
+		}
 
-	if tierThreshold != nil {
-		logEntry.TierThreshold = sql.NullFloat64{Float64: *tierThreshold, Valid: true}
-	}
-	if oldStopPrice != nil {
-		logEntry.OldStopPrice = sql.NullFloat64{Float64: *oldStopPrice, Valid: true}
-	}
-	if newStopPrice != nil {
-		logEntry.NewStopPrice = sql.NullFloat64{Float64: *newStopPrice, Valid: true}
-	}
-	if targetStopProfitPct != nil {
-		logEntry.TargetStopProfitPct = sql.NullFloat64{Float64: *targetStopProfitPct, Valid: true}
-	}
-	if priceChangePct != nil {
-		logEntry.PriceChangePct = sql.NullFloat64{Float64: *priceChangePct, Valid: true}
-	}
-	if updateThresholdPct != nil {
-		logEntry.UpdateThresholdPct = sql.NullFloat64{Float64: *updateThresholdPct, Valid: true}
-	}
-	if shouldUpdate != nil {
-		logEntry.ShouldUpdate = sql.NullBool{Bool: *shouldUpdate, Valid: true}
-	}
-	if apiSuccess != nil {
-		logEntry.APISuccess = sql.NullBool{Bool: *apiSuccess, Valid: true}
-	}
-	if apiError != nil && *apiError != "" {
-		logEntry.APIError = sql.NullString{String: *apiError, Valid: true}
-	}
-	if skipReason != "" {
-		logEntry.SkipReason = sql.NullString{String: skipReason, Valid: true}
-	}
-
-	if err := logger.LogTrailingStopAction(logEntry); err != nil {
-		log.Printf("⚠️ 记录追踪止损日志失败: %v", err)
+	case "close_long", "close_short":
+		// Close position using PositionBuilder for consistent handling
+		// PositionBuilder will handle both cases:
+		// 1. If open position exists: close it properly
+		// 2. If no open position (e.g., table cleared): create a closed position record
+		posBuilder := store.NewPositionBuilder(at.store.Position())
+		if err := posBuilder.ProcessTrade(
+			at.id, at.exchangeID, at.exchange,
+			symbol, side, action,
+			quantity, price, fee, 0, // realizedPnL will be calculated
+			time.Now().UTC().UnixMilli(), orderID,
+		); err != nil {
+			logger.Infof("  ⚠️ Failed to process close position: %v", err)
+		} else {
+			logger.Infof("  ✅ Position closed [%s] %s %s @ %.4f", at.id[:8], symbol, side, price)
+		}
 	}
 }
+
+// createOrderRecord creates an order record struct from order details
+func (at *AutoTrader) createOrderRecord(orderID, symbol, action, positionSide string, quantity, price float64, leverage int) *store.TraderOrder {
+	// Determine order type (market for auto trader)
+	orderType := "MARKET"
+
+	// Determine side (BUY/SELL)
+	var side string
+	switch action {
+	case "open_long", "close_short":
+		side = "BUY"
+	case "open_short", "close_long":
+		side = "SELL"
+	}
+
+	// Use action as orderAction directly (keep lowercase format)
+	orderAction := action
+
+	// Determine if it's a reduce only order
+	reduceOnly := (action == "close_long" || action == "close_short")
+
+	// Normalize symbol for consistency
+	normalizedSymbol := market.Normalize(symbol)
+
+	return &store.TraderOrder{
+		TraderID:        at.id,
+		ExchangeID:      at.exchangeID,
+		ExchangeType:    at.exchange,
+		ExchangeOrderID: orderID,
+		Symbol:          normalizedSymbol,
+		Side:            side,
+		PositionSide:    positionSide,
+		Type:            orderType,
+		TimeInForce:     "GTC",
+		Quantity:        quantity,
+		Price:           price,
+		Status:          "NEW",
+		FilledQuantity:  0,
+		AvgFillPrice:    0,
+		Commission:      0,
+		CommissionAsset: "USDT",
+		Leverage:        leverage,
+		ReduceOnly:      reduceOnly,
+		ClosePosition:   reduceOnly,
+		OrderAction:     orderAction,
+		CreatedAt:       time.Now().UTC().UnixMilli(),
+		UpdatedAt:       time.Now().UTC().UnixMilli(),
+	}
+}
+
+// recordOrderFill records order fill/trade details
+func (at *AutoTrader) recordOrderFill(orderRecordID int64, exchangeOrderID, symbol, action string, price, quantity, fee float64) {
+	if at.store == nil {
+		return
+	}
+
+	// Determine side (BUY/SELL)
+	var side string
+	switch action {
+	case "open_long", "close_short":
+		side = "BUY"
+	case "open_short", "close_long":
+		side = "SELL"
+	}
+
+	// Generate a simple trade ID (exchange doesn't always provide one)
+	tradeID := fmt.Sprintf("%s-%d", exchangeOrderID, time.Now().UnixNano())
+
+	// Normalize symbol for consistency
+	normalizedSymbol := market.Normalize(symbol)
+
+	fill := &store.TraderFill{
+		TraderID:         at.id,
+		ExchangeID:       at.exchangeID,
+		ExchangeType:     at.exchange,
+		OrderID:          orderRecordID,
+		ExchangeOrderID:  exchangeOrderID,
+		ExchangeTradeID:  tradeID,
+		Symbol:           normalizedSymbol,
+		Side:             side,
+		Price:            price,
+		Quantity:         quantity,
+		QuoteQuantity:    price * quantity,
+		Commission:       fee,
+		CommissionAsset:  "USDT",
+		RealizedPnL:      0, // Will be calculated for close orders
+		IsMaker:          false, // Market orders are usually taker
+		CreatedAt:        time.Now().UTC().UnixMilli(),
+	}
+
+	// Calculate realized PnL for close orders
+	if action == "close_long" || action == "close_short" {
+		// Try to get the entry price from the open position
+		var positionSide string
+		if action == "close_long" {
+			positionSide = "LONG"
+		} else {
+			positionSide = "SHORT"
+		}
+
+		if openPos, err := at.store.Position().GetOpenPositionBySymbol(at.id, symbol, positionSide); err == nil && openPos != nil {
+			if positionSide == "LONG" {
+				fill.RealizedPnL = (price - openPos.EntryPrice) * quantity
+			} else {
+				fill.RealizedPnL = (openPos.EntryPrice - price) * quantity
+			}
+		}
+	}
+
+	if err := at.store.Order().CreateFill(fill); err != nil {
+		logger.Infof("  ⚠️ Failed to record fill: %v", err)
+	} else {
+		logger.Infof("  📋 Fill recorded: %.4f @ %.6f, fee: %.4f", quantity, price, fee)
+	}
+}
+
+// ============================================================================
+// Risk Control Helpers
+// ============================================================================
+
+// isBTCETH checks if a symbol is BTC or ETH
+func isBTCETH(symbol string) bool {
+	symbol = strings.ToUpper(symbol)
+	return strings.HasPrefix(symbol, "BTC") || strings.HasPrefix(symbol, "ETH")
+}
+
+// enforcePositionValueRatio checks and enforces position value ratio limits (CODE ENFORCED)
+// Returns the adjusted position size (capped if necessary) and whether the position was capped
+// positionSizeUSD: the original position size in USD
+// equity: the account equity
+// symbol: the trading symbol
+func (at *AutoTrader) enforcePositionValueRatio(positionSizeUSD float64, equity float64, symbol string) (float64, bool) {
+	if at.config.StrategyConfig == nil {
+		return positionSizeUSD, false
+	}
+
+	riskControl := at.config.StrategyConfig.RiskControl
+
+	// Get the appropriate position value ratio limit
+	var maxPositionValueRatio float64
+	if isBTCETH(symbol) {
+		maxPositionValueRatio = riskControl.BTCETHMaxPositionValueRatio
+		if maxPositionValueRatio <= 0 {
+			maxPositionValueRatio = 5.0 // Default: 5x for BTC/ETH
+		}
+	} else {
+		maxPositionValueRatio = riskControl.AltcoinMaxPositionValueRatio
+		if maxPositionValueRatio <= 0 {
+			maxPositionValueRatio = 1.0 // Default: 1x for altcoins
+		}
+	}
+
+	// Calculate max allowed position value = equity × ratio
+	maxPositionValue := equity * maxPositionValueRatio
+
+	// Check if position size exceeds limit
+	if positionSizeUSD > maxPositionValue {
+		logger.Infof("  ⚠️ [RISK CONTROL] Position %.2f USDT exceeds limit (equity %.2f × %.1fx = %.2f USDT max for %s), capping",
+			positionSizeUSD, equity, maxPositionValueRatio, maxPositionValue, symbol)
+		return maxPositionValue, true
+	}
+
+	return positionSizeUSD, false
+}
+
+// enforceMinPositionSize checks minimum position size (CODE ENFORCED)
+func (at *AutoTrader) enforceMinPositionSize(positionSizeUSD float64) error {
+	if at.config.StrategyConfig == nil {
+		return nil
+	}
+
+	minSize := at.config.StrategyConfig.RiskControl.MinPositionSize
+	if minSize <= 0 {
+		minSize = 12 // Default: 12 USDT
+	}
+
+	if positionSizeUSD < minSize {
+		return fmt.Errorf("❌ [RISK CONTROL] Position %.2f USDT below minimum (%.2f USDT)", positionSizeUSD, minSize)
+	}
+	return nil
+}
+
+// enforceMaxPositions checks maximum positions count (CODE ENFORCED)
+func (at *AutoTrader) enforceMaxPositions(currentPositionCount int) error {
+	if at.config.StrategyConfig == nil {
+		return nil
+	}
+
+	maxPositions := at.config.StrategyConfig.RiskControl.MaxPositions
+	if maxPositions <= 0 {
+		maxPositions = 3 // Default: 3 positions
+	}
+
+	if currentPositionCount >= maxPositions {
+		return fmt.Errorf("❌ [RISK CONTROL] Already at max positions (%d/%d)", currentPositionCount, maxPositions)
+	}
+	return nil
+}
+
+// getSideFromAction converts order action to side (BUY/SELL)
+func getSideFromAction(action string) string {
+	switch action {
+	case "open_long", "close_short":
+		return "BUY"
+	case "open_short", "close_long":
+		return "SELL"
+	default:
+		return "BUY"
+	}
+}
+
+// GetOpenOrders returns open orders (pending SL/TP) from exchange
+func (at *AutoTrader) GetOpenOrders(symbol string) ([]OpenOrder, error) {
+	return at.trader.GetOpenOrders(symbol)
+}
+

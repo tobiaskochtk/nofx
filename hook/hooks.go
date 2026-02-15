@@ -2,27 +2,18 @@ package hook
 
 import (
 	"log"
-	"sync"
 )
 
 type HookFunc func(args ...any) any
 
 var (
-	Hooks         map[string]HookFunc = map[string]HookFunc{}
-	EnableHooks                       = true
-	warnedHooks                       = make(map[string]bool)
-	warnedHooksMu sync.Mutex
+	Hooks       map[string]HookFunc = map[string]HookFunc{}
+	EnableHooks                     = true
 )
 
 func HookExec[T any](key string, args ...any) *T {
 	if !EnableHooks {
-		// Nur beim ersten Mal loggen, wenn Hooks deaktiviert sind
-		warnedHooksMu.Lock()
-		if !warnedHooks["disabled"] {
-			log.Printf("🔌 Hooks are disabled")
-			warnedHooks["disabled"] = true
-		}
-		warnedHooksMu.Unlock()
+		// Hooks are disabled, skip silently
 		var zero *T
 		return zero
 	}
@@ -30,15 +21,8 @@ func HookExec[T any](key string, args ...any) *T {
 		log.Printf("🔌 Execute hook: %s", key)
 		res := hook(args...)
 		return res.(*T)
-	} else {
-		// Nur beim ersten Mal pro Hook warnen
-		warnedHooksMu.Lock()
-		if !warnedHooks[key] {
-			log.Printf("🔌 Hook not registered: %s (will not warn again)", key)
-			warnedHooks[key] = true
-		}
-		warnedHooksMu.Unlock()
 	}
+	// Hook not found, skip silently (no log spam)
 	var zero *T
 	return zero
 }

@@ -1,33 +1,40 @@
 import { useState, useEffect } from 'react'
-import type { AIModel, Exchange, CreateTraderRequest } from '../types'
+import type { AIModel, Exchange, CreateTraderRequest, Strategy } from '../types'
 import { useLanguage } from '../contexts/LanguageContext'
 import { t } from '../i18n/translations'
 import { toast } from 'sonner'
-import { Pencil, Plus, X as IconX } from 'lucide-react'
+import { Pencil, Plus, X as IconX, Sparkles, ExternalLink, UserPlus } from 'lucide-react'
 import { httpClient } from '../lib/httpClient'
 
-// アンダースコアの後の名前部分を抽出 | Extract name part after underscore
+// 提取下划线后面的名称部分
 function getShortName(fullName: string): string {
   const parts = fullName.split('_')
   return parts.length > 1 ? parts[parts.length - 1] : fullName
 }
 
-interface TraderConfigData {
+// 交易所注册链接配置
+const EXCHANGE_REGISTRATION_LINKS: Record<string, { url: string; hasReferral?: boolean }> = {
+  binance: { url: 'https://www.binance.com/join?ref=NOFXENG', hasReferral: true },
+  okx: { url: 'https://www.okx.com/join/1865360', hasReferral: true },
+  bybit: { url: 'https://partner.bybit.com/b/83856', hasReferral: true },
+  hyperliquid: { url: 'https://app.hyperliquid.xyz/join/AITRADING', hasReferral: true },
+  aster: { url: 'https://www.asterdex.com/en/referral/fdfc0e', hasReferral: true },
+  lighter: { url: 'https://app.lighter.xyz/?referral=68151432', hasReferral: true },
+}
+
+import type { TraderConfigData } from '../types'
+
+// 表单内部状态类型
+interface FormState {
   trader_id?: string
   trader_name: string
   ai_model: string
   exchange_id: string
-  btc_eth_leverage: number
-  altcoin_leverage: number
-  trading_symbols: string
-  custom_prompt: string
-  override_base_prompt: boolean
-  system_prompt_template: string
+  strategy_id: string
   is_cross_margin: boolean
-  use_coin_pool: boolean
-  use_oi_top: boolean
-  initial_balance?: number // 可选：创建时不需要，编辑时使用
+  show_in_competition: boolean
   scan_interval_minutes: number
+  initial_balance?: number
 }
 
 interface TraderConfigModalProps {
@@ -50,161 +57,75 @@ export function TraderConfigModal({
   onSave,
 }: TraderConfigModalProps) {
   const { language } = useLanguage()
-  const [formData, setFormData] = useState<TraderConfigData>({
+  const [formData, setFormData] = useState<FormState>({
     trader_name: '',
     ai_model: '',
     exchange_id: '',
-    btc_eth_leverage: 5,
-    altcoin_leverage: 3,
-    trading_symbols: '',
-    custom_prompt: '',
-    override_base_prompt: false,
-    system_prompt_template: 'default',
+    strategy_id: '',
     is_cross_margin: true,
-    use_coin_pool: false,
-    use_oi_top: false,
-    initial_balance: 850,
+    show_in_competition: true,
     scan_interval_minutes: 3,
   })
   const [isSaving, setIsSaving] = useState(false)
-  const [availableCoins, setAvailableCoins] = useState<string[]>([])
-  const [selectedCoins, setSelectedCoins] = useState<string[]>([])
-  const [showCoinSelector, setShowCoinSelector] = useState(false)
-  const [promptTemplates, setPromptTemplates] = useState<{ name: string }[]>([])
+  const [strategies, setStrategies] = useState<Strategy[]>([])
   const [isFetchingBalance, setIsFetchingBalance] = useState(false)
   const [balanceFetchError, setBalanceFetchError] = useState<string>('')
 
+  // 获取用户的策略列表
+  useEffect(() => {
+    const fetchStrategies = async () => {
+      try {
+        const result = await httpClient.get<{ strategies: Strategy[] }>('/api/strategies')
+        if (result.success && result.data?.strategies) {
+          const strategyList = result.data.strategies
+          setStrategies(strategyList)
+          // 如果没有选择策略，默认选中激活的策略
+          if (!formData.strategy_id && !isEditMode) {
+            const activeStrategy = strategyList.find(s => s.is_active)
+            if (activeStrategy) {
+              setFormData(prev => ({ ...prev, strategy_id: activeStrategy.id }))
+            } else if (strategyList.length > 0) {
+              setFormData(prev => ({ ...prev, strategy_id: strategyList[0].id }))
+            }
+          }
+        }
+      } catch (error) {
+        console.error('Failed to fetch strategies:', error)
+      }
+    }
+    if (isOpen) {
+      fetchStrategies()
+    }
+  }, [isOpen])
+
   useEffect(() => {
     if (traderData) {
-      setFormData(traderData)
-      // 選択されたコインを設定 | Set selected coins
-      if (traderData.trading_symbols) {
-        const coins = traderData.trading_symbols
-          .split(',')
-          .map((s) => s.trim())
-          .filter((s) => s)
-        setSelectedCoins(coins)
-      }
+      setFormData({
+        ...traderData,
+        strategy_id: traderData.strategy_id || '',
+      })
     } else if (!isEditMode) {
       setFormData({
         trader_name: '',
         ai_model: availableModels[0]?.id || '',
         exchange_id: availableExchanges[0]?.id || '',
-        btc_eth_leverage: 5,
-        altcoin_leverage: 3,
-        trading_symbols: '',
-        custom_prompt: '',
-        override_base_prompt: false,
-        system_prompt_template: 'default',
+        strategy_id: '',
         is_cross_margin: true,
-        use_coin_pool: false,
-        use_oi_top: false,
-        initial_balance: 1000,
+        show_in_competition: true,
         scan_interval_minutes: 3,
       })
     }
-    // 古いデータにもデフォルトの system_prompt_template を確保 | Ensure old data also has default system_prompt_template
-    if (traderData && traderData.system_prompt_template === undefined) {
-      setFormData((prev) => ({
-        ...prev,
-        system_prompt_template: 'default',
-      }))
-    }
   }, [traderData, isEditMode, availableModels, availableExchanges])
-
-  // システム設定からコインリストを取得 | Get coin list from system config
-  useEffect(() => {
-    const fetchConfig = async () => {
-      try {
-        const result = await httpClient.get<{ default_coins?: string[] }>(
-          '/api/config'
-        )
-        if (result.success && result.data?.default_coins) {
-          setAvailableCoins(result.data.default_coins)
-          return
-        }
-      } catch (error) {
-        console.error('Failed to fetch config:', error)
-      }
-      setAvailableCoins([
-        'BTCUSDT',
-        'ETHUSDT',
-        'SOLUSDT',
-        'BNBUSDT',
-        'XRPUSDT',
-        'DOGEUSDT',
-        'ADAUSDT',
-      ])
-    }
-    fetchConfig()
-  }, [])
-
-  // 获取系统提示词模板列表
-  useEffect(() => {
-    const fetchPromptTemplates = async () => {
-      try {
-        const result = await httpClient.get<{
-          templates?: { name: string }[]
-        }>('/api/prompt-templates')
-        if (result.success && result.data?.templates) {
-          setPromptTemplates(result.data.templates)
-          return
-        }
-      } catch (error) {
-        console.error('Failed to fetch prompt templates:', error)
-      }
-      setPromptTemplates([{ name: 'default' }, { name: 'aggressive' }])
-    }
-    fetchPromptTemplates()
-  }, [])
-
-  // 确保当前选择的 system_prompt_template 始终出现在下拉选项里（避免未列出模板导致显示回退为默认值）
-  useEffect(() => {
-    if (!formData.system_prompt_template) return
-    setPromptTemplates((prev) => {
-      if (prev.some((t) => t.name === formData.system_prompt_template)) return prev
-      return [...prev, { name: formData.system_prompt_template }]
-    })
-  }, [formData.system_prompt_template])
-
-  // 当选择的币种改变时，更新输入框
-  useEffect(() => {
-    const symbolsString = selectedCoins.join(',')
-    setFormData((prev) => ({ ...prev, trading_symbols: symbolsString }))
-  }, [selectedCoins])
 
   if (!isOpen) return null
 
-  const handleInputChange = (field: keyof TraderConfigData, value: any) => {
+  const handleInputChange = (field: keyof FormState, value: any) => {
     setFormData((prev) => ({ ...prev, [field]: value }))
-
-    // 如果是直接编辑trading_symbols，同步更新selectedCoins
-    if (field === 'trading_symbols') {
-      const coins = value
-        .split(',')
-        .map((s: string) => s.trim())
-        .filter((s: string) => s)
-      setSelectedCoins(coins)
-    }
-  }
-
-  const handleCoinToggle = (coin: string) => {
-    setSelectedCoins((prev) => {
-      const newCoins = prev.includes(coin)
-        ? prev.filter((c) => c !== coin)
-        : [...prev, coin]
-
-      // 同时更新 formData.trading_symbols
-      const symbolsString = newCoins.join(',')
-      setFormData((current) => ({ ...current, trading_symbols: symbolsString }))
-
-      return newCoins
-    })
   }
 
   const handleFetchCurrentBalance = async () => {
     if (!isEditMode || !traderData?.trader_id) {
-      setBalanceFetchError(t('traderConfigModal.fetchBalanceEditOnly', language))
+       setBalanceFetchError(t('fetchBalanceEditModeOnly', language))
       return
     }
 
@@ -220,21 +141,14 @@ export function TraderConfigModal({
       if (result.success && result.data) {
         const currentBalance =
           result.data.total_equity || result.data.balance || 0
-
         setFormData((prev) => ({ ...prev, initial_balance: currentBalance }))
-        toast.success(t('traderConfigModal.fetchedBalanceSuccess', language))
+        toast.success(t('balanceFetched', language))
       } else {
-        throw new Error(
-          result.message ||
-            t('traderConfigModal.fetchBalanceFailed', language)
-        )
+        throw new Error(result.message || t('balanceFetchFailed', language))
       }
     } catch (error) {
-      console.error('Failed to fetch balance:', error)
-      setBalanceFetchError(
-        t('traderConfigModal.fetchBalanceFailed', language)
-      )
-      // Note: Network/system errors already shown via toast by httpClient
+      console.error(t('balanceFetchFailed', language) + ':', error)
+       setBalanceFetchError(t('balanceFetchNetworkError', language))
     } finally {
       setIsFetchingBalance(false)
     }
@@ -249,40 +163,36 @@ export function TraderConfigModal({
         name: formData.trader_name,
         ai_model_id: formData.ai_model,
         exchange_id: formData.exchange_id,
-        btc_eth_leverage: formData.btc_eth_leverage,
-        altcoin_leverage: formData.altcoin_leverage,
-        trading_symbols: formData.trading_symbols,
-        custom_prompt: formData.custom_prompt,
-        override_base_prompt: formData.override_base_prompt,
-        system_prompt_template: formData.system_prompt_template,
+        strategy_id: formData.strategy_id,
         is_cross_margin: formData.is_cross_margin,
-        use_coin_pool: formData.use_coin_pool,
-        use_oi_top: formData.use_oi_top,
+        show_in_competition: formData.show_in_competition,
         scan_interval_minutes: formData.scan_interval_minutes,
       }
 
-      // 只在编辑模式时包含initial_balance（用于手动更新）
+      // 只在编辑模式时包含initial_balance
       if (isEditMode && formData.initial_balance !== undefined) {
         saveData.initial_balance = formData.initial_balance
       }
 
       await toast.promise(onSave(saveData), {
-        loading: t('traderConfigModal.saving', language),
-        success: t('traderConfigModal.saveSuccess', language),
-        error: t('traderConfigModal.saveFailed', language),
+        loading: t('saving', language),
+        success: t('saveSuccess', language),
+        error: t('saveFailed', language),
       })
       onClose()
     } catch (error) {
-      console.error('Failed to save trader config:', error)
+       console.error(t('saveFailed', language) + ':', error)
     } finally {
       setIsSaving(false)
     }
   }
 
+  const selectedStrategy = strategies.find(s => s.id === formData.strategy_id)
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50 backdrop-blur-sm p-4 overflow-y-auto">
       <div
-        className="bg-[#1E2329] border border-[#2B3139] rounded-xl shadow-2xl max-w-3xl w-full my-8"
+        className="bg-[#1E2329] border border-[#2B3139] rounded-xl shadow-2xl max-w-2xl w-full my-8"
         style={{ maxHeight: 'calc(100vh - 4rem)' }}
         onClick={(e) => e.stopPropagation()}
       >
@@ -298,14 +208,10 @@ export function TraderConfigModal({
             </div>
             <div>
               <h2 className="text-xl font-bold text-[#EAECEF]">
-                {isEditMode
-                  ? t('traderConfigModal.editTitle', language)
-                  : t('traderConfigModal.createTitle', language)}
+                {isEditMode ? t('editTrader', language) : t('createTrader', language)}
               </h2>
               <p className="text-sm text-[#848E9C] mt-1">
-                {isEditMode
-                  ? t('traderConfigModal.editSubtitle', language)
-                  : t('traderConfigModal.createSubtitle', language)}
+                {isEditMode ? t('editTraderConfig', language) : t('selectStrategyAndConfigParams', language)}
               </p>
             </div>
           </div>
@@ -319,18 +225,18 @@ export function TraderConfigModal({
 
         {/* Content */}
         <div
-          className="p-6 space-y-8 overflow-y-auto"
+          className="p-6 space-y-6 overflow-y-auto"
           style={{ maxHeight: 'calc(100vh - 16rem)' }}
         >
           {/* Basic Info */}
           <div className="bg-[#0B0E11] border border-[#2B3139] rounded-lg p-5">
             <h3 className="text-lg font-semibold text-[#EAECEF] mb-5 flex items-center gap-2">
-              🤖 {t('traderConfigModal.basicConfig', language)}
+              <span className="text-[#F0B90B]">1</span> {t('basicConfig', language)}
             </h3>
             <div className="space-y-4">
               <div>
                 <label className="text-sm text-[#EAECEF] block mb-2">
-                  {t('traderName', language)}
+                  {t('traderNameRequired', language)}
                 </label>
                 <input
                   type="text"
@@ -339,13 +245,13 @@ export function TraderConfigModal({
                     handleInputChange('trader_name', e.target.value)
                   }
                   className="w-full px-3 py-2 bg-[#0B0E11] border border-[#2B3139] rounded text-[#EAECEF] focus:border-[#F0B90B] focus:outline-none"
-                  placeholder={t('enterTraderName', language)}
+                   placeholder={t('enterTraderNamePlaceholder', language)}
                 />
               </div>
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="text-sm text-[#EAECEF] block mb-2">
-                    {t('aiModels', language)}
+                  {t('aiModelRequired', language)}
                   </label>
                   <select
                     value={formData.ai_model}
@@ -363,7 +269,7 @@ export function TraderConfigModal({
                 </div>
                 <div>
                   <label className="text-sm text-[#EAECEF] block mb-2">
-                    {t('exchanges', language)}
+                  {t('exchangeRequired', language)}
                   </label>
                   <select
                     value={formData.exchange_id}
@@ -374,28 +280,116 @@ export function TraderConfigModal({
                   >
                     {availableExchanges.map((exchange) => (
                       <option key={exchange.id} value={exchange.id}>
-                        {getShortName(
-                          exchange.name || exchange.id
-                        ).toUpperCase()}
+                        {getShortName(exchange.name || exchange.exchange_type || exchange.id).toUpperCase()}
+                        {exchange.account_name ? ` - ${exchange.account_name}` : ''}
                       </option>
                     ))}
                   </select>
+                  {/* Exchange Registration Link */}
+                  {formData.exchange_id && (() => {
+                    // Find the selected exchange to get its type
+                    const selectedExchange = availableExchanges.find(e => e.id === formData.exchange_id)
+                    const exchangeType = selectedExchange?.exchange_type?.toLowerCase() || ''
+                    const regLink = EXCHANGE_REGISTRATION_LINKS[exchangeType]
+                    if (!regLink) return null
+                    return (
+                      <a
+                        href={regLink.url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="mt-2 inline-flex items-center gap-1.5 text-xs text-[#848E9C] hover:text-[#F0B90B] transition-colors"
+                      >
+                        <UserPlus className="w-3.5 h-3.5" />
+                        <span>{t('noExchangeAccount', language)}</span>
+                        {regLink.hasReferral && (
+                          <span className="px-1.5 py-0.5 bg-[#F0B90B]/10 text-[#F0B90B] rounded text-[10px]">
+                            {t('discount', language)}
+                          </span>
+                        )}
+                        <ExternalLink className="w-3 h-3" />
+                      </a>
+                    )
+                  })()}
                 </div>
               </div>
             </div>
           </div>
 
-          {/* Trading Configuration */}
+          {/* Strategy Selection */}
           <div className="bg-[#0B0E11] border border-[#2B3139] rounded-lg p-5">
             <h3 className="text-lg font-semibold text-[#EAECEF] mb-5 flex items-center gap-2">
-              ⚖️ {t('traderConfigModal.tradingConfig', language)}
+              <span className="text-[#F0B90B]">2</span> {t('selectTradingStrategy', language)}
+              <Sparkles className="w-4 h-4 text-[#F0B90B]" />
             </h3>
             <div className="space-y-4">
-              {/* 第一行：保证金模式和初始余额 */}
+              <div>
+                <label className="text-sm text-[#EAECEF] block mb-2">
+                  {t('useStrategy', language)}
+                </label>
+                <select
+                  value={formData.strategy_id}
+                  onChange={(e) =>
+                    handleInputChange('strategy_id', e.target.value)
+                  }
+                  className="w-full px-3 py-2 bg-[#0B0E11] border border-[#2B3139] rounded text-[#EAECEF] focus:border-[#F0B90B] focus:outline-none"
+                >
+                  <option value="">{t('noStrategyManual', language)}</option>
+                  {strategies.map((strategy) => (
+                    <option key={strategy.id} value={strategy.id}>
+                      {selectedStrategy.name}
+                      {selectedStrategy.is_active ? t('active', language) : ''}
+                      {selectedStrategy.is_default ? t('default', language) : ''}
+                    </option>
+                  ))}
+                </select>
+                {strategies.length === 0 && (
+                    <p className="text-xs text-[#848E9C] mt-2">
+                      {t('noStrategyHint', language)}
+                  </p>
+                )}
+              </div>
+
+              {/* Strategy Preview */}
+              {selectedStrategy && (
+                <div className="mt-3 p-4 bg-[#1E2329] border border-[#2B3139] rounded-lg">
+                  <div className="flex items-center gap-2 mb-2">
+                    <span className="text-[#F0B90B] text-sm font-medium">
+                      {t('strategyDetails', language)}
+                    </span>
+                    {selectedStrategy.is_active && (
+                      <span className="px-2 py-0.5 bg-green-500/20 text-green-400 text-xs rounded">
+                        {t('activating', language)}
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-sm text-[#848E9C] mb-2">
+                    {selectedStrategy.description || (language === 'zh' ? '无描述' : 'No description')}
+                  </p>
+                  <div className="grid grid-cols-2 gap-2 text-xs text-[#848E9C]">
+                    <div>
+                      {t('coinSource', language)}: {selectedStrategy.config.coin_source.source_type === 'static' ? '固定币种' :
+                        selectedStrategy.config.coin_source.source_type === 'ai500' ? 'AI500' :
+                        selectedStrategy.config.coin_source.source_type === 'oi_top' ? 'OI Top' : '混合'}
+                    </div>
+                    <div>
+                      {t('marginLimit', language)}: {((selectedStrategy.config.risk_control?.max_margin_usage || 0.9) * 100).toFixed(0)}%
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Trading Parameters */}
+          <div className="bg-[#0B0E11] border border-[#2B3139] rounded-lg p-5">
+            <h3 className="text-lg font-semibold text-[#EAECEF] mb-5 flex items-center gap-2">
+              <span className="text-[#F0B90B]">3</span> {t('tradingParams', language)}
+            </h3>
+            <div className="space-y-4">
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="text-sm text-[#EAECEF] block mb-2">
-                    {t('traderConfigModal.marginMode', language)}
+                    {t('marginMode', language)}
                   </label>
                   <div className="flex gap-2">
                     <button
@@ -407,7 +401,7 @@ export function TraderConfigModal({
                           : 'bg-[#0B0E11] text-[#848E9C] border border-[#2B3139]'
                       }`}
                     >
-                      {t('crossMarginMode', language)}
+                      {t('crossMargin', language)}
                     </button>
                     <button
                       type="button"
@@ -420,90 +414,10 @@ export function TraderConfigModal({
                           : 'bg-[#0B0E11] text-[#848E9C] border border-[#2B3139]'
                       }`}
                     >
-                      {t('isolatedMarginMode', language)}
+                      {t('isolatedMargin', language)}
                     </button>
                   </div>
                 </div>
-                {isEditMode && (
-                  <div>
-                    <div className="flex items-center justify-between mb-2">
-                      <label className="text-sm text-[#EAECEF]">
-                        {t('traderConfigModal.initialBalanceLabel', language)}
-                      </label>
-                      <button
-                        type="button"
-                        onClick={handleFetchCurrentBalance}
-                        disabled={isFetchingBalance}
-                        className="px-3 py-1 text-xs bg-[#F0B90B] text-black rounded hover:bg-[#E1A706] transition-colors disabled:bg-[#848E9C] disabled:cursor-not-allowed"
-                      >
-                        {isFetchingBalance
-                          ? t('traderConfigModal.fetchingBalance', language)
-                          : t('traderConfigModal.fetchCurrentBalance', language)}
-                      </button>
-                    </div>
-                    <input
-                      type="number"
-                      value={formData.initial_balance || 0}
-                      onChange={(e) =>
-                        handleInputChange(
-                          'initial_balance',
-                          Number(e.target.value)
-                        )
-                      }
-                      onBlur={(e) => {
-                        // Force minimum value on blur
-                        const value = Number(e.target.value)
-                        if (value < 100) {
-                          handleInputChange('initial_balance', 100)
-                        }
-                      }}
-                      className="w-full px-3 py-2 bg-[#0B0E11] border border-[#2B3139] rounded text-[#EAECEF] focus:border-[#F0B90B] focus:outline-none"
-                      min="100"
-                      step="0.01"
-                    />
-                    <p className="text-xs text-[#848E9C] mt-1">
-                      {t('traderConfigModal.manualBalanceHint', language)}
-                    </p>
-                    {balanceFetchError && (
-                      <p className="text-xs text-red-500 mt-1">
-                        {balanceFetchError}
-                      </p>
-                    )}
-                  </div>
-                )}
-                {!isEditMode && (
-                  <div>
-                    <label className="text-sm text-[#EAECEF] mb-2 block">
-                      {t('initialBalance', language)}
-                    </label>
-                    <div className="w-full px-3 py-2 bg-[#1E2329] border border-[#2B3139] rounded text-[#848E9C] flex items-center gap-2">
-                      <svg
-                        xmlns="http://www.w3.org/2000/svg"
-                        className="w-4 h-4 text-[#F0B90B]"
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke="currentColor"
-                        strokeWidth="2"
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                      >
-                        <circle cx="12" cy="12" r="10" />
-                        <line x1="12" x2="12" y1="8" y2="12" />
-                        <line x1="12" x2="12.01" y1="16" y2="16" />
-                      </svg>
-                      <span className="text-sm">
-                        {t(
-                          'traderConfigModal.autoInitialBalanceHint',
-                          language
-                        )}
-                      </span>
-                    </div>
-                  </div>
-                )}
-              </div>
-
-              {/* 第二行：AI 扫描决策间隔 */}
-              <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="text-sm text-[#EAECEF] block mb-2">
                     {t('aiScanInterval', language)}
@@ -527,249 +441,88 @@ export function TraderConfigModal({
                     {t('scanIntervalRecommend', language)}
                   </p>
                 </div>
-                <div></div>
               </div>
 
-              {/* 第三行：杠杆设置 */}
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="text-sm text-[#EAECEF] block mb-2">
-                    {t('btcEthLeverage', language)}
-                  </label>
-                  <input
-                    type="number"
-                    value={formData.btc_eth_leverage}
-                    onChange={(e) =>
-                      handleInputChange(
-                        'btc_eth_leverage',
-                        Number(e.target.value)
-                      )
-                    }
-                    className="w-full px-3 py-2 bg-[#0B0E11] border border-[#2B3139] rounded text-[#EAECEF] focus:border-[#F0B90B] focus:outline-none"
-                    min="1"
-                    max="125"
-                  />
-                </div>
-                <div>
-                  <label className="text-sm text-[#EAECEF] block mb-2">
-                    {t('altcoinLeverage', language)}
-                  </label>
-                  <input
-                    type="number"
-                    value={formData.altcoin_leverage}
-                    onChange={(e) =>
-                      handleInputChange(
-                        'altcoin_leverage',
-                        Number(e.target.value)
-                      )
-                    }
-                    className="w-full px-3 py-2 bg-[#0B0E11] border border-[#2B3139] rounded text-[#EAECEF] focus:border-[#F0B90B] focus:outline-none"
-                    min="1"
-                    max="75"
-                  />
-                </div>
-              </div>
-
-              {/* 第三行：交易币种 */}
-              <div>
-                <div className="flex items-center justify-between mb-2">
-                  <label className="text-sm text-[#EAECEF]">
-                    {t('traderConfigModal.tradingSymbolsLabel', language)}
-                  </label>
-                  <button
-                    type="button"
-                    onClick={() => setShowCoinSelector(!showCoinSelector)}
-                    className="px-3 py-1 text-xs bg-[#F0B90B] text-black rounded hover:bg-[#E1A706] transition-colors"
-                  >
-                    {showCoinSelector
-                      ? t('traderConfigModal.hideQuickSelect', language)
-                      : t('traderConfigModal.quickSelect', language)}
-                  </button>
-                </div>
-                <input
-                  type="text"
-                  value={formData.trading_symbols}
-                  onChange={(e) =>
-                    handleInputChange('trading_symbols', e.target.value)
-                  }
-                  className="w-full px-3 py-2 bg-[#0B0E11] border border-[#2B3139] rounded text-[#EAECEF] focus:border-[#F0B90B] focus:outline-none"
-                  placeholder={t('tradingSymbolsPlaceholder', language)}
-                />
-
-                {/* 币种选择器 */}
-                {showCoinSelector && (
-                  <div className="mt-3 p-3 bg-[#0B0E11] border border-[#2B3139] rounded">
-                    <div className="text-xs text-[#848E9C] mb-2">
-                      {t('traderConfigModal.tapToSelect', language)}
-                    </div>
-                    <div className="flex flex-wrap gap-2">
-                      {availableCoins.map((coin) => (
-                        <button
-                          key={coin}
-                          type="button"
-                          onClick={() => handleCoinToggle(coin)}
-                          className={`px-2 py-1 text-xs rounded transition-colors ${
-                            selectedCoins.includes(coin)
-                              ? 'bg-[#F0B90B] text-black'
-                              : 'bg-[#1E2329] text-[#848E9C] border border-[#2B3139] hover:border-[#F0B90B]'
-                          }`}
-                        >
-                          {coin.replace('USDT', '')}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                )}
-              </div>
-            </div>
-          </div>
-
-          {/* Signal Sources */}
-          <div className="bg-[#0B0E11] border border-[#2B3139] rounded-lg p-5">
-            <h3 className="text-lg font-semibold text-[#EAECEF] mb-5 flex items-center gap-2">
-              📡 {t('traderConfigModal.signalSourceTitle', language)}
-            </h3>
-            <div className="grid grid-cols-2 gap-4">
-              <div className="flex items-center gap-3">
-                <input
-                  type="checkbox"
-                  checked={formData.use_coin_pool}
-                  onChange={(e) =>
-                    handleInputChange('use_coin_pool', e.target.checked)
-                  }
-                  className="w-4 h-4"
-                />
-                <label className="text-sm text-[#EAECEF]">
-                  {t('traderConfigModal.useCoinPoolSignal', language)}
-                </label>
-              </div>
-              <div className="flex items-center gap-3">
-                <input
-                  type="checkbox"
-                  checked={formData.use_oi_top}
-                  onChange={(e) =>
-                    handleInputChange('use_oi_top', e.target.checked)
-                  }
-                  className="w-4 h-4"
-                />
-                <label className="text-sm text-[#EAECEF]">
-                  {t('traderConfigModal.useOiTopSignal', language)}
-                </label>
-              </div>
-            </div>
-          </div>
-
-          {/* Trading Prompt */}
-          <div className="bg-[#0B0E11] border border-[#2B3139] rounded-lg p-5">
-            <h3 className="text-lg font-semibold text-[#EAECEF] mb-5 flex items-center gap-2">
-              💬 {t('traderConfigModal.promptTitle', language)}
-            </h3>
-            <div className="space-y-4">
-              {/* 系统提示词模板选择 */}
+              {/* Competition visibility */}
               <div>
                 <label className="text-sm text-[#EAECEF] block mb-2">
-                  {t('systemPromptTemplate', language)}
+                  {t('competitionDisplay', language)}
                 </label>
-                <select
-                  value={formData.system_prompt_template}
-                  onChange={(e) =>
-                    handleInputChange('system_prompt_template', e.target.value)
-                  }
-                  className="w-full px-3 py-2 bg-[#0B0E11] border border-[#2B3139] rounded text-[#EAECEF] focus:border-[#F0B90B] focus:outline-none"
-                >
-                  {promptTemplates.map((template) => {
-                    // Template name mapping with i18n
-                    const getTemplateName = (name: string) => {
-                      const keyMap: Record<string, string> = {
-                        default: 'promptTemplateDefault',
-                        adaptive: 'promptTemplateAdaptive',
-                        adaptive_relaxed: 'promptTemplateAdaptiveRelaxed',
-                        Hansen: 'promptTemplateHansen',
-                        nof1: 'promptTemplateNof1',
-                        taro_long_prompts: 'promptTemplateTaroLong',
-                        v3_compatible: 'promptTemplateV3Compatible',
-                      }
-                      const key = keyMap[name]
-                      return key
-                        ? t(key, language)
-                        : name.charAt(0).toUpperCase() + name.slice(1)
-                    }
-
-                    return (
-                      <option key={template.name} value={template.name}>
-                        {getTemplateName(template.name)}
-                      </option>
-                    )
-                  })}
-                </select>
-
-                {/* 動態描述區域 */}
-                <div
-                  className="mt-2 p-3 rounded"
-                  style={{
-                    background: 'rgba(240, 185, 11, 0.05)',
-                    border: '1px solid rgba(240, 185, 11, 0.15)',
-                  }}
-                >
-                  <div
-                    className="text-xs font-semibold mb-1"
-                    style={{ color: '#F0B90B' }}
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => handleInputChange('show_in_competition', true)}
+                    className={`flex-1 px-3 py-2 rounded text-sm ${
+                      formData.show_in_competition
+                        ? 'bg-[#F0B90B] text-black'
+                        : 'bg-[#0B0E11] text-[#848E9C] border border-[#2B3139]'
+                    }`}
                   >
-                    {(() => {
-                      const titleKeyMap: Record<string, string> = {
-                        default: 'promptDescDefault',
-                        adaptive: 'promptDescAdaptive',
-                        adaptive_relaxed: 'promptDescAdaptiveRelaxed',
-                        Hansen: 'promptDescHansen',
-                        nof1: 'promptDescNof1',
-                        taro_long_prompts: 'promptDescTaroLong',
-                        v3_compatible: 'promptDescV3Compatible',
-                      }
-                      const key = titleKeyMap[formData.system_prompt_template]
-                      return key
-                        ? t(key, language)
-                        : t('promptDescDefault', language)
-                    })()}
-                  </div>
-                  <div className="text-xs" style={{ color: '#848E9C' }}>
-                    {(() => {
-                      const contentKeyMap: Record<string, string> = {
-                        default: 'promptDescDefaultContent',
-                        adaptive: 'promptDescAdaptiveContent',
-                        adaptive_relaxed: 'promptDescAdaptiveRelaxedContent',
-                        Hansen: 'promptDescHansenContent',
-                        nof1: 'promptDescNof1Content',
-                        taro_long_prompts: 'promptDescTaroLongContent',
-                        v3_compatible: 'promptDescV3CompatibleContent',
-                      }
-                      const key = contentKeyMap[formData.system_prompt_template]
-                      return key
-                        ? t(key, language)
-                        : t('promptDescDefaultContent', language)
-                    })()}
-                  </div>
+                    {t('show', language)}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleInputChange('show_in_competition', false)}
+                    className={`flex-1 px-3 py-2 rounded text-sm ${
+                      !formData.show_in_competition
+                        ? 'bg-[#F0B90B] text-black'
+                        : 'bg-[#0B0E11] text-[#848E9C] border border-[#2B3139]'
+                    }`}
+                  >
+                    {t('hide', language)}
+                  </button>
                 </div>
-                <p className="text-xs text-[#848E9C] mt-1">
-                  {t('traderConfigModal.promptTemplateHint', language)}
+                  <p className="text-xs text-[#848E9C] mt-1">
+                    {t('hiddenInCompetition', language)}
                 </p>
               </div>
 
-              <div className="flex items-center gap-3">
-                <input
-                  type="checkbox"
-                  checked={formData.override_base_prompt}
-                  onChange={(e) =>
-                    handleInputChange('override_base_prompt', e.target.checked)
-                  }
-                  className="w-4 h-4"
-                />
-                <label className="text-sm text-[#EAECEF]">
-                  {t('traderConfigModal.overrideDefaultPrompt', language)}
-                </label>
-                <span className="text-xs text-[#F0B90B] inline-flex items-center gap-1">
+              {/* Initial Balance (Edit mode only) */}
+              {isEditMode && (
+                <div>
+                  <div className="flex items-center justify-between mb-2">
+                    <label className="text-sm text-[#EAECEF]">
+                      {t('initialBalanceLabel', language)}
+                    </label>
+                    <button
+                      type="button"
+                      onClick={handleFetchCurrentBalance}
+                      disabled={isFetchingBalance}
+                      className="px-3 py-1 text-xs bg-[#F0B90B] text-black rounded hover:bg-[#E1A706] transition-colors disabled:bg-[#848E9C] disabled:cursor-not-allowed"
+                    >
+                      {isFetchingBalance ? t('fetching', language) : t('fetchCurrentBalance', language)}
+                    </button>
+                  </div>
+                  <input
+                    type="number"
+                    value={formData.initial_balance || 0}
+                    onChange={(e) =>
+                      handleInputChange(
+                        'initial_balance',
+                        Number(e.target.value)
+                      )
+                    }
+                    className="w-full px-3 py-2 bg-[#0B0E11] border border-[#2B3139] rounded text-[#EAECEF] focus:border-[#F0B90B] focus:outline-none"
+                    min="100"
+                    step="0.01"
+                  />
+                    <p className="text-xs text-[#848E9C] mt-1">
+                      {t('balanceUpdateHint', language)}
+                  </p>
+                  {balanceFetchError && (
+                    <p className="text-xs text-red-500 mt-1">
+                      {balanceFetchError}
+                    </p>
+                  )}
+                </div>
+              )}
+
+              {/* Create mode info */}
+              {!isEditMode && (
+                <div className="p-3 bg-[#1E2329] border border-[#2B3139] rounded flex items-center gap-2">
                   <svg
                     xmlns="http://www.w3.org/2000/svg"
-                    className="w-3.5 h-3.5"
+                    className="w-4 h-4 text-[#F0B90B]"
                     viewBox="0 0 24 24"
                     fill="none"
                     stroke="currentColor"
@@ -777,40 +530,18 @@ export function TraderConfigModal({
                     strokeLinecap="round"
                     strokeLinejoin="round"
                   >
-                    <path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0Z" />
-                    <line x1="12" x2="12" y1="9" y2="13" />
-                    <line x1="12" x2="12.01" y1="17" y2="17" />
-                  </svg>{' '}
-                  {t('traderConfigModal.overridePromptWarning', language)}
-                </span>
-              </div>
-              <div>
-                <label className="text-sm text-[#EAECEF] block mb-2">
-                  {formData.override_base_prompt
-                    ? t('traderConfigModal.customPromptLabel', language)
-                    : t('traderConfigModal.additionalPromptLabel', language)}
-                </label>
-                <textarea
-                  value={formData.custom_prompt}
-                  onChange={(e) =>
-                    handleInputChange('custom_prompt', e.target.value)
-                  }
-                  className="w-full px-3 py-2 bg-[#0B0E11] border border-[#2B3139] rounded text-[#EAECEF] focus:border-[#F0B90B] focus:outline-none h-24 resize-none"
-                  placeholder={
-                    formData.override_base_prompt
-                      ? t(
-                          'traderConfigModal.customPromptPlaceholder',
-                          language
-                        )
-                      : t(
-                          'traderConfigModal.additionalPromptPlaceholder',
-                          language
-                        )
-                  }
-                />
-              </div>
+                    <circle cx="12" cy="12" r="10" />
+                    <line x1="12" x2="12" y1="8" y2="12" />
+                    <line x1="12" x2="12.01" y1="16" y2="16" />
+                  </svg>
+                  <span className="text-sm text-[#848E9C]">
+                    {t('autoFetchBalanceInfo', language)}
+                  </span>
+                </div>
+              )}
             </div>
           </div>
+
         </div>
 
         {/* Footer */}
@@ -832,11 +563,7 @@ export function TraderConfigModal({
               }
               className="px-8 py-3 bg-gradient-to-r from-[#F0B90B] to-[#E1A706] text-black rounded-lg hover:from-[#E1A706] hover:to-[#D4951E] transition-all duration-200 disabled:bg-[#848E9C] disabled:cursor-not-allowed font-medium shadow-lg"
             >
-              {isSaving
-                ? t('traderConfigModal.saving', language)
-                : isEditMode
-                  ? t('traderConfigModal.saveChanges', language)
-                  : t('traderConfigModal.createTitle', language)}
+              {isSaving ? t('saving', language) : isEditMode ? t('editTrader', language) : t('createTraderButton', language)}
             </button>
           )}
         </div>

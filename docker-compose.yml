@@ -4,44 +4,20 @@ services:
     build:
       context: .
       dockerfile: ./docker/Dockerfile.backend
-      args:
-        GO_VERSION: 1.25-alpine
-        ALPINE_VERSION: '3.20'
-        TA_LIB_VERSION: 0.4.0
     container_name: nofx-trading
     restart: unless-stopped
     stop_grace_period: 30s  # 允许应用有 30 秒时间优雅关闭
     ports:
       - "${NOFX_BACKEND_PORT:-8080}:8080"
+      - "6060:6060"  # pprof profiling
     volumes:
-      - ./config.json:/app/config.json:ro
-      - ./config.db:/app/config.db
-      - ./beta_codes.txt:/app/beta_codes.txt:ro
-      - ./config/derivs_v1.yaml:/app/config/derivs_v1.yaml:ro
-      - ./decision_logs:/app/decision_logs
-      - ./prompts:/app/prompts
-      - ./secrets:/app/secrets  # RSA密钥文件 (read-write für Generierung)
-      - /etc/localtime:/etc/localtime:ro  # Sync host time
+      - ./data:/app/data
+      - /etc/localtime:/etc/localtime:ro
+    env_file:
+      - .env
     environment:
-      - TZ=${NOFX_TIMEZONE:-Europe/Berlin}  # Set timezone from .env
-      - AI_MAX_TOKENS=4000  # AI响应的最大token数（默认2000，建议4000-8000）
-      - DATA_ENCRYPTION_KEY=${DATA_ENCRYPTION_KEY}  # 数据库加密密钥
-      - JWT_SECRET=${JWT_SECRET}  # JWT认证密钥
-      # PnL Calculation Settings
-      - NOFX_PNL_TAKER_FEE_RATE=${NOFX_PNL_TAKER_FEE_RATE:-0.0004}
-      - NOFX_PNL_SLIPPAGE_RATE=${NOFX_PNL_SLIPPAGE_RATE:-0.0005}
-      # Trailing Stop Configuration
-      - TRAILING_STOP_ENABLED=${TRAILING_STOP_ENABLED:-false}
-      - TRAILING_STOP_TIERS=${TRAILING_STOP_TIERS:-0.5:-0.2,1.0:0.5,3.0:1.0,10.0:3.0}
-      - TRAILING_STOP_UPDATE_THRESHOLD_PCT=${TRAILING_STOP_UPDATE_THRESHOLD_PCT:-0.3}
-      - TRAILING_STOP_CHECK_INTERVAL_SEC=${TRAILING_STOP_CHECK_INTERVAL_SEC:-30}
-      - TRAILING_STOP_ALLOW_AI_OVERRIDE=${TRAILING_STOP_ALLOW_AI_OVERRIDE:-false}
-      # Binance API Configuration
-      - BINANCE_API_KEY=${BINANCE_API_KEY}
-      - BINANCE_API_SECRET=${BINANCE_API_SECRET}
-    depends_on:
-      - redis
-      - derivs-ingest
+      - TZ=${TZ:-Asia/Shanghai}
+      - AI_MAX_TOKENS=8000
     networks:
       - nofx-network
     healthcheck:
@@ -56,9 +32,6 @@ services:
     build:
       context: .
       dockerfile: ./docker/Dockerfile.frontend
-      args:
-        NODE_VERSION: 20-alpine
-        NGINX_VERSION: stable-alpine
     container_name: nofx-frontend
     restart: unless-stopped
     ports:
@@ -74,81 +47,6 @@ services:
       retries: 3
       start_period: 5s
 
-  # SQLite Web Viewer (optional, for database inspection)
-  sqlite-web:
-    image: coleifer/sqlite-web
-    container_name: nofx-sqlite-web
-    restart: unless-stopped
-    ports:
-      - "${SQLITE_WEB_PORT:-8081}:8080"
-    volumes:
-      - ./config.db:/data/config.db
-    environment:
-      - SQLITE_DATABASE=/data/config.db
-    networks:
-      - nofx-network
-    profiles:
-      - tools  # Nur starten wenn explizit gewünscht
-
-  redis:
-    image: redis:7-alpine
-    container_name: nofx-redis
-    restart: unless-stopped
-    command: ["redis-server", "--save", "60", "1", "--loglevel", "warning"]
-    volumes:
-      - redis-data:/data
-    networks:
-      - nofx-network
-
-  derivs-ingest:
-    build:
-      context: .
-      dockerfile: ./docker/Dockerfile.ingest
-    container_name: nofx-derivs-ingest
-    restart: unless-stopped
-    environment:
-      - NODE_ENV=production
-      - DERIVS_REDIS_ADDR=redis:6379
-      - DERIVS_REDIS_KEYSPACE=derivs:v1
-    working_dir: /app/packages/ingest
-    command: ["npm", "run", "start:derivs"]
-    volumes:
-      - ./config/derivs_v1.yaml:/app/config/derivs_v1.yaml:ro
-    depends_on:
-      - redis
-    networks:
-      - nofx-network
-
-  # Development/Testing service with Go toolchain
-  nofx-dev:
-    build:
-      context: .
-      dockerfile: ./docker/Dockerfile.dev
-      args:
-        GO_VERSION: 1.25-alpine
-        ALPINE_VERSION: '3.20'
-        TA_LIB_VERSION: 0.4.0
-    container_name: nofx-dev
-    working_dir: /app
-    volumes:
-      - .:/app
-      - go-mod-cache:/go/pkg/mod
-      - go-build-cache:/root/.cache/go-build
-    environment:
-      - GOROOT=/usr/local/go
-      - GOTOOLCHAIN=local
-      - CGO_ENABLED=1
-    command: ["sleep", "infinity"]
-    networks:
-      - nofx-network
-    profiles:
-      - dev
-
 networks:
   nofx-network:
     driver: bridge
-
-volumes:
-  redis-data:
-  go-mod-cache:
-  go-build-cache:
