@@ -39,6 +39,9 @@ export function ModelConfigModal({
     ? configuredModels?.find((m) => m.id === selectedModelId)
     : allModels?.find((m) => m.id === selectedModelId)
 
+  const isN8n = selectedModel?.provider === 'n8n' || selectedModel?.id === 'n8n'
+  const isApiKeyRequired = !isN8n
+
   // 如果是编辑现有模型,初始化API Key、Base URL和Model Name
   useEffect(() => {
     if (editingModelId && selectedModel) {
@@ -50,7 +53,7 @@ export function ModelConfigModal({
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
-    if (!selectedModelId || !apiKey.trim()) return
+    if (!selectedModelId || (isApiKeyRequired && !apiKey.trim())) return
 
     onSave(
       selectedModelId,
@@ -174,19 +177,28 @@ export function ModelConfigModal({
                   >
                     API Key
                   </label>
-                  <input
-                    type="password"
-                    value={apiKey}
-                    onChange={(e) => setApiKey(e.target.value)}
-                    placeholder={t('enterAPIKey', language)}
-                    className="w-full px-3 py-2 rounded"
-                    style={{
-                      background: '#0B0E11',
-                      border: '1px solid #2B3139',
-                      color: '#EAECEF',
-                    }}
-                    required
-                  />
+                <input
+                  type="password"
+                  value={apiKey}
+                  onChange={(e) => setApiKey(e.target.value)}
+                  placeholder={
+                    isApiKeyRequired
+                      ? t('enterAPIKey', language)
+                      : t('apiKeyOptional', language)
+                  }
+                  className="w-full px-3 py-2 rounded"
+                  style={{
+                    background: '#0B0E11',
+                    border: '1px solid #2B3139',
+                    color: '#EAECEF',
+                  }}
+                  required={isApiKeyRequired}
+                />
+                {!isApiKeyRequired && (
+                  <div className="text-xs mt-1" style={{ color: '#848E9C' }}>
+                    {t('apiKeyOptional', language)}
+                  </div>
+                )}
                 </div>
 
                 <div>
@@ -200,7 +212,11 @@ export function ModelConfigModal({
                     type="url"
                     value={baseUrl}
                     onChange={(e) => setBaseUrl(e.target.value)}
-                    placeholder={t('customBaseURLPlaceholder', language)}
+                    placeholder={
+                      isN8n
+                        ? 'http://localhost:5678/webhook/ai/decision'
+                        : t('customBaseURLPlaceholder', language)
+                    }
                     className="w-full px-3 py-2 rounded"
                     style={{
                       background: '#0B0E11',
@@ -277,7 +293,7 @@ export function ModelConfigModal({
             </button>
             <button
               type="submit"
-              disabled={!selectedModel || !apiKey.trim()}
+              disabled={!selectedModel || (isApiKeyRequired && !apiKey.trim())}
               className="flex-1 px-4 py-2 rounded text-sm font-semibold disabled:opacity-50"
               style={{ background: '#F0B90B', color: '#000' }}
             >

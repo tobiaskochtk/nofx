@@ -16,6 +16,8 @@ type Config struct {
 	APIKey   string
 	BaseURL  string
 	Model    string
+	// 某些提供商不需要 API Key（例如本地或受信任的代理）
+	AllowEmptyAPIKey bool
 
 	// Behavior configuration
 	MaxTokens   int
@@ -45,6 +47,7 @@ func DefaultConfig() *Config {
 		RetryWaitBase:  2 * time.Second,
 		Timeout:        DefaultTimeout,
 		RetryableErrors: retryableErrors,
+		AllowEmptyAPIKey: false,
 
 		// Default dependencies (use global logger)
 		Logger:     logger.NewMCPLogger(),

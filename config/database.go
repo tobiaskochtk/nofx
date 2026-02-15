@@ -294,6 +294,7 @@ func (d *Database) initDefaultData() error {
 	}{
 		{"deepseek", "DeepSeek", "deepseek"},
 		{"qwen", "Qwen", "qwen"},
+		{"n8n", "n8n Webhook", "n8n"},
 	}
 
 	for _, model := range aiModels {
@@ -304,6 +305,22 @@ func (d *Database) initDefaultData() error {
 		if err != nil {
 			return fmt.Errorf("初始化AI模型失败: %w", err)
 		}
+	}
+
+	// 如果 .env 提供了 n8n 相关默认值，将其写入默认模型配置（不自动启用，也不存储 Token）
+	n8nEndpoint := strings.TrimSpace(os.Getenv("N8N_AI_ENDPOINT"))
+	n8nModel := strings.TrimSpace(os.Getenv("N8N_AI_MODEL"))
+	if n8nEndpoint != "" || n8nModel != "" {
+		_, err := d.db.Exec(`
+			UPDATE ai_models
+			SET custom_api_url = CASE WHEN ? != '' THEN ? ELSE custom_api_url END,
+			    custom_model_name = CASE WHEN ? != '' THEN ? ELSE custom_model_name END
+			WHERE id = 'n8n' AND user_id = 'default'
+		`, n8nEndpoint, n8nEndpoint, n8nModel, n8nModel)
+		if err != nil {
+			return fmt.Errorf("更新默认 n8n 模型配置失败: %w", err)
+		}
+		log.Printf("✓ 载入默认 n8n Webhook 配置 (endpoint=%s, model=%s)", n8nEndpoint, n8nModel)
 	}
 
 	// 初始化交易所（使用default用户）

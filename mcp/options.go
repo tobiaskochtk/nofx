@@ -124,6 +124,13 @@ func WithProvider(provider string) ClientOption {
 	}
 }
 
+// WithAllowEmptyAPIKey allows calling providers that do not require an API key.
+func WithAllowEmptyAPIKey(allow bool) ClientOption {
+	return func(c *Config) {
+		c.AllowEmptyAPIKey = allow
+	}
+}
+
 // WithUseFullURL sets whether to use full URL
 func WithUseFullURL(useFullURL bool) ClientOption {
 	return func(c *Config) {
