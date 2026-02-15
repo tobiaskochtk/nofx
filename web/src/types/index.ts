@@ -1,0 +1,142 @@
+// システムステータス | System status
+export interface SystemStatus {
+  is_running: boolean
+  start_time: string
+  runtime_minutes: number
+  call_count: number
+  initial_balance: number
+  scan_interval: string
+  stop_until: string
+  last_reset_time: string
+  ai_provider: string
+}
+
+// アカウント情報 | Account information
+export interface AccountInfo {
+  total_equity: number
+  available_balance: number
+  total_pnl: number
+  total_pnl_pct: number
+  total_unrealized_pnl: number
+  margin_used: number
+  margin_used_pct: number
+  position_count: number
+  initial_balance: number
+  daily_pnl: number
+}
+
+// ポジション情報 | Position information
+export interface Position {
+  symbol: string
+  side: string
+  entry_price: number
+  mark_price: number
+  quantity: number
+  leverage: number
+  unrealized_pnl: number
+  unrealized_pnl_pct: number
+  liquidation_price: number
+  margin_used: number
+}
+
+// 決策アクション | Decision action
+export interface DecisionAction {
+  action: string
+  symbol: string
+  quantity: number
+  leverage: number
+  price: number
+  order_id: number
+  timestamp: string
+  success: boolean
+  error: string
+}
+
+// 決策レコード | Decision record
+export interface DecisionRecord {
+  timestamp: string
+  cycle_number: number
+  input_prompt: string
+  cot_trace: string
+  decision_json: string
+  account_state: {
+    total_balance: number
+    available_balance: number
+    total_unrealized_profit: number
+    position_count: number
+    margin_used_pct: number
+  }
+  positions: Array<{
+    symbol: string
+    side: string
+    position_amt: number
+    entry_price: number
+    mark_price: number
+    unrealized_profit: number
+    leverage: number
+    liquidation_price: number
+  }>
+  candidate_coins: string[]
+  decisions: DecisionAction[]
+  execution_log: string[]
+  success: boolean
+  error_message: string
+}
+
+// 統計情報 | Statistics information
+export interface Statistics {
+  total_cycles: number
+  successful_cycles: number
+  failed_cycles: number
+  total_open_positions: number
+  total_close_positions: number
+}
+
+// Deals
+export interface Deal {
+  id: number
+  user_id: string
+  trader_id: string
+  exchange: string
+  symbol: string
+  side: 'long' | 'short'
+  leverage: number
+  position_size_usd: number
+  quantity: number
+  open_price: number
+  open_time: string
+  open_order_id: string
+  system_prompt?: string
+  user_prompt?: string
+  reasoning?: string
+  cot_trace?: string
+  decision_json?: string
+  market_context_json?: string
+  stop_loss: number
+  take_profit: number
+  close_price?: number | null
+  close_time?: string | null
+  close_order_id?: string | null
+  realized_pnl?: number | null
+  realized_pnl_pct?: number | null
+  duration_seconds?: number | null
+  was_stop_loss?: boolean | null
+  status: 'open' | 'closed'
+  created_at?: string
+  updated_at?: string
+}
+
+export interface DealEvent {
+  id: number
+  user_id: string
+  trader_id: string
+  deal_id: number
+  type: 'open' | 'partial_close' | 'update_stop_loss' | 'update_take_profit' | 'close'
+  symbol: string
+  side: 'long' | 'short'
+  quantity?: number
+  percentage?: number
+  price?: number
+  order_id?: string
+  created_at: string
+}

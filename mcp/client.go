@@ -147,7 +147,7 @@ func (client *Client) SetTimeout(timeout time.Duration) {
 
 // CallWithMessages template method - fixed retry flow (cannot be overridden)
 func (client *Client) CallWithMessages(systemPrompt, userPrompt string) (string, error) {
-	if client.APIKey == "" {
+	if client.APIKey == "" && (client.config == nil || !client.config.AllowEmptyAPIKey) {
 		return "", fmt.Errorf("AI API key not set, please call SetAPIKey first")
 	}
 
@@ -381,7 +381,7 @@ func (client *Client) isRetryableError(err error) bool {
 //       Build()
 //   result, err := client.CallWithRequest(request)
 func (client *Client) CallWithRequest(req *Request) (string, error) {
-	if client.APIKey == "" {
+	if client.APIKey == "" && (client.config == nil || !client.config.AllowEmptyAPIKey) {
 		return "", fmt.Errorf("AI API key not set, please call SetAPIKey first")
 	}
 

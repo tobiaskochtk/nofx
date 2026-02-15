@@ -1,0 +1,16 @@
+# docker/Dockerfile.ingest
+
+FROM node:20-alpine
+
+WORKDIR /app/packages/ingest
+
+# Install dependencies first
+COPY packages/ingest/package*.json ./
+RUN npm ci
+
+# Copy source
+COPY packages/ingest ./
+
+ENV NODE_ENV=production
+
+CMD ["npm", "run", "start:derivs"]

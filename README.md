@@ -228,6 +228,8 @@ cd ..
 
 # 4. Build and start backend
 go build -o nofx
+
+# Start the backend
 ./nofx
 
 # 5. Start frontend (new terminal)

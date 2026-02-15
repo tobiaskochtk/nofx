@@ -3,12 +3,14 @@ package manager
 import (
 	"context"
 	"fmt"
+	"os"
 	"nofx/debate"
 	"nofx/kernel"
 	"nofx/logger"
 	"nofx/store"
 	"nofx/trader"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 )
@@ -718,9 +720,24 @@ func (tm *TraderManager) addTraderFromStore(traderCfg *store.Trader, aiModelCfg 
 		traderConfig.QwenKey = string(aiModelCfg.APIKey)
 	case "deepseek":
 		traderConfig.DeepSeekKey = string(aiModelCfg.APIKey)
+	case "n8n":
+		traderConfig.CustomAPIKey = string(aiModelCfg.APIKey)
 	default:
 		// For other providers (grok, openai, claude, gemini, kimi, etc.), use CustomAPIKey
 		traderConfig.CustomAPIKey = string(aiModelCfg.APIKey)
+	}
+
+	// n8n supports empty key and can fallback to environment-based defaults.
+	if aiModelCfg.Provider == "n8n" {
+		if strings.TrimSpace(traderConfig.CustomAPIKey) == "" {
+			traderConfig.CustomAPIKey = strings.TrimSpace(os.Getenv("N8N_AI_TOKEN"))
+		}
+		if strings.TrimSpace(traderConfig.CustomAPIURL) == "" {
+			traderConfig.CustomAPIURL = strings.TrimSpace(os.Getenv("N8N_AI_ENDPOINT"))
+		}
+		if strings.TrimSpace(traderConfig.CustomModelName) == "" {
+			traderConfig.CustomModelName = strings.TrimSpace(os.Getenv("N8N_AI_MODEL"))
+		}
 	}
 
 	// Create trader instance

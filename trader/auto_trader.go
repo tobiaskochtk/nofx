@@ -19,6 +19,7 @@ import (
 	"nofx/trader/kucoin"
 	"nofx/trader/lighter"
 	"nofx/trader/okx"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -164,12 +165,35 @@ func NewAutoTrader(config AutoTraderConfig, st *store.Store, userID string) (*Au
 
 	// Initialize AI client based on provider
 	var mcpClient mcp.AIClient
-	aiModel := config.AIModel
+	aiModel := strings.ToLower(strings.TrimSpace(config.AIModel))
 	if config.UseQwen && aiModel == "" {
 		aiModel = "qwen"
 	}
+	envN8nURL := strings.TrimSpace(os.Getenv("N8N_AI_ENDPOINT"))
+	envN8nModel := strings.TrimSpace(os.Getenv("N8N_AI_MODEL"))
+	envN8nToken := strings.TrimSpace(os.Getenv("N8N_AI_TOKEN"))
 
 	switch aiModel {
+	case "n8n":
+		mcpClient = mcp.NewN8nClient()
+		apiKey := strings.TrimSpace(config.CustomAPIKey)
+		if apiKey == "" {
+			apiKey = envN8nToken
+		}
+		apiURL := strings.TrimSpace(config.CustomAPIURL)
+		if apiURL == "" {
+			apiURL = envN8nURL
+		}
+		modelName := strings.TrimSpace(config.CustomModelName)
+		if modelName == "" {
+			modelName = envN8nModel
+		}
+		config.CustomAPIKey = apiKey
+		config.CustomAPIURL = apiURL
+		config.CustomModelName = modelName
+		mcpClient.SetAPIKey(apiKey, apiURL, modelName)
+		logger.Infof("🤖 [%s] Using n8n Webhook (URL: %s, Model: %s)", config.Name, apiURL, modelName)
+
 	case "claude":
 		mcpClient = mcp.NewClaudeClient()
 		mcpClient.SetAPIKey(config.CustomAPIKey, config.CustomAPIURL, config.CustomModelName)
@@ -1556,6 +1580,10 @@ func (at *AutoTrader) GetStatus() map[string]interface{} {
 	aiProvider := "DeepSeek"
 	if at.config.UseQwen {
 		aiProvider = "Qwen"
+	} else if strings.ToLower(at.aiModel) == "n8n" {
+		aiProvider = "n8n"
+	} else if strings.ToLower(at.aiModel) == "custom" {
+		aiProvider = "Custom"
 	}
 
 	at.isRunningMutex.RLock()
