@@ -550,7 +550,7 @@ func (t *FuturesTrader) CancelStopLossOrders(symbol string) error {
 		orderType := order.Type
 
 		// 只取消止损订单（不取消止盈订单）
-		if orderType == futures.OrderTypeStopMarket || orderType == futures.OrderTypeStop {
+		if orderType == futures.OrderType(futures.AlgoOrderTypeStopMarket) || orderType == futures.OrderType(futures.AlgoOrderTypeStop) {
 			_, err := t.client.NewCancelOrderService().
 				Symbol(symbol).
 				OrderID(order.OrderID).
@@ -600,7 +600,7 @@ func (t *FuturesTrader) CancelTakeProfitOrders(symbol string) error {
 		orderType := order.Type
 
 		// 只取消止盈订单（不取消止损订单）
-		if orderType == futures.OrderTypeTakeProfitMarket || orderType == futures.OrderTypeTakeProfit {
+		if orderType == futures.OrderType(futures.AlgoOrderTypeTakeProfitMarket) || orderType == futures.OrderType(futures.AlgoOrderTypeTakeProfit) {
 			_, err := t.client.NewCancelOrderService().
 				Symbol(symbol).
 				OrderID(order.OrderID).
@@ -663,10 +663,10 @@ func (t *FuturesTrader) CancelStopOrders(symbol string) error {
 		orderType := order.Type
 
 		// 只取消止损和止盈订单
-		if orderType == futures.OrderTypeStopMarket ||
-			orderType == futures.OrderTypeTakeProfitMarket ||
-			orderType == futures.OrderTypeStop ||
-			orderType == futures.OrderTypeTakeProfit {
+		if orderType == futures.OrderType(futures.AlgoOrderTypeStopMarket) ||
+			orderType == futures.OrderType(futures.AlgoOrderTypeTakeProfitMarket) ||
+			orderType == futures.OrderType(futures.AlgoOrderTypeStop) ||
+			orderType == futures.OrderType(futures.AlgoOrderTypeTakeProfit) {
 
 			_, err := t.client.NewCancelOrderService().
 				Symbol(symbol).
@@ -743,7 +743,7 @@ func (t *FuturesTrader) SetStopLoss(symbol string, positionSide string, quantity
 		Symbol(symbol).
 		Side(side).
 		PositionSide(posSide).
-		Type(futures.OrderTypeStopMarket).
+		Type(futures.OrderType(futures.AlgoOrderTypeStopMarket)).
 		StopPrice(fmt.Sprintf("%.8f", stopPrice)).
 		Quantity(quantityStr).
 		WorkingType(futures.WorkingTypeContractPrice).
@@ -781,7 +781,7 @@ func (t *FuturesTrader) SetTakeProfit(symbol string, positionSide string, quanti
 		Symbol(symbol).
 		Side(side).
 		PositionSide(posSide).
-		Type(futures.OrderTypeTakeProfitMarket).
+		Type(futures.OrderType(futures.AlgoOrderTypeTakeProfitMarket)).
 		StopPrice(fmt.Sprintf("%.8f", takeProfitPrice)).
 		Quantity(quantityStr).
 		WorkingType(futures.WorkingTypeContractPrice).

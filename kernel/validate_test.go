@@ -1,6 +1,7 @@
 package kernel
 
 import (
+	"math"
 	"testing"
 )
 
@@ -95,6 +96,98 @@ func TestLeverageFallback(t *testing.T) {
 			// If shouldn't error, check if leverage was correctly corrected
 			if !tt.wantError && tt.decision.Leverage != tt.wantLeverage {
 				t.Errorf("Leverage not corrected: got %d, want %d", tt.decision.Leverage, tt.wantLeverage)
+			}
+		})
+	}
+}
+
+// TestPositionSizeFallback tests automatic correction when position value exceeds hard limits.
+func TestPositionSizeFallback(t *testing.T) {
+	tests := []struct {
+		name            string
+		decision        Decision
+		accountEquity   float64
+		btcEthLeverage  int
+		altcoinLeverage int
+		btcEthPosRatio  float64
+		altcoinPosRatio float64
+		wantPositionUSD float64
+		wantError       bool
+	}{
+		{
+			name: "Altcoin position value exceeded - auto-correct to limit",
+			decision: Decision{
+				Symbol:          "ENSOUSDT",
+				Action:          "open_long",
+				Leverage:        5,
+				PositionSizeUSD: 269,
+				StopLoss:        1.965,
+				TakeProfit:      2.085,
+			},
+			accountEquity:   67.24,
+			btcEthLeverage:  5,
+			altcoinLeverage: 5,
+			btcEthPosRatio:  5.0,
+			altcoinPosRatio: 1.0,
+			wantPositionUSD: 67.24,
+			wantError:       false,
+		},
+		{
+			name: "BTC position value exceeded - auto-correct to limit",
+			decision: Decision{
+				Symbol:          "BTCUSDT",
+				Action:          "open_long",
+				Leverage:        5,
+				PositionSizeUSD: 600,
+				StopLoss:        96000,
+				TakeProfit:      102000,
+			},
+			accountEquity:   67.24,
+			btcEthLeverage:  5,
+			altcoinLeverage: 5,
+			btcEthPosRatio:  5.0,
+			altcoinPosRatio: 1.0,
+			wantPositionUSD: 336.2,
+			wantError:       false,
+		},
+		{
+			name: "Position size is zero - still error",
+			decision: Decision{
+				Symbol:          "SOLUSDT",
+				Action:          "open_long",
+				Leverage:        5,
+				PositionSizeUSD: 0,
+				StopLoss:        50,
+				TakeProfit:      200,
+			},
+			accountEquity:   100,
+			btcEthLeverage:  10,
+			altcoinLeverage: 5,
+			btcEthPosRatio:  10.0,
+			altcoinPosRatio: 1.5,
+			wantPositionUSD: 0,
+			wantError:       true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := validateDecision(
+				&tt.decision,
+				tt.accountEquity,
+				tt.btcEthLeverage,
+				tt.altcoinLeverage,
+				tt.btcEthPosRatio,
+				tt.altcoinPosRatio,
+			)
+
+			if (err != nil) != tt.wantError {
+				t.Errorf("validateDecision() error = %v, wantError %v", err, tt.wantError)
+				return
+			}
+
+			if !tt.wantError && math.Abs(tt.decision.PositionSizeUSD-tt.wantPositionUSD) > 1e-6 {
+				t.Errorf("PositionSizeUSD not corrected: got %.8f, want %.8f", tt.decision.PositionSizeUSD, tt.wantPositionUSD)
 			}
 		})
 	}

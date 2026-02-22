@@ -13,6 +13,17 @@ export interface SystemStatus {
   ai_provider: string
   strategy_type?: 'ai_trading' | 'grid_trading'
   grid_symbol?: string
+  trailing_stop?: {
+    enabled: boolean
+    tiers: Array<{
+      profit_threshold: number
+      stop_offset: number
+    }>
+    update_threshold_pct: number
+    check_interval_sec: number
+    allow_ai_override: boolean
+    auto_managed_positions: string[]
+  }
 }
 
 export interface AccountInfo {
@@ -101,6 +112,7 @@ export interface TraderInfo {
   strategy_id?: string
   strategy_name?: string
   custom_prompt?: string
+  use_coin_pool?: boolean
   use_ai500?: boolean
   use_oi_top?: boolean
   system_prompt_template?: string
@@ -174,8 +186,47 @@ export interface CreateTraderRequest {
   custom_prompt?: string
   override_base_prompt?: boolean
   system_prompt_template?: string
+  use_coin_pool?: boolean
   use_ai500?: boolean
   use_oi_top?: boolean
+}
+
+export interface Deal {
+  id: number
+  user_id?: string
+  trader_id?: string
+  exchange?: string
+  symbol: string
+  side: string
+  leverage: number
+  position_size_usd?: number
+  quantity: number
+  open_price: number
+  open_time: string
+  open_order_id?: string
+  stop_loss?: number
+  take_profit?: number
+  close_price?: number | null
+  close_time?: string | null
+  realized_pnl?: number | null
+  realized_pnl_pct?: number | null
+  status: 'open' | 'closed' | string
+  system_prompt?: string
+  user_prompt?: string
+  reasoning?: string
+}
+
+export interface DealEvent {
+  id: number
+  deal_id?: number
+  type: string
+  symbol: string
+  side: string
+  quantity?: number
+  percentage?: number
+  price?: number
+  order_id?: string
+  created_at: string
 }
 
 export interface UpdateModelConfigRequest {
@@ -400,6 +451,87 @@ export interface BacktestStartConfig {
   leverage?: {
     btc_eth_leverage?: number;
     altcoin_leverage?: number;
+  };
+}
+
+export interface AgentStrategyInput {
+  id?: string;
+  name?: string;
+  description?: string;
+  natural_language?: string;
+  save?: boolean;
+  config?: StrategyConfig;
+}
+
+export interface BacktestCreateRequest {
+  config: BacktestStartConfig;
+  strategy?: AgentStrategyInput;
+  wait_for_completion?: boolean;
+  timeout_seconds?: number;
+}
+
+export interface StrategyImprovementSuggestion {
+  id: string;
+  title: string;
+  reason: string;
+  expected_impact: string;
+  patch?: Record<string, unknown>;
+}
+
+export interface BacktestResultPayload {
+  run_id: string;
+  metadata?: BacktestRunMetadata;
+  status?: BacktestStatusPayload;
+  metrics?: BacktestMetrics | null;
+  metrics_ready?: boolean;
+  equity?: BacktestEquityPoint[];
+  trades?: BacktestTradeEvent[];
+  decisions?: DecisionRecord[];
+}
+
+export interface BacktestCreateResponse {
+  run_id: string;
+  strategy_id?: string;
+  strategy_name?: string;
+  metadata?: BacktestRunMetadata;
+  result?: BacktestResultPayload;
+  timed_out?: boolean;
+  timeout_seconds?: number;
+}
+
+export interface BacktestImproveRequest {
+  goal?: string;
+  max_suggestions?: number;
+  auto_apply?: boolean;
+  save_as_strategy?: boolean;
+  strategy_name?: string;
+  rerun?: boolean;
+  wait_for_completion?: boolean;
+  timeout_seconds?: number;
+}
+
+export interface BacktestImproveResponse {
+  run_id: string;
+  goal?: string;
+  base_strategy_id?: string;
+  base_strategy_name?: string;
+  metadata?: BacktestRunMetadata;
+  metrics?: BacktestMetrics | null;
+  suggestions?: StrategyImprovementSuggestion[];
+  auto_applied?: boolean;
+  applied_suggestions?: StrategyImprovementSuggestion[];
+  improved_config?: StrategyConfig;
+  saved_strategy?: {
+    id: string;
+    name: string;
+    description?: string;
+  };
+  rerun?: {
+    run_id: string;
+    metadata?: BacktestRunMetadata;
+    result?: BacktestResultPayload;
+    timed_out?: boolean;
+    timeout_seconds?: number;
   };
 }
 

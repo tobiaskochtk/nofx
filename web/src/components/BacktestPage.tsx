@@ -55,6 +55,7 @@ import type {
   DecisionRecord,
   AIModel,
   Strategy,
+  BacktestImproveResponse,
 } from '../types'
 
 // ============ Types ============
@@ -757,6 +758,12 @@ export function BacktestPage() {
   const [compareRunIds, setCompareRunIds] = useState<string[]>([])
   const [isStarting, setIsStarting] = useState(false)
   const [toast, setToast] = useState<{ text: string; tone: 'info' | 'error' | 'success' } | null>(null)
+  const [showImprovePanel, setShowImprovePanel] = useState(false)
+  const [improveGoal, setImproveGoal] = useState('')
+  const [improveAutoApply, setImproveAutoApply] = useState(true)
+  const [improveRerun, setImproveRerun] = useState(true)
+  const [isImproving, setIsImproving] = useState(false)
+  const [improveResult, setImproveResult] = useState<BacktestImproveResponse | null>(null)
 
   // Form state
   const [formState, setFormState] = useState({
@@ -781,6 +788,7 @@ export function BacktestPage() {
     replayOnly: false,
     aiModelId: '',
     strategyId: '', // Optional: use saved strategy from Strategy Studio
+    strategyIntent: '', // Optional: natural language strategy intent for /backtest/create
   })
 
   // Data fetching
@@ -903,6 +911,10 @@ export function BacktestPage() {
     }
   }, [runs, selectedRunId])
 
+  useEffect(() => {
+    setImproveResult(null)
+  }, [selectedRunId])
+
   // Handlers
   const handleFormChange = (key: string, value: string | number | boolean | string[]) => {
     setFormState((prev) => ({ ...prev, [key]: value }))
@@ -926,35 +938,49 @@ export function BacktestPage() {
 
       // Only send empty symbols if user deliberately cleared them and strategy has dynamic coin source
       const symbolsToSend = (userSymbols.length === 0 && strategyHasDynamicCoins) ? [] : userSymbols
+      const strategyIntent = formState.strategyIntent.trim()
+      const strategyPayload = !formState.strategyId && strategyIntent
+        ? {
+          natural_language: strategyIntent,
+          save: true,
+          name: `UI Strategy ${new Date().toISOString().slice(0, 10)}`,
+        }
+        : undefined
 
-      const payload = await api.startBacktest({
-        run_id: formState.runId.trim() || undefined,
-        strategy_id: formState.strategyId || undefined, // Use saved strategy from Strategy Studio
-        symbols: symbolsToSend,
-        timeframes: formState.timeframes,
-        decision_timeframe: formState.decisionTf,
-        decision_cadence_nbars: formState.cadence,
-        start_ts: Math.floor(start / 1000),
-        end_ts: Math.floor(end / 1000),
-        initial_balance: formState.balance,
-        fee_bps: formState.fee,
-        slippage_bps: formState.slippage,
-        fill_policy: formState.fill,
-        prompt_variant: formState.prompt,
-        prompt_template: formState.promptTemplate,
-        custom_prompt: formState.customPrompt.trim() || undefined,
-        override_prompt: formState.overridePrompt,
-        cache_ai: formState.cacheAI,
-        replay_only: formState.replayOnly,
-        ai_model_id: formState.aiModelId,
-        leverage: {
-          btc_eth_leverage: formState.btcEthLeverage,
-          altcoin_leverage: formState.altcoinLeverage,
+      const payload = await api.createStrategyAndBacktest({
+        config: {
+          run_id: formState.runId.trim() || undefined,
+          strategy_id: formState.strategyId || undefined, // Use saved strategy from Strategy Studio
+          symbols: symbolsToSend,
+          timeframes: formState.timeframes,
+          decision_timeframe: formState.decisionTf,
+          decision_cadence_nbars: formState.cadence,
+          start_ts: Math.floor(start / 1000),
+          end_ts: Math.floor(end / 1000),
+          initial_balance: formState.balance,
+          fee_bps: formState.fee,
+          slippage_bps: formState.slippage,
+          fill_policy: formState.fill,
+          prompt_variant: formState.prompt,
+          prompt_template: formState.promptTemplate,
+          custom_prompt: formState.customPrompt.trim() || undefined,
+          override_prompt: formState.overridePrompt,
+          cache_ai: formState.cacheAI,
+          replay_only: formState.replayOnly,
+          ai_model_id: formState.aiModelId,
+          leverage: {
+            btc_eth_leverage: formState.btcEthLeverage,
+            altcoin_leverage: formState.altcoinLeverage,
+          },
         },
+        strategy: strategyPayload,
       })
 
-      setToast({ text: tr('toasts.startSuccess', { id: payload.run_id }), tone: 'success' })
-      setSelectedRunId(payload.run_id)
+      const runId = payload.run_id || payload.metadata?.run_id
+      if (!runId) throw new Error(language === 'zh' ? '回测创建成功但未返回 run_id' : 'Backtest created but run_id was not returned')
+
+      setToast({ text: tr('toasts.startSuccess', { id: runId }), tone: 'success' })
+      setSelectedRunId(runId)
       setWizardStep(1)
       await refreshRuns()
     } catch (error: unknown) {
@@ -976,6 +1002,50 @@ export function BacktestPage() {
     } catch (error: unknown) {
       const errMsg = error instanceof Error ? error.message : tr('toasts.actionFailed')
       setToast({ text: errMsg, tone: 'error' })
+    }
+  }
+
+  const handleImprove = async () => {
+    if (!selectedRunId) return
+    try {
+      setIsImproving(true)
+      const response = await api.improveBacktestStrategy(selectedRunId, {
+        goal: improveGoal.trim() || undefined,
+        max_suggestions: 3,
+        auto_apply: improveAutoApply,
+        save_as_strategy: improveAutoApply,
+        rerun: improveAutoApply ? improveRerun : false,
+        wait_for_completion: improveAutoApply && improveRerun,
+        timeout_seconds: 120,
+      })
+      setImproveResult(response)
+
+      const rerunRunID = response.rerun?.run_id
+      if (rerunRunID) {
+        setSelectedRunId(rerunRunID)
+        setToast({
+          text: language === 'zh'
+            ? `策略优化完成，已启动新回测 ${rerunRunID}`
+            : `Strategy improved and rerun started: ${rerunRunID}`,
+          tone: 'success',
+        })
+      } else {
+        setToast({
+          text: language === 'zh'
+            ? `已生成 ${(response.suggestions?.length ?? 0)} 条优化建议`
+            : `Generated ${response.suggestions?.length ?? 0} improvement suggestions`,
+          tone: 'success',
+        })
+      }
+
+      await refreshRuns()
+    } catch (error: unknown) {
+      const errMsg = error instanceof Error
+        ? error.message
+        : (language === 'zh' ? '策略优化失败，请稍后重试' : 'Failed to improve strategy. Please try again.')
+      setToast({ text: errMsg, tone: 'error' })
+    } finally {
+      setIsImproving(false)
     }
   }
 
@@ -1239,6 +1309,33 @@ export function BacktestPage() {
                             )}
                           </div>
                         )}
+                      </div>
+
+                      <div>
+                        <label className="block text-xs mb-2" style={{ color: '#848E9C' }}>
+                          {language === 'zh' ? '策略意图（可选）' : 'Strategy Intent (Optional)'}
+                        </label>
+                        <textarea
+                          className="w-full p-2 rounded-lg text-xs"
+                          style={{
+                            background: '#0B0E11',
+                            border: '1px solid #2B3139',
+                            color: '#EAECEF',
+                          }}
+                          value={formState.strategyIntent}
+                          onChange={(e) => handleFormChange('strategyIntent', e.target.value)}
+                          rows={2}
+                          disabled={Boolean(formState.strategyId)}
+                          placeholder={
+                            formState.strategyId
+                              ? (language === 'zh'
+                                ? '已选择保存策略，策略意图输入已禁用'
+                                : 'Saved strategy selected, natural-language strategy input is disabled')
+                              : (language === 'zh'
+                                ? '例如：创建 BTC 动量策略，使用 RSI + MACD，并加入波动率过滤'
+                                : 'Example: create a BTC momentum strategy using RSI + MACD with volatility filter')
+                          }
+                        />
                       </div>
 
                       <div>
@@ -1712,7 +1809,7 @@ export function BacktestPage() {
                       </div>
                     </div>
 
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-2 flex-wrap justify-end">
                       {(status?.state === 'running' || selectedRun?.state === 'running') && (
                         <>
                           <button
@@ -1744,6 +1841,19 @@ export function BacktestPage() {
                         </button>
                       )}
                       <button
+                        onClick={() => setShowImprovePanel((prev) => !prev)}
+                        className="px-3 py-2 rounded-lg transition-all flex items-center gap-2 text-xs font-medium hover:bg-[#2B3139]"
+                        style={{
+                          border: `1px solid ${showImprovePanel ? '#F0B90B' : '#2B3139'}`,
+                          background: showImprovePanel ? 'rgba(240,185,11,0.1)' : 'transparent',
+                          color: showImprovePanel ? '#F0B90B' : '#EAECEF',
+                        }}
+                        title={language === 'zh' ? '策略优化' : 'Improve strategy'}
+                      >
+                        <Brain className="w-4 h-4" style={{ color: showImprovePanel ? '#F0B90B' : '#EAECEF' }} />
+                        {language === 'zh' ? '策略优化' : 'Improve Strategy'}
+                      </button>
+                      <button
                         onClick={handleExport}
                         className="p-2 rounded-lg transition-all hover:bg-[#2B3139]"
                         style={{ border: '1px solid #2B3139' }}
@@ -1773,6 +1883,146 @@ export function BacktestPage() {
                     >
                       <AlertTriangle className="w-4 h-4 flex-shrink-0" />
                       {status?.note || status?.last_error}
+                    </div>
+                  )}
+
+                  {showImprovePanel && (
+                    <div
+                      className="mt-3 p-3 rounded-lg space-y-3"
+                      style={{
+                        background: 'rgba(30, 35, 41, 0.7)',
+                        border: '1px solid #2B3139',
+                      }}
+                    >
+                      <div className="flex items-center justify-between gap-2">
+                        <h3 className="text-sm font-semibold" style={{ color: '#EAECEF' }}>
+                          {language === 'zh' ? '策略优化助手' : 'Strategy Improvement Assistant'}
+                        </h3>
+                        <span className="text-xs font-mono" style={{ color: '#848E9C' }}>
+                          {selectedRunId}
+                        </span>
+                      </div>
+
+                      <textarea
+                        className="w-full p-2 rounded-lg text-xs"
+                        style={{
+                          background: '#0B0E11',
+                          border: '1px solid #2B3139',
+                          color: '#EAECEF',
+                        }}
+                        rows={2}
+                        value={improveGoal}
+                        onChange={(event) => setImproveGoal(event.target.value)}
+                        placeholder={
+                          language === 'zh'
+                            ? '优化目标（可选），例如：降低回撤并提高夏普比率'
+                            : 'Optional goal, e.g. reduce drawdown and improve Sharpe ratio'
+                        }
+                      />
+
+                      <div className="flex flex-wrap items-center gap-3">
+                        <label
+                          className="flex items-center gap-2 text-xs cursor-pointer"
+                          style={{ color: '#EAECEF' }}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={improveAutoApply}
+                            onChange={(event) => setImproveAutoApply(event.target.checked)}
+                            className="accent-[#F0B90B]"
+                          />
+                          {language === 'zh' ? '自动应用建议' : 'Auto-apply suggestions'}
+                        </label>
+                        <label
+                          className="flex items-center gap-2 text-xs cursor-pointer"
+                          style={{ color: improveAutoApply ? '#EAECEF' : '#5E6673' }}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={improveRerun}
+                            disabled={!improveAutoApply}
+                            onChange={(event) => setImproveRerun(event.target.checked)}
+                            className="accent-[#F0B90B]"
+                          />
+                          {language === 'zh' ? '自动重跑回测' : 'Auto rerun backtest'}
+                        </label>
+                        <button
+                          onClick={handleImprove}
+                          disabled={isImproving}
+                          className="ml-auto px-3 py-1.5 rounded-lg text-xs font-medium flex items-center gap-2 disabled:opacity-50"
+                          style={{ background: '#F0B90B', color: '#0B0E11' }}
+                        >
+                          {isImproving ? (
+                            <RefreshCw className="w-3 h-3 animate-spin" />
+                          ) : (
+                            <Brain className="w-3 h-3" />
+                          )}
+                          {isImproving
+                            ? (language === 'zh' ? '优化中...' : 'Improving...')
+                            : (language === 'zh' ? '生成优化建议' : 'Generate Improvements')}
+                        </button>
+                      </div>
+
+                      {improveResult && (
+                        <div className="space-y-2">
+                          <div className="text-xs" style={{ color: '#848E9C' }}>
+                            {language === 'zh'
+                              ? `建议数量: ${improveResult.suggestions?.length ?? 0}`
+                              : `Suggestions: ${improveResult.suggestions?.length ?? 0}`}
+                          </div>
+
+                          {(improveResult.suggestions ?? []).map((suggestion) => (
+                            <div
+                              key={suggestion.id}
+                              className="p-2 rounded-lg"
+                              style={{
+                                background: '#0B0E11',
+                                border: '1px solid #2B3139',
+                              }}
+                            >
+                              <div className="text-sm font-medium" style={{ color: '#EAECEF' }}>
+                                {suggestion.title}
+                              </div>
+                              <div className="text-xs mt-1" style={{ color: '#848E9C' }}>
+                                {suggestion.reason}
+                              </div>
+                              <div className="text-xs mt-1" style={{ color: '#F0B90B' }}>
+                                {suggestion.expected_impact}
+                              </div>
+                            </div>
+                          ))}
+
+                          {improveResult.saved_strategy && (
+                            <div
+                              className="p-2 rounded-lg text-xs"
+                              style={{
+                                background: 'rgba(14,203,129,0.08)',
+                                border: '1px solid rgba(14,203,129,0.25)',
+                                color: '#0ECB81',
+                              }}
+                            >
+                              {language === 'zh'
+                                ? `已保存新策略: ${improveResult.saved_strategy.name} (${improveResult.saved_strategy.id})`
+                                : `Saved strategy: ${improveResult.saved_strategy.name} (${improveResult.saved_strategy.id})`}
+                            </div>
+                          )}
+
+                          {improveResult.rerun?.run_id && (
+                            <div
+                              className="p-2 rounded-lg text-xs"
+                              style={{
+                                background: 'rgba(240,185,11,0.08)',
+                                border: '1px solid rgba(240,185,11,0.25)',
+                                color: '#F0B90B',
+                              }}
+                            >
+                              {language === 'zh'
+                                ? `已触发优化后回测: ${improveResult.rerun.run_id}`
+                                : `Improved rerun started: ${improveResult.rerun.run_id}`}
+                            </div>
+                          )}
+                        </div>
+                      )}
                     </div>
                   )}
 

@@ -47,7 +47,7 @@ func (t *BybitTrader) getTradesViaHTTP(startTime time.Time, limit int) ([]BybitT
 
 	// Generate timestamp
 	timestamp := fmt.Sprintf("%d", time.Now().UnixMilli())
-	recvWindow := "5000"
+	recvWindow := "10000"
 
 	// Build signature payload: timestamp + api_key + recv_window + queryString
 	signPayload := timestamp + t.apiKey + recvWindow + queryParams
@@ -71,8 +71,12 @@ func (t *BybitTrader) getTradesViaHTTP(startTime time.Time, limit int) ([]BybitT
 	req.Header.Set("X-BAPI-RECV-WINDOW", recvWindow)
 	req.Header.Set("Content-Type", "application/json")
 
-	// Use http.DefaultClient for the request
-	resp, err := http.DefaultClient.Do(req)
+	// Reuse trader HTTP client so transport-level timestamp correction is applied.
+	httpClient := http.DefaultClient
+	if t.client != nil && t.client.HTTPClient != nil {
+		httpClient = t.client.HTTPClient
+	}
+	resp, err := httpClient.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("failed to call Bybit API: %w", err)
 	}

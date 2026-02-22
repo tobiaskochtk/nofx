@@ -7,6 +7,7 @@ interface TradersModalState {
   showEditModal: boolean
   showModelModal: boolean
   showExchangeModal: boolean
+  showSignalSourceModal: boolean
 
   // 编辑状态
   editingModel: string | null
@@ -18,6 +19,7 @@ interface TradersModalState {
   setShowEditModal: (show: boolean) => void
   setShowModelModal: (show: boolean) => void
   setShowExchangeModal: (show: boolean) => void
+  setShowSignalSourceModal: (show: boolean) => void
 
   setEditingModel: (modelId: string | null) => void
   setEditingExchange: (exchangeId: string | null) => void
@@ -38,6 +40,7 @@ const initialState = {
   showEditModal: false,
   showModelModal: false,
   showExchangeModal: false,
+  showSignalSourceModal: false,
   editingModel: null,
   editingExchange: null,
   editingTrader: null,
@@ -50,6 +53,7 @@ export const useTradersModalStore = create<TradersModalState>((set) => ({
   setShowEditModal: (show) => set({ showEditModal: show }),
   setShowModelModal: (show) => set({ showModelModal: show }),
   setShowExchangeModal: (show) => set({ showExchangeModal: show }),
+  setShowSignalSourceModal: (show) => set({ showSignalSourceModal: show }),
 
   setEditingModel: (modelId) => set({ editingModel: modelId }),
   setEditingExchange: (exchangeId) => set({ editingExchange: exchangeId }),

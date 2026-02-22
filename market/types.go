@@ -1,10 +1,15 @@
 package market
 
-import "time"
+import (
+	"time"
+
+	"nofx/internal/snapshot"
+)
 
 // Data market data structure
 type Data struct {
 	Symbol            string
+	CollectedAt       time.Time `json:"collected_at,omitempty"`
 	CurrentPrice      float64
 	PriceChange1h     float64 // 1-hour price change percentage
 	PriceChange4h     float64 // 4-hour price change percentage
@@ -17,6 +22,16 @@ type Data struct {
 	LongerTermContext *LongerTermData
 	// Multi-timeframe data (new)
 	TimeframeData map[string]*TimeframeSeriesData `json:"timeframe_data,omitempty"`
+	// Derivatives feature snapshot (f4-f7 and confirmations)
+	Snapshot *snapshot.Snapshot `json:"snapshot,omitempty"`
+	// Feature quality metadata (optional)
+	FeatureStats map[string]FeatureStat `json:"feature_stats,omitempty"`
+}
+
+// FeatureStat stores freshness/coverage metadata for a derived feature.
+type FeatureStat struct {
+	Coverage  float64   `json:"coverage"`
+	UpdatedAt time.Time `json:"updated_at"`
 }
 
 // KlineBar single kline bar with OHLCV data
@@ -231,11 +246,11 @@ const (
 type GridDirection string
 
 const (
-	GridDirectionNeutral   GridDirection = "neutral"     // 50% buy + 50% sell
-	GridDirectionLong      GridDirection = "long"        // 100% buy
-	GridDirectionShort     GridDirection = "short"       // 100% sell
-	GridDirectionLongBias  GridDirection = "long_bias"   // 70% buy + 30% sell (default)
-	GridDirectionShortBias GridDirection = "short_bias"  // 30% buy + 70% sell (default)
+	GridDirectionNeutral   GridDirection = "neutral"    // 50% buy + 50% sell
+	GridDirectionLong      GridDirection = "long"       // 100% buy
+	GridDirectionShort     GridDirection = "short"      // 100% sell
+	GridDirectionLongBias  GridDirection = "long_bias"  // 70% buy + 30% sell (default)
+	GridDirectionShortBias GridDirection = "short_bias" // 30% buy + 70% sell (default)
 )
 
 // GetBuySellRatio returns the buy and sell ratio for this direction

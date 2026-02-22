@@ -18,6 +18,9 @@ services:
     environment:
       - TZ=${TZ:-Asia/Shanghai}
       - AI_MAX_TOKENS=8000
+      - EMBEDDED_REDIS_ENABLED=${EMBEDDED_REDIS_ENABLED:-true}
+      - EMBEDDED_REDIS_PORT=${EMBEDDED_REDIS_PORT:-6379}
+      - DERIVS_STRICT_SYMBOLS=${DERIVS_STRICT_SYMBOLS:-false}
     networks:
       - nofx-network
     healthcheck:

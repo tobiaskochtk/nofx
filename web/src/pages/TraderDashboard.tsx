@@ -452,7 +452,9 @@ export default function TraderDashboard() {
                 if (status?.trailing_stop) {
                   setTrailingStopConfig({
                     enabled: status.trailing_stop.enabled,
-                    tiers: status.trailing_stop.tiers.map(t => `${t.profit_threshold}:${t.stop_offset}`).join(','),
+                    tiers: status.trailing_stop.tiers
+                      .map((t: { profit_threshold: number; stop_offset: number }) => `${t.profit_threshold}:${t.stop_offset}`)
+                      .join(','),
                     update_threshold_pct: status.trailing_stop.update_threshold_pct,
                     check_interval_sec: status.trailing_stop.check_interval_sec,
                     allow_ai_override: status.trailing_stop.allow_ai_override,
@@ -468,7 +470,7 @@ export default function TraderDashboard() {
             </button>
           </div>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-xs">
-            {status.trailing_stop.tiers.map((tier, idx) => (
+            {status.trailing_stop.tiers.map((tier: { profit_threshold: number; stop_offset: number }, idx: number) => (
               <div
                 key={idx}
                 className="p-3 rounded"

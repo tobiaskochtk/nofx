@@ -11,9 +11,19 @@ import (
 	"nofx/provider/nofxos"
 	"nofx/security"
 	"nofx/store"
+	"os"
 	"regexp"
 	"strings"
 	"time"
+)
+
+const (
+	// Keep generous headroom below provider hard-limits.
+	defaultPromptInputTokenBudget = 118000
+	retryPromptInputTokenBudget   = 90000
+	minPromptSectionTokenBudget   = 6000
+	tokenCharsEstimate            = 3 // conservative estimate: ~1 token per 3 chars
+	promptTruncationNotice        = "\n\n[... prompt truncated due to context budget ...]\n\n"
 )
 
 // ============================================================================
@@ -21,10 +31,11 @@ import (
 // ============================================================================
 
 var (
-	// Safe regex: precisely match ```json code blocks
-	reJSONFence      = regexp.MustCompile(`(?is)` + "```json\\s*(\\[\\s*\\{.*?\\}\\s*\\])\\s*```")
-	reJSONArray      = regexp.MustCompile(`(?is)\[\s*\{.*?\}\s*\]`)
+	// Safe regex: match decision arrays (object array or explicit empty array)
+	reJSONFence      = regexp.MustCompile(`(?is)` + "```json\\s*(\\[\\s*(?:\\{.*?\\}\\s*(?:,\\s*\\{.*?\\}\\s*)*)?\\])\\s*```")
+	reJSONArray      = regexp.MustCompile(`(?is)\[\s*(?:\{.*?\}\s*(?:,\s*\{.*?\}\s*)*)?\]`)
 	reArrayHead      = regexp.MustCompile(`^\[\s*\{`)
+	reEmptyJSONArray = regexp.MustCompile(`^\[\s*\]$`)
 	reArrayOpenSpace = regexp.MustCompile(`^\[\s+\{`)
 	reInvisibleRunes = regexp.MustCompile("[\u200B\u200C\u200D\uFEFF]")
 
@@ -106,25 +117,25 @@ type RecentOrder struct {
 
 // Context trading context (complete information passed to AI)
 type Context struct {
-	CurrentTime     string                             `json:"current_time"`
-	RuntimeMinutes  int                                `json:"runtime_minutes"`
-	CallCount       int                                `json:"call_count"`
-	Account         AccountInfo                        `json:"account"`
-	Positions       []PositionInfo                     `json:"positions"`
-	CandidateCoins  []CandidateCoin                    `json:"candidate_coins"`
-	PromptVariant   string                             `json:"prompt_variant,omitempty"`
-	TradingStats    *TradingStats                      `json:"trading_stats,omitempty"`
-	RecentOrders    []RecentOrder                      `json:"recent_orders,omitempty"`
-	MarketDataMap   map[string]*market.Data            `json:"-"`
-	MultiTFMarket   map[string]map[string]*market.Data `json:"-"`
-	OITopDataMap    map[string]*OITopData              `json:"-"`
-	QuantDataMap    map[string]*QuantData              `json:"-"`
-	OIRankingData      *nofxos.OIRankingData      `json:"-"` // Market-wide OI ranking data
-	NetFlowRankingData *nofxos.NetFlowRankingData `json:"-"` // Market-wide fund flow ranking data
-	PriceRankingData   *nofxos.PriceRankingData   `json:"-"` // Market-wide price gainers/losers
-	BTCETHLeverage     int                          `json:"-"`
-	AltcoinLeverage int                                `json:"-"`
-	Timeframes      []string                           `json:"-"`
+	CurrentTime        string                             `json:"current_time"`
+	RuntimeMinutes     int                                `json:"runtime_minutes"`
+	CallCount          int                                `json:"call_count"`
+	Account            AccountInfo                        `json:"account"`
+	Positions          []PositionInfo                     `json:"positions"`
+	CandidateCoins     []CandidateCoin                    `json:"candidate_coins"`
+	PromptVariant      string                             `json:"prompt_variant,omitempty"`
+	TradingStats       *TradingStats                      `json:"trading_stats,omitempty"`
+	RecentOrders       []RecentOrder                      `json:"recent_orders,omitempty"`
+	MarketDataMap      map[string]*market.Data            `json:"-"`
+	MultiTFMarket      map[string]map[string]*market.Data `json:"-"`
+	OITopDataMap       map[string]*OITopData              `json:"-"`
+	QuantDataMap       map[string]*QuantData              `json:"-"`
+	OIRankingData      *nofxos.OIRankingData              `json:"-"` // Market-wide OI ranking data
+	NetFlowRankingData *nofxos.NetFlowRankingData         `json:"-"` // Market-wide fund flow ranking data
+	PriceRankingData   *nofxos.PriceRankingData           `json:"-"` // Market-wide price gainers/losers
+	BTCETHLeverage     int                                `json:"-"`
+	AltcoinLeverage    int                                `json:"-"`
+	Timeframes         []string                           `json:"-"`
 }
 
 // Decision AI trading decision
@@ -290,14 +301,49 @@ func GetFullDecisionWithStrategy(ctx *Context, mcpClient mcp.AIClient, engine *S
 	systemPrompt := engine.BuildSystemPrompt(ctx.Account.TotalEquity, variant)
 
 	// 3. Build User Prompt using strategy engine
-	userPrompt := engine.BuildUserPrompt(ctx)
+	var userPrompt string
+	if strings.EqualFold(strings.TrimSpace(os.Getenv("NOFX_PROMPT_MODE")), "legacy") {
+		userPrompt = engine.BuildUserPrompt(ctx)
+	} else {
+		compactPrompt, err := buildDecisionPayloadPrompt(ctx, riskConfig.MaxPositions)
+		if err != nil {
+			logger.Warnf("⚠️  Failed to build compact payload prompt, fallback to legacy formatter: %v", err)
+			userPrompt = engine.BuildUserPrompt(ctx)
+		} else {
+			userPrompt = compactPrompt
+		}
+	}
+	origInputTokens := estimatePromptTokens(systemPrompt) + estimatePromptTokens(userPrompt)
+	systemPrompt, userPrompt, trimmed := fitPromptsToBudget(systemPrompt, userPrompt, defaultPromptInputTokenBudget)
+	if trimmed {
+		newInputTokens := estimatePromptTokens(systemPrompt) + estimatePromptTokens(userPrompt)
+		logger.Warnf("⚠️  Prompt exceeded budget (%d est. tokens), trimmed to %d est. tokens",
+			origInputTokens, newInputTokens)
+	}
 
 	// 4. Call AI API
 	aiCallStart := time.Now()
 	aiResponse, err := mcpClient.CallWithMessages(systemPrompt, userPrompt)
 	aiCallDuration := time.Since(aiCallStart)
 	if err != nil {
-		return nil, fmt.Errorf("AI API call failed: %w", err)
+		// Retry once with stronger truncation when provider rejects oversized context.
+		if isContextLengthError(err) {
+			retrySystemPrompt, retryUserPrompt, retryTrimmed := fitPromptsToBudget(systemPrompt, userPrompt, retryPromptInputTokenBudget)
+			if retryTrimmed {
+				logger.Warnf("⚠️  Retrying AI call with aggressive prompt trimming (budget: %d est. tokens)",
+					retryPromptInputTokenBudget)
+				aiCallStart = time.Now()
+				aiResponse, err = mcpClient.CallWithMessages(retrySystemPrompt, retryUserPrompt)
+				aiCallDuration = time.Since(aiCallStart)
+				if err == nil {
+					systemPrompt = retrySystemPrompt
+					userPrompt = retryUserPrompt
+				}
+			}
+		}
+		if err != nil {
+			return nil, fmt.Errorf("AI API call failed: %w", err)
+		}
 	}
 
 	// 5. Parse AI response
@@ -978,10 +1024,17 @@ func (e *StrategyEngine) BuildSystemPrompt(accountEquity float64, variant string
 
 	// Position sizing guidance
 	sb.WriteString("## Position Sizing Guidance\n")
+	sb.WriteString("`position_size_usd` is the **position notional value** in USDT (the full position value).\n")
+	sb.WriteString("Do **NOT** multiply `position_size_usd` by leverage.\n")
+	sb.WriteString("Formula:\n")
+	sb.WriteString("- `max_position_size_usd = account_equity × position_value_ratio`\n")
+	sb.WriteString("- `margin_used = position_size_usd / leverage`\n")
 	sb.WriteString("Calculate `position_size_usd` based on your confidence and the Position Value Limits above:\n")
 	sb.WriteString("- High confidence (≥85): Use 80-100%% of max position value limit\n")
 	sb.WriteString("- Medium confidence (70-84): Use 50-80%% of max position value limit\n")
 	sb.WriteString("- Low confidence (60-69): Use 30-50%% of max position value limit\n")
+	sb.WriteString(fmt.Sprintf("- Altcoin example: equity %.0f, altcoin ratio %.1fx → max position_size_usd is %.0f USDT (regardless of leverage)\n",
+		accountEquity, altcoinPosValueRatio, accountEquity*altcoinPosValueRatio))
 	sb.WriteString(fmt.Sprintf("- Example: With equity %.0f and BTC/ETH ratio %.1fx, max is %.0f USDT\n",
 		accountEquity, btcEthPosValueRatio, accountEquity*btcEthPosValueRatio))
 	sb.WriteString("- **DO NOT** just use available_balance as position_size_usd. Use the Position Value Limits!\n\n")
@@ -1424,6 +1477,11 @@ func (e *StrategyEngine) formatMarketData(data *market.Data) string {
 		}
 	}
 
+	if derivsBlock := formatDerivsSignals(data); derivsBlock != "" {
+		sb.WriteString(derivsBlock)
+		sb.WriteString("\n")
+	}
+
 	if len(data.TimeframeData) > 0 {
 		timeframeOrder := []string{"1m", "3m", "5m", "15m", "30m", "1h", "2h", "4h", "6h", "8h", "12h", "1d", "3d", "1w"}
 		for _, tf := range timeframeOrder {
@@ -1667,6 +1725,114 @@ func formatFloatSlice(values []float64) string {
 	return "[" + strings.Join(strValues, ", ") + "]"
 }
 
+func estimatePromptTokens(s string) int {
+	if s == "" {
+		return 0
+	}
+	// Conservative estimate to avoid provider-side hard-limit failures.
+	return (len(s) + tokenCharsEstimate - 1) / tokenCharsEstimate
+}
+
+func fitPromptsToBudget(systemPrompt, userPrompt string, inputTokenBudget int) (string, string, bool) {
+	if inputTokenBudget <= 0 {
+		return systemPrompt, userPrompt, false
+	}
+
+	systemTokens := estimatePromptTokens(systemPrompt)
+	userTokens := estimatePromptTokens(userPrompt)
+	if systemTokens+userTokens <= inputTokenBudget {
+		return systemPrompt, userPrompt, false
+	}
+
+	trimmed := false
+
+	// Keep at least a practical budget for each section, trim system first only if necessary.
+	maxSystemTokens := inputTokenBudget - minPromptSectionTokenBudget
+	if maxSystemTokens < minPromptSectionTokenBudget {
+		maxSystemTokens = minPromptSectionTokenBudget
+	}
+	if systemTokens > maxSystemTokens {
+		systemPrompt = trimPromptMiddle(systemPrompt, maxSystemTokens)
+		systemTokens = estimatePromptTokens(systemPrompt)
+		trimmed = true
+	}
+
+	remainingUserTokens := inputTokenBudget - systemTokens
+	if remainingUserTokens < minPromptSectionTokenBudget {
+		remainingUserTokens = minPromptSectionTokenBudget
+	}
+	if userTokens > remainingUserTokens {
+		userPrompt = trimPromptMiddle(userPrompt, remainingUserTokens)
+		trimmed = true
+	}
+
+	return systemPrompt, userPrompt, trimmed
+}
+
+func trimPromptMiddle(s string, targetTokens int) string {
+	if targetTokens <= 0 || s == "" {
+		return s
+	}
+
+	targetChars := targetTokens * tokenCharsEstimate
+	runes := []rune(s)
+	if len(runes) <= targetChars {
+		return s
+	}
+
+	noticeRunes := []rune(promptTruncationNotice)
+	minKeep := 512
+	if targetChars <= len(noticeRunes)+minKeep*2 {
+		// Tiny budget fallback: keep the tail (often contains output constraints).
+		tail := targetChars - len(noticeRunes)
+		if tail < minKeep {
+			tail = minKeep
+		}
+		if tail > len(runes) {
+			tail = len(runes)
+		}
+		return string(append(noticeRunes, runes[len(runes)-tail:]...))
+	}
+
+	contentBudget := targetChars - len(noticeRunes)
+	head := int(float64(contentBudget) * 0.58)
+	tail := contentBudget - head
+	if head < minKeep {
+		head = minKeep
+		tail = contentBudget - head
+	}
+	if tail < minKeep {
+		tail = minKeep
+		head = contentBudget - tail
+	}
+	if head < 0 {
+		head = 0
+	}
+	if tail < 0 {
+		tail = 0
+	}
+	if head+tail > len(runes) {
+		return s
+	}
+
+	var b strings.Builder
+	b.Grow(head + len(noticeRunes) + tail)
+	b.WriteString(string(runes[:head]))
+	b.WriteString(promptTruncationNotice)
+	b.WriteString(string(runes[len(runes)-tail:]))
+	return b.String()
+}
+
+func isContextLengthError(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "maximum context length") ||
+		strings.Contains(msg, "reduce the length of the messages") ||
+		strings.Contains(msg, "requested ") && strings.Contains(msg, "tokens")
+}
+
 // ============================================================================
 // AI Response Parsing
 // ============================================================================
@@ -1805,6 +1971,11 @@ func fixMissingQuotes(jsonStr string) string {
 func validateJSONFormat(jsonStr string) error {
 	trimmed := strings.TrimSpace(jsonStr)
 
+	// Explicit empty decision array means "no action" and is valid.
+	if reEmptyJSONArray.MatchString(trimmed) {
+		return nil
+	}
+
 	if !reArrayHead.MatchString(trimmed) {
 		if strings.HasPrefix(trimmed, "[") && !strings.Contains(trimmed[:min(20, len(trimmed))], "{") {
 			return fmt.Errorf("not a valid decision array (must contain objects {}), actual content: %s", trimmed[:min(50, len(trimmed))])
@@ -1893,6 +2064,13 @@ func validateDecision(d *Decision, accountEquity float64, btcEthLeverage, altcoi
 			return fmt.Errorf("position size must be greater than 0: %.2f", d.PositionSizeUSD)
 		}
 
+		tolerance := maxPositionValue * 0.01
+		if d.PositionSizeUSD > maxPositionValue+tolerance {
+			logger.Infof("⚠️  [Position Size Fallback] %s position size exceeded (%.2f > %.2f), auto-adjusting to limit %.2f",
+				d.Symbol, d.PositionSizeUSD, maxPositionValue, maxPositionValue)
+			d.PositionSizeUSD = maxPositionValue
+		}
+
 		const minPositionSizeGeneral = 12.0
 		const minPositionSizeBTCETH = 60.0
 
@@ -1906,14 +2084,6 @@ func validateDecision(d *Decision, accountEquity float64, btcEthLeverage, altcoi
 			}
 		}
 
-		tolerance := maxPositionValue * 0.01
-		if d.PositionSizeUSD > maxPositionValue+tolerance {
-			if d.Symbol == "BTCUSDT" || d.Symbol == "ETHUSDT" {
-				return fmt.Errorf("BTC/ETH single coin position value cannot exceed %.0f USDT (%.1fx account equity), actual: %.0f", maxPositionValue, posRatio, d.PositionSizeUSD)
-			} else {
-				return fmt.Errorf("altcoin single coin position value cannot exceed %.0f USDT (%.1fx account equity), actual: %.0f", maxPositionValue, posRatio, d.PositionSizeUSD)
-			}
-		}
 		if d.StopLoss <= 0 || d.TakeProfit <= 0 {
 			return fmt.Errorf("stop loss and take profit must be greater than 0")
 		}

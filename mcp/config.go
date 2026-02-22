@@ -25,8 +25,8 @@ type Config struct {
 	UseFullURL  bool
 
 	// Retry configuration
-	MaxRetries     int
-	RetryWaitBase  time.Duration
+	MaxRetries      int
+	RetryWaitBase   time.Duration
 	RetryableErrors []string
 
 	// Timeout configuration
@@ -39,19 +39,21 @@ type Config struct {
 
 // DefaultConfig returns default configuration
 func DefaultConfig() *Config {
+	timeout := getEnvDurationSeconds("AI_HTTP_TIMEOUT_S", DefaultTimeout)
+
 	return &Config{
 		// Default values
-		MaxTokens:      getEnvInt("AI_MAX_TOKENS", 2000),
-		Temperature:    MCPClientTemperature,
-		MaxRetries:     MaxRetryTimes,
-		RetryWaitBase:  2 * time.Second,
-		Timeout:        DefaultTimeout,
-		RetryableErrors: retryableErrors,
+		MaxTokens:        getEnvInt("AI_MAX_TOKENS", 2000),
+		Temperature:      MCPClientTemperature,
+		MaxRetries:       MaxRetryTimes,
+		RetryWaitBase:    2 * time.Second,
+		Timeout:          timeout,
+		RetryableErrors:  retryableErrors,
 		AllowEmptyAPIKey: false,
 
 		// Default dependencies (use global logger)
 		Logger:     logger.NewMCPLogger(),
-		HTTPClient: &http.Client{Timeout: DefaultTimeout},
+		HTTPClient: &http.Client{Timeout: timeout},
 	}
 }
 
@@ -69,6 +71,16 @@ func getEnvInt(key string, defaultValue int) int {
 func getEnvString(key string, defaultValue string) string {
 	if val := os.Getenv(key); val != "" {
 		return val
+	}
+	return defaultValue
+}
+
+// getEnvDurationSeconds reads timeout seconds from env and returns defaultValue if missing/invalid.
+func getEnvDurationSeconds(key string, defaultValue time.Duration) time.Duration {
+	if val := os.Getenv(key); val != "" {
+		if sec, err := strconv.Atoi(val); err == nil && sec > 0 {
+			return time.Duration(sec) * time.Second
+		}
 	}
 	return defaultValue
 }

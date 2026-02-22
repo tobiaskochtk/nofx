@@ -7,6 +7,7 @@ import (
 	"io"
 	"math"
 	"nofx/logger"
+	"nofx/pkg/types"
 	"nofx/provider/coinank/coinank_api"
 	"nofx/provider/coinank/coinank_enum"
 	"nofx/provider/hyperliquid"
@@ -16,16 +17,22 @@ import (
 	"time"
 )
 
-// FundingRateCache is the funding rate cache structure
-// Binance Funding Rate only updates every 8 hours, using 1-hour cache can significantly reduce API calls
-type FundingRateCache struct {
-	Rate      float64
+// premiumIndexData holds the latest Binance perp premium snapshot.
+type premiumIndexData struct {
+	FundingRate float64
+	MarkPrice   float64
+	IndexPrice  float64
+	Timestamp   int64
+}
+
+type premiumIndexCache struct {
+	Data      premiumIndexData
 	UpdatedAt time.Time
 }
 
 var (
-	fundingRateMap sync.Map // map[string]*FundingRateCache
-	frCacheTTL     = 1 * time.Hour
+	premiumIndexMap sync.Map // map[string]*premiumIndexCache
+	frCacheTTL      = 1 * time.Hour
 )
 
 // Note: Kline data now uses free/open API (coinank_api.Kline) which doesn't require authentication
@@ -139,6 +146,18 @@ func getKlinesFromHyperliquid(symbol, interval string, limit int) ([]Kline, erro
 	ctx := context.Background()
 	candles, err := client.GetCandles(ctx, baseCoin, hlInterval, limit)
 	if err != nil {
+		// For non-xyz assets on Hyperliquid, fallback to Binance/CoinAnk kline source.
+		// This prevents hard failures when AI pools include symbols not listed on Hyperliquid.
+		if !IsXyzDexAsset(symbol) {
+			normalized := Normalize(symbol)
+			logger.Warnf("⚠️ Hyperliquid market klines failed for %s (%v), fallback to CoinAnk/Binance", symbol, err)
+			fallbackKlines, fallbackErr := getKlinesFromCoinAnk(normalized, interval, "binance", limit)
+			if fallbackErr == nil {
+				return fallbackKlines, nil
+			}
+			return nil, fmt.Errorf("Hyperliquid API error: %w (fallback error: %v)", err, fallbackErr)
+		}
+
 		return nil, fmt.Errorf("Hyperliquid API error: %w", err)
 	}
 
@@ -257,8 +276,12 @@ func GetWithExchange(symbol, exchange string) (*Data, error) {
 		oiData = &OIData{Latest: 0, Average: 0}
 	}
 
-	// Get Funding Rate
-	fundingRate, _ := getFundingRate(symbol)
+	// Get funding / mark / index snapshot
+	premium, premiumErr := getPremiumIndexData(symbol)
+	fundingRate := 0.0
+	if premiumErr == nil && premium != nil {
+		fundingRate = premium.FundingRate
+	}
 
 	// Calculate intraday series data
 	intradayData := calculateIntradaySeries(klines3m)
@@ -266,8 +289,9 @@ func GetWithExchange(symbol, exchange string) (*Data, error) {
 	// Calculate longer-term data
 	longerTermData := calculateLongerTermData(klines4h)
 
-	return &Data{
+	data := &Data{
 		Symbol:            symbol,
+		CollectedAt:       time.Now().UTC(),
 		CurrentPrice:      currentPrice,
 		PriceChange1h:     priceChange1h,
 		PriceChange4h:     priceChange4h,
@@ -278,7 +302,10 @@ func GetWithExchange(symbol, exchange string) (*Data, error) {
 		FundingRate:       fundingRate,
 		IntradaySeries:    intradayData,
 		LongerTermContext: longerTermData,
-	}, nil
+	}
+	syncDerivsBaseCache(data.Symbol, oiData, premium)
+	attachDerivsSnapshot(data)
+	return data, nil
 }
 
 // GetWithTimeframes retrieves market data for specified multiple timeframes
@@ -370,7 +397,7 @@ func GetWithTimeframes(symbol string, timeframes []string, primaryTimeframe stri
 	currentRSI7 := calculateRSI(primaryKlines, 7)
 
 	// Calculate price changes
-	priceChange1h := calculatePriceChangeByBars(primaryKlines, primaryTimeframe, 60) // 1 hour
+	priceChange1h := calculatePriceChangeByBars(primaryKlines, primaryTimeframe, 60)  // 1 hour
 	priceChange4h := calculatePriceChangeByBars(primaryKlines, primaryTimeframe, 240) // 4 hours
 
 	// Get OI data
@@ -379,11 +406,16 @@ func GetWithTimeframes(symbol string, timeframes []string, primaryTimeframe stri
 		oiData = &OIData{Latest: 0, Average: 0}
 	}
 
-	// Get Funding Rate
-	fundingRate, _ := getFundingRate(symbol)
+	// Get funding / mark / index snapshot
+	premium, premiumErr := getPremiumIndexData(symbol)
+	fundingRate := 0.0
+	if premiumErr == nil && premium != nil {
+		fundingRate = premium.FundingRate
+	}
 
-	return &Data{
+	data := &Data{
 		Symbol:        symbol,
+		CollectedAt:   time.Now().UTC(),
 		CurrentPrice:  currentPrice,
 		PriceChange1h: priceChange1h,
 		PriceChange4h: priceChange4h,
@@ -393,7 +425,10 @@ func GetWithTimeframes(symbol string, timeframes []string, primaryTimeframe stri
 		OpenInterest:  oiData,
 		FundingRate:   fundingRate,
 		TimeframeData: timeframeData,
-	}, nil
+	}
+	syncDerivsBaseCache(data.Symbol, oiData, premium)
+	attachDerivsSnapshot(data)
+	return data, nil
 }
 
 // calculateTimeframeSeries calculates series data for a single timeframe
@@ -822,31 +857,39 @@ func getOpenInterestData(symbol string) (*OIData, error) {
 	}, nil
 }
 
-// getFundingRate retrieves funding rate (optimized: uses 1-hour cache)
+// getFundingRate retrieves funding rate (optimized: uses 1-hour premiumIndex cache).
 func getFundingRate(symbol string) (float64, error) {
-	// Check cache (1-hour validity)
-	// Funding Rate only updates every 8 hours, 1-hour cache is very reasonable
-	if cached, ok := fundingRateMap.Load(symbol); ok {
-		cache := cached.(*FundingRateCache)
+	premium, err := getPremiumIndexData(symbol)
+	if err != nil {
+		return 0, err
+	}
+	if premium == nil {
+		return 0, nil
+	}
+	return premium.FundingRate, nil
+}
+
+// getPremiumIndexData fetches the latest mark/index/funding snapshot from Binance.
+func getPremiumIndexData(symbol string) (*premiumIndexData, error) {
+	if cached, ok := premiumIndexMap.Load(symbol); ok {
+		cache := cached.(*premiumIndexCache)
 		if time.Since(cache.UpdatedAt) < frCacheTTL {
-			// Cache hit, return directly
-			return cache.Rate, nil
+			data := cache.Data
+			return &data, nil
 		}
 	}
 
-	// Cache expired or doesn't exist, call API
 	url := fmt.Sprintf("https://fapi.binance.com/fapi/v1/premiumIndex?symbol=%s", symbol)
-
 	apiClient := NewAPIClient()
 	resp, err := apiClient.client.Get(url)
 	if err != nil {
-		return 0, err
+		return nil, err
 	}
 	defer resp.Body.Close()
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return 0, err
+		return nil, err
 	}
 
 	var result struct {
@@ -860,18 +903,23 @@ func getFundingRate(symbol string) (float64, error) {
 	}
 
 	if err := json.Unmarshal(body, &result); err != nil {
-		return 0, err
+		return nil, err
 	}
 
 	rate, _ := strconv.ParseFloat(result.LastFundingRate, 64)
-
-	// Update cache
-	fundingRateMap.Store(symbol, &FundingRateCache{
-		Rate:      rate,
+	markPrice, _ := strconv.ParseFloat(result.MarkPrice, 64)
+	indexPrice, _ := strconv.ParseFloat(result.IndexPrice, 64)
+	data := premiumIndexData{
+		FundingRate: rate,
+		MarkPrice:   markPrice,
+		IndexPrice:  indexPrice,
+		Timestamp:   result.Time,
+	}
+	premiumIndexMap.Store(symbol, &premiumIndexCache{
+		Data:      data,
 		UpdatedAt: time.Now(),
 	})
-
-	return rate, nil
+	return &data, nil
 }
 
 // Format formats and outputs market data
@@ -1147,6 +1195,7 @@ func BuildDataFromKlines(symbol string, primary []Kline, longer []Kline) (*Data,
 
 	data := &Data{
 		Symbol:            symbol,
+		CollectedAt:       time.Now().UTC(),
 		CurrentPrice:      currentPrice,
 		CurrentEMA20:      calculateEMA(primary, 20),
 		CurrentMACD:       calculateMACD(primary),
@@ -1164,6 +1213,53 @@ func BuildDataFromKlines(symbol string, primary []Kline, longer []Kline) (*Data,
 	}
 
 	return data, nil
+}
+
+// attachDerivsSnapshot enriches market data with derivs snapshot and QoS marks for f4-f7.
+func attachDerivsSnapshot(data *Data) {
+	if data == nil {
+		return
+	}
+	if data.CollectedAt.IsZero() {
+		data.CollectedAt = time.Now().UTC()
+	}
+
+	snap := buildDerivsSnapshot(data.Symbol)
+	if snap == nil || snap.Features.Derivs == nil {
+		return
+	}
+	data.Snapshot = snap
+	derivs := snap.Features.Derivs
+	now := time.Now().UTC()
+
+	if hasFeature4(derivs) {
+		data.markFeatureFresh(FeatureKeyF4, 1.0, now)
+	}
+	if hasFeature5(derivs) {
+		data.markFeatureFresh(FeatureKeyF5, 1.0, now)
+	}
+	if hasFeature6(derivs) {
+		data.markFeatureFresh(FeatureKeyF6, 1.0, now)
+	}
+	if hasFeature7(derivs) {
+		data.markFeatureFresh(FeatureKeyF7, 1.0, now)
+	}
+}
+
+func hasFeature4(d *types.DerivsFeatures) bool {
+	return d != nil && (d.ConfidenceCVD3m != nil || d.CVDNotionalZ3mShort != nil || d.CVDNotionalZ3mLong != nil || d.TBRNotional3m != nil)
+}
+
+func hasFeature5(d *types.DerivsFeatures) bool {
+	return d != nil && (d.ConfidenceLiq3m != nil || d.DistUpAtr3m != nil || d.DistDnAtr3m != nil || d.PreferDirection3m != nil)
+}
+
+func hasFeature6(d *types.DerivsFeatures) bool {
+	return d != nil && (d.ConfidenceAVWAP3m != nil || d.AVWAPBias3m != nil || d.AVWAPUpDistAtr3m != nil || d.AVWAPDnDistAtr3m != nil)
+}
+
+func hasFeature7(d *types.DerivsFeatures) bool {
+	return d != nil && (d.ConfidenceVol3m != nil || d.BBW3m != nil || d.SqueezeOn3m != nil || d.RvRatio3m != nil)
 }
 
 func priceChangeFromSeries(series []Kline, duration time.Duration) float64 {

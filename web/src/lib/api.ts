@@ -15,6 +15,11 @@ import type {
   CompetitionData,
   BacktestRunsResponse,
   BacktestStartConfig,
+  BacktestCreateRequest,
+  BacktestCreateResponse,
+  BacktestResultPayload,
+  BacktestImproveRequest,
+  BacktestImproveResponse,
   BacktestStatusPayload,
   BacktestEquityPoint,
   BacktestTradeEvent,
@@ -30,6 +35,8 @@ import type {
   DebateVote,
   DebatePersonalityInfo,
   PositionHistoryResponse,
+  Deal,
+  DealEvent,
 } from '../types'
 import { CryptoService } from './crypto'
 import { httpClient } from './httpClient'
@@ -460,6 +467,143 @@ export const api = {
     return result.data!
   },
 
+  async getPerformance(traderId: string): Promise<any> {
+    const query = new URLSearchParams({ trader_id: traderId })
+    const res = await fetch(`${API_BASE}/performance?${query}`, {
+      headers: getAuthHeaders(),
+    })
+    return handleJSONResponse<any>(res)
+  },
+
+  async getDeals(params: {
+    trader_id: string
+    status?: string
+    side?: string
+    symbol?: string
+    from?: string
+    to?: string
+    q?: string
+    pnl?: 'win' | 'loss'
+    pnl_min?: number
+    pnl_max?: number
+    limit?: number
+    offset?: number
+  }): Promise<Deal[]> {
+    const query = new URLSearchParams()
+    Object.entries(params).forEach(([key, value]) => {
+      if (value === undefined || value === null || value === '') return
+      query.set(key, String(value))
+    })
+    const res = await fetch(`${API_BASE}/deals?${query}`, {
+      headers: getAuthHeaders(),
+    })
+    return handleJSONResponse<Deal[]>(res)
+  },
+
+  async getDealsCount(params: {
+    trader_id: string
+    status?: string
+    side?: string
+    symbol?: string
+    from?: string
+    to?: string
+    q?: string
+    pnl?: 'win' | 'loss'
+    pnl_min?: number
+    pnl_max?: number
+  }): Promise<number> {
+    const query = new URLSearchParams()
+    Object.entries(params).forEach(([key, value]) => {
+      if (value === undefined || value === null || value === '') return
+      query.set(key, String(value))
+    })
+    const res = await fetch(`${API_BASE}/deals/count?${query}`, {
+      headers: getAuthHeaders(),
+    })
+    const payload = await handleJSONResponse<number | { count: number }>(res)
+    return typeof payload === 'number' ? payload : (payload?.count ?? 0)
+  },
+
+  getDealsExportURL(
+    format: 'csv' | 'jsonl',
+    params: {
+      trader_id: string
+      status?: string
+      side?: string
+      symbol?: string
+      from?: string
+      to?: string
+      q?: string
+      pnl?: 'win' | 'loss'
+      pnl_min?: number
+      pnl_max?: number
+      columns?: string[]
+      mode?: 'full' | 'slim' | 'train'
+      train_actions?: 'all' | 'final'
+    }
+  ): string {
+    const query = new URLSearchParams()
+    query.set('format', format)
+    Object.entries(params).forEach(([key, value]) => {
+      if (value === undefined || value === null || value === '') return
+      if (Array.isArray(value)) {
+        if (value.length > 0) query.set(key, value.join(','))
+        return
+      }
+      query.set(key, String(value))
+    })
+    return `${API_BASE}/deals/export?${query}`
+  },
+
+  async getDealById(
+    traderId: string,
+    dealId: number
+  ): Promise<{ deal: Deal; events: DealEvent[] }> {
+    const query = new URLSearchParams({
+      trader_id: traderId,
+      deal_id: String(dealId),
+    })
+    const res = await fetch(`${API_BASE}/deals/detail?${query}`, {
+      headers: getAuthHeaders(),
+    })
+    return handleJSONResponse<{ deal: Deal; events: DealEvent[] }>(res)
+  },
+
+  async saveUserSignalSource(
+    coinPoolUrl: string,
+    oiTopUrl: string
+  ): Promise<void> {
+    const res = await fetch(`${API_BASE}/signal-source`, {
+      method: 'POST',
+      headers: getAuthHeaders(),
+      body: JSON.stringify({
+        coin_pool_url: coinPoolUrl,
+        oi_top_url: oiTopUrl,
+      }),
+    })
+    if (!res.ok) {
+      const text = await res.text()
+      throw new Error(text || '保存信号源失败')
+    }
+  },
+
+  async updateTrailingStopConfig(
+    traderId: string,
+    config: {
+      enabled: boolean
+      tiers: string
+      update_threshold_pct: number
+      check_interval_sec: number
+      allow_ai_override: boolean
+    }
+  ): Promise<void> {
+    const result = await httpClient.put(
+      `${API_BASE}/traders/${traderId}/trailing-stop`,
+      config
+    )
+    if (!result.success) throw new Error('更新追踪止损配置失败')
+  },
+
   // Backtest APIs
   async getBacktestRuns(params?: {
     state?: string
@@ -479,6 +623,53 @@ export const api = {
       }
     )
     return handleJSONResponse<BacktestRunsResponse>(res)
+  },
+
+  async createStrategyAndBacktest(
+    payload: BacktestCreateRequest
+  ): Promise<BacktestCreateResponse> {
+    const res = await fetch(`${API_BASE}/backtest/create`, {
+      method: 'POST',
+      headers: getAuthHeaders(),
+      body: JSON.stringify(payload),
+    })
+    return handleJSONResponse<BacktestCreateResponse>(res)
+  },
+
+  async getBacktestResult(
+    runId: string,
+    params?: {
+      include?: string
+      equity_limit?: number
+      trade_limit?: number
+      decision_limit?: number
+    }
+  ): Promise<BacktestResultPayload> {
+    const query = new URLSearchParams()
+    if (params?.include) query.set('include', params.include)
+    if (typeof params?.equity_limit === 'number') query.set('equity_limit', String(params.equity_limit))
+    if (typeof params?.trade_limit === 'number') query.set('trade_limit', String(params.trade_limit))
+    if (typeof params?.decision_limit === 'number') query.set('decision_limit', String(params.decision_limit))
+    const queryString = query.toString()
+    const res = await fetch(
+      `${API_BASE}/backtest/${encodeURIComponent(runId)}${queryString ? `?${queryString}` : ''}`,
+      {
+        headers: getAuthHeaders(),
+      }
+    )
+    return handleJSONResponse<BacktestResultPayload>(res)
+  },
+
+  async improveBacktestStrategy(
+    runId: string,
+    payload?: BacktestImproveRequest
+  ): Promise<BacktestImproveResponse> {
+    const res = await fetch(`${API_BASE}/backtest/${encodeURIComponent(runId)}/improve`, {
+      method: 'POST',
+      headers: getAuthHeaders(),
+      body: payload ? JSON.stringify(payload) : undefined,
+    })
+    return handleJSONResponse<BacktestImproveResponse>(res)
   },
 
   async startBacktest(config: BacktestStartConfig): Promise<BacktestRunMetadata> {

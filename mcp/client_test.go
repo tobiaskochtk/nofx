@@ -3,6 +3,7 @@ package mcp
 import (
 	"errors"
 	"net/http"
+	"strings"
 	"testing"
 	"time"
 )
@@ -125,6 +126,19 @@ func TestClient_CallWithMessages_NoAPIKey(t *testing.T) {
 
 	if err.Error() != "AI API key not set, please call SetAPIKey first" {
 		t.Errorf("unexpected error message: %v", err)
+	}
+}
+
+func TestClient_ParseMCPResponse_EmptyContent(t *testing.T) {
+	client := NewClient().(*Client)
+	body := []byte(`{"choices":[{"message":{"content":"   "}}]}`)
+
+	_, err := client.parseMCPResponse(body)
+	if err == nil {
+		t.Fatal("expected error for empty content, got nil")
+	}
+	if !strings.Contains(err.Error(), "empty content") {
+		t.Fatalf("expected empty content error, got: %v", err)
 	}
 }
 
@@ -338,6 +352,16 @@ func TestClient_IsRetryableError(t *testing.T) {
 		{
 			name:     "timeout error",
 			err:      errors.New("timeout exceeded"),
+			expected: true,
+		},
+		{
+			name:     "context deadline exceeded error",
+			err:      errors.New("failed to read response: context deadline exceeded (Client.Timeout or context cancellation while reading body)"),
+			expected: true,
+		},
+		{
+			name:     "uppercase timeout error",
+			err:      errors.New("Client.Timeout exceeded while awaiting headers"),
 			expected: true,
 		},
 		{

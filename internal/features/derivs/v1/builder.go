@@ -5,6 +5,7 @@ import (
 	"log"
 	"math"
 	"os"
+	"strings"
 	"time"
 
 	"nofx/config"
@@ -18,6 +19,7 @@ type Builder struct {
 	fundingHistory FundingHistory
 	basisHistory   BasisHistory
 	enabledSymbols map[string]struct{}
+	strictSymbols  bool
 	micro          *microFetcher
 }
 
@@ -50,6 +52,7 @@ func NewBuilder(cfg *config.DerivsV1Config, store Store) *Builder {
 		fundingHistory: NewCacheFundingHistory(store),
 		basisHistory:   NewCacheBasisHistory(store),
 		enabledSymbols: enabled,
+		strictSymbols:  derivsStrictSymbolsEnabled(),
 		micro:          microFetcher,
 	}
 }
@@ -64,9 +67,12 @@ func (b *Builder) Build(symbol string) (*types.DerivsFeatures, error) {
 	norm := SanitizeSymbol(symbol)
 	log.Printf("[Builder.Build] %s: normalized to %s", symbol, norm)
 
-	if _, ok := b.enabledSymbols[norm]; !ok {
-		log.Printf("[Builder.Build] %s: NOT in enabled list (have %d symbols)", norm, len(b.enabledSymbols))
-		return nil, nil
+	if _, ok := b.enabledSymbols[norm]; !ok && len(b.enabledSymbols) > 0 {
+		if b.strictSymbols {
+			log.Printf("[Builder.Build] %s: NOT in enabled list (strict mode enabled, skipping)", norm)
+			return nil, nil
+		}
+		log.Printf("[Builder.Build] %s: NOT in enabled list (strict mode off, processing dynamic symbol)", norm)
 	}
 	log.Printf("[Builder.Build] %s: proceeding with feature computation", norm)
 
@@ -388,5 +394,14 @@ func toIntPointer(v interface{}) *int {
 		return &i
 	default:
 		return nil
+	}
+}
+
+func derivsStrictSymbolsEnabled() bool {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("DERIVS_STRICT_SYMBOLS"))) {
+	case "1", "true", "yes", "on":
+		return true
+	default:
+		return false
 	}
 }

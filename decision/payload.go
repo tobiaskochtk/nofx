@@ -232,9 +232,6 @@ type policyPayload struct {
 
 type metaPayload struct {
 	Summary     string   `json:"summary"`
-	Account     string   `json:"account"`
-	Positions   string   `json:"positions"`
-	Latest      string   `json:"latest,omitempty"`
 	SharpeRatio *float64 `json:"sharpe_ratio,omitempty"` // Sharpe Ratio for AI decision making
 }
 
@@ -242,6 +239,11 @@ type payloadDiagnostics struct {
 	FeaturePass map[string][]string
 	ByteSize    int
 	RuneSize    int
+}
+
+// BuildUserPayload exports the compact payload builder for cross-package callers.
+func BuildUserPayload(ctx *Context) (string, error) {
+	return buildUserPayload(ctx)
 }
 
 func buildUserPayload(ctx *Context) (string, error) {
@@ -607,48 +609,6 @@ func buildMetaPayload(ctx *Context) *metaPayload {
 		return nil
 	}
 	summary := fmt.Sprintf("Time: %s | Cycle: #%d | Running: %d minutes", ctx.CurrentTime, ctx.CallCount, ctx.RuntimeMinutes)
-	acct := ctx.Account
-	var balancePct float64
-	if acct.TotalEquity > 0 {
-		balancePct = (acct.AvailableBalance / acct.TotalEquity) * 100
-	}
-	accountLine := fmt.Sprintf(
-		"Account: Equity %.2f | Balance %.2f (%.1f%%) | P&L %+.2f%% | Margin %.1f%% | Positions %d",
-		roundTo(acct.TotalEquity, 2),
-		roundTo(acct.AvailableBalance, 2),
-		roundTo(balancePct, 1),
-		roundTo(acct.TotalPnLPct, 2),
-		roundTo(acct.MarginUsedPct, 1),
-		acct.PositionCount,
-	)
-	positionLine := "Positions: none"
-	if len(ctx.Positions) > 0 {
-		lines := make([]string, 0, len(ctx.Positions))
-		for i, pos := range ctx.Positions {
-			value := math.Abs(pos.Quantity) * pos.MarkPrice
-			age := describeMinutes(pos.UpdateTime)
-			line := fmt.Sprintf(
-				"%d. %s %s | Entry %.4f Current %.4f | Qty %.4f | Value %.2f USDT | P&L %+.2f%% (%+.2f USDT) | Max %.2f%% | Lev %dx | Margin %.0f | Liq %.4f | Held %s",
-				i+1,
-				pos.Symbol,
-				strings.ToUpper(pos.Side),
-				pos.EntryPrice,
-				pos.MarkPrice,
-				pos.Quantity,
-				value,
-				pos.UnrealizedPnLPct,
-				pos.UnrealizedPnL,
-				pos.PeakPnLPct,
-				pos.Leverage,
-				pos.MarginUsed,
-				pos.LiquidationPrice,
-				age,
-			)
-			lines = append(lines, line)
-		}
-		positionLine = strings.Join(lines, "\n")
-	}
-	latestLine := buildLatestLine(ctx)
 
 	// Extract Sharpe Ratio from Performance if available
 	var sharpeRatio *float64
@@ -681,9 +641,6 @@ func buildMetaPayload(ctx *Context) *metaPayload {
 
 	return &metaPayload{
 		Summary:     summary,
-		Account:     accountLine,
-		Positions:   positionLine,
-		Latest:      latestLine,
 		SharpeRatio: sharpeRatio,
 	}
 }
@@ -704,38 +661,6 @@ func describeMinutes(updateMs int64) string {
 		return fmt.Sprintf("%d minutes", mins)
 	}
 	return fmt.Sprintf("%d hours %d minutes", mins/60, mins%60)
-}
-
-func buildLatestLine(ctx *Context) string {
-	if ctx == nil || len(ctx.MarketDataMap) == 0 {
-		return ""
-	}
-	var symbol string
-	if len(ctx.Positions) > 0 {
-		symbol = ctx.Positions[0].Symbol
-	}
-	if symbol == "" {
-		if _, ok := ctx.MarketDataMap["BTCUSDT"]; ok {
-			symbol = "BTCUSDT"
-		} else {
-			for sym := range ctx.MarketDataMap {
-				symbol = sym
-				break
-			}
-		}
-	}
-	data := ctx.MarketDataMap[symbol]
-	if data == nil {
-		return ""
-	}
-	return fmt.Sprintf(
-		"%s | current_price=%.4f current_ema20=%.3f current_macd=%.3f current_rsi7=%.3f",
-		symbol,
-		data.CurrentPrice,
-		data.CurrentEMA20,
-		data.CurrentMACD,
-		data.CurrentRSI7,
-	)
 }
 
 func buildQoS(data *market.Data, key string) (featureQoS, bool) {

@@ -206,7 +206,15 @@ func GetFullDecisionWithCustomPrompt(ctx *Context, mcpClient mcp.AIClient, custo
 	}
 
 	// 2. 构建 System Prompt（固定规则）和 User Prompt（动态数据）
-	systemPrompt := buildSystemPromptWithCustom(ctx.Account.TotalEquity, ctx.BTCETHLeverage, ctx.AltcoinLeverage, customPrompt, overrideBase, templateName)
+	systemPrompt := buildSystemPromptWithCustom(
+		ctx.Account.TotalEquity,
+		ctx.BTCETHLeverage,
+		ctx.AltcoinLeverage,
+		customPrompt,
+		overrideBase,
+		templateName,
+		len(ctx.Positions) > 0,
+	)
 	userPrompt, err := buildUserPrompt(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("构建市场数据payload失败: %w", err)
@@ -351,34 +359,39 @@ func calculateMaxCandidates(ctx *Context) int {
 }
 
 // buildSystemPromptWithCustom 构建包含自定义内容的 System Prompt
-func buildSystemPromptWithCustom(accountEquity float64, btcEthLeverage, altcoinLeverage int, customPrompt string, overrideBase bool, templateName string) string {
-	// 如果覆盖基础prompt且有自定义prompt，只使用自定义prompt
+func buildSystemPromptWithCustom(accountEquity float64, btcEthLeverage, altcoinLeverage int, customPrompt string, overrideBase bool, templateName string, hasOpenPositions bool) string {
+	var sb strings.Builder
+
+	// 如果覆盖基础prompt且有自定义prompt，使用自定义prompt主体
 	if overrideBase && customPrompt != "" {
-		return customPrompt
+		sb.WriteString(customPrompt)
+		sb.WriteString("\n\n")
+		sb.WriteString(buildFinalOutputContract(hasOpenPositions))
+		return sb.String()
 	}
 
 	// 获取基础prompt（使用指定的模板）
-	basePrompt := buildSystemPrompt(accountEquity, btcEthLeverage, altcoinLeverage, templateName)
-
-	// 如果没有自定义prompt，直接返回基础prompt
-	if customPrompt == "" {
-		return basePrompt
-	}
+	basePrompt := buildSystemPrompt(accountEquity, btcEthLeverage, altcoinLeverage, templateName, hasOpenPositions)
+	sb.WriteString(basePrompt)
 
 	// 添加自定义prompt部分到基础prompt
-	var sb strings.Builder
-	sb.WriteString(basePrompt)
+	if customPrompt != "" {
+		sb.WriteString("\n\n")
+		sb.WriteString("# 📌 个性化交易策略\n\n")
+		sb.WriteString(customPrompt)
+		sb.WriteString("\n\n")
+		sb.WriteString("注意: 以上个性化策略是对基础规则的补充，不能违背基础风险控制原则。\n")
+	}
+
+	// 统一最终契约，解决模板/自定义提示词之间的冲突指令
 	sb.WriteString("\n\n")
-	sb.WriteString("# 📌 个性化交易策略\n\n")
-	sb.WriteString(customPrompt)
-	sb.WriteString("\n\n")
-	sb.WriteString("注意: 以上个性化策略是对基础规则的补充，不能违背基础风险控制原则。\n")
+	sb.WriteString(buildFinalOutputContract(hasOpenPositions))
 
 	return sb.String()
 }
 
 // buildSystemPrompt 构建 System Prompt（使用模板+动态部分）
-func buildSystemPrompt(accountEquity float64, btcEthLeverage, altcoinLeverage int, templateName string) string {
+func buildSystemPrompt(accountEquity float64, btcEthLeverage, altcoinLeverage int, templateName string, hasOpenPositions bool) string {
 	var sb strings.Builder
 
 	// 1. 加载提示词模板（核心交易策略部分）
@@ -425,18 +438,44 @@ func buildSystemPrompt(accountEquity float64, btcEthLeverage, altcoinLeverage in
 	sb.WriteString("<decision>\n")
 	sb.WriteString("```json\n[\n")
 	sb.WriteString(fmt.Sprintf("  {\"symbol\": \"BTCUSDT\", \"action\": \"open_short\", \"leverage\": %d, \"position_size_usd\": %.0f, \"stop_loss\": 97000, \"take_profit\": 91000, \"confidence\": 85, \"risk_usd\": 300, \"reasoning\": \"下跌趋势+MACD死叉\"},\n", btcEthLeverage, accountEquity*5))
-	sb.WriteString("  {\"symbol\": \"SOLUSDT\", \"action\": \"update_stop_loss\", \"new_stop_loss\": 155, \"reasoning\": \"移动止损至保本位\"},\n")
+	if hasOpenPositions {
+		sb.WriteString("  {\"symbol\": \"SOLUSDT\", \"action\": \"update_stop_loss\", \"new_stop_loss\": 155, \"reasoning\": \"移动止损至保本位\"},\n")
+	}
 	sb.WriteString("  {\"symbol\": \"ETHUSDT\", \"action\": \"close_long\", \"reasoning\": \"止盈离场\"}\n")
 	sb.WriteString("]\n```\n")
 	sb.WriteString("</decision>\n\n")
 	sb.WriteString("## 字段说明\n\n")
-	sb.WriteString("- `action`: open_long | open_short | close_long | close_short | update_stop_loss | update_take_profit | partial_close | hold | wait\n")
+	if hasOpenPositions {
+		sb.WriteString("- `action`: open_long | open_short | close_long | close_short | update_stop_loss | update_take_profit | partial_close | hold | wait\n")
+	} else {
+		sb.WriteString("- `action`: open_long | open_short | close_long | close_short | hold | wait\n")
+	}
 	sb.WriteString("- `confidence`: 0-100（开仓建议≥75）\n")
 	sb.WriteString("- 开仓时必填: leverage, position_size_usd, stop_loss, take_profit, confidence, risk_usd, reasoning\n")
-	sb.WriteString("- update_stop_loss 时必填: new_stop_loss (注意是 new_stop_loss，不是 stop_loss)\n")
-	sb.WriteString("- update_take_profit 时必填: new_take_profit (注意是 new_take_profit，不是 take_profit)\n")
-	sb.WriteString("- partial_close 时必填: close_percentage (0-100)\n\n")
+	if hasOpenPositions {
+		sb.WriteString("- update_stop_loss 时必填: new_stop_loss (注意是 new_stop_loss，不是 stop_loss)\n")
+		sb.WriteString("- update_take_profit 时必填: new_take_profit (注意是 new_take_profit，不是 take_profit)\n")
+		sb.WriteString("- partial_close 时必填: close_percentage (0-100)\n\n")
+	} else {
+		sb.WriteString("- 当前无持仓时，不应输出 update_stop_loss / update_take_profit / partial_close\n\n")
+	}
 
+	return sb.String()
+}
+
+func buildFinalOutputContract(hasOpenPositions bool) string {
+	var sb strings.Builder
+	sb.WriteString("# 最终执行契约（冲突时以本节为准）\n\n")
+	sb.WriteString("1. 只使用 XML 标签 `<reasoning>` 和 `<decision>` 分隔输出。\n")
+	sb.WriteString("2. `<decision>` 标签内必须是 JSON 数组 `[]`，不要输出 JSON-only 包装对象。\n")
+	sb.WriteString("3. `confidence` 统一使用 0-100 的整数。\n")
+	if hasOpenPositions {
+		sb.WriteString("4. 可用 action: open_long | open_short | close_long | close_short | update_stop_loss | update_take_profit | partial_close | hold | wait。\n")
+	} else {
+		sb.WriteString("4. 当前无持仓时，可用 action: open_long | open_short | close_long | close_short | hold | wait。\n")
+		sb.WriteString("5. 当前无持仓：禁止输出 update_stop_loss / update_take_profit / partial_close。\n")
+	}
+	sb.WriteString("6. 若其它段落与本节冲突（例如要求 JSON Only 或 `confidence` 0-1），一律以本节为准。\n")
 	return sb.String()
 }
 

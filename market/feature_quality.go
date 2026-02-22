@@ -2,6 +2,13 @@ package market
 
 import "time"
 
+const (
+	FeatureKeyF4 = "f4"
+	FeatureKeyF5 = "f5"
+	FeatureKeyF6 = "f6"
+	FeatureKeyF7 = "f7"
+)
+
 // FeatureQuality returns quality stats for a feature key if recorded.
 func (d *Data) FeatureQuality(key string) (FeatureStat, bool) {
 	if d == nil || d.FeatureStats == nil {

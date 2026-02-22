@@ -220,7 +220,7 @@ func TestConfig_RetryableErrors_IsUsed(t *testing.T) {
 		},
 		{
 			name:      "timeout should NOT be retryable (not in custom list)",
-			err:       errors.New("timeout exceeded"),
+			err:       errors.New("Client.Timeout exceeded while awaiting headers"),
 			retryable: false,
 		},
 	}

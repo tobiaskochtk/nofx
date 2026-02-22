@@ -21,7 +21,7 @@ func TestBuildSystemPrompt_ContainsAllValidActions(t *testing.T) {
 	}
 
 	// 构建 prompt
-	prompt := buildSystemPrompt(1000.0, 10, 5, "default")
+	prompt := buildSystemPrompt(1000.0, 10, 5, "default", true)
 
 	// 验证每个有效 action 都在 prompt 中出现
 	for _, action := range validActions {
@@ -33,7 +33,7 @@ func TestBuildSystemPrompt_ContainsAllValidActions(t *testing.T) {
 
 // TestBuildSystemPrompt_ActionListCompleteness 测试 action 列表的完整性
 func TestBuildSystemPrompt_ActionListCompleteness(t *testing.T) {
-	prompt := buildSystemPrompt(1000.0, 10, 5, "default")
+	prompt := buildSystemPrompt(1000.0, 10, 5, "default", true)
 
 	// 检查是否包含关键的缺失 action
 	missingActions := []string{
@@ -46,5 +46,19 @@ func TestBuildSystemPrompt_ActionListCompleteness(t *testing.T) {
 		if !strings.Contains(prompt, action) {
 			t.Errorf("Prompt 缺少关键 action: %s（这会导致 AI 返回无效决策）", action)
 		}
+	}
+}
+
+func TestBuildSystemPrompt_NoOpenPositions_HidesPositionManagementActions(t *testing.T) {
+	prompt := buildSystemPrompt(1000.0, 10, 5, "default", false)
+
+	if strings.Contains(prompt, "`action`: open_long | open_short | close_long | close_short | update_stop_loss") {
+		t.Errorf("No-position prompt should not expose position-management actions in action list")
+	}
+	if !strings.Contains(prompt, "当前无持仓时，不应输出 update_stop_loss / update_take_profit / partial_close") {
+		t.Errorf("No-position prompt should explicitly prohibit position-management actions")
+	}
+	if strings.Contains(prompt, "{\"symbol\": \"SOLUSDT\", \"action\": \"update_stop_loss\"") {
+		t.Errorf("No-position prompt should not include update_stop_loss example")
 	}
 }

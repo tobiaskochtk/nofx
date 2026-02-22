@@ -3,7 +3,6 @@ package api
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -22,6 +21,7 @@ import (
 )
 
 func (s *Server) registerBacktestRoutes(router *gin.RouterGroup) {
+	router.POST("/create", s.handleBacktestCreate)
 	router.POST("/start", s.handleBacktestStart)
 	router.POST("/pause", s.handleBacktestPause)
 	router.POST("/resume", s.handleBacktestResume)
@@ -37,6 +37,8 @@ func (s *Server) registerBacktestRoutes(router *gin.RouterGroup) {
 	router.GET("/decisions", s.handleBacktestDecisions)
 	router.GET("/export", s.handleBacktestExport)
 	router.GET("/klines", s.handleBacktestKlines)
+	router.GET("/:id", s.handleBacktestResult)
+	router.POST("/:id/improve", s.handleBacktestImprove)
 }
 
 type backtestStartRequest struct {
@@ -65,53 +67,9 @@ func (s *Server) handleBacktestStart(c *gin.Context) {
 	}
 
 	cfg := req.Config
-	if cfg.RunID == "" {
-		cfg.RunID = "bt_" + time.Now().UTC().Format("20060102_150405")
-	}
-	cfg.CustomPrompt = strings.TrimSpace(cfg.CustomPrompt)
-	cfg.UserID = normalizeUserID(c.GetString("user_id"))
-
-	logger.Infof("📊 Backtest request - symbols from request: %v (count=%d), strategyID: %s",
-		cfg.Symbols, len(cfg.Symbols), cfg.StrategyID)
-
-	// Load strategy config if strategy_id is provided
-	if cfg.StrategyID != "" {
-		strategy, err := s.store.Strategy().Get(cfg.UserID, cfg.StrategyID)
-		if err != nil {
-			SafeBadRequest(c, "Failed to load strategy")
-			return
-		}
-		if strategy == nil {
-			SafeBadRequest(c, "Strategy not found")
-			return
-		}
-		var strategyConfig store.StrategyConfig
-		if err := json.Unmarshal([]byte(strategy.Config), &strategyConfig); err != nil {
-			SafeBadRequest(c, "Failed to parse strategy config")
-			return
-		}
-		cfg.SetLoadedStrategy(&strategyConfig)
-		logger.Infof("📊 Backtest using saved strategy: %s (%s)", strategy.Name, strategy.ID)
-		logger.Infof("📊 Strategy coin source: type=%s, use_ai500=%v, use_oi_top=%v, static_coins=%v",
-			strategyConfig.CoinSource.SourceType,
-			strategyConfig.CoinSource.UseAI500,
-			strategyConfig.CoinSource.UseOITop,
-			strategyConfig.CoinSource.StaticCoins)
-
-		// If no symbols provided, fetch from strategy's coin source
-		if len(cfg.Symbols) == 0 {
-			symbols, err := s.resolveStrategyCoins(&strategyConfig)
-			if err != nil {
-				SafeBadRequest(c, "Failed to resolve coins from strategy")
-				return
-			}
-			cfg.Symbols = symbols
-			logger.Infof("📊 Resolved %d coins from strategy: %v", len(symbols), symbols)
-		}
-	}
-
-	if err := s.hydrateBacktestAIConfig(&cfg); err != nil {
-		SafeBadRequest(c, "Failed to configure AI model")
+	userID := normalizeUserID(c.GetString("user_id"))
+	if err := s.prepareBacktestConfig(&cfg, userID); err != nil {
+		SafeBadRequest(c, err.Error())
 		return
 	}
 

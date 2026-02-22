@@ -490,9 +490,12 @@ export function useTraderActions({
   }
 
   const handleSaveExchange = async (
-    exchangeId: string,
+    exchangeId: string | null,
+    exchangeType: string,
+    accountName: string,
     apiKey: string,
     secretKey?: string,
+    passphrase?: string,
     testnet?: boolean,
     hyperliquidWalletAddr?: string,
     asterUser?: string,
@@ -500,12 +503,15 @@ export function useTraderActions({
     asterPrivateKey?: string,
     lighterWalletAddr?: string,
     lighterPrivateKey?: string,
-    lighterApiKeyPrivateKey?: string
+    lighterApiKeyPrivateKey?: string,
+    lighterApiKeyIndex?: number
   ) => {
     try {
+      const resolvedExchangeID = exchangeId || exchangeType
+
       // 找到要配置的交易所(从supportedExchanges中)
       const exchangeToUpdate = supportedExchanges?.find(
-        (e) => e.id === exchangeId
+        (e) => e.id === resolvedExchangeID || e.exchange_type === exchangeType
       )
       if (!exchangeToUpdate) {
         toast.error(t('exchangeNotExist', language))
@@ -513,18 +519,25 @@ export function useTraderActions({
       }
 
       // 创建或更新用户的交易所配置
-      const existingExchange = allExchanges?.find((e) => e.id === exchangeId)
+      const existingExchange = allExchanges?.find((e) => {
+        if (exchangeId && e.id === exchangeId) return true
+        if (e.exchange_type !== exchangeType) return false
+        if (!accountName) return false
+        return e.account_name === accountName
+      })
       let updatedExchanges
 
       if (existingExchange) {
         // 更新现有配置
         updatedExchanges =
           allExchanges?.map((e) =>
-            e.id === exchangeId
+            e.id === existingExchange.id
               ? {
                   ...e,
+                  account_name: accountName || e.account_name,
                   apiKey,
                   secretKey,
+                  passphrase,
                   testnet,
                   hyperliquidWalletAddr,
                   asterUser,
@@ -533,6 +546,7 @@ export function useTraderActions({
                   lighterWalletAddr,
                   lighterPrivateKey,
                   lighterApiKeyPrivateKey,
+                  lighterApiKeyIndex,
                   enabled: true,
                 }
               : e
@@ -541,8 +555,10 @@ export function useTraderActions({
         // 添加新配置
         const newExchange = {
           ...exchangeToUpdate,
+          account_name: accountName || exchangeToUpdate.account_name || exchangeToUpdate.name || exchangeType,
           apiKey,
           secretKey,
+          passphrase,
           testnet,
           hyperliquidWalletAddr,
           asterUser,
@@ -551,6 +567,7 @@ export function useTraderActions({
           lighterWalletAddr,
           lighterPrivateKey,
           lighterApiKeyPrivateKey,
+          lighterApiKeyIndex,
           enabled: true,
         }
         updatedExchanges = [...(allExchanges || []), newExchange]
@@ -564,6 +581,7 @@ export function useTraderActions({
               enabled: exchange.enabled,
               api_key: exchange.apiKey || '',
               secret_key: exchange.secretKey || '',
+              passphrase: exchange.passphrase || '',
               testnet: exchange.testnet || false,
               hyperliquid_wallet_addr: exchange.hyperliquidWalletAddr || '',
               aster_user: exchange.asterUser || '',
@@ -572,6 +590,7 @@ export function useTraderActions({
               lighter_wallet_addr: exchange.lighterWalletAddr || '',
               lighter_private_key: exchange.lighterPrivateKey || '',
               lighter_api_key_private_key: exchange.lighterApiKeyPrivateKey || '',
+              lighter_api_key_index: exchange.lighterApiKeyIndex || 0,
             },
           ])
         ),

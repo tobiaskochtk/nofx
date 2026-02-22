@@ -20,6 +20,7 @@ import (
 	"nofx/trader/lighter"
 	"nofx/trader/okx"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -45,13 +46,13 @@ type AutoTraderConfig struct {
 	BybitSecretKey string
 
 	// OKX API configuration
-	OKXAPIKey    string
-	OKXSecretKey string
+	OKXAPIKey     string
+	OKXSecretKey  string
 	OKXPassphrase string
 
 	// Bitget API configuration
-	BitgetAPIKey    string
-	BitgetSecretKey string
+	BitgetAPIKey     string
+	BitgetSecretKey  string
 	BitgetPassphrase string
 
 	// Gate API configuration
@@ -59,8 +60,8 @@ type AutoTraderConfig struct {
 	GateSecretKey string
 
 	// KuCoin API configuration
-	KuCoinAPIKey    string
-	KuCoinSecretKey string
+	KuCoinAPIKey     string
+	KuCoinSecretKey  string
 	KuCoinPassphrase string
 
 	// Hyperliquid configuration
@@ -122,9 +123,9 @@ type AutoTrader struct {
 	config                AutoTraderConfig
 	trader                Trader // Use Trader interface (supports multiple platforms)
 	mcpClient             mcp.AIClient
-	store                 *store.Store             // Data storage (decision records, etc.)
+	store                 *store.Store           // Data storage (decision records, etc.)
 	strategyEngine        *kernel.StrategyEngine // Strategy engine (uses strategy configuration)
-	cycleNumber           int                      // Current cycle number
+	cycleNumber           int                    // Current cycle number
 	initialBalance        float64
 	dailyPnL              float64
 	customPrompt          string // Custom trading strategy prompt
@@ -776,26 +777,13 @@ func (at *AutoTrader) buildTradingContext() (*kernel.Context, error) {
 	}
 
 	// Get account fields
-	totalWalletBalance := 0.0
-	totalUnrealizedProfit := 0.0
-	availableBalance := 0.0
-	totalEquity := 0.0
+	totalWalletBalance := getBalanceFloat(balance, "totalWalletBalance", "wallet_balance", "walletBalance")
+	totalUnrealizedProfit := getBalanceFloat(balance, "totalUnrealizedProfit", "unrealized_profit", "unrealizedPnl")
+	availableBalance := getBalanceFloat(balance, "availableBalance", "available_balance", "available")
+	totalEquity := getBalanceFloat(balance, "totalEquity", "total_equity")
 
-	if wallet, ok := balance["totalWalletBalance"].(float64); ok {
-		totalWalletBalance = wallet
-	}
-	if unrealized, ok := balance["totalUnrealizedProfit"].(float64); ok {
-		totalUnrealizedProfit = unrealized
-	}
-	if avail, ok := balance["availableBalance"].(float64); ok {
-		availableBalance = avail
-	}
-
-	// Use totalEquity directly if provided by trader (more accurate)
-	if eq, ok := balance["totalEquity"].(float64); ok && eq > 0 {
-		totalEquity = eq
-	} else {
-		// Fallback: Total Equity = Wallet balance + Unrealized profit
+	// Fallback: Total Equity = Wallet balance + Unrealized profit
+	if totalEquity <= 0 {
 		totalEquity = totalWalletBalance + totalUnrealizedProfit
 	}
 
@@ -905,7 +893,7 @@ func (at *AutoTrader) buildTradingContext() (*kernel.Context, error) {
 			// Log warning but don't fail - equity snapshot should still be saved
 			logger.Infof("⚠️ [%s] Failed to get candidate coins: %v (will use empty list)", at.name, err)
 		} else {
-			candidateCoins = coins
+			candidateCoins = at.filterNonTradableHyperliquidCandidates(coins)
 			logger.Infof("📋 [%s] Strategy engine fetched candidate coins: %d", at.name, len(candidateCoins))
 		}
 	}
@@ -1061,6 +1049,43 @@ func (at *AutoTrader) buildTradingContext() (*kernel.Context, error) {
 	return ctx, nil
 }
 
+// filterNonTradableHyperliquidCandidates removes symbols that are not tradable on Hyperliquid.
+// This avoids AI selecting symbols that have market data from external pools but cannot be executed on exchange.
+func (at *AutoTrader) filterNonTradableHyperliquidCandidates(candidates []kernel.CandidateCoin) []kernel.CandidateCoin {
+	if len(candidates) == 0 {
+		return candidates
+	}
+
+	exchange := strings.ToLower(strings.TrimSpace(at.exchange))
+	if exchange != "hyperliquid" && exchange != "hyperliquid-xyz" && exchange != "xyz" {
+		return candidates
+	}
+
+	filtered := make([]kernel.CandidateCoin, 0, len(candidates))
+	removed := make([]string, 0)
+
+	for _, coin := range candidates {
+		_, err := at.trader.GetMarketPrice(coin.Symbol)
+		if err != nil {
+			errMsg := strings.ToLower(err.Error())
+			if strings.Contains(errMsg, "price not found for") || strings.Contains(errMsg, "xyz dex price not found for") {
+				removed = append(removed, coin.Symbol)
+				continue
+			}
+			// Keep candidate on transient probe failures (network/API hiccups).
+			logger.Infof("⚠️ [%s] Tradability probe failed for %s: %v (keeping candidate)", at.name, coin.Symbol, err)
+		}
+
+		filtered = append(filtered, coin)
+	}
+
+	if len(removed) > 0 {
+		logger.Infof("🚫 [%s] Removed %d non-tradable Hyperliquid candidates: %s", at.name, len(removed), strings.Join(removed, ", "))
+	}
+
+	return filtered
+}
+
 // executeDecisionWithRecord executes AI decision and records detailed information
 func (at *AutoTrader) executeDecisionWithRecord(decision *kernel.Decision, actionRecord *store.DecisionAction) error {
 	switch decision.Action {
@@ -1140,19 +1165,19 @@ func (at *AutoTrader) executeOpenLongWithRecord(decision *kernel.Decision, actio
 	if err != nil {
 		return fmt.Errorf("failed to get account balance: %w", err)
 	}
-	availableBalance := 0.0
-	if avail, ok := balance["availableBalance"].(float64); ok {
-		availableBalance = avail
-	}
+	availableBalance := getBalanceFloat(balance, "availableBalance", "available_balance", "available")
 
 	// Get equity for position value ratio check
-	equity := 0.0
-	if eq, ok := balance["totalEquity"].(float64); ok && eq > 0 {
-		equity = eq
-	} else if eq, ok := balance["totalWalletBalance"].(float64); ok && eq > 0 {
-		equity = eq
-	} else {
+	equity := getBalanceFloat(balance, "totalEquity", "total_equity", "totalWalletBalance", "wallet_balance", "balance")
+	if equity <= 0 {
 		equity = availableBalance // Fallback to available balance
+	}
+
+	if decision.Leverage <= 0 {
+		return fmt.Errorf("❌ [RISK CONTROL] Invalid leverage %d (must be > 0)", decision.Leverage)
+	}
+	if decision.PositionSizeUSD <= 0 {
+		return fmt.Errorf("❌ [RISK CONTROL] Invalid position size %.2f USDT (must be > 0)", decision.PositionSizeUSD)
 	}
 
 	// [CODE ENFORCED] Position Value Ratio Check: position_value <= equity × ratio
@@ -1165,12 +1190,22 @@ func (at *AutoTrader) executeOpenLongWithRecord(decision *kernel.Decision, actio
 	// Formula: totalRequired = positionSize/leverage + positionSize*0.001 + positionSize/leverage*0.01
 	//        = positionSize * (1.01/leverage + 0.001)
 	marginFactor := 1.01/float64(decision.Leverage) + 0.001
+	if math.IsInf(marginFactor, 0) || math.IsNaN(marginFactor) || marginFactor <= 0 {
+		return fmt.Errorf("❌ [RISK CONTROL] Invalid margin factor (leverage=%d)", decision.Leverage)
+	}
 	maxAffordablePositionSize := availableBalance / marginFactor
+	if maxAffordablePositionSize <= 0 {
+		return fmt.Errorf("❌ [RISK CONTROL] Insufficient available balance: %.2f USDT", availableBalance)
+	}
 
 	actualPositionSize := decision.PositionSizeUSD
 	if actualPositionSize > maxAffordablePositionSize {
 		// Use 98% of max to leave buffer for price fluctuation
 		adjustedSize := maxAffordablePositionSize * 0.98
+		if adjustedSize < at.minPositionSize() {
+			return fmt.Errorf("❌ [RISK CONTROL] Insufficient available balance: max affordable %.2f USDT is below minimum %.2f USDT",
+				adjustedSize, at.minPositionSize())
+		}
 		logger.Infof("  ⚠️ Position size %.2f exceeds max affordable %.2f, auto-reducing to %.2f",
 			actualPositionSize, maxAffordablePositionSize, adjustedSize)
 		actualPositionSize = adjustedSize
@@ -1257,19 +1292,19 @@ func (at *AutoTrader) executeOpenShortWithRecord(decision *kernel.Decision, acti
 	if err != nil {
 		return fmt.Errorf("failed to get account balance: %w", err)
 	}
-	availableBalance := 0.0
-	if avail, ok := balance["availableBalance"].(float64); ok {
-		availableBalance = avail
-	}
+	availableBalance := getBalanceFloat(balance, "availableBalance", "available_balance", "available")
 
 	// Get equity for position value ratio check
-	equity := 0.0
-	if eq, ok := balance["totalEquity"].(float64); ok && eq > 0 {
-		equity = eq
-	} else if eq, ok := balance["totalWalletBalance"].(float64); ok && eq > 0 {
-		equity = eq
-	} else {
+	equity := getBalanceFloat(balance, "totalEquity", "total_equity", "totalWalletBalance", "wallet_balance", "balance")
+	if equity <= 0 {
 		equity = availableBalance // Fallback to available balance
+	}
+
+	if decision.Leverage <= 0 {
+		return fmt.Errorf("❌ [RISK CONTROL] Invalid leverage %d (must be > 0)", decision.Leverage)
+	}
+	if decision.PositionSizeUSD <= 0 {
+		return fmt.Errorf("❌ [RISK CONTROL] Invalid position size %.2f USDT (must be > 0)", decision.PositionSizeUSD)
 	}
 
 	// [CODE ENFORCED] Position Value Ratio Check: position_value <= equity × ratio
@@ -1282,12 +1317,22 @@ func (at *AutoTrader) executeOpenShortWithRecord(decision *kernel.Decision, acti
 	// Formula: totalRequired = positionSize/leverage + positionSize*0.001 + positionSize/leverage*0.01
 	//        = positionSize * (1.01/leverage + 0.001)
 	marginFactor := 1.01/float64(decision.Leverage) + 0.001
+	if math.IsInf(marginFactor, 0) || math.IsNaN(marginFactor) || marginFactor <= 0 {
+		return fmt.Errorf("❌ [RISK CONTROL] Invalid margin factor (leverage=%d)", decision.Leverage)
+	}
 	maxAffordablePositionSize := availableBalance / marginFactor
+	if maxAffordablePositionSize <= 0 {
+		return fmt.Errorf("❌ [RISK CONTROL] Insufficient available balance: %.2f USDT", availableBalance)
+	}
 
 	actualPositionSize := decision.PositionSizeUSD
 	if actualPositionSize > maxAffordablePositionSize {
 		// Use 98% of max to leave buffer for price fluctuation
 		adjustedSize := maxAffordablePositionSize * 0.98
+		if adjustedSize < at.minPositionSize() {
+			return fmt.Errorf("❌ [RISK CONTROL] Insufficient available balance: max affordable %.2f USDT is below minimum %.2f USDT",
+				adjustedSize, at.minPositionSize())
+		}
 		logger.Infof("  ⚠️ Position size %.2f exceeds max affordable %.2f, auto-reducing to %.2f",
 			actualPositionSize, maxAffordablePositionSize, adjustedSize)
 		actualPositionSize = adjustedSize
@@ -1625,26 +1670,13 @@ func (at *AutoTrader) GetAccountInfo() (map[string]interface{}, error) {
 	}
 
 	// Get account fields
-	totalWalletBalance := 0.0
-	totalUnrealizedProfit := 0.0
-	availableBalance := 0.0
-	totalEquity := 0.0
+	totalWalletBalance := getBalanceFloat(balance, "totalWalletBalance", "wallet_balance", "walletBalance")
+	totalUnrealizedProfit := getBalanceFloat(balance, "totalUnrealizedProfit", "unrealized_profit", "unrealizedPnl")
+	availableBalance := getBalanceFloat(balance, "availableBalance", "available_balance", "available")
+	totalEquity := getBalanceFloat(balance, "totalEquity", "total_equity")
 
-	if wallet, ok := balance["totalWalletBalance"].(float64); ok {
-		totalWalletBalance = wallet
-	}
-	if unrealized, ok := balance["totalUnrealizedProfit"].(float64); ok {
-		totalUnrealizedProfit = unrealized
-	}
-	if avail, ok := balance["availableBalance"].(float64); ok {
-		availableBalance = avail
-	}
-
-	// Use totalEquity directly if provided by trader (more accurate)
-	if eq, ok := balance["totalEquity"].(float64); ok && eq > 0 {
-		totalEquity = eq
-	} else {
-		// Fallback: Total Equity = Wallet balance + Unrealized profit
+	// Fallback: Total Equity = Wallet balance + Unrealized profit
+	if totalEquity <= 0 {
 		totalEquity = totalWalletBalance + totalUnrealizedProfit
 	}
 
@@ -2208,22 +2240,22 @@ func (at *AutoTrader) recordOrderFill(orderRecordID int64, exchangeOrderID, symb
 	normalizedSymbol := market.Normalize(symbol)
 
 	fill := &store.TraderFill{
-		TraderID:         at.id,
-		ExchangeID:       at.exchangeID,
-		ExchangeType:     at.exchange,
-		OrderID:          orderRecordID,
-		ExchangeOrderID:  exchangeOrderID,
-		ExchangeTradeID:  tradeID,
-		Symbol:           normalizedSymbol,
-		Side:             side,
-		Price:            price,
-		Quantity:         quantity,
-		QuoteQuantity:    price * quantity,
-		Commission:       fee,
-		CommissionAsset:  "USDT",
-		RealizedPnL:      0, // Will be calculated for close orders
-		IsMaker:          false, // Market orders are usually taker
-		CreatedAt:        time.Now().UTC().UnixMilli(),
+		TraderID:        at.id,
+		ExchangeID:      at.exchangeID,
+		ExchangeType:    at.exchange,
+		OrderID:         orderRecordID,
+		ExchangeOrderID: exchangeOrderID,
+		ExchangeTradeID: tradeID,
+		Symbol:          normalizedSymbol,
+		Side:            side,
+		Price:           price,
+		Quantity:        quantity,
+		QuoteQuantity:   price * quantity,
+		Commission:      fee,
+		CommissionAsset: "USDT",
+		RealizedPnL:     0,     // Will be calculated for close orders
+		IsMaker:         false, // Market orders are usually taker
+		CreatedAt:       time.Now().UTC().UnixMilli(),
 	}
 
 	// Calculate realized PnL for close orders
@@ -2255,6 +2287,48 @@ func (at *AutoTrader) recordOrderFill(orderRecordID int64, exchangeOrderID, symb
 // ============================================================================
 // Risk Control Helpers
 // ============================================================================
+
+// getBalanceFloat reads numeric balance fields with flexible key names/types.
+func getBalanceFloat(balance map[string]interface{}, keys ...string) float64 {
+	for _, key := range keys {
+		v, ok := balance[key]
+		if !ok || v == nil {
+			continue
+		}
+
+		switch n := v.(type) {
+		case float64:
+			return n
+		case float32:
+			return float64(n)
+		case int:
+			return float64(n)
+		case int64:
+			return float64(n)
+		case int32:
+			return float64(n)
+		case uint:
+			return float64(n)
+		case uint64:
+			return float64(n)
+		case uint32:
+			return float64(n)
+		case string:
+			if parsed, err := strconv.ParseFloat(n, 64); err == nil {
+				return parsed
+			}
+		}
+	}
+
+	return 0
+}
+
+func (at *AutoTrader) minPositionSize() float64 {
+	if at.config.StrategyConfig != nil && at.config.StrategyConfig.RiskControl.MinPositionSize > 0 {
+		return at.config.StrategyConfig.RiskControl.MinPositionSize
+	}
+	return 12.0
+}
 
 // isBTCETH checks if a symbol is BTC or ETH
 func isBTCETH(symbol string) bool {
@@ -2351,4 +2425,3 @@ func getSideFromAction(action string) string {
 func (at *AutoTrader) GetOpenOrders(symbol string) ([]OpenOrder, error) {
 	return at.trader.GetOpenOrders(symbol)
 }
-

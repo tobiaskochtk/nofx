@@ -806,7 +806,7 @@ func (t *HyperliquidTrader) resolveFillFromHistory(symbol, expectedDir string, f
 
 func (t *HyperliquidTrader) fetchRecentFill(symbol, expectedDir string, expectedSize float64) (float64, float64, int64, error) {
 	startTime := time.Now().Add(-hyperliquidFillLookback).UnixMilli()
-	fills, err := t.exchange.Info().UserFillsByTime(t.ctx, t.walletAddr, startTime, nil)
+	fills, err := t.exchange.Info().UserFillsByTime(t.ctx, t.walletAddr, startTime, nil, nil)
 	if err != nil {
 		return 0, 0, 0, fmt.Errorf("获取成交记录失败: %w", err)
 	}

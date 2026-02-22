@@ -143,6 +143,7 @@ func (s *Server) setupRoutes() {
 		api.POST("/register", s.handleRegister)
 		api.POST("/login", s.handleLogin)
 		api.POST("/verify-otp", s.handleVerifyOTP)
+		api.POST("/reset-password", s.handleResetPassword)
 		api.POST("/complete-registration", s.handleCompleteRegistration)
 
 		// Routes requiring authentication
@@ -2506,8 +2507,16 @@ func (s *Server) handleKlines(c *gin.Context) {
 		// Hyperliquid native API - supports both crypto perps and stock perps (xyz dex)
 		klines, err = s.getKlinesFromHyperliquid(symbol, interval, limit)
 		if err != nil {
-			SafeInternalError(c, "Get klines from Hyperliquid", err)
-			return
+			// Some symbols can be returned by strategy/AI pools but are not tradable on Hyperliquid.
+			// Fallback to Binance data via CoinAnk to avoid frontend hard-failing on chart rendering.
+			normalizedSymbol := market.Normalize(symbol)
+			logger.Warnf("⚠️ Hyperliquid klines failed for %s (%v), fallback to Binance/CoinAnk", symbol, err)
+
+			klines, err = s.getKlinesFromCoinank(normalizedSymbol, interval, "binance", limit)
+			if err != nil {
+				SafeInternalError(c, "Get klines from Hyperliquid", err)
+				return
+			}
 		}
 	default:
 		// Crypto exchanges via CoinAnk

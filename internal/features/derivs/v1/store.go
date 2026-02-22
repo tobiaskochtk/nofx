@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -15,6 +16,7 @@ import (
 
 const defaultCacheDir = "data/derivs"
 const redisDefaultTimeout = 2 * time.Second
+const redisMaxSeriesPoints = 400
 
 // Store provides access to cached derivs slices regardless of backing medium.
 type Store interface {
@@ -200,6 +202,16 @@ func (s *RedisStore) load(kind, symbol string, out any) (bool, error) {
 	return true, nil
 }
 
+func (s *RedisStore) set(kind, symbol string, payload any) error {
+	ctx, cancel := context.WithTimeout(context.Background(), s.timeout)
+	defer cancel()
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return err
+	}
+	return s.client.Set(ctx, s.key(kind, symbol), body, 0).Err()
+}
+
 // LoadOI implements Store for Redis.
 func (s *RedisStore) LoadOI(symbol string) (*OICache, error) {
 	var cache OICache
@@ -228,4 +240,154 @@ func (s *RedisStore) LoadBasis(symbol string) (*BasisCache, error) {
 		return nil, err
 	}
 	return &cache, nil
+}
+
+// UpsertOISamples merges venue samples into the existing OI cache payload.
+func (s *RedisStore) UpsertOISamples(symbol, venue string, samples []OICacheSample, status string) error {
+	cache, err := s.LoadOI(symbol)
+	if err != nil {
+		return err
+	}
+	if cache == nil {
+		cache = &OICache{
+			Symbol:  SanitizeSymbol(symbol),
+			Samples: map[string][]OICacheSample{},
+			Status:  map[string]string{},
+		}
+	}
+	if cache.Samples == nil {
+		cache.Samples = map[string][]OICacheSample{}
+	}
+	if cache.Status == nil {
+		cache.Status = map[string]string{}
+	}
+	if len(samples) > 0 {
+		cache.Samples[venue] = mergeOICacheSamples(cache.Samples[venue], samples, redisMaxSeriesPoints)
+	}
+	if status != "" {
+		cache.Status[venue] = status
+	}
+	cache.UpdatedAt = time.Now().UnixMilli()
+	return s.set("oi", symbol, cache)
+}
+
+// UpsertFundingSamples merges venue samples into the existing funding cache payload.
+func (s *RedisStore) UpsertFundingSamples(symbol, venue string, samples []FundingCacheSample, status string) error {
+	cache, err := s.LoadFunding(symbol)
+	if err != nil {
+		return err
+	}
+	if cache == nil {
+		cache = &FundingCache{
+			Symbol:  SanitizeSymbol(symbol),
+			Samples: map[string][]FundingCacheSample{},
+			Status:  map[string]string{},
+		}
+	}
+	if cache.Samples == nil {
+		cache.Samples = map[string][]FundingCacheSample{}
+	}
+	if cache.Status == nil {
+		cache.Status = map[string]string{}
+	}
+	if len(samples) > 0 {
+		cache.Samples[venue] = mergeFundingCacheSamples(cache.Samples[venue], samples, redisMaxSeriesPoints)
+	}
+	if status != "" {
+		cache.Status[venue] = status
+	}
+	cache.UpdatedAt = time.Now().UnixMilli()
+	return s.set("funding", symbol, cache)
+}
+
+// UpsertBasisSamples merges venue samples into the existing basis cache payload.
+func (s *RedisStore) UpsertBasisSamples(symbol, venue string, samples []BasisCacheSample, status string) error {
+	cache, err := s.LoadBasis(symbol)
+	if err != nil {
+		return err
+	}
+	if cache == nil {
+		cache = &BasisCache{
+			Symbol:  SanitizeSymbol(symbol),
+			Samples: map[string][]BasisCacheSample{},
+			Status:  map[string]string{},
+		}
+	}
+	if cache.Samples == nil {
+		cache.Samples = map[string][]BasisCacheSample{}
+	}
+	if cache.Status == nil {
+		cache.Status = map[string]string{}
+	}
+	if len(samples) > 0 {
+		cache.Samples[venue] = mergeBasisCacheSamples(cache.Samples[venue], samples, redisMaxSeriesPoints)
+	}
+	if status != "" {
+		cache.Status[venue] = status
+	}
+	cache.UpdatedAt = time.Now().UnixMilli()
+	return s.set("basis", symbol, cache)
+}
+
+func mergeOICacheSamples(existing, incoming []OICacheSample, maxPoints int) []OICacheSample {
+	merged := make([]OICacheSample, 0, len(existing)+len(incoming))
+	merged = append(merged, existing...)
+	merged = append(merged, incoming...)
+	sort.SliceStable(merged, func(i, j int) bool {
+		return merged[i].Timestamp < merged[j].Timestamp
+	})
+	dedup := merged[:0]
+	for _, sample := range merged {
+		if len(dedup) > 0 && dedup[len(dedup)-1].Timestamp == sample.Timestamp {
+			dedup[len(dedup)-1] = sample
+			continue
+		}
+		dedup = append(dedup, sample)
+	}
+	if maxPoints > 0 && len(dedup) > maxPoints {
+		dedup = dedup[len(dedup)-maxPoints:]
+	}
+	return append([]OICacheSample(nil), dedup...)
+}
+
+func mergeFundingCacheSamples(existing, incoming []FundingCacheSample, maxPoints int) []FundingCacheSample {
+	merged := make([]FundingCacheSample, 0, len(existing)+len(incoming))
+	merged = append(merged, existing...)
+	merged = append(merged, incoming...)
+	sort.SliceStable(merged, func(i, j int) bool {
+		return merged[i].Timestamp < merged[j].Timestamp
+	})
+	dedup := merged[:0]
+	for _, sample := range merged {
+		if len(dedup) > 0 && dedup[len(dedup)-1].Timestamp == sample.Timestamp {
+			dedup[len(dedup)-1] = sample
+			continue
+		}
+		dedup = append(dedup, sample)
+	}
+	if maxPoints > 0 && len(dedup) > maxPoints {
+		dedup = dedup[len(dedup)-maxPoints:]
+	}
+	return append([]FundingCacheSample(nil), dedup...)
+}
+
+func mergeBasisCacheSamples(existing, incoming []BasisCacheSample, maxPoints int) []BasisCacheSample {
+	merged := make([]BasisCacheSample, 0, len(existing)+len(incoming))
+	merged = append(merged, existing...)
+	merged = append(merged, incoming...)
+	sort.SliceStable(merged, func(i, j int) bool {
+		return merged[i].Timestamp < merged[j].Timestamp
+	})
+	dedup := merged[:0]
+	for _, sample := range merged {
+		if len(dedup) > 0 && dedup[len(dedup)-1].Timestamp == sample.Timestamp {
+			dedup[len(dedup)-1] = sample
+			continue
+		}
+		dedup = append(dedup, sample)
+	}
+	if maxPoints > 0 && len(dedup) > maxPoints {
+		dedup = dedup[len(dedup)-maxPoints:]
+	}
+	return append([]BasisCacheSample(nil), dedup...)
 }

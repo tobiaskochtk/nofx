@@ -12,12 +12,17 @@ interface TradersConfigState {
   // 计算属性
   configuredModels: AIModel[]
   configuredExchanges: Exchange[]
+  userSignalSource: {
+    coinPoolUrl: string
+    oiTopUrl: string
+  }
 
   // Actions
   setAllModels: (models: AIModel[]) => void
   setAllExchanges: (exchanges: Exchange[]) => void
   setSupportedModels: (models: AIModel[]) => void
   setSupportedExchanges: (exchanges: Exchange[]) => void
+  setUserSignalSource: (config: { coinPoolUrl: string; oiTopUrl: string }) => void
 
   // 异步加载
   loadConfigs: (user: any, token: string | null) => Promise<void>
@@ -33,6 +38,10 @@ const initialState = {
   supportedExchanges: [],
   configuredModels: [],
   configuredExchanges: [],
+  userSignalSource: {
+    coinPoolUrl: '',
+    oiTopUrl: '',
+  },
 }
 
 export const useTradersConfigStore = create<TradersConfigState>((set, get) => ({
@@ -65,6 +74,7 @@ export const useTradersConfigStore = create<TradersConfigState>((set, get) => ({
 
   setSupportedModels: (models) => set({ supportedModels: models }),
   setSupportedExchanges: (exchanges) => set({ supportedExchanges: exchanges }),
+  setUserSignalSource: (config) => set({ userSignalSource: config }),
 
   loadConfigs: async (user, token) => {
     if (!user || !token) {

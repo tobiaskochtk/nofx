@@ -1,6 +1,7 @@
 package bybit
 
 import (
+	"bytes"
 	"context"
 	"crypto/hmac"
 	"crypto/sha256"
@@ -58,8 +59,16 @@ func NewBybitTrader(apiKey, secretKey string) *BybitTrader {
 		}
 
 		client.HTTPClient.Transport = &headerRoundTripper{
-			base:      defaultTransport,
-			refererID: src,
+			base:          defaultTransport,
+			refererID:     src,
+			apiKey:        apiKey,
+			secretKey:     secretKey,
+			recvWindow:    "10000", // Wider tolerance to avoid transient network delays
+			timeEndpoint:  client.BaseURL + "/v5/market/time",
+			syncInterval:  2 * time.Minute,
+			defaultOffset: -1500, // Keep local timestamp slightly behind as safe fallback
+			safetyDriftMs: 200,
+			timeOffset:    -1500,
 		}
 	}
 
@@ -80,11 +89,229 @@ func NewBybitTrader(apiKey, secretKey string) *BybitTrader {
 type headerRoundTripper struct {
 	base      http.RoundTripper
 	refererID string
+	apiKey    string
+	secretKey string
+
+	recvWindow    string
+	timeEndpoint  string
+	syncInterval  time.Duration
+	defaultOffset int64
+	safetyDriftMs int64
+
+	mu          sync.RWMutex
+	timeOffset  int64
+	lastSync    time.Time
+	syncRunning bool
 }
 
 func (h *headerRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
 	req.Header.Set("Referer", h.refererID)
-	return h.base.RoundTrip(req)
+
+	// SDK already signs requests, but we re-sign with server-time offset to avoid
+	// timestamp rejections when local clock is slightly ahead.
+	if !h.requiresResign(req) {
+		return h.base.RoundTrip(req)
+	}
+
+	bodyBytes, err := readRequestBody(req)
+	if err != nil {
+		return nil, err
+	}
+
+	h.syncServerTimeOffset(false)
+	h.resignRequest(req, bodyBytes)
+
+	resp, err := h.base.RoundTrip(req)
+	if err != nil {
+		return nil, err
+	}
+
+	// Retry once after forced time sync when Bybit rejects timestamp.
+	if !h.isTimestampErrorResponse(resp) {
+		return resp, nil
+	}
+
+	_ = resp.Body.Close()
+
+	h.syncServerTimeOffset(true)
+	retryReq := cloneRequestWithBody(req, bodyBytes)
+	h.resignRequest(retryReq, bodyBytes)
+
+	return h.base.RoundTrip(retryReq)
+}
+
+func (h *headerRoundTripper) requiresResign(req *http.Request) bool {
+	return req.Header.Get("X-BAPI-API-KEY") != ""
+}
+
+func (h *headerRoundTripper) resignRequest(req *http.Request, body []byte) {
+	recvWindow := h.recvWindow
+	if recvWindow == "" {
+		recvWindow = "10000"
+	}
+
+	timestamp := strconv.FormatInt(time.Now().UnixMilli()+h.getTimeOffset(), 10)
+	payload := req.URL.RawQuery
+	if req.Method == http.MethodPost {
+		payload = string(body)
+		req.Header.Set("Content-Type", "application/json")
+	}
+
+	signPayload := timestamp + h.apiKey + recvWindow + payload
+	mac := hmac.New(sha256.New, []byte(h.secretKey))
+	mac.Write([]byte(signPayload))
+	signature := hex.EncodeToString(mac.Sum(nil))
+
+	req.Header.Set("X-BAPI-API-KEY", h.apiKey)
+	req.Header.Set("X-BAPI-SIGN", signature)
+	req.Header.Set("X-BAPI-SIGN-TYPE", "2")
+	req.Header.Set("X-BAPI-TIMESTAMP", timestamp)
+	req.Header.Set("X-BAPI-RECV-WINDOW", recvWindow)
+
+	if body != nil {
+		req.Body = io.NopCloser(bytes.NewReader(body))
+		req.ContentLength = int64(len(body))
+	}
+}
+
+func (h *headerRoundTripper) getTimeOffset() int64 {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	return h.timeOffset
+}
+
+func (h *headerRoundTripper) syncServerTimeOffset(force bool) {
+	h.mu.Lock()
+	if !force && !h.lastSync.IsZero() && time.Since(h.lastSync) < h.syncInterval {
+		h.mu.Unlock()
+		return
+	}
+	if h.syncRunning {
+		h.mu.Unlock()
+		return
+	}
+	h.syncRunning = true
+	h.mu.Unlock()
+
+	offset, err := h.fetchServerTimeOffset()
+	now := time.Now()
+
+	h.mu.Lock()
+	defer h.mu.Unlock()
+
+	if err == nil {
+		h.timeOffset = offset - h.safetyDriftMs
+		h.lastSync = now
+	} else if h.lastSync.IsZero() {
+		h.timeOffset = h.defaultOffset
+	}
+	h.syncRunning = false
+}
+
+func (h *headerRoundTripper) fetchServerTimeOffset() (int64, error) {
+	endpoint := h.timeEndpoint
+	if endpoint == "" {
+		endpoint = "https://api.bybit.com/v5/market/time"
+	}
+
+	req, err := http.NewRequest(http.MethodGet, endpoint, nil)
+	if err != nil {
+		return 0, err
+	}
+
+	client := &http.Client{
+		Transport: h.base,
+		Timeout:   3 * time.Second,
+	}
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return 0, err
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return 0, err
+	}
+
+	var payload struct {
+		Time   int64 `json:"time"`
+		Result struct {
+			TimeSecond string `json:"timeSecond"`
+			TimeNano   string `json:"timeNano"`
+		} `json:"result"`
+	}
+
+	if err := json.Unmarshal(body, &payload); err != nil {
+		return 0, err
+	}
+
+	serverTimeMs := payload.Time
+	if serverTimeMs == 0 && payload.Result.TimeNano != "" {
+		if ns, err := strconv.ParseInt(payload.Result.TimeNano, 10, 64); err == nil {
+			serverTimeMs = ns / int64(time.Millisecond)
+		}
+	}
+	if serverTimeMs == 0 && payload.Result.TimeSecond != "" {
+		if sec, err := strconv.ParseInt(payload.Result.TimeSecond, 10, 64); err == nil {
+			serverTimeMs = sec * 1000
+		}
+	}
+	if serverTimeMs == 0 {
+		return 0, fmt.Errorf("invalid Bybit server time response")
+	}
+
+	return serverTimeMs - time.Now().UnixMilli(), nil
+}
+
+func (h *headerRoundTripper) isTimestampErrorResponse(resp *http.Response) bool {
+	if resp == nil || resp.Body == nil {
+		return false
+	}
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return false
+	}
+	resp.Body = io.NopCloser(bytes.NewReader(body))
+
+	if len(body) == 0 {
+		return false
+	}
+
+	lower := strings.ToLower(string(body))
+	return strings.Contains(lower, "server timestamp or recv_window") ||
+		strings.Contains(lower, "req_timestamp") ||
+		strings.Contains(lower, "server_timestamp") ||
+		strings.Contains(lower, "\"retcode\":10002")
+}
+
+func readRequestBody(req *http.Request) ([]byte, error) {
+	if req.Body == nil {
+		return nil, nil
+	}
+
+	body, err := io.ReadAll(req.Body)
+	if err != nil {
+		return nil, err
+	}
+	req.Body = io.NopCloser(bytes.NewReader(body))
+	req.ContentLength = int64(len(body))
+	return body, nil
+}
+
+func cloneRequestWithBody(req *http.Request, body []byte) *http.Request {
+	clone := req.Clone(req.Context())
+	clone.Header = req.Header.Clone()
+	if body != nil {
+		clone.Body = io.NopCloser(bytes.NewReader(body))
+		clone.ContentLength = int64(len(body))
+	} else {
+		clone.Body = nil
+		clone.ContentLength = 0
+	}
+	return clone
 }
 
 // GetBalance retrieves account balance
@@ -124,25 +351,56 @@ func (t *BybitTrader) GetBalance() (map[string]interface{}, error) {
 
 	if len(list) > 0 {
 		account, _ := list[0].(map[string]interface{})
-		if equityStr, ok := account["totalEquity"].(string); ok {
-			totalEquity, _ = strconv.ParseFloat(equityStr, 64)
-		}
-		if availStr, ok := account["totalAvailableBalance"].(string); ok {
-			availableBalance, _ = strconv.ParseFloat(availStr, 64)
-		}
+		totalEquity = parseBybitFloat(account["totalEquity"])
+		availableBalance = parseBybitFloat(account["totalAvailableBalance"])
 		// Bybit UNIFIED account wallet balance field
-		if walletStr, ok := account["totalWalletBalance"].(string); ok {
-			totalWalletBalance, _ = strconv.ParseFloat(walletStr, 64)
-		}
+		totalWalletBalance = parseBybitFloat(account["totalWalletBalance"])
 		// Bybit perpetual contract unrealized PnL
-		if uplStr, ok := account["totalPerpUPL"].(string); ok {
-			totalPerpUPL, _ = strconv.ParseFloat(uplStr, 64)
+		totalPerpUPL = parseBybitFloat(account["totalPerpUPL"])
+
+		// Fallback 1: Derive from margin fields when totalAvailableBalance is unavailable.
+		if availableBalance <= 0 {
+			totalMarginBalance := parseBybitFloat(account["totalMarginBalance"])
+			totalInitialMargin := parseBybitFloat(account["totalInitialMargin"])
+			derivedAvailable := totalMarginBalance - totalInitialMargin
+			if derivedAvailable > 0 {
+				availableBalance = derivedAvailable
+			}
+		}
+
+		// Fallback 2: Sum per-coin withdrawable balances (common in some UNIFIED responses).
+		if availableBalance <= 0 {
+			if coinList, ok := account["coin"].([]interface{}); ok {
+				sumWithdrawable := 0.0
+				for _, coinItem := range coinList {
+					coinMap, ok := coinItem.(map[string]interface{})
+					if !ok {
+						continue
+					}
+					withdrawable := parseBybitFloat(coinMap["availableToWithdraw"])
+					if withdrawable <= 0 {
+						// Some account modes may omit withdrawable; walletBalance is safer than zero here.
+						withdrawable = parseBybitFloat(coinMap["walletBalance"])
+					}
+					if withdrawable > 0 {
+						sumWithdrawable += withdrawable
+					}
+				}
+				if sumWithdrawable > 0 {
+					availableBalance = sumWithdrawable
+				}
+			}
 		}
 	}
 
 	// If no totalWalletBalance, use totalEquity
 	if totalWalletBalance == 0 {
 		totalWalletBalance = totalEquity
+	}
+
+	// Final fallback: when no margin is used and no positions, wallet is effectively available.
+	if availableBalance == 0 && totalWalletBalance > 0 {
+		availableBalance = totalWalletBalance
 	}
 
 	balance := map[string]interface{}{
@@ -160,6 +418,32 @@ func (t *BybitTrader) GetBalance() (map[string]interface{}, error) {
 	t.balanceCacheMutex.Unlock()
 
 	return balance, nil
+}
+
+func parseBybitFloat(v interface{}) float64 {
+	switch val := v.(type) {
+	case string:
+		if parsed, err := strconv.ParseFloat(val, 64); err == nil {
+			return parsed
+		}
+	case float64:
+		return val
+	case float32:
+		return float64(val)
+	case int:
+		return float64(val)
+	case int64:
+		return float64(val)
+	case int32:
+		return float64(val)
+	case uint:
+		return float64(val)
+	case uint64:
+		return float64(val)
+	case uint32:
+		return float64(val)
+	}
+	return 0
 }
 
 // GetPositions retrieves all positions
@@ -914,7 +1198,7 @@ func (t *BybitTrader) getClosedPnLViaHTTP(startTime time.Time, limit int) ([]typ
 
 	// Generate timestamp
 	timestamp := fmt.Sprintf("%d", time.Now().UnixMilli())
-	recvWindow := "5000"
+	recvWindow := "10000"
 
 	// Build signature payload: timestamp + api_key + recv_window + queryString
 	signPayload := timestamp + t.apiKey + recvWindow + queryParams
@@ -938,8 +1222,12 @@ func (t *BybitTrader) getClosedPnLViaHTTP(startTime time.Time, limit int) ([]typ
 	req.Header.Set("X-BAPI-RECV-WINDOW", recvWindow)
 	req.Header.Set("Content-Type", "application/json")
 
-	// Use http.DefaultClient for the request
-	resp, err := http.DefaultClient.Do(req)
+	// Reuse trader HTTP client so transport-level timestamp correction is applied.
+	httpClient := http.DefaultClient
+	if t.client != nil && t.client.HTTPClient != nil {
+		httpClient = t.client.HTTPClient
+	}
+	resp, err := httpClient.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("failed to call Bybit API: %w", err)
 	}
