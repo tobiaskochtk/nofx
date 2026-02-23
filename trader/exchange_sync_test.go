@@ -2,6 +2,7 @@ package trader
 
 import (
 	"nofx/store"
+	"strings"
 	"testing"
 	"time"
 
@@ -19,8 +20,8 @@ type TestScenario struct {
 
 // TestTrade represents a single trade in a test scenario
 type TestTrade struct {
-	Action      string  // open_long, close_short, etc.
-	Side        string  // LONG or SHORT
+	Action      string // open_long, close_short, etc.
+	Side        string // LONG or SHORT
 	Symbol      string
 	Quantity    float64
 	Price       float64
@@ -34,6 +35,21 @@ type ExpectedPosition struct {
 	Side     string
 	Quantity float64
 	Status   string // OPEN or CLOSED
+}
+
+func openInMemorySQLite(t *testing.T) *gorm.DB {
+	t.Helper()
+
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{
+		Logger: logger.Default.LogMode(logger.Silent),
+	})
+	if err != nil {
+		if strings.Contains(strings.ToLower(err.Error()), "requires cgo") {
+			t.Skipf("skipping test without cgo sqlite support: %v", err)
+		}
+		t.Fatalf("Failed to create test database: %v", err)
+	}
+	return db
 }
 
 // Standard test scenarios that all exchanges should pass
@@ -117,12 +133,7 @@ func runStandardTests(t *testing.T, exchangeName string) {
 	for _, scenario := range scenarios {
 		t.Run(scenario.Name, func(t *testing.T) {
 			// Setup database
-			db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{
-				Logger: logger.Default.LogMode(logger.Silent),
-			})
-			if err != nil {
-				t.Fatalf("Failed to create test database: %v", err)
-			}
+			db := openInMemorySQLite(t)
 
 			positionStore := store.NewPositionStore(db)
 			if err := positionStore.InitTables(); err != nil {
@@ -201,12 +212,7 @@ func TestAllExchangesStandardScenarios(t *testing.T) {
 
 // TestPositionAccumulationBug tests that positions don't accumulate incorrectly
 func TestPositionAccumulationBug(t *testing.T) {
-	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{
-		Logger: logger.Default.LogMode(logger.Silent),
-	})
-	if err != nil {
-		t.Fatalf("Failed to create test database: %v", err)
-	}
+	db := openInMemorySQLite(t)
 
 	positionStore := store.NewPositionStore(db)
 	if err := positionStore.InitTables(); err != nil {
@@ -286,12 +292,7 @@ func TestPositionAccumulationBug(t *testing.T) {
 
 // TestQuantityPrecision tests handling of quantity precision issues
 func TestQuantityPrecision(t *testing.T) {
-	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{
-		Logger: logger.Default.LogMode(logger.Silent),
-	})
-	if err != nil {
-		t.Fatalf("Failed to create test database: %v", err)
-	}
+	db := openInMemorySQLite(t)
 
 	positionStore := store.NewPositionStore(db)
 	if err := positionStore.InitTables(); err != nil {
@@ -305,7 +306,7 @@ func TestQuantityPrecision(t *testing.T) {
 	exchangeType := "test"
 
 	// Open position
-	err = posBuilder.ProcessTrade(
+	err := posBuilder.ProcessTrade(
 		traderID, exchangeID, exchangeType,
 		"BTCUSDT", "LONG", "open_long",
 		0.01, 50000, 1.0, 0,

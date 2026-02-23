@@ -77,6 +77,8 @@ type Context struct {
 	RuntimeMinutes  int                     `json:"runtime_minutes"`
 	CallCount       int                     `json:"call_count"`
 	PayloadVersion  string                  `json:"payload_version,omitempty"`
+	ContextTF       string                  `json:"-"`
+	PriceType       string                  `json:"-"`
 	Account         AccountInfo             `json:"account"`
 	Positions       []PositionInfo          `json:"positions"`
 	CandidateCoins  []CandidateCoin         `json:"candidate_coins"`
@@ -147,7 +149,11 @@ func (d *Decision) UnmarshalJSON(data []byte) error {
 	if d.Symbol == "" {
 		d.Symbol = raw.Sym
 	}
-	d.Action = raw.Action
+	d.Action = strings.ToLower(strings.TrimSpace(raw.Action))
+	if d.Action == "reduce" || d.Action == "partial_close" || d.Action == "partial_exit" {
+		// Partial exits are disabled by policy.
+		d.Action = "wait"
+	}
 	d.Leverage = raw.Leverage
 	if d.Leverage == 0 {
 		d.Leverage = raw.Lev
@@ -446,7 +452,7 @@ func buildSystemPrompt(accountEquity float64, btcEthLeverage, altcoinLeverage in
 	sb.WriteString("</decision>\n\n")
 	sb.WriteString("## 字段说明\n\n")
 	if hasOpenPositions {
-		sb.WriteString("- `action`: open_long | open_short | close_long | close_short | update_stop_loss | update_take_profit | partial_close | hold | wait\n")
+		sb.WriteString("- `action`: open_long | open_short | close_long | close_short | update_stop_loss | update_take_profit | hold | wait\n")
 	} else {
 		sb.WriteString("- `action`: open_long | open_short | close_long | close_short | hold | wait\n")
 	}
@@ -455,9 +461,9 @@ func buildSystemPrompt(accountEquity float64, btcEthLeverage, altcoinLeverage in
 	if hasOpenPositions {
 		sb.WriteString("- update_stop_loss 时必填: new_stop_loss (注意是 new_stop_loss，不是 stop_loss)\n")
 		sb.WriteString("- update_take_profit 时必填: new_take_profit (注意是 new_take_profit，不是 take_profit)\n")
-		sb.WriteString("- partial_close 时必填: close_percentage (0-100)\n\n")
+		sb.WriteString("- 不允许 partial_close（禁止部分平仓）\n\n")
 	} else {
-		sb.WriteString("- 当前无持仓时，不应输出 update_stop_loss / update_take_profit / partial_close\n\n")
+		sb.WriteString("- 当前无持仓时，不应输出 update_stop_loss / update_take_profit\n\n")
 	}
 
 	return sb.String()
@@ -470,10 +476,10 @@ func buildFinalOutputContract(hasOpenPositions bool) string {
 	sb.WriteString("2. `<decision>` 标签内必须是 JSON 数组 `[]`，不要输出 JSON-only 包装对象。\n")
 	sb.WriteString("3. `confidence` 统一使用 0-100 的整数。\n")
 	if hasOpenPositions {
-		sb.WriteString("4. 可用 action: open_long | open_short | close_long | close_short | update_stop_loss | update_take_profit | partial_close | hold | wait。\n")
+		sb.WriteString("4. 可用 action: open_long | open_short | close_long | close_short | update_stop_loss | update_take_profit | hold | wait。\n")
 	} else {
 		sb.WriteString("4. 当前无持仓时，可用 action: open_long | open_short | close_long | close_short | hold | wait。\n")
-		sb.WriteString("5. 当前无持仓：禁止输出 update_stop_loss / update_take_profit / partial_close。\n")
+		sb.WriteString("5. 当前无持仓：禁止输出 update_stop_loss / update_take_profit。\n")
 	}
 	sb.WriteString("6. 若其它段落与本节冲突（例如要求 JSON Only 或 `confidence` 0-1），一律以本节为准。\n")
 	return sb.String()
@@ -740,7 +746,6 @@ func validateDecision(d *Decision, accountEquity float64, btcEthLeverage, altcoi
 		"close_short":        true,
 		"update_stop_loss":   true,
 		"update_take_profit": true,
-		"partial_close":      true,
 		"hold":               true,
 		"wait":               true,
 	}
@@ -864,13 +869,6 @@ func validateDecision(d *Decision, accountEquity float64, btcEthLeverage, altcoi
 	if d.Action == "update_take_profit" {
 		if d.NewTakeProfit <= 0 {
 			return fmt.Errorf("新止盈价格必须大于0: %.2f", d.NewTakeProfit)
-		}
-	}
-
-	// 部分平仓验证
-	if d.Action == "partial_close" {
-		if d.ClosePercentage <= 0 || d.ClosePercentage > 100 {
-			return fmt.Errorf("平仓百分比必须在0-100之间: %.1f", d.ClosePercentage)
 		}
 	}
 

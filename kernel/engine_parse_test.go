@@ -55,3 +55,30 @@ func TestValidateJSONFormat_EmptyArrayAllowed(t *testing.T) {
 		}
 	}
 }
+
+func TestExtractDecisions_JSONWrapperObject(t *testing.T) {
+	response := `{
+  "ts_utc": "2026-02-22T17:38:26Z",
+  "cycle": 5,
+  "decisions": [
+    {"sym":"BTCUSDT","action":"ENTER","side":"long","size_pct":0.25,"leverage":3,"sl_px":96000,"tp_px":101000,"confidence":0.82,"reason_codes":["trend_up"]}
+  ]
+}`
+
+	decisions, err := extractDecisions(response)
+	if err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+	if len(decisions) != 1 {
+		t.Fatalf("expected 1 decision, got: %d", len(decisions))
+	}
+	if decisions[0].Action != "open_long" {
+		t.Fatalf("expected mapped action open_long, got: %s", decisions[0].Action)
+	}
+	if decisions[0].PositionSizeUSD >= 0 {
+		t.Fatalf("expected size_pct marker (negative) before validation, got %.4f", decisions[0].PositionSizeUSD)
+	}
+	if decisions[0].Confidence != 82 {
+		t.Fatalf("expected confidence converted to 82, got %d", decisions[0].Confidence)
+	}
+}

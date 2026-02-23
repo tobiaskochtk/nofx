@@ -2,6 +2,7 @@ package kernel
 
 import (
 	"fmt"
+	"strings"
 
 	decisionpkg "nofx/decision"
 	"nofx/market"
@@ -16,6 +17,8 @@ func buildDecisionPayloadPrompt(ctx *Context, maxPositions int) (string, error) 
 		RuntimeMinutes:  ctx.RuntimeMinutes,
 		CallCount:       ctx.CallCount,
 		PayloadVersion:  decisionpkg.PayloadSchemaVersion,
+		ContextTF:       resolvePayloadContextTF(ctx),
+		PriceType:       "mark",
 		Account:         convertDecisionAccount(ctx.Account),
 		MarketDataMap:   copyMarketDataMap(ctx.MarketDataMap),
 		BTCETHLeverage:  ctx.BTCETHLeverage,
@@ -84,4 +87,17 @@ func copyMarketDataMap(in map[string]*market.Data) map[string]*market.Data {
 		out[k] = v
 	}
 	return out
+}
+
+func resolvePayloadContextTF(ctx *Context) string {
+	if ctx == nil {
+		return ""
+	}
+	for _, tf := range ctx.Timeframes {
+		normalized := strings.TrimSpace(strings.ToLower(tf))
+		if normalized != "" {
+			return normalized
+		}
+	}
+	return ""
 }

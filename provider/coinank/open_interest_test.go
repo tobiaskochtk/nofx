@@ -1,3 +1,6 @@
+//go:build coinank_integration
+// +build coinank_integration
+
 package coinank
 
 import (
@@ -13,6 +16,9 @@ func TestOpenInterestAll(t *testing.T) {
 	resp, err := client.OpenInterestAll(context.TODO(), "BTC")
 	if err != nil {
 		t.Error(err)
+	}
+	if len(resp) == 0 {
+		t.Skip("empty OpenInterestAll response")
 	}
 	if resp[0].ExchangeName != "ALL" {
 		t.Error("exchange name is empty")
@@ -42,6 +48,9 @@ func TestOpenInterestSymbolChart(t *testing.T) {
 	resp, err := client.OpenInterestSymbolChart(context.TODO(), coinank_enum.Binance, "BTCUSDT", coinank_enum.Hour1, time.Now().UnixMilli(), 10)
 	if err != nil {
 		t.Error(err)
+	}
+	if len(resp) == 0 {
+		t.Skip("empty OpenInterestSymbolChart response")
 	}
 	if resp[0].BaseCoin != "BTC" {
 		t.Error("baseCoin is error")

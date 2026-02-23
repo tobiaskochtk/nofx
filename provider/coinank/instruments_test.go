@@ -1,3 +1,6 @@
+//go:build coinank_integration
+// +build coinank_integration
+
 package coinank
 
 import (

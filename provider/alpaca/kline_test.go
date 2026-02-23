@@ -8,6 +8,9 @@ import (
 
 func TestGetBars(t *testing.T) {
 	client := NewClient()
+	if client.apiKey == "" || client.secretKey == "" {
+		t.Skip("alpaca integration test skipped: API keys not configured")
+	}
 
 	resp, err := client.GetBars(context.TODO(), "AAPL", "1Day", 5)
 	if err != nil {

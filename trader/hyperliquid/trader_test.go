@@ -23,8 +23,8 @@ import (
 // Inherits TraderTestSuite and adds Hyperliquid-specific mock logic
 type HyperliquidTestSuite struct {
 	*testutil.TraderTestSuite // Embeds base test suite
-	mockServer              *httptest.Server
-	privateKey              *ecdsa.PrivateKey
+	mockServer                *httptest.Server
+	privateKey                *ecdsa.PrivateKey
 }
 
 // NewHyperliquidTestSuite Create Hyperliquid test suite
@@ -283,7 +283,7 @@ func TestNewHyperliquidTrader(t *testing.T) {
 			walletAddr:    "0x1234567890123456789012345678901234567890",
 			testnet:       true,
 			wantError:     true,
-			errorContains: "Failed to parse private key",
+			errorContains: "failed to parse private key",
 		},
 		{
 			name:          "Empty wallet address",

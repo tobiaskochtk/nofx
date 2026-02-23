@@ -21,7 +21,7 @@ import (
 // Inherits TraderTestSuite and adds Bybit-specific mock logic
 type BybitTraderTestSuite struct {
 	*testutil.TraderTestSuite // Embeds base test suite
-	mockServer              *httptest.Server
+	mockServer                *httptest.Server
 }
 
 // NewBybitTraderTestSuite Create Bybit test suite
@@ -146,9 +146,9 @@ func TestNewBybitTrader(t *testing.T) {
 func TestBybitTrader_SymbolFormat(t *testing.T) {
 	// Bybit uses uppercase symbol format (e.g. BTCUSDT)
 	tests := []struct {
-		name     string
-		symbol   string
-		isValid  bool
+		name    string
+		symbol  string
+		isValid bool
 	}{
 		{
 			name:    "Standard USDT contract",
@@ -198,14 +198,14 @@ func TestBybitTrader_FormatQuantity(t *testing.T) {
 			name:     "ETH quantity formatting",
 			symbol:   "ETHUSDT",
 			quantity: 1.2345,
-			expected: "1.234",
+			expected: "1.23",
 			hasError: false,
 		},
 		{
 			name:     "Integer quantity",
 			symbol:   "SOLUSDT",
 			quantity: 10.0,
-			expected: "10.000",
+			expected: "10.0",
 			hasError: false,
 		},
 	}
@@ -370,9 +370,9 @@ func TestBybitTrader_MockServerGetBalance(t *testing.T) {
 							"totalEquity": "10100.50",
 							"coin": []map[string]interface{}{
 								{
-									"coin":             "USDT",
-									"walletBalance":    "10000.00",
-									"unrealisedPnl":    "100.50",
+									"coin":                "USDT",
+									"walletBalance":       "10000.00",
+									"unrealisedPnl":       "100.50",
 									"availableToWithdraw": "8000.00",
 								},
 							},

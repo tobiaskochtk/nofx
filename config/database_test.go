@@ -569,9 +569,24 @@ func setupTestDB(t *testing.T) (*Database, func()) {
 	}
 
 	// 设置加密服务（用于测试加密功能）
-	// 创建临时 RSA 密钥
-	rsaKeyPath := t.TempDir() + "/test_rsa_key"
-	cryptoService, err := crypto.NewCryptoService(rsaKeyPath)
+	if old := os.Getenv(crypto.EnvRSAPrivateKey); old == "" {
+		privateKeyPEM, _, genErr := crypto.GenerateKeyPair()
+		if genErr != nil {
+			t.Logf("警告：无法生成 RSA 密钥，将在无加密模式下测试: %v", genErr)
+		} else {
+			t.Setenv(crypto.EnvRSAPrivateKey, privateKeyPEM)
+		}
+	}
+	if old := os.Getenv(crypto.EnvDataEncryptionKey); old == "" {
+		dataKey, genErr := crypto.GenerateDataKey()
+		if genErr != nil {
+			t.Logf("警告：无法生成数据加密密钥，将在无加密模式下测试: %v", genErr)
+		} else {
+			t.Setenv(crypto.EnvDataEncryptionKey, dataKey)
+		}
+	}
+
+	cryptoService, err := crypto.NewCryptoService()
 	if err != nil {
 		// 如果创建失败，继续测试但不使用加密
 		t.Logf("警告：无法创建加密服务，将在无加密模式下测试: %v", err)
@@ -582,7 +597,6 @@ func setupTestDB(t *testing.T) (*Database, func()) {
 	cleanup := func() {
 		db.Close()
 		os.RemoveAll(tmpFile)
-		os.RemoveAll(rsaKeyPath)
 	}
 
 	return db, cleanup
@@ -638,19 +652,24 @@ func TestDataPersistenceAcrossReopen(t *testing.T) {
 	dbPath := tmpFile.Name()
 	defer os.Remove(dbPath)
 
-	// 确保测试期间有可用的数据加密密钥
+	// 确保测试期间有可用的加密密钥
 	const testDataKey = "unit-test-data-key"
-	if old := os.Getenv("DATA_ENCRYPTION_KEY"); old == "" {
-		t.Setenv("DATA_ENCRYPTION_KEY", testDataKey)
+	if old := os.Getenv(crypto.EnvDataEncryptionKey); old == "" {
+		t.Setenv(crypto.EnvDataEncryptionKey, testDataKey)
+	}
+	if old := os.Getenv(crypto.EnvRSAPrivateKey); old == "" {
+		privateKeyPEM, _, genErr := crypto.GenerateKeyPair()
+		if genErr != nil {
+			t.Fatalf("生成 RSA 密钥失败: %v", genErr)
+		}
+		t.Setenv(crypto.EnvRSAPrivateKey, privateKeyPEM)
 	}
 
 	// 设置加密服务
-	rsaKeyPath := "test_rsa_key.pem"
-	cryptoService, err := crypto.NewCryptoService(rsaKeyPath)
+	cryptoService, err := crypto.NewCryptoService()
 	if err != nil {
 		t.Fatalf("初始化加密服务失败: %v", err)
 	}
-	defer os.RemoveAll(rsaKeyPath)
 
 	userID := "test-user-persistence"
 	testAPIKey := "test-api-key-should-persist"

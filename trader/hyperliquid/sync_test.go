@@ -3,6 +3,7 @@ package hyperliquid
 import (
 	"math"
 	"nofx/store"
+	"strings"
 	"testing"
 	"time"
 
@@ -80,6 +81,9 @@ func TestHyperliquidPositionBuilding(t *testing.T) {
 		Logger: logger.Default.LogMode(logger.Silent),
 	})
 	if err != nil {
+		if strings.Contains(strings.ToLower(err.Error()), "requires cgo") {
+			t.Skipf("skipping test without cgo sqlite support: %v", err)
+		}
 		t.Fatalf("Failed to create test database: %v", err)
 	}
 
@@ -310,6 +314,9 @@ func TestHyperliquidBugScenario(t *testing.T) {
 		Logger: logger.Default.LogMode(logger.Silent),
 	})
 	if err != nil {
+		if strings.Contains(strings.ToLower(err.Error()), "requires cgo") {
+			t.Skipf("skipping test without cgo sqlite support: %v", err)
+		}
 		t.Fatalf("Failed to create test database: %v", err)
 	}
 
@@ -328,13 +335,13 @@ func TestHyperliquidBugScenario(t *testing.T) {
 	// Account has 30 USDT, should not be able to hold 1.7 ETH
 
 	trades := []struct {
-		action   string
-		side     string
-		symbol   string
-		qty      float64
-		price    float64
-		fee      float64
-		pnl      float64
+		action string
+		side   string
+		symbol string
+		qty    float64
+		price  float64
+		fee    float64
+		pnl    float64
 	}{
 		// Order 853: Open Short
 		{"open_short", "SHORT", "ETHUSDT", 0.0472, 3500, 0.2, 0},

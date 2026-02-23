@@ -3,12 +3,12 @@ package manager
 import (
 	"context"
 	"fmt"
-	"os"
 	"nofx/debate"
 	"nofx/kernel"
 	"nofx/logger"
 	"nofx/store"
 	"nofx/trader"
+	"os"
 	"sort"
 	"strings"
 	"sync"
@@ -409,7 +409,6 @@ func (tm *TraderManager) GetTopTradersData() (map[string]interface{}, error) {
 	return result, nil
 }
 
-
 // RemoveTrader removes a trader from memory (does not affect database)
 // Used to force reload when updating trader configuration
 // If the trader is running, it will be stopped first
@@ -418,11 +417,14 @@ func (tm *TraderManager) RemoveTrader(traderID string) {
 	defer tm.mu.Unlock()
 
 	if t, exists := tm.traders[traderID]; exists {
-		// Stop the trader if it's running (this ensures the goroutine exits)
-		status := t.GetStatus()
-		if isRunning, ok := status["is_running"].(bool); ok && isRunning {
-			logger.Infof("⏹ Stopping trader %s before removing from memory...", traderID)
-			t.Stop()
+		// Stop the trader if it's running (this ensures the goroutine exits).
+		// Tests may insert nil placeholders, so guard the dereference.
+		if t != nil {
+			status := t.GetStatus()
+			if isRunning, ok := status["is_running"].(bool); ok && isRunning {
+				logger.Infof("⏹ Stopping trader %s before removing from memory...", traderID)
+				t.Stop()
+			}
 		}
 		delete(tm.traders, traderID)
 		logger.Infof("✓ Trader %s removed from memory", traderID)
@@ -666,11 +668,11 @@ func (tm *TraderManager) addTraderFromStore(traderCfg *store.Trader, aiModelCfg 
 		QwenKey:               "",
 		CustomAPIURL:          aiModelCfg.CustomAPIURL,
 		CustomModelName:       aiModelCfg.CustomModelName,
-		ScanInterval:         time.Duration(traderCfg.ScanIntervalMinutes) * time.Minute,
-		InitialBalance:       traderCfg.InitialBalance,
-		IsCrossMargin:        traderCfg.IsCrossMargin,
-		ShowInCompetition:    traderCfg.ShowInCompetition,
-		StrategyConfig:       strategyConfig,
+		ScanInterval:          time.Duration(traderCfg.ScanIntervalMinutes) * time.Minute,
+		InitialBalance:        traderCfg.InitialBalance,
+		IsCrossMargin:         traderCfg.IsCrossMargin,
+		ShowInCompetition:     traderCfg.ShowInCompetition,
+		StrategyConfig:        strategyConfig,
 	}
 
 	logger.Infof("📊 Loading trader %s: ScanIntervalMinutes=%d (from DB), ScanInterval=%v",

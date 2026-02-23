@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"nofx/logger"
 	"nofx/market"
@@ -31,10 +32,11 @@ const (
 // ============================================================================
 
 var (
-	// Safe regex: match decision arrays (object array or explicit empty array)
-	reJSONFence      = regexp.MustCompile(`(?is)` + "```json\\s*(\\[\\s*(?:\\{.*?\\}\\s*(?:,\\s*\\{.*?\\}\\s*)*)?\\])\\s*```")
+	// Safe regex: capture the full fenced JSON block, then extract the first JSON blob.
+	reJSONFence      = regexp.MustCompile(`(?is)` + "```json\\s*([\\s\\S]*?)\\s*```")
 	reJSONArray      = regexp.MustCompile(`(?is)\[\s*(?:\{.*?\}\s*(?:,\s*\{.*?\}\s*)*)?\]`)
 	reArrayHead      = regexp.MustCompile(`^\[\s*\{`)
+	reObjectHead     = regexp.MustCompile(`^\{`)
 	reEmptyJSONArray = regexp.MustCompile(`^\[\s*\]$`)
 	reArrayOpenSpace = regexp.MustCompile(`^\[\s+\{`)
 	reInvisibleRunes = regexp.MustCompile("[\u200B\u200C\u200D\uFEFF]")
@@ -42,6 +44,8 @@ var (
 	// XML tag extraction (supports any characters in reasoning chain)
 	reReasoningTag = regexp.MustCompile(`(?s)<reasoning>(.*?)</reasoning>`)
 	reDecisionTag  = regexp.MustCompile(`(?s)<decision>(.*?)</decision>`)
+	// Strip legacy CoT instructions from configurable prompt sections to keep JSON-only output strict.
+	reChainOfThoughtFirstLine = regexp.MustCompile(`(?im)^.*write\s+chain[-\s]of[-\s]thought\s+first.*\r?\n?`)
 )
 
 // ============================================================================
@@ -160,6 +164,140 @@ type Decision struct {
 	Confidence int     `json:"confidence,omitempty"` // Confidence level (0-100)
 	RiskUSD    float64 `json:"risk_usd,omitempty"`   // Maximum USD risk
 	Reasoning  string  `json:"reasoning"`
+}
+
+// UnmarshalJSON supports both legacy execution actions and the new contract-style format:
+// {sym, action: HOLD|ENTER|EXIT, side, size_pct, leverage, confidence, reason_codes}.
+// Legacy stop fields (stop_loss/take_profit/sl_px/tp_px) are still accepted for compatibility.
+func (d *Decision) UnmarshalJSON(data []byte) error {
+	type stopsTargets struct {
+		SL float64 `json:"sl"`
+		TP float64 `json:"tp"`
+	}
+	type rawDecision struct {
+		Symbol          string          `json:"symbol"`
+		Sym             string          `json:"sym"`
+		Action          string          `json:"action"`
+		Side            string          `json:"side"`
+		Leverage        int             `json:"leverage"`
+		Lev             int             `json:"lev"`
+		PositionSizeUSD float64         `json:"position_size_usd"`
+		SizePct         float64         `json:"size_pct"`
+		StopLoss        float64         `json:"stop_loss"`
+		SLPx            float64         `json:"sl_px"`
+		TakeProfit      float64         `json:"take_profit"`
+		TPPx            float64         `json:"tp_px"`
+		StopsTargets    stopsTargets    `json:"stops_targets"`
+		ConfidenceRaw   json.RawMessage `json:"confidence"`
+		RiskUSD         float64         `json:"risk_usd"`
+		Reasoning       string          `json:"reasoning"`
+		ReasonCodes     []string        `json:"reason_codes"`
+	}
+
+	var raw rawDecision
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+
+	d.Symbol = strings.ToUpper(strings.TrimSpace(raw.Symbol))
+	if d.Symbol == "" {
+		d.Symbol = strings.ToUpper(strings.TrimSpace(raw.Sym))
+	}
+
+	side := normalizeDecisionSide(raw.Side)
+	d.Action = normalizeDecisionAction(raw.Action, side)
+
+	d.Leverage = raw.Leverage
+	if d.Leverage == 0 {
+		d.Leverage = raw.Lev
+	}
+
+	d.PositionSizeUSD = raw.PositionSizeUSD
+	if d.PositionSizeUSD == 0 && raw.SizePct > 0 {
+		// negative marker => interpreted in validateDecision as account-equity percentage.
+		d.PositionSizeUSD = -raw.SizePct
+	}
+
+	d.StopLoss = raw.StopLoss
+	if d.StopLoss == 0 {
+		if raw.SLPx != 0 {
+			d.StopLoss = raw.SLPx
+		} else if raw.StopsTargets.SL != 0 {
+			d.StopLoss = raw.StopsTargets.SL
+		}
+	}
+
+	d.TakeProfit = raw.TakeProfit
+	if d.TakeProfit == 0 {
+		if raw.TPPx != 0 {
+			d.TakeProfit = raw.TPPx
+		} else if raw.StopsTargets.TP != 0 {
+			d.TakeProfit = raw.StopsTargets.TP
+		}
+	}
+
+	d.Confidence = 0
+	if len(raw.ConfidenceRaw) > 0 {
+		var confFloat float64
+		if err := json.Unmarshal(raw.ConfidenceRaw, &confFloat); err == nil {
+			if confFloat <= 1 {
+				d.Confidence = int(confFloat*100 + 0.5)
+			} else {
+				d.Confidence = int(confFloat + 0.5)
+			}
+		} else {
+			var confInt int
+			if err2 := json.Unmarshal(raw.ConfidenceRaw, &confInt); err2 == nil {
+				d.Confidence = confInt
+			}
+		}
+	}
+
+	d.RiskUSD = raw.RiskUSD
+	d.Reasoning = strings.TrimSpace(raw.Reasoning)
+	if d.Reasoning == "" && len(raw.ReasonCodes) > 0 {
+		d.Reasoning = strings.Join(raw.ReasonCodes, ", ")
+	}
+
+	return nil
+}
+
+func normalizeDecisionAction(action, side string) string {
+	a := strings.ToLower(strings.TrimSpace(action))
+	switch a {
+	case "open_long", "open_short", "close_long", "close_short", "hold", "wait":
+		return a
+	case "no_trade":
+		return "wait"
+	case "enter", "open", "open_new", "add_position":
+		if side == "short" {
+			return "open_short"
+		}
+		return "open_long"
+	case "exit", "close", "full_close":
+		if side == "short" {
+			return "close_short"
+		}
+		return "close_long"
+	case "reduce", "partial_close", "partial_exit":
+		// Partial exits are disabled by policy: convert to wait/hold.
+		return "wait"
+	default:
+		return a
+	}
+}
+
+func normalizeDecisionSide(side string) string {
+	s := strings.ToLower(strings.TrimSpace(side))
+	s = strings.TrimPrefix(s, "open_")
+	s = strings.TrimPrefix(s, "close_")
+	if strings.Contains(s, "short") {
+		return "short"
+	}
+	if strings.Contains(s, "long") {
+		return "long"
+	}
+	return ""
 }
 
 // FullDecision AI's complete decision (including chain of thought)
@@ -303,15 +441,14 @@ func GetFullDecisionWithStrategy(ctx *Context, mcpClient mcp.AIClient, engine *S
 	// 3. Build User Prompt using strategy engine
 	var userPrompt string
 	if strings.EqualFold(strings.TrimSpace(os.Getenv("NOFX_PROMPT_MODE")), "legacy") {
+		logger.Warnf("⚠️  NOFX_PROMPT_MODE=legacy is deprecated and ignored; using trade_snapshot.v4 payload prompt")
+	}
+	compactPrompt, err := buildDecisionPayloadPrompt(ctx, riskConfig.MaxPositions)
+	if err != nil {
+		logger.Warnf("⚠️  Failed to build compact payload prompt, fallback to legacy formatter: %v", err)
 		userPrompt = engine.BuildUserPrompt(ctx)
 	} else {
-		compactPrompt, err := buildDecisionPayloadPrompt(ctx, riskConfig.MaxPositions)
-		if err != nil {
-			logger.Warnf("⚠️  Failed to build compact payload prompt, fallback to legacy formatter: %v", err)
-			userPrompt = engine.BuildUserPrompt(ctx)
-		} else {
-			userPrompt = compactPrompt
-		}
+		userPrompt = compactPrompt
 	}
 	origInputTokens := estimatePromptTokens(systemPrompt) + estimatePromptTokens(userPrompt)
 	systemPrompt, userPrompt, trimmed := fitPromptsToBudget(systemPrompt, userPrompt, defaultPromptInputTokenBudget)
@@ -398,6 +535,7 @@ func fetchMarketDataWithStrategy(ctx *Context, engine *StrategyEngine) error {
 	if primaryTimeframe == "" {
 		primaryTimeframe = timeframes[0]
 	}
+	ctx.Timeframes = orderedTimeframes(primaryTimeframe, timeframes)
 	if klineCount <= 0 {
 		klineCount = 30
 	}
@@ -451,6 +589,28 @@ func fetchMarketDataWithStrategy(ctx *Context, engine *StrategyEngine) error {
 
 	logger.Infof("📊 Successfully fetched multi-timeframe market data for %d coins", len(ctx.MarketDataMap))
 	return nil
+}
+
+func orderedTimeframes(primary string, timeframes []string) []string {
+	seen := make(map[string]struct{}, len(timeframes)+1)
+	out := make([]string, 0, len(timeframes)+1)
+	add := func(tf string) {
+		tf = strings.TrimSpace(strings.ToLower(tf))
+		if tf == "" {
+			return
+		}
+		if _, ok := seen[tf]; ok {
+			return
+		}
+		seen[tf] = struct{}{}
+		out = append(out, tf)
+	}
+
+	add(primary)
+	for _, tf := range timeframes {
+		add(tf)
+	}
+	return out
 }
 
 // ============================================================================
@@ -969,6 +1129,11 @@ func (e *StrategyEngine) BuildSystemPrompt(accountEquity float64, variant string
 	var sb strings.Builder
 	riskControl := e.config.RiskControl
 	promptSections := e.config.PromptSections
+	minConfidenceNorm := float64(riskControl.MinConfidence)
+	if minConfidenceNorm > 1 {
+		minConfidenceNorm /= 100.0
+	}
+	minConfidenceNorm = math.Max(0, math.Min(1, minConfidenceNorm))
 
 	// 0. Data Dictionary & Schema (ensure AI understands all fields)
 	lang := e.GetLanguage()
@@ -989,7 +1154,7 @@ func (e *StrategyEngine) BuildSystemPrompt(accountEquity float64, variant string
 	// 2. Trading mode variant
 	switch strings.ToLower(strings.TrimSpace(variant)) {
 	case "aggressive":
-		sb.WriteString("## Mode: Aggressive\n- Prioritize capturing trend breakouts, can build positions in batches when confidence ≥ 70\n- Allow higher positions, but must strictly set stop-loss and explain risk-reward ratio\n\n")
+		sb.WriteString("## Mode: Aggressive\n- Prioritize capturing trend breakouts, can build positions in batches when confidence >= 0.70\n- Allow higher positions while respecting hard constraints and policy thresholds\n\n")
 	case "conservative":
 		sb.WriteString("## Mode: Conservative\n- Only open positions when multiple signals resonate\n- Prioritize cash preservation, must pause for multiple periods after consecutive losses\n\n")
 	case "scalping":
@@ -1019,25 +1184,17 @@ func (e *StrategyEngine) BuildSystemPrompt(accountEquity float64, variant string
 	sb.WriteString("## AI GUIDED (Recommended, you should follow):\n")
 	sb.WriteString(fmt.Sprintf("- Trading Leverage: Altcoins max %dx | BTC/ETH max %dx\n",
 		riskControl.AltcoinMaxLeverage, riskControl.BTCETHMaxLeverage))
-	sb.WriteString(fmt.Sprintf("- Risk-Reward Ratio: ≥1:%.1f (take_profit / stop_loss)\n", riskControl.MinRiskRewardRatio))
-	sb.WriteString(fmt.Sprintf("- Min Confidence: ≥%d to open position\n\n", riskControl.MinConfidence))
+	sb.WriteString("- Stops/targets are handled by backend; AI does not output sl/tp and must not block entries due to missing sl/tp.\n")
+	sb.WriteString(fmt.Sprintf("- Min Confidence: >=%.2f to open position\n\n", minConfidenceNorm))
 
 	// Position sizing guidance
 	sb.WriteString("## Position Sizing Guidance\n")
-	sb.WriteString("`position_size_usd` is the **position notional value** in USDT (the full position value).\n")
-	sb.WriteString("Do **NOT** multiply `position_size_usd` by leverage.\n")
-	sb.WriteString("Formula:\n")
-	sb.WriteString("- `max_position_size_usd = account_equity × position_value_ratio`\n")
-	sb.WriteString("- `margin_used = position_size_usd / leverage`\n")
-	sb.WriteString("Calculate `position_size_usd` based on your confidence and the Position Value Limits above:\n")
-	sb.WriteString("- High confidence (≥85): Use 80-100%% of max position value limit\n")
-	sb.WriteString("- Medium confidence (70-84): Use 50-80%% of max position value limit\n")
-	sb.WriteString("- Low confidence (60-69): Use 30-50%% of max position value limit\n")
-	sb.WriteString(fmt.Sprintf("- Altcoin example: equity %.0f, altcoin ratio %.1fx → max position_size_usd is %.0f USDT (regardless of leverage)\n",
-		accountEquity, altcoinPosValueRatio, accountEquity*altcoinPosValueRatio))
-	sb.WriteString(fmt.Sprintf("- Example: With equity %.0f and BTC/ETH ratio %.1fx, max is %.0f USDT\n",
-		accountEquity, btcEthPosValueRatio, accountEquity*btcEthPosValueRatio))
-	sb.WriteString("- **DO NOT** just use available_balance as position_size_usd. Use the Position Value Limits!\n\n")
+	sb.WriteString("`size_pct` is the fraction of `account.equity` used as position notional.\n")
+	sb.WriteString("`position_size_usd = account.equity * size_pct`\n")
+	sb.WriteString("Constraints:\n")
+	sb.WriteString("- `0 < size_pct <= pol.size_cap`\n")
+	sb.WriteString("- Must satisfy backend min position size: `position_size_usd >= 12` -> `size_pct >= 12 / account.equity`\n")
+	sb.WriteString("- Leverage does not change notional; it only changes margin: `margin_used = position_size_usd / leverage`\n\n")
 
 	// 4. Trading frequency (editable)
 	if promptSections.TradingFrequency != "" {
@@ -1056,12 +1213,12 @@ func (e *StrategyEngine) BuildSystemPrompt(accountEquity float64, variant string
 		sb.WriteString(promptSections.EntryStandards)
 		sb.WriteString("\n\nYou have the following indicator data:\n")
 		e.writeAvailableIndicators(&sb)
-		sb.WriteString(fmt.Sprintf("\n**Confidence ≥ %d** required to open positions.\n\n", riskControl.MinConfidence))
+		sb.WriteString(fmt.Sprintf("\n**Confidence >= %.2f** required to open positions.\n\n", minConfidenceNorm))
 	} else {
 		sb.WriteString("# 🎯 Entry Standards (Strict)\n\n")
 		sb.WriteString("Only open positions when multiple signals resonate. You have:\n")
 		e.writeAvailableIndicators(&sb)
-		sb.WriteString(fmt.Sprintf("\nFeel free to use any effective analysis method, but **confidence ≥ %d** required to open positions; avoid low-quality behaviors such as single indicators, contradictory signals, sideways consolidation, reopening immediately after closing, etc.\n\n", riskControl.MinConfidence))
+		sb.WriteString(fmt.Sprintf("\nFeel free to use any effective analysis method, but **confidence >= %.2f** required to open positions; avoid low-quality behaviors such as single indicators, contradictory signals, sideways consolidation, reopening immediately after closing, etc.\n\n", minConfidenceNorm))
 	}
 
 	// 6. Decision process (editable)
@@ -1072,32 +1229,46 @@ func (e *StrategyEngine) BuildSystemPrompt(accountEquity float64, variant string
 		sb.WriteString("# 📋 Decision Process\n\n")
 		sb.WriteString("1. Check positions → Should we take profit/stop-loss\n")
 		sb.WriteString("2. Scan candidate coins + multi-timeframe → Are there strong signals\n")
-		sb.WriteString("3. Write chain of thought first, then output structured JSON\n\n")
+		sb.WriteString("3. Output structured JSON only\n\n")
 	}
+	// Always append deterministic entry logic, even when custom prompt sections are configured.
+	sb.WriteString("Treat candidate.score and candidate.confidence as precomputed aggregate signals.\n")
+	sb.WriteString("Do not invent additional veto rules beyond the hard constraints and explicit policy thresholds.\n\n")
+	sb.WriteString("Follow `pol.entry_rule` exactly.\n\n")
+	sb.WriteString("Eligibility for ENTER (when positions allow):\n")
+	sb.WriteString("- `candidate.score >= pol.min_score`\n")
+	sb.WriteString("- `candidate.confidence >= pol.min_confidence` (if present; else ignore)\n")
+	sb.WriteString("- `candidate.qos.stale_s <= req.max_stale_s`\n")
+	sb.WriteString("- required fields present per `req.*`\n")
+	sb.WriteString("- if `pol.obey_side_bias == true`, then `side == candidate.side_bias`\n\n")
+	sb.WriteString("Selection:\n")
+	sb.WriteString("- choose the single best eligible candidate by highest score\n")
+	sb.WriteString("- tie-break by higher confidence, then lower stale_s\n\n")
+	sb.WriteString("If at least one eligible candidate exists and max_new_positions allows it, output exactly one ENTER decision.\n")
+	sb.WriteString("Otherwise output `decisions: []`.\n\n")
 
 	// 7. Output format
 	sb.WriteString("# Output Format (Strictly Follow)\n\n")
-	sb.WriteString("**Must use XML tags <reasoning> and <decision> to separate chain of thought and decision JSON, avoiding parsing errors**\n\n")
-	sb.WriteString("## Format Requirements\n\n")
-	sb.WriteString("<reasoning>\n")
-	sb.WriteString("Your chain of thought analysis...\n")
-	sb.WriteString("- Briefly analyze your thinking process \n")
-	sb.WriteString("</reasoning>\n\n")
-	sb.WriteString("<decision>\n")
-	sb.WriteString("Step 2: JSON decision array\n\n")
-	sb.WriteString("```json\n[\n")
-	// Use the actual configured position value ratio for BTC/ETH in the example
-	examplePositionSize := accountEquity * btcEthPosValueRatio
-	sb.WriteString(fmt.Sprintf("  {\"symbol\": \"BTCUSDT\", \"action\": \"open_short\", \"leverage\": %d, \"position_size_usd\": %.0f, \"stop_loss\": 97000, \"take_profit\": 91000, \"confidence\": 85, \"risk_usd\": 300},\n",
-		riskControl.BTCETHMaxLeverage, examplePositionSize))
-	sb.WriteString("  {\"symbol\": \"ETHUSDT\", \"action\": \"close_long\"}\n")
-	sb.WriteString("]\n```\n")
-	sb.WriteString("</decision>\n\n")
-	sb.WriteString("## Field Description\n\n")
-	sb.WriteString("- `action`: open_long | open_short | close_long | close_short | hold | wait\n")
-	sb.WriteString(fmt.Sprintf("- `confidence`: 0-100 (opening recommended ≥ %d)\n", riskControl.MinConfidence))
-	sb.WriteString("- Required when opening: leverage, position_size_usd, stop_loss, take_profit, confidence, risk_usd\n")
-	sb.WriteString("- **IMPORTANT**: All numeric values must be calculated numbers, NOT formulas/expressions (e.g., use `27.76` not `3000 * 0.01`)\n\n")
+	sb.WriteString("You are TradeDecisionFn.\n")
+	sb.WriteString("Return JSON only. No prose, no XML tags, no markdown.\n")
+	sb.WriteString("Use only fields present in the input snapshot.\n")
+	sb.WriteString("Evaluate eligibility per-candidate. Ignore ineligible candidates. Return decisions: [] only if no eligible candidate exists.\n")
+	sb.WriteString("Respect output_contract constraints.\n\n")
+	sb.WriteString("Required JSON shape:\n")
+	sb.WriteString("`{\"ts_utc\":\"...\",\"cycle\":123,\"decisions\":[...]}`\n\n")
+	sb.WriteString("Decision fields must match exactly `input_snapshot.output_contract.decision_fields`.\n")
+	sb.WriteString("Do not output any extra keys.\n")
+	sb.WriteString("If a field is not listed in `output_contract.decision_fields`, it must not appear in output.\n\n")
+	sb.WriteString("Example:\n")
+	sb.WriteString("```json\n")
+	sb.WriteString("{\n")
+	sb.WriteString("  \"ts_utc\": \"2026-02-22T17:38:26Z\",\n")
+	sb.WriteString("  \"cycle\": 5,\n")
+	sb.WriteString("  \"decisions\": [\n")
+	sb.WriteString("    {\"sym\":\"BTCUSDT\",\"action\":\"ENTER\",\"side\":\"short\",\"size_pct\":0.2,\"leverage\":3,\"confidence\":0.82,\"reason_codes\":[\"score_ok\",\"stale_ok\",\"side_bias_ok\"]}\n")
+	sb.WriteString("  ]\n")
+	sb.WriteString("}\n")
+	sb.WriteString("```\n\n")
 
 	// 8. Custom Prompt
 	if e.config.CustomPrompt != "" {
@@ -1107,7 +1278,14 @@ func (e *StrategyEngine) BuildSystemPrompt(accountEquity float64, variant string
 		sb.WriteString("Note: The above personalized strategy is a supplement to the basic rules and cannot violate the basic risk control principles.\n")
 	}
 
-	return sb.String()
+	return sanitizeSystemPrompt(sb.String())
+}
+
+func sanitizeSystemPrompt(prompt string) string {
+	if strings.TrimSpace(prompt) == "" {
+		return prompt
+	}
+	return reChainOfThoughtFirstLine.ReplaceAllString(prompt, "")
 }
 
 func (e *StrategyEngine) writeAvailableIndicators(sb *strings.Builder) {
@@ -1872,9 +2050,15 @@ func extractCoTTrace(response string) string {
 		return strings.TrimSpace(response[:decisionIdx])
 	}
 
-	jsonStart := strings.Index(response, "[")
+	jsonStart := -1
+	if arrStart := strings.Index(response, "["); arrStart >= 0 {
+		jsonStart = arrStart
+	}
+	if objStart := strings.Index(response, "{"); objStart >= 0 && (jsonStart == -1 || objStart < jsonStart) {
+		jsonStart = objStart
+	}
 	if jsonStart > 0 {
-		logger.Infof("⚠️  Extracted reasoning chain using old format ([ character separator)")
+		logger.Infof("⚠️  Extracted reasoning chain using JSON separator")
 		return strings.TrimSpace(response[:jsonStart])
 	}
 
@@ -1899,19 +2083,22 @@ func extractDecisions(response string) ([]Decision, error) {
 
 	if m := reJSONFence.FindStringSubmatch(jsonPart); m != nil && len(m) > 1 {
 		jsonContent := strings.TrimSpace(m[1])
+		if extracted := extractFirstJSONBlob(jsonContent); extracted != "" {
+			jsonContent = extracted
+		}
 		jsonContent = compactArrayOpen(jsonContent)
 		jsonContent = fixMissingQuotes(jsonContent)
 		if err := validateJSONFormat(jsonContent); err != nil {
 			return nil, fmt.Errorf("JSON format validation failed: %w\nJSON content: %s\nFull response:\n%s", err, jsonContent, response)
 		}
-		var decisions []Decision
-		if err := json.Unmarshal([]byte(jsonContent), &decisions); err != nil {
+		decisions, err := parseDecisionPayload(jsonContent)
+		if err != nil {
 			return nil, fmt.Errorf("JSON parsing failed: %w\nJSON content: %s", err, jsonContent)
 		}
 		return decisions, nil
 	}
 
-	jsonContent := strings.TrimSpace(reJSONArray.FindString(jsonPart))
+	jsonContent := extractFirstJSONBlob(jsonPart)
 	if jsonContent == "" {
 		logger.Infof("⚠️  [SafeFallback] AI didn't output JSON decision, entering safe wait mode")
 
@@ -1936,12 +2123,152 @@ func extractDecisions(response string) ([]Decision, error) {
 		return nil, fmt.Errorf("JSON format validation failed: %w\nJSON content: %s\nFull response:\n%s", err, jsonContent, response)
 	}
 
-	var decisions []Decision
-	if err := json.Unmarshal([]byte(jsonContent), &decisions); err != nil {
+	decisions, err := parseDecisionPayload(jsonContent)
+	if err != nil {
 		return nil, fmt.Errorf("JSON parsing failed: %w\nJSON content: %s", err, jsonContent)
 	}
 
 	return decisions, nil
+}
+
+func parseDecisionPayload(jsonContent string) ([]Decision, error) {
+	var decisions []Decision
+	if err := json.Unmarshal([]byte(jsonContent), &decisions); err == nil {
+		return decisions, nil
+	}
+
+	var envelope struct {
+		Timestamp string     `json:"ts_utc"`
+		Cycle     int        `json:"cycle"`
+		Decisions []Decision `json:"decisions"`
+	}
+	if err := json.Unmarshal([]byte(jsonContent), &envelope); err == nil {
+		if envelope.Decisions != nil {
+			return envelope.Decisions, nil
+		}
+	}
+
+	var single Decision
+	if err := json.Unmarshal([]byte(jsonContent), &single); err == nil {
+		if single.Action != "" {
+			return []Decision{single}, nil
+		}
+	}
+
+	return nil, fmt.Errorf("unsupported decision payload shape")
+}
+
+func extractFirstJSONBlob(s string) string {
+	arrayStart := strings.Index(s, "[")
+	objectStart := strings.Index(s, "{")
+
+	start := -1
+	kind := byte(0)
+	if arrayStart >= 0 {
+		start = arrayStart
+		kind = '['
+	}
+	if objectStart >= 0 && (start == -1 || objectStart < start) {
+		start = objectStart
+		kind = '{'
+	}
+	if start < 0 {
+		return ""
+	}
+
+	switch kind {
+	case '[':
+		end := findMatchingBracket(s, start)
+		if end >= start {
+			return strings.TrimSpace(s[start : end+1])
+		}
+	case '{':
+		end := findMatchingBrace(s, start)
+		if end >= start {
+			return strings.TrimSpace(s[start : end+1])
+		}
+	}
+	return ""
+}
+
+func findMatchingBracket(s string, start int) int {
+	if start >= len(s) || s[start] != '[' {
+		return -1
+	}
+	depth := 0
+	inString := false
+	escaped := false
+	for i := start; i < len(s); i++ {
+		ch := s[i]
+		if inString {
+			if escaped {
+				escaped = false
+				continue
+			}
+			if ch == '\\' {
+				escaped = true
+				continue
+			}
+			if ch == '"' {
+				inString = false
+			}
+			continue
+		}
+		if ch == '"' {
+			inString = true
+			continue
+		}
+		switch ch {
+		case '[':
+			depth++
+		case ']':
+			depth--
+			if depth == 0 {
+				return i
+			}
+		}
+	}
+	return -1
+}
+
+func findMatchingBrace(s string, start int) int {
+	if start >= len(s) || s[start] != '{' {
+		return -1
+	}
+	depth := 0
+	inString := false
+	escaped := false
+	for i := start; i < len(s); i++ {
+		ch := s[i]
+		if inString {
+			if escaped {
+				escaped = false
+				continue
+			}
+			if ch == '\\' {
+				escaped = true
+				continue
+			}
+			if ch == '"' {
+				inString = false
+			}
+			continue
+		}
+		if ch == '"' {
+			inString = true
+			continue
+		}
+		switch ch {
+		case '{':
+			depth++
+		case '}':
+			depth--
+			if depth == 0 {
+				return i
+			}
+		}
+	}
+	return -1
 }
 
 func fixMissingQuotes(jsonStr string) string {
@@ -1976,11 +2303,11 @@ func validateJSONFormat(jsonStr string) error {
 		return nil
 	}
 
-	if !reArrayHead.MatchString(trimmed) {
+	if !(reArrayHead.MatchString(trimmed) || reObjectHead.MatchString(trimmed)) {
 		if strings.HasPrefix(trimmed, "[") && !strings.Contains(trimmed[:min(20, len(trimmed))], "{") {
 			return fmt.Errorf("not a valid decision array (must contain objects {}), actual content: %s", trimmed[:min(50, len(trimmed))])
 		}
-		return fmt.Errorf("JSON must start with [{ (whitespace allowed), actual: %s", trimmed[:min(20, len(trimmed))])
+		return fmt.Errorf("JSON must start with [{ or {, actual: %s", trimmed[:min(20, len(trimmed))])
 	}
 
 	if strings.Contains(jsonStr, "~") {
@@ -2052,6 +2379,14 @@ func validateDecision(d *Decision, accountEquity float64, btcEthLeverage, altcoi
 			maxPositionValue = accountEquity * posRatio
 		}
 
+		if d.PositionSizeUSD < 0 {
+			pct := -d.PositionSizeUSD
+			if pct <= 0 || pct > 1 {
+				return fmt.Errorf("size_pct must be in (0,1]: %.4f", pct)
+			}
+			d.PositionSizeUSD = accountEquity * pct
+		}
+
 		if d.Leverage <= 0 {
 			return fmt.Errorf("leverage must be greater than 0: %d", d.Leverage)
 		}
@@ -2084,45 +2419,49 @@ func validateDecision(d *Decision, accountEquity float64, btcEthLeverage, altcoi
 			}
 		}
 
-		if d.StopLoss <= 0 || d.TakeProfit <= 0 {
-			return fmt.Errorf("stop loss and take profit must be greater than 0")
+		hasSL := d.StopLoss > 0
+		hasTP := d.TakeProfit > 0
+		if hasSL != hasTP {
+			return fmt.Errorf("stop_loss and take_profit must both be provided or both omitted")
 		}
-
-		if d.Action == "open_long" {
-			if d.StopLoss >= d.TakeProfit {
-				return fmt.Errorf("for long positions, stop loss price must be less than take profit price")
+		// SL/TP are optional for contract-style ENTER decisions. If provided, enforce consistency + RR.
+		if hasSL && hasTP {
+			if d.Action == "open_long" {
+				if d.StopLoss >= d.TakeProfit {
+					return fmt.Errorf("for long positions, stop loss price must be less than take profit price")
+				}
+			} else {
+				if d.StopLoss <= d.TakeProfit {
+					return fmt.Errorf("for short positions, stop loss price must be greater than take profit price")
+				}
 			}
-		} else {
-			if d.StopLoss <= d.TakeProfit {
-				return fmt.Errorf("for short positions, stop loss price must be greater than take profit price")
-			}
-		}
 
-		var entryPrice float64
-		if d.Action == "open_long" {
-			entryPrice = d.StopLoss + (d.TakeProfit-d.StopLoss)*0.2
-		} else {
-			entryPrice = d.StopLoss - (d.StopLoss-d.TakeProfit)*0.2
-		}
-
-		var riskPercent, rewardPercent, riskRewardRatio float64
-		if d.Action == "open_long" {
-			riskPercent = (entryPrice - d.StopLoss) / entryPrice * 100
-			rewardPercent = (d.TakeProfit - entryPrice) / entryPrice * 100
-			if riskPercent > 0 {
-				riskRewardRatio = rewardPercent / riskPercent
+			var entryPrice float64
+			if d.Action == "open_long" {
+				entryPrice = d.StopLoss + (d.TakeProfit-d.StopLoss)*0.2
+			} else {
+				entryPrice = d.StopLoss - (d.StopLoss-d.TakeProfit)*0.2
 			}
-		} else {
-			riskPercent = (d.StopLoss - entryPrice) / entryPrice * 100
-			rewardPercent = (entryPrice - d.TakeProfit) / entryPrice * 100
-			if riskPercent > 0 {
-				riskRewardRatio = rewardPercent / riskPercent
-			}
-		}
 
-		if riskRewardRatio < 3.0 {
-			return fmt.Errorf("risk/reward ratio too low (%.2f:1), must be ≥3.0:1 [risk: %.2f%% reward: %.2f%%] [stop loss: %.2f take profit: %.2f]",
-				riskRewardRatio, riskPercent, rewardPercent, d.StopLoss, d.TakeProfit)
+			var riskPercent, rewardPercent, riskRewardRatio float64
+			if d.Action == "open_long" {
+				riskPercent = (entryPrice - d.StopLoss) / entryPrice * 100
+				rewardPercent = (d.TakeProfit - entryPrice) / entryPrice * 100
+				if riskPercent > 0 {
+					riskRewardRatio = rewardPercent / riskPercent
+				}
+			} else {
+				riskPercent = (d.StopLoss - entryPrice) / entryPrice * 100
+				rewardPercent = (entryPrice - d.TakeProfit) / entryPrice * 100
+				if riskPercent > 0 {
+					riskRewardRatio = rewardPercent / riskPercent
+				}
+			}
+
+			if riskRewardRatio < 3.0 {
+				return fmt.Errorf("risk/reward ratio too low (%.2f:1), must be ≥3.0:1 [risk: %.2f%% reward: %.2f%%] [stop loss: %.2f take profit: %.2f]",
+					riskRewardRatio, riskPercent, rewardPercent, d.StopLoss, d.TakeProfit)
+			}
 		}
 	}
 

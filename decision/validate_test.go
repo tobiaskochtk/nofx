@@ -219,63 +219,21 @@ func TestUpdateTakeProfitValidation(t *testing.T) {
 	}
 }
 
-// TestPartialCloseValidation 测试 partial_close 动作的字段验证
-func TestPartialCloseValidation(t *testing.T) {
-	tests := []struct {
-		name      string
-		decision  Decision
-		wantError bool
-		errorMsg  string
-	}{
-		{
-			name: "正确使用close_percentage字段",
-			decision: Decision{
-				Symbol:          "ETHUSDT",
-				Action:          "partial_close",
-				ClosePercentage: 50.0,
-				Reasoning:       "锁定一半利润",
-			},
-			wantError: false,
-		},
-		{
-			name: "close_percentage为0应该报错",
-			decision: Decision{
-				Symbol:          "ETHUSDT",
-				Action:          "partial_close",
-				ClosePercentage: 0,
-				Reasoning:       "测试错误情况",
-			},
-			wantError: true,
-			errorMsg:  "平仓百分比必须在0-100之间",
-		},
-		{
-			name: "close_percentage超过100应该报错",
-			decision: Decision{
-				Symbol:          "ETHUSDT",
-				Action:          "partial_close",
-				ClosePercentage: 150,
-				Reasoning:       "测试错误情况",
-			},
-			wantError: true,
-			errorMsg:  "平仓百分比必须在0-100之间",
-		},
+// TestPartialCloseDisabled 验证已禁用 partial_close（禁止部分平仓）
+func TestPartialCloseDisabled(t *testing.T) {
+	decision := Decision{
+		Symbol:          "ETHUSDT",
+		Action:          "partial_close",
+		ClosePercentage: 50.0,
+		Reasoning:       "锁定一半利润",
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			err := validateDecision(&tt.decision, 1000.0, 10, 5)
-
-			if (err != nil) != tt.wantError {
-				t.Errorf("validateDecision() error = %v, wantError %v", err, tt.wantError)
-				return
-			}
-
-			if tt.wantError && err != nil {
-				if tt.errorMsg != "" && !contains(err.Error(), tt.errorMsg) {
-					t.Errorf("错误信息不匹配: got %q, want to contain %q", err.Error(), tt.errorMsg)
-				}
-			}
-		})
+	err := validateDecision(&decision, 1000.0, 10, 5)
+	if err == nil {
+		t.Fatalf("expected partial_close to be rejected")
+	}
+	if !contains(err.Error(), "无效的action") {
+		t.Fatalf("unexpected error: %v", err)
 	}
 }
 

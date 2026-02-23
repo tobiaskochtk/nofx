@@ -15,7 +15,6 @@ func TestBuildSystemPrompt_ContainsAllValidActions(t *testing.T) {
 		"close_short",
 		"update_stop_loss",
 		"update_take_profit",
-		"partial_close",
 		"hold",
 		"wait",
 	}
@@ -39,7 +38,6 @@ func TestBuildSystemPrompt_ActionListCompleteness(t *testing.T) {
 	missingActions := []string{
 		"update_stop_loss",
 		"update_take_profit",
-		"partial_close",
 	}
 
 	for _, action := range missingActions {
@@ -55,7 +53,7 @@ func TestBuildSystemPrompt_NoOpenPositions_HidesPositionManagementActions(t *tes
 	if strings.Contains(prompt, "`action`: open_long | open_short | close_long | close_short | update_stop_loss") {
 		t.Errorf("No-position prompt should not expose position-management actions in action list")
 	}
-	if !strings.Contains(prompt, "当前无持仓时，不应输出 update_stop_loss / update_take_profit / partial_close") {
+	if !strings.Contains(prompt, "当前无持仓时，不应输出 update_stop_loss / update_take_profit") {
 		t.Errorf("No-position prompt should explicitly prohibit position-management actions")
 	}
 	if strings.Contains(prompt, "{\"symbol\": \"SOLUSDT\", \"action\": \"update_stop_loss\"") {

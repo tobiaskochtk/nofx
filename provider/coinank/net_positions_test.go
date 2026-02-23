@@ -1,3 +1,6 @@
+//go:build coinank_integration
+// +build coinank_integration
+
 package coinank
 
 import (
@@ -13,6 +16,9 @@ func TestNetPositions(t *testing.T) {
 	resp, err := client.NetPositions(context.TODO(), coinank_enum.Binance, "BTCUSDT", coinank_enum.Hour1, time.Now().UnixMilli(), 10)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if len(resp) == 0 {
+		t.Skip("empty NetPositions response")
 	}
 	if resp[0].Begin <= 0 {
 		t.Errorf("begin timestamp error")

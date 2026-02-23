@@ -1,3 +1,6 @@
+//go:build coinank_integration
+// +build coinank_integration
+
 package coinank
 
 import (
@@ -26,6 +29,9 @@ func TestOiRank(t *testing.T) {
 	if err != nil {
 		t.Error(err)
 	}
+	if len(resp) == 0 {
+		t.Skip("empty OiRank response")
+	}
 	if resp[0].BaseCoin != "BTC" {
 		t.Error("oi first not BTC")
 	}
@@ -41,6 +47,9 @@ func TestLongShortRank(t *testing.T) {
 	resp, err := client.LongShortRank(context.TODO(), coinank_enum.LongShortRatio, coinank_enum.Desc, 1, 10)
 	if err != nil {
 		t.Error(err)
+	}
+	if len(resp) == 0 {
+		t.Skip("empty LongShortRank response")
 	}
 	if resp[0].BaseCoin == "" {
 		t.Error("baseCoin is empty")
@@ -58,6 +67,9 @@ func TestLiquidationRank(t *testing.T) {
 	if err != nil {
 		t.Error(err)
 	}
+	if len(resp) == 0 {
+		t.Skip("empty LiquidationRank response")
+	}
 	if resp[0].BaseCoin == "" {
 		t.Error("baseCoin is empty")
 	}
@@ -74,6 +86,9 @@ func TestPriceRank(t *testing.T) {
 	if err != nil {
 		t.Error(err)
 	}
+	if len(resp) == 0 {
+		t.Skip("empty PriceRank response")
+	}
 	if resp[0].BaseCoin == "" {
 		t.Error("baseCoin is empty")
 	}
@@ -89,6 +104,9 @@ func TestVolumeRank(t *testing.T) {
 	resp, err := client.VolumeRank(context.TODO(), coinank_enum.Turnover24h, coinank_enum.Desc, 1, 10)
 	if err != nil {
 		t.Error(err)
+	}
+	if len(resp) == 0 {
+		t.Skip("empty VolumeRank response")
 	}
 	if resp[0].BaseCoin == "" {
 		t.Error("baseCoin is empty")

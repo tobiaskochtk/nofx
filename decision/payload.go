@@ -5,10 +5,8 @@ import (
 	"fmt"
 	"log"
 	"math"
-	"reflect"
 	"sort"
 	"strings"
-	"sync"
 	"time"
 	"unicode/utf8"
 
@@ -17,222 +15,249 @@ import (
 )
 
 const (
-	PayloadSchemaVersion     = "3.1"
-	defaultTopK              = 12 // Increased to support all configured coins (was 8)
+	PayloadSchemaVersion     = "trade_snapshot.v4"
+	defaultTopK              = 12
 	featureCoverageThreshold = 0.95
 	featureSLALimitSeconds   = 30
-	minRankEpsilon           = 0.001
+	requiredMaxStaleSeconds  = 300
+	defaultContextTF         = "15m"
+	defaultContextPriceType  = "mark"
+	minScoreEpsilon          = 0.001
 )
 
-var (
-	bootDict = map[string]string{
-		"ts":           "timestamp ISO-8601 UTC",
-		"acct":         "account",
-		"eq":           "equity",
-		"bal":          "balance",
-		"upnl":         "unrealized_pnl_pct",
-		"marg":         "margin_pct",
-		"pos":          "positions",
-		"sym":          "symbol",
-		"side":         "side",
-		"px":           "last_price",
-		"ent":          "entry_price",
-		"pnl_pct":      "unrealized_profit_loss_pct",
-		"lev":          "leverage",
-		"liq":          "liq_price",
-		"age_min":      "minutes open",
-		"ctx":          "context fields",
-		"atr3":         "ATR_3m_len14",
-		"ema20":        "EMA20",
-		"macd":         "MACD",
-		"rsi7":         "RSI7",
-		"oi":           "open_interest_last",
-		"fund_bps":     "funding in bps",
-		"basis_pct":    "basis in %",
-		"f":            "features",
-		"f4":           "microstructure_cvd",
-		"f5":           "liq_heatmap",
-		"f6":           "avwap",
-		"f7":           "vol_regime",
-		"qos":          "quality_of_signals",
-		"cov":          "coverage_0to1",
-		"age_s":        "seconds_since_latest_sample",
-		"c15":          "15m_confirm",
-		"rank":         "server-side rank score",
-		"pol":          "policy",
-		"topk":         "top_k candidates",
-		"conf":         "confidence_0to1",
-		"sharpe_ratio": "Sharpe Ratio (risk-adjusted return)",
-	}
-	bootOnce sync.Once
-)
-
-type bootMessage struct {
-	Version string            `json:"ver"`
-	Dict    map[string]string `json:"dict"`
+var requiredCandidateFields = []string{
+	"sym",
+	"px_mark",
+	"side_bias",
+	"score",
+	"confidence",
+	"ctx",
+	"qos",
 }
 
-type feedEnvelope struct {
-	Boot *bootMessage `json:"boot,omitempty"`
-	*livePayload
+var requiredCandidateContextFields = []string{
+	"tf",
+	"px_type",
+	"ema20",
+	"macd",
+	"rsi7",
+	"oi",
+	"oi_d1h_pct",
+	"fund_bps",
+	"basis_pct",
+}
+
+var nullableOKFields = []string{
+	"candidates[].spread_bps",
+	"candidates[].liq_score",
+	"candidates[].feat.orderflow",
+	"candidates[].feat.risk",
+	"candidates[].feat.levels",
+	"candidates[].feat.volatility",
 }
 
 type livePayload struct {
-	Version    string             `json:"ver"`
-	Timestamp  string             `json:"ts"`
-	Account    accountPayload     `json:"acct"`
-	Positions  []positionPayload  `json:"pos,omitempty"`
-	Candidates []candidatePayload `json:"cands,omitempty"`
-	Policy     policyPayload      `json:"pol"`
-	TopK       int                `json:"topk"`
-	Meta       *metaPayload       `json:"meta,omitempty"`
+	Schema         string                `json:"schema"`
+	TimestampUTC   string                `json:"ts_utc"`
+	Run            runPayload            `json:"run"`
+	Account        accountPayload        `json:"account"`
+	Defs           defsPayload           `json:"defs"`
+	Enums          enumsPayload          `json:"enums"`
+	Req            reqPayload            `json:"req"`
+	Policy         policyPayload         `json:"pol"`
+	Positions      []positionPayload     `json:"positions"`
+	Candidates     []candidatePayload    `json:"candidates"`
+	OutputContract outputContractPayload `json:"output_contract"`
+}
+
+type runPayload struct {
+	Cycle    int `json:"cycle"`
+	RuntimeS int `json:"runtime_s"`
 }
 
 type accountPayload struct {
-	Equity           float64 `json:"eq"`
-	Balance          float64 `json:"bal"`
-	UnrealizedPnLPct float64 `json:"upnl"`
-	MarginPct        float64 `json:"marg"`
+	Equity     float64 `json:"equity"`
+	Balance    float64 `json:"balance"`
+	UPnL       float64 `json:"upnl"`
+	MarginUsed float64 `json:"margin_used"`
 }
 
-type positionPayload struct {
-	Symbol    string          `json:"sym"`
-	Side      string          `json:"side"`
-	Entry     float64         `json:"ent"`
-	Price     float64         `json:"px"`
-	PnLPct    *float64        `json:"pnl_pct,omitempty"` // Unrealized profit/loss percentage for dynamic trailing stop
-	Leverage  int             `json:"lev"`
-	LiqPrice  *float64        `json:"liq,omitempty"`
-	AgeMin    *int            `json:"age_min,omitempty"`
-	Context   *contextBlock   `json:"ctx,omitempty"`
-	Features  *featureBlock   `json:"f,omitempty"`
-	Confirm15 *confirmation15 `json:"c15,omitempty"`
+type defsPayload struct {
+	CtxTF      string `json:"ctx_tf"`
+	PxType     string `json:"px_type"`
+	StaleS     string `json:"stale_s"`
+	FundBps    string `json:"fund_bps"`
+	BasisPct   string `json:"basis_pct"`
+	OID1hPct   string `json:"oi_d1h_pct"`
+	MACD       string `json:"macd"`
+	RSI7       string `json:"rsi7"`
+	Score      string `json:"score"`
+	Confidence string `json:"confidence"`
 }
 
-type candidatePayload struct {
-	Symbol   string        `json:"sym"`
-	Price    float64       `json:"px"`
-	Rank     float64       `json:"rank"`
-	Context  *contextBlock `json:"ctx,omitempty"`
-	Features *featureBlock `json:"f,omitempty"`
+type enumsPayload struct {
+	OIDiv []string `json:"oi_div"`
 }
 
-type contextBlock struct {
-	EMA20      *float64 `json:"ema20,omitempty"`
-	MACD       *float64 `json:"macd,omitempty"`
-	RSI7       *float64 `json:"rsi7,omitempty"`
-	ATR3       *float64 `json:"atr3,omitempty"`
-	OI         *float64 `json:"oi,omitempty"`
-	FundingBps *float64 `json:"fund_bps,omitempty"`
-	BasisPct   *float64 `json:"basis_pct,omitempty"`
-}
-
-type featureBlock struct {
-	F4 *feature4Payload `json:"f4,omitempty"`
-	F5 *feature5Payload `json:"f5,omitempty"`
-	F6 *feature6Payload `json:"f6,omitempty"`
-	F7 *feature7Payload `json:"f7,omitempty"`
-}
-
-type featureQoS struct {
-	Coverage  float64 `json:"cov"`
-	AgeSecond int     `json:"age_s"`
-}
-
-type feature4Payload struct {
-	ShortCVD   *float64        `json:"cvd_s,omitempty"`
-	LongCVD    *float64        `json:"cvd_l,omitempty"`
-	ShortImb   *float64        `json:"imb_s,omitempty"`
-	LongImb    *float64        `json:"imb_l,omitempty"`
-	TBR        *float64        `json:"tbr,omitempty"`
-	Slopes     *feature4Slopes `json:"slopes,omitempty"`
-	Div        *feature4Div    `json:"div,omitempty"`
-	Confidence *float64        `json:"conf,omitempty"`
-	QoS        featureQoS      `json:"qos"`
-}
-
-type feature4Slopes struct {
-	PriceShort *float64 `json:"p20,omitempty"`
-	CVDSlope   *float64 `json:"cvd20,omitempty"`
-}
-
-type feature4Div struct {
-	BearShort *int `json:"bear_s,omitempty"`
-	BearMid   *int `json:"bear_m,omitempty"`
-}
-
-type feature5Payload struct {
-	Dist       *distancePayload `json:"dist,omitempty"`
-	Prefer     string           `json:"prefer,omitempty"`
-	Risk       *liqRiskPayload  `json:"risk,omitempty"`
-	Confidence *float64         `json:"conf,omitempty"`
-	QoS        featureQoS       `json:"qos"`
-}
-
-type distancePayload struct {
-	UpATR   *float64 `json:"up_atr,omitempty"`
-	DownATR *float64 `json:"dn_atr,omitempty"`
-}
-
-type liqRiskPayload struct {
-	Up   *int `json:"up,omitempty"`
-	Down *int `json:"dn,omitempty"`
-}
-
-type feature6Payload struct {
-	Near       *nearbyLevels `json:"near,omitempty"`
-	Bias       string        `json:"bias,omitempty"`
-	ReclaimUp  *int          `json:"reclaim_up,omitempty"`
-	RejectDown *int          `json:"reject_dn,omitempty"`
-	Confidence *float64      `json:"conf,omitempty"`
-	QoS        featureQoS    `json:"qos"`
-}
-
-type nearbyLevels struct {
-	Up   *nearLevel `json:"up,omitempty"`
-	Down *nearLevel `json:"dn,omitempty"`
-}
-
-type nearLevel struct {
-	Name    string   `json:"name,omitempty"`
-	DistATR *float64 `json:"dist_atr,omitempty"`
-}
-
-type feature7Payload struct {
-	BBW        *float64   `json:"bbw,omitempty"`
-	Squeeze    *int       `json:"sq,omitempty"`
-	RVRatio    *float64   `json:"rv,omitempty"`
-	Regime     string     `json:"reg,omitempty"`
-	Confidence *float64   `json:"conf,omitempty"`
-	QoS        featureQoS `json:"qos"`
-}
-
-type confirmation15 struct {
-	F4 *confirmationF4 `json:"f4,omitempty"`
-	F5 *confirmationF5 `json:"f5,omitempty"`
-}
-
-type confirmationF4 struct {
-	Confidence *float64 `json:"conf,omitempty"`
-}
-
-type confirmationF5 struct {
-	Dist       *distancePayload `json:"dist,omitempty"`
-	Prefer     string           `json:"prefer,omitempty"`
-	Confidence *float64         `json:"conf,omitempty"`
+type reqPayload struct {
+	RequiredTF                  string   `json:"required_tf"`
+	MaxStaleS                   int      `json:"max_stale_s"`
+	RequiredCandidateFields     []string `json:"required_candidate_fields"`
+	RequiredCandidateCtxFields  []string `json:"required_candidate_ctx_fields"`
+	NullableOKAny               []string `json:"nullable_ok_any"`
 }
 
 type policyPayload struct {
-	SizeCap    float64 `json:"size_cap"`
-	HoldOnNull bool    `json:"hold_on_null"`
-	Need15m    bool    `json:"need_15m"`
-	MinConf    float64 `json:"min_conf"`
-	SLASecs    int     `json:"sla_s,omitempty"`
+	AllowedActions       []string `json:"allowed_actions"`
+	AllowedSides         []string `json:"allowed_sides"`
+	SizeCap              float64  `json:"size_cap"`
+	MaxLeverage          int      `json:"max_leverage"`
+	MaxNewPositions      int      `json:"max_new_positions"`
+	ManagePositionsFirst bool     `json:"manage_positions_first"`
+	ObeySideBias         bool     `json:"obey_side_bias"`
+	ExitOnlyIfInPos      bool     `json:"exit_only_if_in_positions"`
+	EntryRule            entryRulePayload `json:"entry_rule"`
+	MinScore             float64  `json:"min_score"`
 }
 
-type metaPayload struct {
-	Summary     string   `json:"summary"`
-	SharpeRatio *float64 `json:"sharpe_ratio,omitempty"` // Sharpe Ratio for AI decision making
+type entryRulePayload struct {
+	MustEnterIfAnyEligible bool     `json:"must_enter_if_any_eligible"`
+	SelectBestBy           []string `json:"select_best_by"`
+}
+
+type outputContractPayload struct {
+	Format         string                   `json:"format"`
+	DecisionMode   string                   `json:"decision_mode"`
+	AllowedActions []string                 `json:"allowed_actions"`
+	Fields         []string                 `json:"fields"`
+	FieldSources   map[string]string        `json:"field_sources"`
+	DecisionFields []string                 `json:"decision_fields"`
+	Constraints    outputConstraintsPayload `json:"constraints"`
+}
+
+type outputConstraintsPayload struct {
+	SizePctMax                 float64 `json:"size_pct_max"`
+	LeverageMax                int     `json:"leverage_max"`
+	MaxNewPositions            int     `json:"max_new_positions"`
+	SideMustMatchCandidateBias bool    `json:"side_must_match_candidate_bias"`
+	ExitRequiresOpenPosition   bool    `json:"exit_requires_open_position"`
+	DecisionsLenMax            int     `json:"decisions_len_max"`
+	DecisionsLenMin            int     `json:"decisions_len_min"`
+	DecisionsMustBeArray       bool    `json:"decisions_must_be_array"`
+}
+
+type positionPayload struct {
+	Symbol    string         `json:"sym"`
+	Side      string         `json:"side"`
+	EntryPx   float64        `json:"entry_px"`
+	PxMark    float64        `json:"px_mark"`
+	PxLast    *float64       `json:"px_last"`
+	PxIndex   *float64       `json:"px_index"`
+	PnLPct    *float64       `json:"pnl_pct"`
+	Leverage  int            `json:"leverage"`
+	LiqPx     *float64       `json:"liq_px"`
+	AgeMin    *int           `json:"age_min"`
+	SpreadBps *float64       `json:"spread_bps"`
+	LiqScore  *float64       `json:"liq_score"`
+	Context   contextBlock   `json:"ctx"`
+	Features  featurePayload `json:"feat"`
+	QoS       symbolQoS      `json:"qos"`
+}
+
+type candidatePayload struct {
+	Symbol     string         `json:"sym"`
+	PxMark     float64        `json:"px_mark"`
+	PxLast     *float64       `json:"px_last"`
+	PxIndex    *float64       `json:"px_index"`
+	SideBias   string         `json:"side_bias"`
+	Score      float64        `json:"score"`
+	Confidence float64        `json:"confidence"`
+	SpreadBps  *float64       `json:"spread_bps"`
+	LiqScore   *float64       `json:"liq_score"`
+	Context    contextBlock   `json:"ctx"`
+	Features   featurePayload `json:"feat"`
+	QoS        symbolQoS      `json:"qos"`
+}
+
+type contextBlock struct {
+	TF                   string         `json:"tf"`
+	PxType               string         `json:"px_type"`
+	EMA20                *float64       `json:"ema20"`
+	MACD                 *float64       `json:"macd"`
+	RSI7                 *float64       `json:"rsi7"`
+	OI                   *float64       `json:"oi"`
+	OIDelta1hPct         *float64       `json:"oi_d1h_pct"`
+	OIPriceDiv           *string        `json:"oi_div"`
+	OIPriceCorr24h       *float64       `json:"oi_corr"`
+	OIZ7d                *float64       `json:"oi_z"`
+	FundingBps           *float64       `json:"fund_bps"`
+	FundingMedianZ7d     *float64       `json:"fund_z"`
+	FundingDispersionBps *float64       `json:"fund_disp_bps"`
+	BasisPct             *float64       `json:"basis_pct"`
+	BasisZ14d            *float64       `json:"basis_z"`
+	Source               contextSources `json:"src"`
+}
+
+type contextSources struct {
+	OI    string `json:"oi"`
+	Fund  string `json:"fund"`
+	Basis string `json:"basis"`
+}
+
+type featurePayload struct {
+	Orderflow  *orderflowPayload  `json:"orderflow"`
+	Risk       *riskPayload       `json:"risk"`
+	Levels     *levelsPayload     `json:"levels"`
+	Volatility *volatilityPayload `json:"volatility"`
+}
+
+type orderflowPayload struct {
+	CVDShort       *float64 `json:"cvd_short"`
+	CVDLong        *float64 `json:"cvd_long"`
+	ImbalanceShort *float64 `json:"imbalance_short"`
+	ImbalanceLong  *float64 `json:"imbalance_long"`
+	TakerBuyRatio  *float64 `json:"taker_buy_ratio"`
+	SlopePx20      *float64 `json:"slope_px20"`
+	SlopeCVD20     *float64 `json:"slope_cvd20"`
+	Confidence     *float64 `json:"confidence"`
+}
+
+type riskPayload struct {
+	DistUpATR       *float64 `json:"dist_up_atr"`
+	DistDnATR       *float64 `json:"dist_dn_atr"`
+	LiqRiskUp       *int     `json:"liq_risk_up"`
+	LiqRiskDown     *int     `json:"liq_risk_down"`
+	PreferDirection *string  `json:"prefer_direction"`
+	Confidence      *float64 `json:"confidence"`
+}
+
+type levelsPayload struct {
+	NearUp      *nearLevelPayload `json:"near_up"`
+	NearDn      *nearLevelPayload `json:"near_dn"`
+	Bias        *string           `json:"bias"`
+	ReclaimUp   *bool             `json:"reclaim_up"`
+	RejectionDn *bool             `json:"rejection_down"`
+	Confidence  *float64          `json:"confidence"`
+}
+
+type nearLevelPayload struct {
+	Name    *string  `json:"name"`
+	DistATR *float64 `json:"dist_atr"`
+}
+
+type volatilityPayload struct {
+	BBW            *float64 `json:"bbw"`
+	Squeeze        *bool    `json:"squeeze"`
+	SqueezeRelease *bool    `json:"squeeze_release"`
+	RealizedVol    *float64 `json:"realized_vol"`
+	Regime         *string  `json:"regime"`
+	Confidence     *float64 `json:"confidence"`
+}
+
+type symbolQoS struct {
+	StaleS   int      `json:"stale_s"`
+	Missing  []string `json:"missing"`
+	Coverage float64  `json:"coverage"`
 }
 
 type payloadDiagnostics struct {
@@ -251,37 +276,23 @@ func buildUserPayload(ctx *Context) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	envelope := feedEnvelope{
-		livePayload: payload,
-	}
-	if shouldAttachBoot() {
-		envelope.Boot = &bootMessage{
-			Version: PayloadSchemaVersion,
-			Dict:    bootDict,
-		}
-	}
-	encoded, err := json.Marshal(&envelope)
+	encoded, err := json.Marshal(payload)
 	if err != nil {
 		return "", fmt.Errorf("encode payload: %w", err)
 	}
 	diag.ByteSize = len(encoded)
 	diag.RuneSize = utf8.RuneCount(encoded)
-	logPayloadDiagnostics(payload.Version, diag)
+	logPayloadDiagnostics(payload.Schema, diag)
 	return string(encoded), nil
-}
-
-func shouldAttachBoot() bool {
-	send := false
-	bootOnce.Do(func() {
-		send = true
-	})
-	return send
 }
 
 func assembleLivePayload(ctx *Context) (*livePayload, *payloadDiagnostics, error) {
 	if ctx == nil {
 		return nil, nil, fmt.Errorf("context is nil")
 	}
+	requiredTF := resolveRequiredTF(ctx)
+	contextPriceType := resolveContextPriceType(ctx)
+
 	version := strings.TrimSpace(ctx.PayloadVersion)
 	if version == "" {
 		version = PayloadSchemaVersion
@@ -289,46 +300,104 @@ func assembleLivePayload(ctx *Context) (*livePayload, *payloadDiagnostics, error
 	if version != PayloadSchemaVersion {
 		return nil, nil, fmt.Errorf("payload version %s not supported, upgrade to %s", version, PayloadSchemaVersion)
 	}
-	acct := accountPayload{
-		Equity:           roundTo(ctx.Account.TotalEquity, 3),
-		Balance:          roundTo(ctx.Account.AvailableBalance, 3),
-		UnrealizedPnLPct: roundTo(ctx.Account.TotalPnLPct, 3),
-		MarginPct:        roundTo(ctx.Account.MarginUsedPct, 3),
-	}
+
 	live := &livePayload{
-		Version:   version,
-		Timestamp: time.Now().UTC().Format(time.RFC3339),
-		Account:   acct,
-		Policy: policyPayload{
-			SizeCap:    0.25,
-			HoldOnNull: true,
-			Need15m:    true,
-			MinConf:    0.7,
-			SLASecs:    featureSLALimitSeconds,
+		Schema:       version,
+		TimestampUTC: time.Now().UTC().Format(time.RFC3339),
+		Run: runPayload{
+			Cycle:    ctx.CallCount,
+			RuntimeS: maxInt(0, ctx.RuntimeMinutes*60),
 		},
-		TopK: defaultTopK,
+		Account: accountPayload{
+			Equity:     roundTo(ctx.Account.TotalEquity, 3),
+			Balance:    roundTo(ctx.Account.AvailableBalance, 3),
+			UPnL:       roundTo(ctx.Account.UnrealizedPnL, 3),
+			MarginUsed: roundTo(normalizeMarginUsedRatio(ctx.Account.MarginUsedPct), 3),
+		},
+		Defs: defsPayload{
+			CtxTF:      "all_ctx_indicators_apply_to_this_tf",
+			PxType:     "price_type_used_for_decisions (mark|last|index)",
+			StaleS:     "seconds since the newest underlying market-data point used for this candidate",
+			FundBps:    "funding_rate_bps_per_8h; positive=longs_pay_shorts",
+			BasisPct:   "perp_minus_index_pct; negative=perp_below_index",
+			OID1hPct:   "open_interest_change_pct_over_1h",
+			MACD:       "macd_line_minus_signal_line",
+			RSI7:       "rsi_period_7_on_ctx.tf",
+			Score:      "normalized_score_0_to_1; higher=better_for_side_bias",
+			Confidence: "estimated_signal_reliability_0_to_1",
+		},
+		Enums: enumsPayload{
+			OIDiv: []string{"confirming", "divergent", "neutral"},
+		},
+		Req: reqPayload{
+			RequiredTF:                 requiredTF,
+			MaxStaleS:                  requiredMaxStaleSeconds,
+			RequiredCandidateFields:    append([]string(nil), requiredCandidateFields...),
+			RequiredCandidateCtxFields: append([]string(nil), requiredCandidateContextFields...),
+			NullableOKAny:              append([]string(nil), nullableOKFields...),
+		},
+		Policy: policyPayload{
+			AllowedActions:       []string{"HOLD", "ENTER", "EXIT"},
+			AllowedSides:         []string{"long", "short"},
+			SizeCap:              0.25,
+			MaxLeverage:          5,
+			MaxNewPositions:      1,
+			ManagePositionsFirst: true,
+			ObeySideBias:         true,
+			ExitOnlyIfInPos:      true,
+			EntryRule: entryRulePayload{
+				MustEnterIfAnyEligible: true,
+				SelectBestBy:           []string{"score", "confidence", "-qos.stale_s"},
+			},
+			MinScore:             0.70,
+		},
+		OutputContract: outputContractPayload{
+			Format:         "json_only",
+			DecisionMode:   "single_best",
+			AllowedActions: []string{"HOLD", "ENTER", "EXIT"},
+			Fields:         []string{"ts_utc", "cycle", "decisions"},
+			FieldSources: map[string]string{
+				"ts_utc": "ts_utc",
+				"cycle":  "run.cycle",
+			},
+			DecisionFields: []string{"sym", "action", "side", "size_pct", "leverage", "confidence", "reason_codes"},
+			Constraints: outputConstraintsPayload{
+				SizePctMax:                 0.25,
+				LeverageMax:                5,
+				MaxNewPositions:            1,
+				SideMustMatchCandidateBias: true,
+				ExitRequiresOpenPosition:   true,
+				DecisionsLenMax:            1,
+				DecisionsLenMin:            0,
+				DecisionsMustBeArray:       true,
+			},
+		},
+		Positions:  make([]positionPayload, 0, len(ctx.Positions)),
+		Candidates: make([]candidatePayload, 0, len(ctx.CandidateCoins)),
 	}
+
 	diag := &payloadDiagnostics{FeaturePass: make(map[string][]string)}
 	positionSymbols := make(map[string]struct{}, len(ctx.Positions))
 	for _, pos := range ctx.Positions {
-		positionSymbols[strings.ToUpper(pos.Symbol)] = struct{}{}
-		payloadPos := buildPositionPayload(ctx, &pos, diag)
+		payloadPos := buildPositionPayload(ctx, &pos, diag, live.Req, contextPriceType)
+		positionSymbols[payloadPos.Symbol] = struct{}{}
 		live.Positions = append(live.Positions, payloadPos)
 	}
+
 	candidates := make([]candidatePayload, 0, len(ctx.CandidateCoins))
 	for _, coin := range ctx.CandidateCoins {
 		symbol := strings.ToUpper(coin.Symbol)
 		if _, held := positionSymbols[symbol]; held {
 			continue
 		}
-		payloadCand, ok := buildCandidatePayload(ctx, symbol, diag)
+		payloadCand, ok := buildCandidatePayload(ctx, coin, diag, live.Req, contextPriceType)
 		if ok {
 			candidates = append(candidates, payloadCand)
 		}
 	}
 	if len(candidates) > 0 {
 		sort.SliceStable(candidates, func(i, j int) bool {
-			return candidates[i].Rank > candidates[j].Rank
+			return candidates[i].Score > candidates[j].Score
 		})
 		limit := defaultTopK
 		if len(candidates) < limit {
@@ -336,231 +405,470 @@ func assembleLivePayload(ctx *Context) (*livePayload, *payloadDiagnostics, error
 		}
 		live.Candidates = candidates[:limit]
 	}
+
 	if err := validateLivePayload(live); err != nil {
 		return nil, nil, err
 	}
-	live.Meta = buildMetaPayload(ctx)
 	return live, diag, nil
 }
 
-func buildPositionPayload(ctx *Context, pos *PositionInfo, diag *payloadDiagnostics) positionPayload {
-	payload := positionPayload{
-		Symbol:   strings.ToUpper(pos.Symbol),
-		Side:     strings.ToLower(pos.Side),
-		Entry:    roundTo(pos.EntryPrice, 4),
-		Price:    roundTo(pos.MarkPrice, 4),
-		Leverage: pos.Leverage,
+func resolveRequiredTF(ctx *Context) string {
+	if ctx == nil {
+		return defaultContextTF
 	}
+	tf := strings.TrimSpace(strings.ToLower(ctx.ContextTF))
+	if tf != "" {
+		return tf
+	}
+	return defaultContextTF
+}
 
-	// Add unrealized PnL percentage for dynamic trailing stop logic
+func resolveContextPriceType(ctx *Context) string {
+	if ctx == nil {
+		return defaultContextPriceType
+	}
+	pxType := strings.TrimSpace(strings.ToLower(ctx.PriceType))
+	switch pxType {
+	case "mark", "last", "index":
+		return pxType
+	default:
+		return defaultContextPriceType
+	}
+}
+
+func buildPositionPayload(ctx *Context, pos *PositionInfo, diag *payloadDiagnostics, req reqPayload, contextPriceType string) positionPayload {
+	symbol := strings.ToUpper(pos.Symbol)
+	data := ctx.MarketDataMap[symbol]
+	context := buildContextBlock(data)
+	features := buildFeatureBlock(data, diag, symbol)
+	missing := collectMissingFields(&context)
+	qos := buildSymbolQoS(data, pos.UpdateTime, missing)
+
+	pxMark := roundTo(pos.MarkPrice, 6)
+	if pxMark <= 0 && data != nil {
+		pxMark = roundTo(data.CurrentPrice, 6)
+	}
+	pxLast := optionalRounded(dataCurrentPrice(data), 6)
+	pxIndex := deriveIndexPrice(pxMark, context.BasisPct)
+
+	payload := positionPayload{
+		Symbol:    symbol,
+		Side:      normalizeSide(pos.Side),
+		EntryPx:   roundTo(pos.EntryPrice, 6),
+		PxMark:    pxMark,
+		PxLast:    pxLast,
+		PxIndex:   pxIndex,
+		Leverage:  pos.Leverage,
+		SpreadBps: nil,
+		LiqScore:  nil,
+		Context:   context,
+		Features:  features,
+		QoS:       qos,
+	}
 	if pos.EntryPrice > 0 {
 		pnlPct := roundTo(pos.UnrealizedPnLPct, 2)
 		payload.PnLPct = &pnlPct
 	}
-
 	if pos.LiquidationPrice > 0 {
-		val := roundTo(pos.LiquidationPrice, 4)
-		payload.LiqPrice = &val
+		val := roundTo(pos.LiquidationPrice, 6)
+		payload.LiqPx = &val
 	}
 	if pos.UpdateTime > 0 {
 		age := int(maxFloat(0, float64(time.Now().UnixMilli()-pos.UpdateTime)/60000))
 		payload.AgeMin = &age
 	}
-	data := ctx.MarketDataMap[payload.Symbol]
-	if data != nil {
-		payload.Context = buildContextBlock(data)
-		payload.Features, payload.Confirm15 = buildFeatureBlock(data, diag, payload.Symbol)
+
+	if req.RequiredTF != "" {
+		payload.Context.TF = req.RequiredTF
+	}
+	if contextPriceType != "" {
+		payload.Context.PxType = contextPriceType
 	}
 	return payload
 }
 
-func buildCandidatePayload(ctx *Context, symbol string, diag *payloadDiagnostics) (candidatePayload, bool) {
+func buildCandidatePayload(ctx *Context, coin CandidateCoin, diag *payloadDiagnostics, req reqPayload, contextPriceType string) (candidatePayload, bool) {
+	symbol := strings.ToUpper(coin.Symbol)
 	data := ctx.MarketDataMap[symbol]
 	if data == nil {
 		return candidatePayload{}, false
 	}
-	price := roundTo(data.CurrentPrice, 4)
-	cand := candidatePayload{
-		Symbol: symbol,
-		Price:  price,
+
+	context := buildContextBlock(data)
+	features := buildFeatureBlock(data, diag, symbol)
+	missing := collectMissingFields(&context)
+	qos := buildSymbolQoS(data, 0, missing)
+
+	pxMark := roundTo(data.CurrentPrice, 6)
+	pxLast := optionalRounded(data.CurrentPrice, 6)
+	pxIndex := deriveIndexPrice(pxMark, context.BasisPct)
+
+	score := roundTo(computeScore(data), 3)
+	if score < minScoreEpsilon {
+		score = minScoreEpsilon
 	}
-	cand.Context = buildContextBlock(data)
-	cand.Features, _ = buildFeatureBlock(data, diag, symbol)
-	cand.Rank = roundTo(computeRank(data), 3)
-	if cand.Rank < minRankEpsilon {
-		cand.Rank = minRankEpsilon
+	confidence := roundTo(derivsConfidenceScore(microDerivs(data)), 3)
+
+	cand := candidatePayload{
+		Symbol:     symbol,
+		PxMark:     pxMark,
+		PxLast:     pxLast,
+		PxIndex:    pxIndex,
+		SideBias:   deriveSideBias(data),
+		Score:      score,
+		Confidence: confidence,
+		SpreadBps:  nil,
+		LiqScore:   nil,
+		Context:    context,
+		Features:   features,
+		QoS:        qos,
+	}
+	if req.RequiredTF != "" {
+		cand.Context.TF = req.RequiredTF
+	}
+	if contextPriceType != "" {
+		cand.Context.PxType = contextPriceType
 	}
 	return cand, true
 }
 
-func buildContextBlock(data *market.Data) *contextBlock {
+func buildContextBlock(data *market.Data) contextBlock {
+	ctx := contextBlock{
+		TF:     defaultContextTF,
+		PxType: defaultContextPriceType,
+		Source: contextSources{
+			OI:    "unknown",
+			Fund:  "unknown",
+			Basis: "unknown",
+		},
+	}
 	if data == nil {
-		return nil
+		return ctx
 	}
-	ctx := &contextBlock{}
-	ctx.EMA20 = floatPtr(roundTo(data.CurrentEMA20, 3))
-	ctx.MACD = floatPtr(roundTo(data.CurrentMACD, 3))
-	rsi := clampFloat(data.CurrentRSI7, 0, 100)
-	ctx.RSI7 = floatPtr(roundTo(rsi, 3))
-	if data.LongerTermContext != nil && data.LongerTermContext.ATR3 > 0 {
-		ctx.ATR3 = floatPtr(roundTo(data.LongerTermContext.ATR3, 4))
-	}
+
+	ema := roundTo(data.CurrentEMA20, 3)
+	macd := roundTo(data.CurrentMACD, 3)
+	rsi := roundTo(clampFloat(data.CurrentRSI7, 0, 100), 3)
+	ctx.EMA20 = &ema
+	ctx.MACD = &macd
+	ctx.RSI7 = &rsi
+
 	if data.OpenInterest != nil && data.OpenInterest.Latest > 0 {
-		ctx.OI = floatPtr(roundTo(data.OpenInterest.Latest, 3))
+		oi := roundTo(data.OpenInterest.Latest, 3)
+		ctx.OI = &oi
 	}
+
 	derivs := microDerivs(data)
 	if derivs != nil {
+		if derivs.OIDelta1hPct != nil {
+			v := roundTo(*derivs.OIDelta1hPct*100, 3)
+			ctx.OIDelta1hPct = &v
+		}
+		if derivs.OIPriceDiv != nil {
+			s := safeString(derivs.OIPriceDiv)
+			if s != "" {
+				ctx.OIPriceDiv = &s
+			}
+		}
+		if derivs.OIPriceCorr24h != nil {
+			v := roundTo(*derivs.OIPriceCorr24h, 3)
+			ctx.OIPriceCorr24h = &v
+		}
+		if derivs.OIZ7d != nil {
+			v := roundTo(*derivs.OIZ7d, 3)
+			ctx.OIZ7d = &v
+		}
 		if derivs.FundingLatestBps != nil {
-			ctx.FundingBps = floatPtr(roundTo(*derivs.FundingLatestBps, 3))
+			v := roundTo(*derivs.FundingLatestBps, 3)
+			ctx.FundingBps = &v
 		} else if data.FundingRate != 0 {
-			ctx.FundingBps = floatPtr(roundTo(data.FundingRate*10_000, 3))
+			v := roundTo(data.FundingRate*10_000, 3)
+			ctx.FundingBps = &v
+		}
+		if derivs.FundingMedianZ7d != nil {
+			v := roundTo(*derivs.FundingMedianZ7d, 3)
+			ctx.FundingMedianZ7d = &v
+		}
+		if derivs.FundingDispersionBps != nil {
+			v := roundTo(*derivs.FundingDispersionBps, 3)
+			ctx.FundingDispersionBps = &v
 		}
 		if derivs.BasisPct != nil {
-			ctx.BasisPct = floatPtr(roundTo(*derivs.BasisPct*100, 3))
+			v := roundTo(*derivs.BasisPct*100, 3)
+			ctx.BasisPct = &v
+		}
+		if derivs.BasisZ14d != nil {
+			v := roundTo(*derivs.BasisZ14d, 3)
+			ctx.BasisZ14d = &v
+		}
+		if status := strings.TrimSpace(derivs.OISourceStatus); status != "" {
+			ctx.Source.OI = status
+		}
+		if status := strings.TrimSpace(derivs.FundingSourceStatus); status != "" {
+			ctx.Source.Fund = status
+		}
+		if status := strings.TrimSpace(derivs.BasisSourceStatus); status != "" {
+			ctx.Source.Basis = status
 		}
 	}
 	return ctx
 }
 
-func buildFeatureBlock(data *market.Data, diag *payloadDiagnostics, symbol string) (*featureBlock, *confirmation15) {
+func buildFeatureBlock(data *market.Data, diag *payloadDiagnostics, symbol string) featurePayload {
 	derivs := microDerivs(data)
 	if derivs == nil {
-		return nil, nil
+		return featurePayload{}
 	}
-	features := &featureBlock{}
-	confirm := &confirmation15{}
-	if f4 := buildFeature4(data, derivs, diag, symbol); f4 != nil {
-		features.F4 = f4
+	features := featurePayload{}
+	if f4 := buildOrderflowFeature(data, derivs, diag, symbol); f4 != nil {
+		features.Orderflow = f4
 	}
-	if f5, c15 := buildFeature5(data, derivs, diag, symbol); f5 != nil {
-		features.F5 = f5
-		if c15 != nil {
-			confirm.F5 = c15
-		}
+	if f5 := buildRiskFeature(data, derivs, diag, symbol); f5 != nil {
+		features.Risk = f5
 	}
-	if f6 := buildFeature6(data, derivs, diag, symbol); f6 != nil {
-		features.F6 = f6
+	if f6 := buildLevelsFeature(data, derivs, diag, symbol); f6 != nil {
+		features.Levels = f6
 	}
-	if f7 := buildFeature7(data, derivs, diag, symbol); f7 != nil {
-		features.F7 = f7
+	if f7 := buildVolatilityFeature(data, derivs, diag, symbol); f7 != nil {
+		features.Volatility = f7
 	}
-	if c15 := buildConfirmF4(derivs); c15 != nil {
-		confirm.F4 = c15
-	}
-	if features.F4 == nil && features.F5 == nil && features.F6 == nil && features.F7 == nil {
-		features = nil
-	}
-	if confirm.F4 == nil && confirm.F5 == nil {
-		confirm = nil
-	}
-	return features, confirm
+	return features
 }
 
-func buildFeature4(data *market.Data, derivs *types.DerivsFeatures, diag *payloadDiagnostics, symbol string) *feature4Payload {
-	qos, pass := buildQoS(data, market.FeatureKeyF4)
-	if pass {
+func buildOrderflowFeature(data *market.Data, derivs *types.DerivsFeatures, diag *payloadDiagnostics, symbol string) *orderflowPayload {
+	_, pass := buildQoS(data, market.FeatureKeyF4)
+	if !pass {
+		return nil
+	}
+	if diag != nil {
 		diag.FeaturePass[symbol] = append(diag.FeaturePass[symbol], market.FeatureKeyF4)
 	}
-	f4 := &feature4Payload{QoS: qos}
-	f4.ShortCVD = clampPtr(derivs.CVDNotionalZ3mShort)
-	f4.LongCVD = clampPtr(derivs.CVDNotionalZ3mLong)
-	f4.ShortImb = clampPtr(derivs.ImbNotionalZ3mShort)
-	f4.LongImb = clampPtr(derivs.ImbNotionalZ3mLong)
-	f4.TBR = clampPtr(derivs.TBRNotional3m)
-	f4.Slopes = &feature4Slopes{
-		PriceShort: clampPtr(derivs.SlopePrice3mShort),
-		CVDSlope:   clampPtr(derivs.SlopeCVDZ3mShort),
+	return &orderflowPayload{
+		CVDShort:       clampPtr(derivs.CVDNotionalZ3mShort),
+		CVDLong:        clampPtr(derivs.CVDNotionalZ3mLong),
+		ImbalanceShort: clampPtr(derivs.ImbNotionalZ3mShort),
+		ImbalanceLong:  clampPtr(derivs.ImbNotionalZ3mLong),
+		TakerBuyRatio:  clampPtr(derivs.TBRNotional3m),
+		SlopePx20:      clampPtr(derivs.SlopePrice3mShort),
+		SlopeCVD20:     clampPtr(derivs.SlopeCVDZ3mShort),
+		Confidence:     normalizedConfidence(derivs.ConfidenceCVD3m),
 	}
-	f4.Div = &feature4Div{
-		BearShort: derivs.DivBearShort3m,
-		BearMid:   derivs.DivBearMid3m,
-	}
-	f4.Confidence = normalizedConfidence(derivs.ConfidenceCVD3m)
-	return f4
 }
 
-func buildFeature5(data *market.Data, derivs *types.DerivsFeatures, diag *payloadDiagnostics, symbol string) (*feature5Payload, *confirmationF5) {
-	qos, pass := buildQoS(data, market.FeatureKeyF5)
-	if pass {
+func buildRiskFeature(data *market.Data, derivs *types.DerivsFeatures, diag *payloadDiagnostics, symbol string) *riskPayload {
+	_, pass := buildQoS(data, market.FeatureKeyF5)
+	if !pass {
+		return nil
+	}
+	if diag != nil {
 		diag.FeaturePass[symbol] = append(diag.FeaturePass[symbol], market.FeatureKeyF5)
 	}
-	f5 := &feature5Payload{QoS: qos}
-	f5.Dist = &distancePayload{
-		UpATR:   positivePtr(derivs.DistUpAtr3m),
-		DownATR: positivePtr(derivs.DistDnAtr3m),
-	}
+	var prefer *string
 	if derivs.PreferDirection3m != nil {
-		f5.Prefer = strings.ToLower(*derivs.PreferDirection3m)
+		s := strings.ToLower(strings.TrimSpace(*derivs.PreferDirection3m))
+		prefer = &s
 	}
-	f5.Risk = &liqRiskPayload{Up: derivs.LiqRiskUp3m, Down: derivs.LiqRiskDown3m}
-	f5.Confidence = normalizedConfidence(derivs.ConfidenceLiq3m)
-	confirm := buildConfirmF5(derivs)
-	return f5, confirm
+	return &riskPayload{
+		DistUpATR:       positivePtr(derivs.DistUpAtr3m),
+		DistDnATR:       positivePtr(derivs.DistDnAtr3m),
+		LiqRiskUp:       derivs.LiqRiskUp3m,
+		LiqRiskDown:     derivs.LiqRiskDown3m,
+		PreferDirection: prefer,
+		Confidence:      normalizedConfidence(derivs.ConfidenceLiq3m),
+	}
 }
 
-func buildFeature6(data *market.Data, derivs *types.DerivsFeatures, diag *payloadDiagnostics, symbol string) *feature6Payload {
-	qos, pass := buildQoS(data, market.FeatureKeyF6)
-	if pass {
+func buildLevelsFeature(data *market.Data, derivs *types.DerivsFeatures, diag *payloadDiagnostics, symbol string) *levelsPayload {
+	_, pass := buildQoS(data, market.FeatureKeyF6)
+	if !pass {
+		return nil
+	}
+	if diag != nil {
 		diag.FeaturePass[symbol] = append(diag.FeaturePass[symbol], market.FeatureKeyF6)
 	}
-	f6 := &feature6Payload{QoS: qos}
-	near := &nearbyLevels{}
+	out := &levelsPayload{Confidence: normalizedConfidence(derivs.ConfidenceAVWAP3m)}
 	if derivs.AVWAPUpName3m != nil || derivs.AVWAPUpDistAtr3m != nil {
-		near.Up = &nearLevel{Name: safeString(derivs.AVWAPUpName3m), DistATR: positivePtr(derivs.AVWAPUpDistAtr3m)}
+		out.NearUp = &nearLevelPayload{
+			Name:    normalizeStringPtr(derivs.AVWAPUpName3m),
+			DistATR: positivePtr(derivs.AVWAPUpDistAtr3m),
+		}
 	}
 	if derivs.AVWAPDnName3m != nil || derivs.AVWAPDnDistAtr3m != nil {
-		near.Down = &nearLevel{Name: safeString(derivs.AVWAPDnName3m), DistATR: positivePtr(derivs.AVWAPDnDistAtr3m)}
-	}
-	if near.Up != nil || near.Down != nil {
-		f6.Near = near
+		out.NearDn = &nearLevelPayload{
+			Name:    normalizeStringPtr(derivs.AVWAPDnName3m),
+			DistATR: positivePtr(derivs.AVWAPDnDistAtr3m),
+		}
 	}
 	if derivs.AVWAPBias3m != nil {
-		f6.Bias = strings.ToLower(*derivs.AVWAPBias3m)
+		bias := strings.ToLower(strings.TrimSpace(*derivs.AVWAPBias3m))
+		out.Bias = &bias
 	}
-	f6.ReclaimUp = derivs.AVWAPReclaimUp3m
-	f6.RejectDown = derivs.AVWAPRejectionDn3m
-	f6.Confidence = normalizedConfidence(derivs.ConfidenceAVWAP3m)
-	return f6
+	out.ReclaimUp = intFlagToBool(derivs.AVWAPReclaimUp3m)
+	out.RejectionDn = intFlagToBool(derivs.AVWAPRejectionDn3m)
+	return out
 }
 
-func buildFeature7(data *market.Data, derivs *types.DerivsFeatures, diag *payloadDiagnostics, symbol string) *feature7Payload {
-	qos, pass := buildQoS(data, market.FeatureKeyF7)
-	if pass {
+func buildVolatilityFeature(data *market.Data, derivs *types.DerivsFeatures, diag *payloadDiagnostics, symbol string) *volatilityPayload {
+	_, pass := buildQoS(data, market.FeatureKeyF7)
+	if !pass {
+		return nil
+	}
+	if diag != nil {
 		diag.FeaturePass[symbol] = append(diag.FeaturePass[symbol], market.FeatureKeyF7)
 	}
-	f7 := &feature7Payload{QoS: qos}
-	f7.BBW = positivePtr(derivs.BBW3m)
-	f7.Squeeze = derivs.SqueezeOn3m
-	f7.RVRatio = positivePtr(derivs.RvRatio3m)
+	out := &volatilityPayload{
+		BBW:            positivePtr(derivs.BBW3m),
+		Squeeze:        intFlagToBool(derivs.SqueezeOn3m),
+		SqueezeRelease: intFlagToBool(derivs.SqueezeRelease3m),
+		RealizedVol:    positivePtr(derivs.RvRatio3m),
+		Confidence:     normalizedConfidence(derivs.ConfidenceVol3m),
+	}
 	if derivs.VolRegime3m != nil {
-		f7.Regime = strings.ToLower(*derivs.VolRegime3m)
+		regime := strings.ToLower(strings.TrimSpace(*derivs.VolRegime3m))
+		out.Regime = &regime
 	}
-	f7.Confidence = normalizedConfidence(derivs.ConfidenceVol3m)
-	return f7
+	return out
 }
 
-func buildConfirmF4(derivs *types.DerivsFeatures) *confirmationF4 {
-	if derivs == nil || derivs.ConfidenceCVD15m == nil {
-		return nil
+func collectMissingFields(ctx *contextBlock) []string {
+	if ctx == nil {
+		return append([]string(nil), requiredCandidateContextFields...)
 	}
-	return &confirmationF4{Confidence: normalizedConfidence(derivs.ConfidenceCVD15m)}
+	missing := make([]string, 0)
+	if ctx.EMA20 == nil {
+		missing = append(missing, "ema20")
+	}
+	if ctx.MACD == nil {
+		missing = append(missing, "macd")
+	}
+	if ctx.RSI7 == nil {
+		missing = append(missing, "rsi7")
+	}
+	if ctx.OI == nil {
+		missing = append(missing, "oi")
+	}
+	if ctx.OIDelta1hPct == nil {
+		missing = append(missing, "oi_d1h_pct")
+	}
+	if ctx.FundingBps == nil {
+		missing = append(missing, "fund_bps")
+	}
+	if ctx.BasisPct == nil {
+		missing = append(missing, "basis_pct")
+	}
+	return missing
 }
 
-func buildConfirmF5(derivs *types.DerivsFeatures) *confirmationF5 {
-	if derivs == nil {
+func buildSymbolQoS(data *market.Data, updateMs int64, missing []string) symbolQoS {
+	staleS := deriveStaleSeconds(data, updateMs)
+	if missing == nil {
+		missing = []string{}
+	}
+	requiredCount := float64(len(requiredCandidateContextFields))
+	coverage := 1.0
+	if requiredCount > 0 {
+		coverage = clampFloat((requiredCount-float64(len(missing)))/requiredCount, 0, 1)
+	}
+	return symbolQoS{
+		StaleS:   staleS,
+		Missing:  missing,
+		Coverage: roundTo(coverage, 3),
+	}
+}
+
+func deriveStaleSeconds(data *market.Data, updateMs int64) int {
+	stale := requiredMaxStaleSeconds * 2
+	if data != nil && !data.CollectedAt.IsZero() {
+		stale = int(maxFloat(0, time.Since(data.CollectedAt).Seconds()))
+	}
+	if updateMs > 0 {
+		updateStale := int(maxFloat(0, float64(time.Now().UnixMilli()-updateMs)/1000))
+		if stale == 0 || updateStale < stale {
+			stale = updateStale
+		}
+	}
+	return stale
+}
+
+func deriveIndexPrice(pxMark float64, basisPct *float64) *float64 {
+	if pxMark <= 0 || basisPct == nil {
 		return nil
 	}
-	if derivs.DistUpAtr15m == nil && derivs.DistDnAtr15m == nil && derivs.ConfidenceLiq15m == nil {
+	denom := 1 + (*basisPct / 100)
+	if math.Abs(denom) < 1e-9 {
 		return nil
 	}
-	conf := &confirmationF5{
-		Dist:       &distancePayload{UpATR: positivePtr(derivs.DistUpAtr15m), DownATR: positivePtr(derivs.DistDnAtr15m)},
-		Confidence: normalizedConfidence(derivs.ConfidenceLiq15m),
+	indexPx := roundTo(pxMark/denom, 6)
+	return &indexPx
+}
+
+func deriveSideBias(data *market.Data) string {
+	if data == nil {
+		return "neutral"
 	}
-	if derivs.PreferDirection15m != nil {
-		conf.Prefer = strings.ToLower(*derivs.PreferDirection15m)
+	trendDirRaw := data.PriceChange1h + data.PriceChange4h*0.5
+	direction := signFloat(trendDirRaw)
+	if direction > 0 {
+		return "long"
 	}
-	return conf
+	if direction < 0 {
+		return "short"
+	}
+	return "neutral"
+}
+
+func optionalRounded(value float64, decimals int) *float64 {
+	if value == 0 || math.IsNaN(value) || math.IsInf(value, 0) {
+		return nil
+	}
+	v := roundTo(value, decimals)
+	return &v
+}
+
+func dataCurrentPrice(data *market.Data) float64 {
+	if data == nil {
+		return 0
+	}
+	return data.CurrentPrice
+}
+
+func normalizeStringPtr(value *string) *string {
+	if value == nil {
+		return nil
+	}
+	s := strings.ToLower(strings.TrimSpace(*value))
+	if s == "" {
+		return nil
+	}
+	return &s
+}
+
+func intFlagToBool(value *int) *bool {
+	if value == nil {
+		return nil
+	}
+	b := *value != 0
+	return &b
+}
+
+func normalizeSide(side string) string {
+	s := strings.ToLower(strings.TrimSpace(side))
+	s = strings.TrimPrefix(s, "open_")
+	s = strings.TrimPrefix(s, "close_")
+	if s == "long" || s == "short" {
+		return s
+	}
+	return "long"
+}
+
+func normalizeMarginUsedRatio(marginUsedPct float64) float64 {
+	if marginUsedPct <= 0 {
+		return 0
+	}
+	if marginUsedPct > 1 {
+		return marginUsedPct / 100
+	}
+	return marginUsedPct
 }
 
 func microDerivs(data *market.Data) *types.DerivsFeatures {
@@ -570,100 +878,173 @@ func microDerivs(data *market.Data) *types.DerivsFeatures {
 	return data.Snapshot.Features.Derivs
 }
 
-func computeRank(data *market.Data) float64 {
+func computeScore(data *market.Data) float64 {
 	if data == nil {
 		return 0
 	}
-	var scores []float64
-	momentum := (math.Abs(data.PriceChange1h) + math.Abs(data.PriceChange4h)*0.5) / 10
-	scores = append(scores, clampFloat(momentum, 0, 1))
-	rsiScore := math.Abs(data.CurrentRSI7-50) / 50
-	scores = append(scores, clampFloat(rsiScore, 0, 1))
-	if data.Snapshot != nil && data.Snapshot.Features.Derivs != nil {
-		d := data.Snapshot.Features.Derivs
-		confComponents := []*float64{d.ConfidenceCVD3m, d.ConfidenceLiq3m, d.ConfidenceAVWAP3m, d.ConfidenceVol3m}
-		var sum float64
-		var count float64
-		for _, c := range confComponents {
-			if c != nil {
-				sum += clampFloat(*c, 0, 1)
-				count++
+	trendDirRaw := data.PriceChange1h + data.PriceChange4h*0.5
+	direction := signFloat(trendDirRaw)
+
+	trendStrength := clampFloat((math.Abs(data.PriceChange1h)+math.Abs(data.PriceChange4h)*0.6)/8.0, 0, 1)
+
+	dirCoherence := 0.5
+	if direction != 0 {
+		macdDir := signFloat(data.CurrentMACD)
+		if macdDir == direction {
+			dirCoherence += 0.25
+		} else if macdDir != 0 {
+			dirCoherence -= 0.20
+		}
+		rsi := clampFloat(data.CurrentRSI7, 0, 100)
+		if direction > 0 {
+			if rsi >= 45 && rsi <= 72 {
+				dirCoherence += 0.20
+			}
+			if rsi > 80 {
+				dirCoherence -= 0.20
+			}
+		} else {
+			if rsi >= 28 && rsi <= 55 {
+				dirCoherence += 0.20
+			}
+			if rsi < 20 {
+				dirCoherence -= 0.20
 			}
 		}
-		if count > 0 {
-			scores = append(scores, sum/count)
-		}
 	}
-	if len(scores) == 0 {
-		return 0
-	}
-	sum := 0.0
-	for _, s := range scores {
-		sum += clampFloat(s, 0, 1)
-	}
-	return clampFloat(sum/float64(len(scores)), 0, 1)
+	dirCoherence = clampFloat(dirCoherence, 0, 1)
+
+	d := microDerivs(data)
+	confScore := derivsConfidenceScore(d)
+	flowAlignment := directionalFlowAlignmentScore(direction, d)
+	regimeScore := volatilityRegimeScore(d)
+
+	score := 0.22*trendStrength + 0.26*dirCoherence + 0.22*flowAlignment + 0.14*regimeScore + 0.16*confScore
+	return clampFloat(score, 0, 1)
 }
 
-func buildMetaPayload(ctx *Context) *metaPayload {
-	if ctx == nil {
-		return nil
-	}
-	summary := fmt.Sprintf("Time: %s | Cycle: #%d | Running: %d minutes", ctx.CurrentTime, ctx.CallCount, ctx.RuntimeMinutes)
+// computeRank is kept for compatibility with existing tests and callers.
+func computeRank(data *market.Data) float64 {
+	return computeScore(data)
+}
 
-	// Extract Sharpe Ratio from Performance if available
-	var sharpeRatio *float64
-	if ctx.Performance != nil {
-		// Try to type assert to map[string]interface{} first (common JSON unmarshal result)
-		if perfMap, ok := ctx.Performance.(map[string]interface{}); ok {
-			if sr, exists := perfMap["sharpe_ratio"]; exists {
-				if srFloat, ok := sr.(float64); ok {
-					sharpeRatio = &srFloat
+func derivsConfidenceScore(d *types.DerivsFeatures) float64 {
+	if d == nil {
+		return 0.5
+	}
+	confComponents := []*float64{d.ConfidenceCVD3m, d.ConfidenceLiq3m, d.ConfidenceAVWAP3m, d.ConfidenceVol3m}
+	var sum float64
+	var count float64
+	for _, c := range confComponents {
+		if c == nil {
+			continue
+		}
+		sum += clampFloat(*c, 0, 1)
+		count++
+	}
+	if count == 0 {
+		return 0.5
+	}
+	return clampFloat(sum/count, 0, 1)
+}
+
+func directionalFlowAlignmentScore(direction float64, d *types.DerivsFeatures) float64 {
+	if d == nil {
+		return 0.5
+	}
+	score := 0.5
+	if d.OIPriceDiv != nil {
+		switch safeString(d.OIPriceDiv) {
+		case "confirming":
+			score += 0.10
+		case "divergent":
+			score -= 0.15
+		}
+	}
+	if direction != 0 {
+		if d.OIDelta1hPct != nil {
+			oiDir := signFloat(*d.OIDelta1hPct)
+			if oiDir == direction {
+				score += 0.20
+			} else if oiDir != 0 {
+				score -= 0.15
+			}
+		}
+		if d.PreferDirection3m != nil {
+			pref := safeString(d.PreferDirection3m)
+			if direction > 0 {
+				if strings.Contains(pref, "long") {
+					score += 0.20
+				} else if strings.Contains(pref, "short") {
+					score -= 0.20
+				}
+			} else {
+				if strings.Contains(pref, "short") {
+					score += 0.20
+				} else if strings.Contains(pref, "long") {
+					score -= 0.20
 				}
 			}
 		}
-		// Also try direct struct type assertion in case it's already typed
-		if sharpeRatio == nil {
-			// Use reflection to get SharpeRatio field dynamically
-			// This handles the case where Performance is logger.PerformanceAnalysis
-			v := reflect.ValueOf(ctx.Performance)
-			if v.Kind() == reflect.Ptr {
-				v = v.Elem()
-			}
-			if v.Kind() == reflect.Struct {
-				field := v.FieldByName("SharpeRatio")
-				if field.IsValid() && field.Kind() == reflect.Float64 {
-					sr := field.Float()
-					sharpeRatio = &sr
+		if d.AVWAPBias3m != nil {
+			bias := safeString(d.AVWAPBias3m)
+			if direction > 0 {
+				if strings.Contains(bias, "long") || strings.Contains(bias, "bull") {
+					score += 0.15
+				} else if strings.Contains(bias, "short") || strings.Contains(bias, "bear") {
+					score -= 0.15
+				}
+			} else {
+				if strings.Contains(bias, "short") || strings.Contains(bias, "bear") {
+					score += 0.15
+				} else if strings.Contains(bias, "long") || strings.Contains(bias, "bull") {
+					score -= 0.15
 				}
 			}
 		}
 	}
-
-	return &metaPayload{
-		Summary:     summary,
-		SharpeRatio: sharpeRatio,
-	}
+	return clampFloat(score, 0, 1)
 }
 
-func describeMinutes(updateMs int64) string {
-	if updateMs <= 0 {
-		return "n/a"
+func volatilityRegimeScore(d *types.DerivsFeatures) float64 {
+	if d == nil {
+		return 0.55
 	}
-	delta := time.Now().UnixMilli() - updateMs
-	if delta < 0 {
-		delta = 0
+	score := 0.55
+	if d.VolRegime3m != nil {
+		regime := safeString(d.VolRegime3m)
+		switch {
+		case strings.Contains(regime, "expansion"), strings.Contains(regime, "trend"):
+			score = 0.90
+		case strings.Contains(regime, "volatile"):
+			score = 0.75
+		case strings.Contains(regime, "compression"), strings.Contains(regime, "squeeze"):
+			score = 0.35
+		case strings.Contains(regime, "normal"), strings.Contains(regime, "neutral"), strings.Contains(regime, "balanced"):
+			score = 0.60
+		}
 	}
-	mins := int(delta / 60000)
-	if mins < 1 {
-		return "<1 minute"
+	if d.SqueezeOn3m != nil && *d.SqueezeOn3m == 1 {
+		score -= 0.08
 	}
-	if mins < 60 {
-		return fmt.Sprintf("%d minutes", mins)
+	if d.SqueezeRelease3m != nil && *d.SqueezeRelease3m == 1 {
+		score += 0.08
 	}
-	return fmt.Sprintf("%d hours %d minutes", mins/60, mins%60)
+	if d.RvRatio3m != nil {
+		if *d.RvRatio3m > 1.3 {
+			score += 0.05
+		}
+		if *d.RvRatio3m < 0.8 {
+			score -= 0.05
+		}
+	}
+	return clampFloat(score, 0, 1)
 }
 
-func buildQoS(data *market.Data, key string) (featureQoS, bool) {
+func buildQoS(data *market.Data, key string) (symbolQoS, bool) {
+	if data == nil {
+		return symbolQoS{StaleS: featureSLALimitSeconds * 2, Missing: []string{}, Coverage: 0}, false
+	}
 	stat, ok := data.FeatureQuality(key)
 	coverage := 0.0
 	age := featureSLALimitSeconds * 2
@@ -675,42 +1056,56 @@ func buildQoS(data *market.Data, key string) (featureQoS, bool) {
 	} else if !data.CollectedAt.IsZero() {
 		age = int(maxFloat(0, time.Since(data.CollectedAt).Seconds()))
 	}
-	qos := featureQoS{
-		Coverage:  roundTo(coverage, 3),
-		AgeSecond: age,
+	qos := symbolQoS{
+		StaleS:   age,
+		Missing:  []string{},
+		Coverage: roundTo(coverage, 3),
 	}
 	pass := coverage >= featureCoverageThreshold && age <= featureSLALimitSeconds
 	return qos, pass
 }
 
 func validateLivePayload(payload *livePayload) error {
-	if payload.Version != PayloadSchemaVersion {
-		return fmt.Errorf("invalid payload version %s", payload.Version)
+	if payload.Schema != PayloadSchemaVersion {
+		return fmt.Errorf("invalid payload schema %s", payload.Schema)
 	}
-	if payload.Timestamp == "" {
-		return fmt.Errorf("timestamp missing")
+	if payload.TimestampUTC == "" {
+		return fmt.Errorf("ts_utc missing")
+	}
+	if payload.Req.RequiredTF == "" {
+		return fmt.Errorf("req.required_tf missing")
+	}
+	if payload.Req.MaxStaleS <= 0 {
+		return fmt.Errorf("req.max_stale_s invalid")
+	}
+	if len(payload.Req.RequiredCandidateFields) == 0 {
+		return fmt.Errorf("req.required_candidate_fields missing")
+	}
+	if len(payload.Req.RequiredCandidateCtxFields) == 0 {
+		return fmt.Errorf("req.required_candidate_ctx_fields missing")
 	}
 	if math.IsNaN(payload.Account.Equity) || payload.Account.Equity < 0 {
 		return fmt.Errorf("account equity invalid")
 	}
-	if err := validateAssets(payload.Positions, payload.Candidates); err != nil {
-		return err
-	}
-	for _, cand := range payload.Candidates {
-		if cand.Rank < 0 || cand.Rank > 1 {
-			return fmt.Errorf("candidate rank out of range for %s", cand.Symbol)
-		}
-	}
 	if payload.Policy.SizeCap <= 0 || payload.Policy.SizeCap > 1 {
 		return fmt.Errorf("policy size_cap invalid")
 	}
-	if payload.Policy.MinConf < 0 || payload.Policy.MinConf > 1 {
-		return fmt.Errorf("policy min_conf invalid")
+	if payload.Policy.MinScore < 0 || payload.Policy.MinScore > 1 {
+		return fmt.Errorf("policy min_score invalid")
+	}
+	if payload.OutputContract.Constraints.DecisionsLenMin < 0 {
+		return fmt.Errorf("output_contract.constraints.decisions_len_min invalid")
+	}
+	if payload.OutputContract.Constraints.DecisionsLenMax < payload.OutputContract.Constraints.DecisionsLenMin {
+		return fmt.Errorf("output_contract.constraints.decisions_len_max invalid")
+	}
+	if err := validateAssets(payload.Positions, payload.Candidates, payload.Req); err != nil {
+		return err
 	}
 	return nil
 }
 
-func validateAssets(positions []positionPayload, candidates []candidatePayload) error {
+func validateAssets(positions []positionPayload, candidates []candidatePayload, req reqPayload) error {
 	for _, pos := range positions {
 		if pos.Symbol == "" {
 			return fmt.Errorf("position symbol missing")
@@ -718,12 +1113,10 @@ func validateAssets(positions []positionPayload, candidates []candidatePayload) 
 		if pos.Side != "long" && pos.Side != "short" {
 			return fmt.Errorf("position %s side invalid", pos.Symbol)
 		}
-		if pos.Context != nil && pos.Context.RSI7 != nil {
-			if *pos.Context.RSI7 < 0 || *pos.Context.RSI7 > 100 {
-				return fmt.Errorf("position %s RSI out of range", pos.Symbol)
-			}
+		if err := validateContext(pos.Context, req.RequiredTF, pos.Symbol, "position"); err != nil {
+			return err
 		}
-		if err := validateFeatureQoS(pos.Features, pos.Symbol); err != nil {
+		if err := validateSymbolQoS(pos.QoS, pos.Symbol); err != nil {
 			return err
 		}
 	}
@@ -731,80 +1124,43 @@ func validateAssets(positions []positionPayload, candidates []candidatePayload) 
 		if cand.Symbol == "" {
 			return fmt.Errorf("candidate symbol missing")
 		}
-		if cand.Context != nil && cand.Context.RSI7 != nil {
-			if *cand.Context.RSI7 < 0 || *cand.Context.RSI7 > 100 {
-				return fmt.Errorf("candidate %s RSI out of range", cand.Symbol)
-			}
+		if cand.Score < 0 || cand.Score > 1 {
+			return fmt.Errorf("candidate score out of range for %s", cand.Symbol)
 		}
-		if err := validateFeatureQoS(cand.Features, cand.Symbol); err != nil {
+		if cand.Confidence < 0 || cand.Confidence > 1 {
+			return fmt.Errorf("candidate confidence out of range for %s", cand.Symbol)
+		}
+		if cand.SideBias != "long" && cand.SideBias != "short" && cand.SideBias != "neutral" {
+			return fmt.Errorf("candidate side_bias invalid for %s", cand.Symbol)
+		}
+		if err := validateContext(cand.Context, req.RequiredTF, cand.Symbol, "candidate"); err != nil {
+			return err
+		}
+		if err := validateSymbolQoS(cand.QoS, cand.Symbol); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func validateFeatureQoS(features *featureBlock, symbol string) error {
-	if features == nil {
-		return nil
+func validateContext(ctx contextBlock, requiredTF, symbol, assetType string) error {
+	if requiredTF != "" && ctx.TF != requiredTF {
+		return fmt.Errorf("%s %s tf mismatch: got %s want %s", assetType, symbol, ctx.TF, requiredTF)
 	}
-	checks := []struct {
-		name    string
-		payload interface{}
-	}{
-		{"f4", features.F4},
-		{"f5", features.F5},
-		{"f6", features.F6},
-		{"f7", features.F7},
-	}
-	for _, item := range checks {
-		switch v := item.payload.(type) {
-		case *feature4Payload:
-			if err := ensureQoS(v.QoS, symbol, item.name); err != nil {
-				return err
-			}
-			if v.Confidence != nil && (*v.Confidence < 0 || *v.Confidence > 1) {
-				return fmt.Errorf("%s %s confidence out of range", symbol, item.name)
-			}
-		case *feature5Payload:
-			if err := ensureQoS(v.QoS, symbol, item.name); err != nil {
-				return err
-			}
-			if v.Confidence != nil && (*v.Confidence < 0 || *v.Confidence > 1) {
-				return fmt.Errorf("%s %s confidence out of range", symbol, item.name)
-			}
-			if v.Dist != nil {
-				if v.Dist.UpATR != nil && *v.Dist.UpATR < 0 {
-					return fmt.Errorf("%s f5 up_atr negative", symbol)
-				}
-				if v.Dist.DownATR != nil && *v.Dist.DownATR < 0 {
-					return fmt.Errorf("%s f5 dn_atr negative", symbol)
-				}
-			}
-		case *feature6Payload:
-			if err := ensureQoS(v.QoS, symbol, item.name); err != nil {
-				return err
-			}
-			if v.Confidence != nil && (*v.Confidence < 0 || *v.Confidence > 1) {
-				return fmt.Errorf("%s %s confidence out of range", symbol, item.name)
-			}
-		case *feature7Payload:
-			if err := ensureQoS(v.QoS, symbol, item.name); err != nil {
-				return err
-			}
-			if v.Confidence != nil && (*v.Confidence < 0 || *v.Confidence > 1) {
-				return fmt.Errorf("%s %s confidence out of range", symbol, item.name)
-			}
+	if ctx.RSI7 != nil {
+		if *ctx.RSI7 < 0 || *ctx.RSI7 > 100 {
+			return fmt.Errorf("%s %s rsi7 out of range", assetType, symbol)
 		}
 	}
 	return nil
 }
 
-func ensureQoS(q featureQoS, symbol, feature string) error {
+func validateSymbolQoS(q symbolQoS, symbol string) error {
 	if q.Coverage < 0 || q.Coverage > 1 {
-		return fmt.Errorf("%s %s coverage out of range", symbol, feature)
+		return fmt.Errorf("%s qos coverage out of range", symbol)
 	}
-	if q.AgeSecond < 0 {
-		return fmt.Errorf("%s %s age negative", symbol, feature)
+	if q.StaleS < 0 {
+		return fmt.Errorf("%s qos stale_s negative", symbol)
 	}
 	return nil
 }
@@ -888,4 +1244,21 @@ func maxFloat(a, b float64) float64 {
 		return a
 	}
 	return b
+}
+
+func maxInt(a, b int) int {
+	if a > b {
+		return a
+	}
+	return b
+}
+
+func signFloat(value float64) float64 {
+	if value > 1e-9 {
+		return 1
+	}
+	if value < -1e-9 {
+		return -1
+	}
+	return 0
 }

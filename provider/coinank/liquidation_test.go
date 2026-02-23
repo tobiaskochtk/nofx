@@ -1,3 +1,6 @@
+//go:build coinank_integration
+// +build coinank_integration
+
 package coinank
 
 import (
@@ -30,6 +33,9 @@ func TestLiquidationCoinAggHistory(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if len(resp) == 0 {
+		t.Skip("empty LiquidationCoinAggHistory response")
+	}
 	if resp[0].All.LongTurnover <= 0 {
 		t.Errorf("longTurnover is negative")
 	}
@@ -45,6 +51,9 @@ func TestLiquidationHistory(t *testing.T) {
 	resp, err := client.LiquidationHistory(context.TODO(), coinank_enum.Binance, "BTCUSDT", coinank_enum.Hour1, time.Now().UnixMilli(), 10)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if len(resp) == 0 {
+		t.Skip("empty LiquidationHistory response")
 	}
 	if resp[0].LongTurnover <= 0 {
 		t.Errorf("longTurnover is negative")
@@ -62,6 +71,9 @@ func TestLiquidationOrders(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if len(resp) == 0 {
+		t.Skip("empty LiquidationOrders response")
+	}
 	res, err := json.Marshal(resp)
 	if resp[0].Price <= 0 {
 		t.Errorf("price is negative")
@@ -77,6 +89,9 @@ func TestLiquidationOrdersNoArgs(t *testing.T) {
 	resp, err := client.LiquidationOrders(context.TODO(), "", "", "", 0, 0)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if len(resp) == 0 {
+		t.Skip("empty LiquidationOrders response")
 	}
 	res, err := json.Marshal(resp)
 	if resp[0].Price <= 0 {
