@@ -25,4 +25,76 @@ export function stripLeadingIcons(input: string | undefined | null): string {
   return s.trim()
 }
 
-export default { stripLeadingIcons }
+/**
+ * True when CoT has human-readable text (not only JSON/code-fence artifacts).
+ */
+export function hasReadableCoT(input: string | undefined | null): boolean {
+  if (!input) return false
+
+  const raw = String(input).replace(/[\u200B\u200C\u200D\uFEFF]/g, '').trim()
+  if (!raw) return false
+
+  if (isFenceArtifactText(raw)) {
+    return false
+  }
+
+  const fencedMatch = raw.match(/^```json\s*([\s\S]*?)\s*```$/i)
+  const candidate = (fencedMatch ? fencedMatch[1] : raw).trim()
+  if (!candidate) return false
+
+  if ((candidate.startsWith('{') || candidate.startsWith('[')) && isValidJSON(candidate)) {
+    return false
+  }
+
+  return true
+}
+
+/**
+ * Filters out noisy execution-log lines that are just markdown fence fragments.
+ */
+export function isNoiseExecutionLog(input: string | undefined | null): boolean {
+  return normalizeExecutionLogLine(input) === ''
+}
+
+/**
+ * Removes markdown fence artifact lines from a log item and returns readable text.
+ */
+export function normalizeExecutionLogLine(input: string | undefined | null): string {
+  if (!input) return ''
+  const raw = String(input).replace(/[\u200B\u200C\u200D\uFEFF]/g, '').trim()
+  if (!raw) return ''
+
+  const lines = raw
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0 && !isFenceArtifactText(line))
+
+  if (lines.length === 0) return ''
+  return lines.join('\n').trim()
+}
+
+function isFenceArtifactText(input: string): boolean {
+  const lower = input.toLowerCase().trim()
+  if (lower === '```' || lower === '```json' || lower === '```jsonc' || lower === 'json' || lower === 'jsonc') {
+    return true
+  }
+
+  const lines = input
+    .split(/\r?\n/)
+    .map((line) => line.trim().toLowerCase())
+    .filter((line) => line.length > 0)
+
+  if (lines.length === 0) return true
+  return lines.every((line) => line.startsWith('```') || line === 'json' || line === 'jsonc')
+}
+
+function isValidJSON(value: string): boolean {
+  try {
+    JSON.parse(value)
+    return true
+  } catch {
+    return false
+  }
+}
+
+export default { stripLeadingIcons, hasReadableCoT, isNoiseExecutionLog, normalizeExecutionLogLine }

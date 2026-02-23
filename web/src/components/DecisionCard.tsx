@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import type { DecisionRecord, DecisionAction } from '../types'
 import { t, type Language } from '../i18n/translations'
+import { hasReadableCoT, normalizeExecutionLogLine } from '../lib/text'
 
 interface DecisionCardProps {
   decision: DecisionRecord
@@ -221,6 +222,10 @@ export function DecisionCard({ decision, language, onSymbolClick }: DecisionCard
   const [showSystemPrompt, setShowSystemPrompt] = useState(false)
   const [showInputPrompt, setShowInputPrompt] = useState(false)
   const [showCoT, setShowCoT] = useState(false)
+  const showCoTSection = hasReadableCoT(decision.cot_trace)
+  const visibleExecutionLogs = (decision.execution_log || [])
+    .map((log) => normalizeExecutionLogLine(log))
+    .filter((log) => log.length > 0)
 
   // Copy text to clipboard
   const copyToClipboard = async (text: string, label: string) => {
@@ -290,6 +295,18 @@ export function DecisionCard({ decision, language, onSymbolClick }: DecisionCard
           {decision.decisions.map((action, index) => (
             <ActionCard key={`${action.symbol}-${index}`} action={action} language={language} onSymbolClick={onSymbolClick} />
           ))}
+        </div>
+      )}
+      {(!decision.decisions || decision.decisions.length === 0) && decision.success && (
+        <div
+          className="mb-4 rounded-lg p-3 text-sm"
+          style={{
+            background: 'rgba(132, 142, 156, 0.12)',
+            border: '1px solid rgba(132, 142, 156, 0.25)',
+            color: '#848E9C',
+          }}
+        >
+          No AI action this cycle (`decisions: []`).
         </div>
       )}
 
@@ -414,7 +431,7 @@ export function DecisionCard({ decision, language, onSymbolClick }: DecisionCard
         )}
 
         {/* AI Thinking */}
-        {decision.cot_trace && (
+        {showCoTSection && (
           <div>
             <button
               onClick={() => setShowCoT(!showCoT)}
@@ -450,12 +467,12 @@ export function DecisionCard({ decision, language, onSymbolClick }: DecisionCard
       </div>
 
       {/* Execution Log */}
-      {decision.execution_log && decision.execution_log.length > 0 && (
+      {visibleExecutionLogs.length > 0 && (
         <div
           className="rounded-lg p-3 mt-4 text-xs font-mono space-y-1"
           style={{ background: '#0B0E11', border: '1px solid #2B3139' }}
         >
-          {decision.execution_log.map((log, index) => (
+          {visibleExecutionLogs.map((log, index) => (
             <div key={`${log}-${index}`} style={{ color: '#EAECEF' }}>
               {log}
             </div>

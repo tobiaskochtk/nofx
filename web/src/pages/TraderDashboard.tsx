@@ -21,7 +21,7 @@ import {
   XCircle,
   Settings,
 } from 'lucide-react'
-import { stripLeadingIcons } from '../lib/text'
+import { hasReadableCoT, normalizeExecutionLogLine, stripLeadingIcons } from '../lib/text'
 import type {
   SystemStatus,
   AccountInfo,
@@ -1002,6 +1002,9 @@ function DecisionCard({
 }) {
   const [showInputPrompt, setShowInputPrompt] = useState(false)
   const [showCoT, setShowCoT] = useState(false)
+  const visibleExecutionLogs = (decision.execution_log || [])
+    .map((log) => normalizeExecutionLogLine(log))
+    .filter((log) => log.length > 0)
 
   return (
     <div
@@ -1067,7 +1070,7 @@ function DecisionCard({
       )}
 
       {/* AI Chain of Thought - Collapsible */}
-      {decision.cot_trace && (
+      {hasReadableCoT(decision.cot_trace) && (
         <div className="mb-3">
           <button
             onClick={() => setShowCoT(!showCoT)}
@@ -1155,6 +1158,18 @@ function DecisionCard({
           ))}
         </div>
       )}
+      {(!decision.decisions || decision.decisions.length === 0) && decision.success && (
+        <div
+          className="text-sm rounded px-3 py-2 mb-3"
+          style={{
+            color: '#848E9C',
+            background: 'rgba(132, 142, 156, 0.12)',
+            border: '1px solid rgba(132, 142, 156, 0.25)',
+          }}
+        >
+          No AI action this cycle (`decisions: []`).
+        </div>
+      )}
 
       {/* Account State Summary */}
       {decision.account_state && (
@@ -1223,17 +1238,18 @@ function DecisionCard({
       )}
 
       {/* Execution Logs */}
-      {decision.execution_log && decision.execution_log.length > 0 && (
+      {visibleExecutionLogs.length > 0 && (
         <div className="space-y-1">
-          {decision.execution_log.map((log, k) => (
+          {visibleExecutionLogs.map((log, k) => (
             <div
               key={k}
               className="text-xs font-mono"
               style={{
-                color:
-                  log.includes('✓') || log.includes('成功')
-                    ? '#0ECB81'
-                    : '#F6465D',
+                color: log.includes('✓') || log.includes('成功')
+                  ? '#0ECB81'
+                  : log.includes('❌') || log.toLowerCase().includes('failed')
+                    ? '#F6465D'
+                    : '#848E9C',
               }}
             >
               {log}

@@ -3,9 +3,16 @@ package store
 import (
 	"encoding/json"
 	"fmt"
+	"regexp"
+	"strings"
 	"time"
 
 	"gorm.io/gorm"
+)
+
+var (
+	reDecisionInvisibleRunes = regexp.MustCompile("[\u200B\u200C\u200D\uFEFF]")
+	reDecisionJSONFence      = regexp.MustCompile("(?is)^\\s*```(?:json|jsonc)\\s*([\\s\\S]*?)\\s*```\\s*$")
 )
 
 // DecisionStore decision log storage
@@ -131,7 +138,7 @@ func (db *DecisionRecordDB) toRecord() *DecisionRecord {
 		Timestamp:           db.Timestamp,
 		SystemPrompt:        db.SystemPrompt,
 		InputPrompt:         db.InputPrompt,
-		CoTTrace:            db.CoTTrace,
+		CoTTrace:            sanitizeDecisionCoTTrace(db.CoTTrace),
 		DecisionJSON:        db.DecisionJSON,
 		RawResponse:         db.RawResponse,
 		Success:             db.Success,
@@ -156,6 +163,8 @@ func (s *DecisionStore) LogDecision(record *DecisionRecord) error {
 	candidateCoinsJSON, _ := json.Marshal(record.CandidateCoins)
 	executionLogJSON, _ := json.Marshal(record.ExecutionLog)
 	decisionsJSON, _ := json.Marshal(record.Decisions)
+	normalizedCoT := sanitizeDecisionCoTTrace(record.CoTTrace)
+	record.CoTTrace = normalizedCoT
 
 	dbRecord := &DecisionRecordDB{
 		TraderID:            record.TraderID,
@@ -163,7 +172,7 @@ func (s *DecisionStore) LogDecision(record *DecisionRecord) error {
 		Timestamp:           record.Timestamp,
 		SystemPrompt:        record.SystemPrompt,
 		InputPrompt:         record.InputPrompt,
-		CoTTrace:            record.CoTTrace,
+		CoTTrace:            normalizedCoT,
 		DecisionJSON:        record.DecisionJSON,
 		RawResponse:         record.RawResponse,
 		CandidateCoins:      string(candidateCoinsJSON),
@@ -310,4 +319,58 @@ func (s *DecisionStore) GetLastCycleNumber(traderID string) (int, error) {
 		return 0, nil
 	}
 	return *cycleNumber, nil
+}
+
+func sanitizeDecisionCoTTrace(input string) string {
+	raw := strings.TrimSpace(reDecisionInvisibleRunes.ReplaceAllString(input, ""))
+	if raw == "" {
+		return ""
+	}
+
+	lower := strings.ToLower(raw)
+	if lower == "```" || lower == "```json" || lower == "```jsonc" || lower == "json" || lower == "jsonc" {
+		return ""
+	}
+	if isFenceLinesOnly(raw) {
+		return ""
+	}
+
+	if match := reDecisionJSONFence.FindStringSubmatch(raw); match != nil && len(match) > 1 {
+		inner := strings.TrimSpace(match[1])
+		if inner == "" {
+			return ""
+		}
+		if json.Valid([]byte(inner)) {
+			return ""
+		}
+	}
+
+	if (strings.HasPrefix(raw, "{") || strings.HasPrefix(raw, "[")) && json.Valid([]byte(raw)) {
+		return ""
+	}
+
+	return raw
+}
+
+func isFenceLinesOnly(input string) bool {
+	lines := strings.Split(strings.TrimSpace(input), "\n")
+	if len(lines) == 0 {
+		return true
+	}
+
+	seenNonEmpty := false
+	for _, line := range lines {
+		l := strings.TrimSpace(line)
+		if l == "" {
+			continue
+		}
+		seenNonEmpty = true
+		lower := strings.ToLower(l)
+		if strings.HasPrefix(lower, "```") || lower == "json" || lower == "jsonc" {
+			continue
+		}
+		return false
+	}
+
+	return seenNonEmpty
 }

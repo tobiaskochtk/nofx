@@ -1,6 +1,7 @@
 package kernel
 
 import (
+	"errors"
 	"strings"
 	"testing"
 )
@@ -47,6 +48,18 @@ func TestExtractDecisions_FallbackStillWorksForNoJSON(t *testing.T) {
 	}
 }
 
+func TestExtractDecisions_FenceOnlyArtifactReturnsEmptyDecisions(t *testing.T) {
+	response := "```json"
+
+	decisions, err := extractDecisions(response)
+	if err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+	if len(decisions) != 0 {
+		t.Fatalf("expected 0 decisions for fence-only artifact, got: %d", len(decisions))
+	}
+}
+
 func TestValidateJSONFormat_EmptyArrayAllowed(t *testing.T) {
 	cases := []string{"[]", "[ ]", "[\n]"}
 	for _, tc := range cases {
@@ -80,5 +93,53 @@ func TestExtractDecisions_JSONWrapperObject(t *testing.T) {
 	}
 	if decisions[0].Confidence != 82 {
 		t.Fatalf("expected confidence converted to 82, got %d", decisions[0].Confidence)
+	}
+}
+
+func TestExtractCoTTrace_FencedJSONOnlyReturnsEmpty(t *testing.T) {
+	response := "```json\n{\"ts_utc\":\"2026-02-22T17:38:26Z\",\"cycle\":5,\"decisions\":[]}\n```"
+
+	trace := extractCoTTrace(response)
+	if trace != "" {
+		t.Fatalf("expected empty CoT trace for fenced JSON-only response, got: %q", trace)
+	}
+}
+
+func TestExtractCoTTrace_ObjectJSONOnlyReturnsEmpty(t *testing.T) {
+	response := "{\"ts_utc\":\"2026-02-22T17:38:26Z\",\"cycle\":5,\"decisions\":[]}"
+
+	trace := extractCoTTrace(response)
+	if trace != "" {
+		t.Fatalf("expected empty CoT trace for object JSON-only response, got: %q", trace)
+	}
+}
+
+func TestExtractCoTTrace_ReasoningTagStillExtracts(t *testing.T) {
+	response := "<reasoning>trend aligns and stale check passed</reasoning>\n<decision>\n```json\n{\"ts_utc\":\"2026-02-22T17:38:26Z\",\"cycle\":5,\"decisions\":[]}\n```\n</decision>"
+
+	trace := extractCoTTrace(response)
+	if trace != "trend aligns and stale check passed" {
+		t.Fatalf("expected reasoning text to be extracted, got: %q", trace)
+	}
+}
+
+func TestIsEmptyAIContentError(t *testing.T) {
+	if !isEmptyAIContentError(errors.New("AI API call failed: fail to parse AI server response: API returned empty content")) {
+		t.Fatal("expected empty-content error to be detected")
+	}
+	if isEmptyAIContentError(errors.New("AI API call failed: timeout exceeded")) {
+		t.Fatal("expected non-empty-content error to be ignored")
+	}
+}
+
+func TestBuildNoTradeDecisionEnvelope_ProducesValidEmptyDecisions(t *testing.T) {
+	envelope := buildNoTradeDecisionEnvelope(957)
+
+	decisions, err := extractDecisions(envelope)
+	if err != nil {
+		t.Fatalf("expected no error parsing fallback envelope, got: %v", err)
+	}
+	if len(decisions) != 0 {
+		t.Fatalf("expected 0 decisions, got: %d", len(decisions))
 	}
 }

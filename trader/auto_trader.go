@@ -644,10 +644,9 @@ func (at *AutoTrader) runCycle() error {
 		record.InputPrompt = aiDecision.UserPrompt
 		record.CoTTrace = aiDecision.CoTTrace
 		record.RawResponse = aiDecision.RawResponse // Save raw AI response for debugging
-		if len(aiDecision.Decisions) > 0 {
-			decisionJSON, _ := json.MarshalIndent(aiDecision.Decisions, "", "  ")
-			record.DecisionJSON = string(decisionJSON)
-		}
+		// Always persist decision JSON, including explicit empty array "[]".
+		decisionJSON, _ := json.MarshalIndent(aiDecision.Decisions, "", "  ")
+		record.DecisionJSON = string(decisionJSON)
 	}
 
 	if err != nil {
@@ -705,6 +704,9 @@ func (at *AutoTrader) runCycle() error {
 
 	// 8. Sort decisions: ensure close positions first, then open positions (prevent position stacking overflow)
 	sortedDecisions := sortDecisionsByPriority(aiDecision.Decisions)
+	if len(sortedDecisions) == 0 {
+		record.ExecutionLog = append(record.ExecutionLog, "No AI actions this cycle (decisions: [])")
+	}
 
 	logger.Info("🔄 Execution order (optimized): Close positions first → Open positions later")
 	for i, d := range sortedDecisions {

@@ -479,7 +479,12 @@ func GetFullDecisionWithStrategy(ctx *Context, mcpClient mcp.AIClient, engine *S
 			}
 		}
 		if err != nil {
-			return nil, fmt.Errorf("AI API call failed: %w", err)
+			if isEmptyAIContentError(err) {
+				logger.Warnf("⚠️  AI returned empty content, falling back to no-trade decision for this cycle")
+				aiResponse = buildNoTradeDecisionEnvelope(ctx.CallCount)
+			} else {
+				return nil, fmt.Errorf("AI API call failed: %w", err)
+			}
 		}
 	}
 
@@ -2011,6 +2016,20 @@ func isContextLengthError(err error) bool {
 		strings.Contains(msg, "requested ") && strings.Contains(msg, "tokens")
 }
 
+func isEmptyAIContentError(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "api returned empty content") ||
+		strings.Contains(msg, "returned empty content")
+}
+
+func buildNoTradeDecisionEnvelope(cycle int) string {
+	ts := time.Now().UTC().Format(time.RFC3339)
+	return fmt.Sprintf("{\"ts_utc\":\"%s\",\"cycle\":%d,\"decisions\":[]}", ts, cycle)
+}
+
 // ============================================================================
 // AI Response Parsing
 // ============================================================================
@@ -2040,29 +2059,112 @@ func parseFullDecisionResponse(aiResponse string, accountEquity float64, btcEthL
 }
 
 func extractCoTTrace(response string) string {
-	if match := reReasoningTag.FindStringSubmatch(response); match != nil && len(match) > 1 {
-		logger.Infof("✓ Extracted reasoning chain using <reasoning> tag")
-		return strings.TrimSpace(match[1])
+	cleaned := strings.TrimSpace(removeInvisibleRunes(response))
+	if cleaned == "" {
+		return ""
 	}
 
-	if decisionIdx := strings.Index(response, "<decision>"); decisionIdx > 0 {
-		logger.Infof("✓ Extracted content before <decision> tag as reasoning chain")
-		return strings.TrimSpace(response[:decisionIdx])
+	if match := reReasoningTag.FindStringSubmatch(cleaned); match != nil && len(match) > 1 {
+		trace := sanitizeCoTTrace(match[1])
+		if trace != "" {
+			logger.Infof("✓ Extracted reasoning chain using <reasoning> tag")
+		}
+		return trace
+	}
+
+	if decisionIdx := strings.Index(cleaned, "<decision>"); decisionIdx > 0 {
+		trace := sanitizeCoTTrace(cleaned[:decisionIdx])
+		if trace != "" {
+			logger.Infof("✓ Extracted content before <decision> tag as reasoning chain")
+		}
+		return trace
+	}
+
+	// JSON-only response should not be treated as a reasoning chain.
+	if isJSONOnlyResponse(cleaned) {
+		return ""
 	}
 
 	jsonStart := -1
-	if arrStart := strings.Index(response, "["); arrStart >= 0 {
+	if arrStart := strings.Index(cleaned, "["); arrStart >= 0 {
 		jsonStart = arrStart
 	}
-	if objStart := strings.Index(response, "{"); objStart >= 0 && (jsonStart == -1 || objStart < jsonStart) {
+	if objStart := strings.Index(cleaned, "{"); objStart >= 0 && (jsonStart == -1 || objStart < jsonStart) {
 		jsonStart = objStart
 	}
-	if jsonStart > 0 {
-		logger.Infof("⚠️  Extracted reasoning chain using JSON separator")
-		return strings.TrimSpace(response[:jsonStart])
+	if jsonStart >= 0 {
+		trace := sanitizeCoTTrace(cleaned[:jsonStart])
+		if trace != "" {
+			logger.Infof("⚠️  Extracted reasoning chain using JSON separator")
+		}
+		return trace
 	}
 
-	return strings.TrimSpace(response)
+	return sanitizeCoTTrace(cleaned)
+}
+
+func sanitizeCoTTrace(trace string) string {
+	s := strings.TrimSpace(removeInvisibleRunes(trace))
+	if s == "" {
+		return ""
+	}
+
+	if isFenceOnlyArtifact(s) {
+		return ""
+	}
+	if isJSONOnlyResponse(s) {
+		return ""
+	}
+
+	return s
+}
+
+func isFenceOnlyArtifact(s string) bool {
+	trimmed := strings.TrimSpace(strings.ToLower(s))
+	if trimmed == "" {
+		return true
+	}
+	if trimmed == "```" || trimmed == "```json" || trimmed == "```jsonc" || trimmed == "json" {
+		return true
+	}
+
+	lines := strings.Split(trimmed, "\n")
+	for _, line := range lines {
+		l := strings.TrimSpace(line)
+		if l == "" {
+			continue
+		}
+		if strings.HasPrefix(l, "```") {
+			continue
+		}
+		return false
+	}
+
+	return true
+}
+
+func isJSONOnlyResponse(s string) bool {
+	trimmed := strings.TrimSpace(removeInvisibleRunes(s))
+	if trimmed == "" {
+		return false
+	}
+
+	if matchIdx := reJSONFence.FindStringSubmatchIndex(trimmed); matchIdx != nil && matchIdx[0] == 0 && matchIdx[1] == len(trimmed) {
+		inner := strings.TrimSpace(trimmed[matchIdx[2]:matchIdx[3]])
+		if inner == "" {
+			return false
+		}
+		if blob := extractFirstJSONBlob(inner); blob != "" && strings.TrimSpace(blob) == inner {
+			return true
+		}
+		return json.Valid([]byte(inner))
+	}
+
+	if blob := extractFirstJSONBlob(trimmed); blob != "" && strings.TrimSpace(blob) == trimmed {
+		return true
+	}
+
+	return false
 }
 
 func extractDecisions(response string) ([]Decision, error) {
@@ -2100,9 +2202,18 @@ func extractDecisions(response string) ([]Decision, error) {
 
 	jsonContent := extractFirstJSONBlob(jsonPart)
 	if jsonContent == "" {
+		// Incomplete markdown fences like "```json" are treated as no-trade output.
+		if isFenceOnlyArtifact(jsonPart) {
+			logger.Infof("⚠️  [SafeFallback] AI response is fence-only artifact, treating as empty decisions")
+			return []Decision{}, nil
+		}
+
 		logger.Infof("⚠️  [SafeFallback] AI didn't output JSON decision, entering safe wait mode")
 
-		cotSummary := jsonPart
+		cotSummary := sanitizeCoTTrace(jsonPart)
+		if cotSummary == "" {
+			cotSummary = "empty or malformed non-JSON output"
+		}
 		if len(cotSummary) > 240 {
 			cotSummary = cotSummary[:240] + "..."
 		}
