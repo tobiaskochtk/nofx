@@ -2273,6 +2273,11 @@ func (s *Server) handlePositionHistory(c *gin.Context) {
 		return
 	}
 
+	// Best-effort sync from exchange closed-pnl endpoint to avoid stale history.
+	// This keeps "position history" aligned with exchanges where close records are not
+	// always reconstructed correctly from fill streams alone.
+	s.syncRecentClosedPositions(trader)
+
 	// Get closed positions
 	positions, err := store.Position().GetClosedPositions(trader.GetID(), limit)
 	if err != nil {
@@ -2295,6 +2300,78 @@ func (s *Server) handlePositionHistory(c *gin.Context) {
 		"symbol_stats":    symbolStats,
 		"direction_stats": directionStats,
 	})
+}
+
+// syncRecentClosedPositions pulls recent CLOSED records from exchange and stores them.
+// It is intentionally best-effort and must not block the history API on failures.
+func (s *Server) syncRecentClosedPositions(at *trader.AutoTrader) {
+	if at == nil {
+		return
+	}
+
+	st := at.GetStore()
+	if st == nil {
+		return
+	}
+
+	exchangeID := at.GetExchangeID()
+	if exchangeID == "" {
+		return
+	}
+
+	underlying := at.GetUnderlyingTrader()
+	if underlying == nil {
+		return
+	}
+
+	lastExitMs, err := st.Position().GetLastClosedPositionTime(at.GetID())
+	if err != nil {
+		logger.Infof("⚠️ [%s] Failed to get last closed position time: %v", at.GetName(), err)
+		return
+	}
+
+	// Use overlap window to avoid boundary misses around timestamp equality/race.
+	startTime := time.UnixMilli(lastExitMs).UTC().Add(-2 * time.Hour)
+	if startTime.Before(time.Now().UTC().Add(-30 * 24 * time.Hour)) {
+		startTime = time.Now().UTC().Add(-30 * 24 * time.Hour)
+	}
+
+	records, err := underlying.GetClosedPnL(startTime, 300)
+	if err != nil {
+		logger.Infof("⚠️ [%s] ClosedPnL sync skipped: %v", at.GetName(), err)
+		return
+	}
+	if len(records) == 0 {
+		return
+	}
+
+	converted := make([]store.ClosedPnLRecord, 0, len(records))
+	for _, r := range records {
+		converted = append(converted, store.ClosedPnLRecord{
+			Symbol:      r.Symbol,
+			Side:        r.Side,
+			EntryPrice:  r.EntryPrice,
+			ExitPrice:   r.ExitPrice,
+			Quantity:    r.Quantity,
+			RealizedPnL: r.RealizedPnL,
+			Fee:         r.Fee,
+			Leverage:    r.Leverage,
+			EntryTime:   r.EntryTime.UTC().UnixMilli(),
+			ExitTime:    r.ExitTime.UTC().UnixMilli(),
+			OrderID:     r.OrderID,
+			CloseType:   r.CloseType,
+			ExchangeID:  r.ExchangeID,
+		})
+	}
+
+	created, _, err := st.Position().SyncClosedPositions(at.GetID(), exchangeID, at.GetExchange(), converted)
+	if err != nil {
+		logger.Infof("⚠️ [%s] Failed syncing closed positions: %v", at.GetName(), err)
+		return
+	}
+	if created > 0 {
+		logger.Infof("🔄 [%s] Synced %d closed positions from exchange", at.GetName(), created)
+	}
 }
 
 // handleTrades Historical trades list

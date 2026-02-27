@@ -1551,6 +1551,11 @@ func (at *AutoTrader) GetExchange() string {
 	return at.exchange
 }
 
+// GetExchangeID gets exchange account UUID
+func (at *AutoTrader) GetExchangeID() string {
+	return at.exchangeID
+}
+
 // GetShowInCompetition returns whether trader should be shown in competition
 func (at *AutoTrader) GetShowInCompetition() bool {
 	return at.showInCompetition
