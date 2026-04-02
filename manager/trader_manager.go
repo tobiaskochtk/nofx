@@ -3,8 +3,6 @@ package manager
 import (
 	"context"
 	"fmt"
-	"nofx/debate"
-	"nofx/kernel"
 	"nofx/logger"
 	"nofx/store"
 	"nofx/trader"
@@ -14,27 +12,6 @@ import (
 	"sync"
 	"time"
 )
-
-// TraderExecutorAdapter wraps AutoTrader to implement debate.TraderExecutor
-type TraderExecutorAdapter struct {
-	autoTrader *trader.AutoTrader
-}
-
-// ExecuteDecision executes a trading decision
-func (a *TraderExecutorAdapter) ExecuteDecision(d *kernel.Decision) error {
-	return a.autoTrader.ExecuteDecision(d)
-}
-
-// GetBalance returns account balance
-func (a *TraderExecutorAdapter) GetBalance() (map[string]interface{}, error) {
-	info, err := a.autoTrader.GetAccountInfo()
-	if err != nil {
-		return nil, fmt.Errorf("failed to get account info: %w", err)
-	}
-	// Log the balance for debugging
-	logger.Infof("[Debate] GetBalance for trader, result: %+v", info)
-	return info, nil
-}
 
 // CompetitionCache competition data cache
 type CompetitionCache struct {
@@ -715,6 +692,9 @@ func (tm *TraderManager) addTraderFromStore(traderCfg *store.Trader, aiModelCfg 
 		traderConfig.LighterAPIKeyPrivateKey = string(exchangeCfg.LighterAPIKeyPrivateKey)
 		traderConfig.LighterAPIKeyIndex = exchangeCfg.LighterAPIKeyIndex
 		traderConfig.LighterTestnet = exchangeCfg.Testnet
+	case "indodax":
+		traderConfig.IndodaxAPIKey = string(exchangeCfg.APIKey)
+		traderConfig.IndodaxSecretKey = string(exchangeCfg.SecretKey)
 	}
 
 	// Set API keys based on AI model (convert EncryptedString to string)
@@ -781,12 +761,3 @@ func (tm *TraderManager) addTraderFromStore(traderCfg *store.Trader, aiModelCfg 
 	return nil
 }
 
-// GetTraderExecutor returns a TraderExecutor for the given trader ID
-// This is used by the debate module to execute consensus trades
-func (tm *TraderManager) GetTraderExecutor(traderID string) (debate.TraderExecutor, error) {
-	at, err := tm.GetTrader(traderID)
-	if err != nil {
-		return nil, err
-	}
-	return &TraderExecutorAdapter{autoTrader: at}, nil
-}

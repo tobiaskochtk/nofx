@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"nofx/logger"
+	"nofx/security"
 )
 
 // Config client configuration (centralized management of all configurations)
@@ -16,17 +17,18 @@ type Config struct {
 	APIKey   string
 	BaseURL  string
 	Model    string
-	// 某些提供商不需要 API Key（例如本地或受信任的代理）
+	// Some providers do not require an API key (for example local or trusted proxies).
 	AllowEmptyAPIKey bool
 
 	// Behavior configuration
 	MaxTokens   int
+	MaxContext  int     // Model's max context window in tokens (0 = no limit)
 	Temperature float64
 	UseFullURL  bool
 
 	// Retry configuration
-	MaxRetries      int
-	RetryWaitBase   time.Duration
+	MaxRetries     int
+	RetryWaitBase  time.Duration
 	RetryableErrors []string
 
 	// Timeout configuration
@@ -53,7 +55,7 @@ func DefaultConfig() *Config {
 
 		// Default dependencies (use global logger)
 		Logger:     logger.NewMCPLogger(),
-		HTTPClient: &http.Client{Timeout: timeout},
+		HTTPClient: security.SafeHTTPClient(timeout),
 	}
 }
 

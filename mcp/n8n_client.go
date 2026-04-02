@@ -52,7 +52,7 @@ func NewN8nClient(opts ...ClientOption) AIClient {
 		baseClient.APIKey = strings.TrimSpace(getEnvString("N8N_AI_TOKEN", ""))
 	}
 
-	baseClient.hooks = client
+	baseClient.Hooks = client
 	return client
 }
 
@@ -94,7 +94,7 @@ func (n *N8nClient) CallWithRequest(req *Request) (string, error) {
 	return n.CallWithMessages(systemPrompt, userPrompt)
 }
 
-func (n *N8nClient) buildMCPRequestBody(systemPrompt, userPrompt string) map[string]any {
+func (n *N8nClient) BuildMCPRequestBody(systemPrompt, userPrompt string) map[string]any {
 	promptParts := []string{}
 
 	if sp := strings.TrimSpace(systemPrompt); sp != "" {
@@ -124,17 +124,17 @@ func (n *N8nClient) buildMCPRequestBody(systemPrompt, userPrompt string) map[str
 	return body
 }
 
-func (n *N8nClient) buildUrl() string {
+func (n *N8nClient) BuildUrl() string {
 	return n.BaseURL
 }
 
-func (n *N8nClient) setAuthHeader(headers http.Header) {
+func (n *N8nClient) SetAuthHeader(headers http.Header) {
 	if n.APIKey != "" {
 		headers.Set("Authorization", fmt.Sprintf("Bearer %s", n.APIKey))
 	}
 }
 
-func (n *N8nClient) parseMCPResponse(body []byte) (string, error) {
+func (n *N8nClient) ParseMCPResponse(body []byte) (string, error) {
 	var resp struct {
 		Status       string `json:"status"`
 		DecisionRaw  string `json:"decision_raw"`
@@ -166,9 +166,9 @@ func (n *N8nClient) parseMCPResponse(body []byte) (string, error) {
 }
 
 // 保持与其他客户端一致的重试策略
-func (n *N8nClient) isRetryableError(err error) bool {
+func (n *N8nClient) IsRetryableError(err error) bool {
 	// 复用基础客户端的重试关键字（含网络/超时）
-	return n.Client.isRetryableError(err)
+	return n.Client.IsRetryableError(err)
 }
 
 // 为日志中标记 Provider/Model 提供可读输出
