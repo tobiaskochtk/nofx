@@ -119,27 +119,32 @@ func (e *StrategyEngine) BuildSystemPrompt(accountEquity float64, variant string
 
 	// 7. Output format
 	sb.WriteString("# Output Format (Strictly Follow)\n\n")
-	sb.WriteString("**Must use XML tags <reasoning> and <decision> to separate chain of thought and decision JSON, avoiding parsing errors**\n\n")
+	sb.WriteString("Use XML tags `<reasoning>` and `<decision>` to separate analysis from the decision JSON.\n\n")
 	sb.WriteString("## Format Requirements\n\n")
 	sb.WriteString("<reasoning>\n")
-	sb.WriteString("Your chain of thought analysis...\n")
-	sb.WriteString("- Briefly analyze your thinking process \n")
+	sb.WriteString("Brief, high-signal analysis only.\n")
 	sb.WriteString("</reasoning>\n\n")
 	sb.WriteString("<decision>\n")
-	sb.WriteString("Step 2: JSON decision array\n\n")
-	sb.WriteString("```json\n[\n")
-	// Use the actual configured position value ratio for BTC/ETH in the example
-	examplePositionSize := accountEquity * btcEthPosValueRatio
-	sb.WriteString(fmt.Sprintf("  {\"symbol\": \"BTCUSDT\", \"action\": \"open_short\", \"leverage\": %d, \"position_size_usd\": %.0f, \"stop_loss\": 97000, \"take_profit\": 91000, \"confidence\": 85, \"risk_usd\": 300},\n",
-		riskControl.BTCETHMaxLeverage, examplePositionSize))
-	sb.WriteString("  {\"symbol\": \"ETHUSDT\", \"action\": \"close_long\"}\n")
-	sb.WriteString("]\n```\n")
+	sb.WriteString("A single JSON object. No markdown fence. No prose before or after the JSON.\n")
+	sb.WriteString("{\n")
+	sb.WriteString("  \"ts_utc\": \"2026-04-03T12:00:00Z\",\n")
+	sb.WriteString("  \"cycle\": 123,\n")
+	sb.WriteString("  \"decisions\": [\n")
+	sb.WriteString(fmt.Sprintf("    {\"sym\":\"BTCUSDT\",\"action\":\"ENTER\",\"side\":\"long\",\"size_pct\":%.2f,\"leverage\":%d,\"confidence\":0.82,\"reason_codes\":[\"trend_align\",\"btc_regime_support\"],\"stops_targets\":{\"sl\":96000,\"tp\":101000}},\n",
+		btcEthPosValueRatio, riskControl.BTCETHMaxLeverage))
+	sb.WriteString("    {\"sym\":\"ETHUSDT\",\"action\":\"EXIT\",\"side\":\"long\",\"confidence\":0.74,\"reason_codes\":[\"momentum_stall\"]}\n")
+	sb.WriteString("  ]\n")
+	sb.WriteString("}\n")
 	sb.WriteString("</decision>\n\n")
 	sb.WriteString("## Field Description\n\n")
-	sb.WriteString("- `action`: open_long | open_short | close_long | close_short | hold | wait\n")
-	sb.WriteString(fmt.Sprintf("- `confidence`: 0-100 (opening recommended ≥ %d)\n", riskControl.MinConfidence))
-	sb.WriteString("- Required when opening: leverage, position_size_usd, stop_loss, take_profit, confidence, risk_usd\n")
-	sb.WriteString("- **IMPORTANT**: All numeric values must be calculated numbers, NOT formulas/expressions (e.g., use `27.76` not `3000 * 0.01`)\n\n")
+	sb.WriteString("- `action`: `ENTER` | `EXIT` | `HOLD`\n")
+	sb.WriteString("- `side`: `long` | `short`; must match symbol bias for new entries\n")
+	sb.WriteString("- `size_pct`: decimal fraction of account equity, max `0.25`\n")
+	sb.WriteString(fmt.Sprintf("- `confidence`: use `0.00-1.00`; new entries should typically be `>= %.2f`\n", float64(riskControl.MinConfidence)/100))
+	sb.WriteString("- `reason_codes`: short machine-friendly tokens, not sentences\n")
+	sb.WriteString("- `stops_targets`: required for `ENTER`, omit for `EXIT` and `HOLD`\n")
+	sb.WriteString("- If there is no valid trade, return `{\"ts_utc\":\"...\",\"cycle\":N,\"decisions\":[]}`\n")
+	sb.WriteString("- All numeric values must be explicit numbers, never formulas or ranges\n\n")
 
 	// 8. Custom Prompt
 	if e.config.CustomPrompt != "" {
@@ -156,12 +161,19 @@ func (e *StrategyEngine) writeAvailableIndicators(sb *strings.Builder) {
 	indicators := e.config.Indicators
 	kline := indicators.Klines
 
-	sb.WriteString(fmt.Sprintf("- %s price series", kline.PrimaryTimeframe))
+	sb.WriteString(fmt.Sprintf("- Compact %s market snapshot (price, EMA, MACD, RSI, OI/funding/basis)\n", kline.PrimaryTimeframe))
 	if kline.EnableMultiTimeframe {
-		sb.WriteString(fmt.Sprintf(" + %s K-line series\n", kline.LongerTimeframe))
-	} else {
-		sb.WriteString("\n")
+		sb.WriteString("- Compact multi-timeframe summaries for the selected confirmation frames (close, EMA20/50, MACD, RSI, ATR, window change)\n")
 	}
+	sb.WriteString("- BTC benchmark regime snapshot with the same compact multi-timeframe confirmation\n")
+	sb.WriteString("- Compact venue-tradability block so you can distinguish venue support vs missing order book vs price-only availability\n")
+	sb.WriteString("- Compact execution-quality block where available (spread, local depth, imbalance, slippage feasibility)\n")
+	sb.WriteString("- Compact volume-participation block derived from timeframe volume behavior\n")
+	sb.WriteString("- Compact same-symbol trade memory block (last side, last result, cooldown, loss streak)\n")
+	sb.WriteString("- Compact symbol-level quant flow where available (institutional/retail flow, OI deltas, short-horizon price change)\n")
+	sb.WriteString("- Compact feature-availability block (`f4`-`f7`, `f10`-`f12`) to explain whether a signal is fresh, stale, low-coverage, or unavailable\n")
+	sb.WriteString("- Compact relative-strength block versus BTC across 1h/4h/context timeframe\n")
+	sb.WriteString("- Compact market leadership regime block (OI leaders, institutional flow leaders, price leaders/losers)\n")
 
 	if indicators.EnableEMA {
 		sb.WriteString("- EMA indicators")
@@ -215,9 +227,7 @@ func (e *StrategyEngine) writeAvailableIndicators(sb *strings.Builder) {
 		sb.WriteString("- AI500 / OI_Top filter tags (if available)\n")
 	}
 
-	if indicators.EnableQuantData {
-		sb.WriteString("- Quantitative data (institutional/retail fund flow, position changes, multi-period price changes)\n")
-	}
+	sb.WriteString("- Recent closed-trade memory + trader performance summary (if available)\n")
 }
 
 // ============================================================================

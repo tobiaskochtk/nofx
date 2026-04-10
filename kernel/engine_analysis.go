@@ -26,8 +26,8 @@ const (
 // ============================================================================
 
 var (
-	// Safe regex: precisely match ```json code blocks
-	reJSONFence      = regexp.MustCompile(`(?is)` + "```json\\s*(\\[\\s*\\{.*?\\}\\s*\\])\\s*```")
+	// Safe regex: capture fenced JSON content without assuming array vs envelope object.
+	reJSONFence      = regexp.MustCompile(`(?is)` + "```json\\s*(.*?)\\s*```")
 	reJSONArray      = regexp.MustCompile(`(?is)\[\s*\{.*?\}\s*\]`)
 	reArrayHead      = regexp.MustCompile(`^\[\s*\{`)
 	reArrayOpenSpace = regexp.MustCompile(`^\[\s+\{`)
@@ -149,8 +149,19 @@ func GetFullDecisionWithStrategy(ctx *Context, mcpClient mcp.AIClient, engine *S
 			}
 		}
 		if err != nil {
+			if isEmptyAIContentError(err) {
+				logger.Warnf("⚠️  AI returned empty content, forcing no-trade envelope for cycle %d", ctx.CallCount)
+				aiResponse = buildNoTradeDecisionEnvelope(ctx.CallCount)
+				err = nil
+			}
+		}
+		if err != nil {
 			return nil, fmt.Errorf("AI API call failed: %w", err)
 		}
+	}
+	if strings.TrimSpace(aiResponse) == "" {
+		logger.Warnf("⚠️  AI response was blank, forcing no-trade envelope for cycle %d", ctx.CallCount)
+		aiResponse = buildNoTradeDecisionEnvelope(ctx.CallCount)
 	}
 
 	// 5. Parse AI response
@@ -317,6 +328,16 @@ func fetchMarketDataWithStrategy(ctx *Context, engine *StrategyEngine) error {
 
 	logger.Infof("📊 Strategy timeframes: %v, Primary: %s, Kline count: %d", timeframes, primaryTimeframe, klineCount)
 
+	const benchmarkSymbol = "BTCUSDT"
+	if _, exists := ctx.MarketDataMap[benchmarkSymbol]; !exists {
+		benchmarkData, err := market.GetWithTimeframes(benchmarkSymbol, timeframes, primaryTimeframe, klineCount)
+		if err != nil {
+			logger.Infof("⚠️  Failed to fetch benchmark market data for %s: %v", benchmarkSymbol, err)
+		} else {
+			ctx.MarketDataMap[benchmarkSymbol] = benchmarkData
+		}
+	}
+
 	// 1. First fetch data for position coins (must fetch)
 	for _, pos := range ctx.Positions {
 		data, err := market.GetWithTimeframes(pos.Symbol, timeframes, primaryTimeframe, klineCount)
@@ -362,6 +383,13 @@ func fetchMarketDataWithStrategy(ctx *Context, engine *StrategyEngine) error {
 		ctx.MarketDataMap[coin.Symbol] = data
 	}
 
+	// Align feature freshness across the whole cycle. Snapshot construction is serial,
+	// so early symbols can otherwise age out before the prompt is assembled.
+	refreshAt := time.Now().UTC()
+	for _, data := range ctx.MarketDataMap {
+		data.TouchFeatureStats(refreshAt)
+	}
+
 	logger.Infof("📊 Successfully fetched multi-timeframe market data for %d coins", len(ctx.MarketDataMap))
 	return nil
 }
@@ -395,9 +423,16 @@ func parseFullDecisionResponse(aiResponse string, accountEquity float64, btcEthL
 }
 
 func extractCoTTrace(response string) string {
+	response = removeInvisibleRunes(response)
+	trimmed := strings.TrimSpace(response)
+
 	if match := reReasoningTag.FindStringSubmatch(response); match != nil && len(match) > 1 {
 		logger.Infof("✓ Extracted reasoning chain using <reasoning> tag")
 		return strings.TrimSpace(match[1])
+	}
+
+	if isJSONOnlyResponse(trimmed) {
+		return ""
 	}
 
 	if decisionIdx := strings.Index(response, "<decision>"); decisionIdx > 0 {
@@ -405,13 +440,13 @@ func extractCoTTrace(response string) string {
 		return strings.TrimSpace(response[:decisionIdx])
 	}
 
-	jsonStart := strings.Index(response, "[")
+	jsonStart := strings.IndexAny(response, "[{")
 	if jsonStart > 0 {
-		logger.Infof("⚠️  Extracted reasoning chain using old format ([ character separator)")
+		logger.Infof("⚠️  Extracted reasoning chain using legacy JSON separator")
 		return strings.TrimSpace(response[:jsonStart])
 	}
 
-	return strings.TrimSpace(response)
+	return trimmed
 }
 
 func extractDecisions(response string) ([]Decision, error) {
@@ -428,24 +463,13 @@ func extractDecisions(response string) ([]Decision, error) {
 		logger.Infof("⚠️  <decision> tag not found, searching JSON in full text")
 	}
 
-	jsonPart = fixMissingQuotes(jsonPart)
-
-	if m := reJSONFence.FindStringSubmatch(jsonPart); m != nil && len(m) > 1 {
-		jsonContent := strings.TrimSpace(m[1])
-		jsonContent = compactArrayOpen(jsonContent)
-		jsonContent = fixMissingQuotes(jsonContent)
-		if err := validateJSONFormat(jsonContent); err != nil {
-			return nil, fmt.Errorf("JSON format validation failed: %w\nJSON content: %s\nFull response:\n%s", err, jsonContent, response)
+	jsonContent, found := extractDecisionJSONFragment(jsonPart)
+	if !found || strings.TrimSpace(jsonContent) == "" {
+		trimmedPart := strings.TrimSpace(jsonPart)
+		if strings.HasPrefix(trimmedPart, "```json") || trimmedPart == "```" || trimmedPart == "```json" {
+			logger.Infof("⚠️  Empty fenced JSON artifact detected, treating as no-trade output")
+			return []Decision{}, nil
 		}
-		var decisions []Decision
-		if err := json.Unmarshal([]byte(jsonContent), &decisions); err != nil {
-			return nil, fmt.Errorf("JSON parsing failed: %w\nJSON content: %s", err, jsonContent)
-		}
-		return decisions, nil
-	}
-
-	jsonContent := strings.TrimSpace(reJSONArray.FindString(jsonPart))
-	if jsonContent == "" {
 		logger.Infof("⚠️  [SafeFallback] AI didn't output JSON decision, entering safe wait mode")
 
 		cotSummary := jsonPart
@@ -462,18 +486,10 @@ func extractDecisions(response string) ([]Decision, error) {
 		return []Decision{fallbackDecision}, nil
 	}
 
-	jsonContent = compactArrayOpen(jsonContent)
-	jsonContent = fixMissingQuotes(jsonContent)
-
-	if err := validateJSONFormat(jsonContent); err != nil {
-		return nil, fmt.Errorf("JSON format validation failed: %w\nJSON content: %s\nFull response:\n%s", err, jsonContent, response)
+	decisions, err := parseDecisionJSONContent(jsonContent)
+	if err != nil {
+		return nil, fmt.Errorf("%w\nJSON content: %s\nFull response:\n%s", err, jsonContent, response)
 	}
-
-	var decisions []Decision
-	if err := json.Unmarshal([]byte(jsonContent), &decisions); err != nil {
-		return nil, fmt.Errorf("JSON parsing failed: %w\nJSON content: %s", err, jsonContent)
-	}
-
 	return decisions, nil
 }
 
@@ -503,6 +519,12 @@ func fixMissingQuotes(jsonStr string) string {
 
 func validateJSONFormat(jsonStr string) error {
 	trimmed := strings.TrimSpace(jsonStr)
+	if trimmed == "" {
+		return fmt.Errorf("JSON content is empty")
+	}
+	if len(trimmed) >= 2 && strings.HasPrefix(trimmed, "[") && strings.HasSuffix(trimmed, "]") && strings.TrimSpace(trimmed[1:len(trimmed)-1]) == "" {
+		return nil
+	}
 
 	if !reArrayHead.MatchString(trimmed) {
 		if strings.HasPrefix(trimmed, "[") && !strings.Contains(trimmed[:min(20, len(trimmed))], "{") {
@@ -526,6 +548,157 @@ func validateJSONFormat(jsonStr string) error {
 	}
 
 	return nil
+}
+
+func parseDecisionJSONContent(jsonContent string) ([]Decision, error) {
+	trimmed := strings.TrimSpace(fixMissingQuotes(jsonContent))
+	if trimmed == "" {
+		return nil, fmt.Errorf("JSON parsing failed: decision content empty")
+	}
+
+	switch trimmed[0] {
+	case '[':
+		return parseDecisionArray(trimmed)
+	case '{':
+		type decisionEnvelope struct {
+			Decisions json.RawMessage `json:"decisions"`
+		}
+		var envelope decisionEnvelope
+		if err := json.Unmarshal([]byte(trimmed), &envelope); err != nil {
+			return nil, fmt.Errorf("JSON parsing failed: %w", err)
+		}
+		if len(envelope.Decisions) == 0 {
+			return nil, fmt.Errorf("JSON parsing failed: decision envelope missing decisions field")
+		}
+		inner := strings.TrimSpace(string(envelope.Decisions))
+		if inner == "" || inner == "null" {
+			return []Decision{}, nil
+		}
+		return parseDecisionArray(inner)
+	default:
+		return nil, fmt.Errorf("JSON must start with [ or {, actual: %s", trimmed[:min(20, len(trimmed))])
+	}
+}
+
+func parseDecisionArray(jsonContent string) ([]Decision, error) {
+	jsonContent = compactArrayOpen(jsonContent)
+	jsonContent = fixMissingQuotes(jsonContent)
+	if err := validateJSONFormat(jsonContent); err != nil {
+		return nil, fmt.Errorf("JSON format validation failed: %w", err)
+	}
+	var decisions []Decision
+	if err := json.Unmarshal([]byte(jsonContent), &decisions); err != nil {
+		return nil, fmt.Errorf("JSON parsing failed: %w", err)
+	}
+	return decisions, nil
+}
+
+func extractDecisionJSONFragment(s string) (string, bool) {
+	s = fixMissingQuotes(strings.TrimSpace(s))
+	if s == "" {
+		return "", false
+	}
+	if match := reJSONFence.FindStringSubmatch(s); match != nil && len(match) > 1 {
+		return strings.TrimSpace(match[1]), true
+	}
+	if fragment, ok := extractBalancedJSON(s); ok {
+		return fragment, true
+	}
+	if array := strings.TrimSpace(reJSONArray.FindString(s)); array != "" {
+		return array, true
+	}
+	return "", false
+}
+
+func extractBalancedJSON(s string) (string, bool) {
+	start := -1
+	for i, r := range s {
+		if r == '{' || r == '[' {
+			start = i
+			break
+		}
+	}
+	if start < 0 {
+		return "", false
+	}
+
+	depth := 0
+	inString := false
+	escaped := false
+	for i := start; i < len(s); i++ {
+		ch := s[i]
+		if inString {
+			if escaped {
+				escaped = false
+				continue
+			}
+			if ch == '\\' {
+				escaped = true
+				continue
+			}
+			if ch == '"' {
+				inString = false
+			}
+			continue
+		}
+		switch ch {
+		case '"':
+			inString = true
+		case '{', '[':
+			depth++
+		case '}', ']':
+			depth--
+			if depth == 0 {
+				return strings.TrimSpace(s[start : i+1]), true
+			}
+			if depth < 0 {
+				return "", false
+			}
+		}
+	}
+	return "", false
+}
+
+func isJSONOnlyResponse(s string) bool {
+	if s == "" {
+		return false
+	}
+	if match := reJSONFence.FindStringSubmatch(s); match != nil && len(match) > 1 && strings.TrimSpace(match[0]) == s {
+		return true
+	}
+	if fragment, ok := extractDecisionJSONFragment(s); ok && strings.TrimSpace(fragment) == s {
+		return true
+	}
+	return false
+}
+
+func isEmptyAIContentError(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(strings.TrimSpace(err.Error()))
+	return strings.Contains(msg, "empty content") ||
+		strings.Contains(msg, "returned empty") ||
+		strings.Contains(msg, "no content") ||
+		strings.Contains(msg, "response body is empty")
+}
+
+func buildNoTradeDecisionEnvelope(cycle int) string {
+	type noTradeEnvelope struct {
+		TimestampUTC string     `json:"ts_utc"`
+		Cycle        int        `json:"cycle"`
+		Decisions    []Decision `json:"decisions"`
+	}
+	payload := noTradeEnvelope{
+		TimestampUTC: time.Now().UTC().Format(time.RFC3339),
+		Cycle:        cycle,
+		Decisions:    []Decision{},
+	}
+	encoded, err := json.Marshal(payload)
+	if err != nil {
+		return `{"ts_utc":"","cycle":0,"decisions":[]}`
+	}
+	return string(encoded)
 }
 
 func min(a, b int) int {

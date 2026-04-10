@@ -61,6 +61,88 @@ type CandidateCoin struct {
 	Sources []string `json:"sources"` // 来源: "ai500" 和/或 "oi_top"
 }
 
+// PerformanceSummary captures compact trader-level performance context for AI.
+type PerformanceSummary struct {
+	TotalTrades    int     `json:"total_trades"`
+	WinRate        float64 `json:"win_rate"`
+	ProfitFactor   float64 `json:"profit_factor"`
+	SharpeRatio    float64 `json:"sharpe_ratio"`
+	TotalPnL       float64 `json:"total_pnl"`
+	AvgWin         float64 `json:"avg_win"`
+	AvgLoss        float64 `json:"avg_loss"`
+	MaxDrawdownPct float64 `json:"max_drawdown_pct"`
+}
+
+// RecentTrade captures a compact closed-trade memory sample for AI.
+type RecentTrade struct {
+	Symbol        string  `json:"symbol"`
+	Side          string  `json:"side"`
+	PnLPct        float64 `json:"pnl_pct"`
+	HoldDuration  string  `json:"hold_duration,omitempty"`
+	ExitTimestamp int64   `json:"-"`
+}
+
+// ExecutionQualitySummary captures compact order-book feasibility data for AI.
+type ExecutionQualitySummary struct {
+	SpreadBps         *float64 `json:"spread_bps,omitempty"`
+	LiqScore          *float64 `json:"liq_score,omitempty"`
+	DepthBidUSD1Pct   *float64 `json:"depth_bid_usd_1pct,omitempty"`
+	DepthAskUSD1Pct   *float64 `json:"depth_ask_usd_1pct,omitempty"`
+	BookImbalance1Pct *float64 `json:"book_imbalance_1pct,omitempty"`
+	SlippageEst25USD  *float64 `json:"slippage_est_25usd,omitempty"`
+	SlippageEst100USD *float64 `json:"slippage_est_100usd,omitempty"`
+}
+
+// VenueTradabilitySummary captures whether the active venue can trade a symbol cleanly.
+type VenueTradabilitySummary struct {
+	VenueSupported bool   `json:"venue_supported"`
+	OrderBookState string `json:"orderbook_state,omitempty"`
+	MinNotionalOK  *bool  `json:"min_notional_ok,omitempty"`
+	PriceSource    string `json:"price_source,omitempty"`
+}
+
+// QuantFlowSummary captures only the highest-value symbol-level quant data for AI.
+type QuantFlowSummary struct {
+	InstFuture15m     *float64 `json:"inst_future_15m,omitempty"`
+	InstFuture1h      *float64 `json:"inst_future_1h,omitempty"`
+	InstSpot1h        *float64 `json:"inst_spot_1h,omitempty"`
+	RetailFuture15m   *float64 `json:"retail_future_15m,omitempty"`
+	OIDelta15mPct     *float64 `json:"oi_delta_15m_pct,omitempty"`
+	OIDelta1hPct      *float64 `json:"oi_delta_1h_pct,omitempty"`
+	PriceChange15mPct *float64 `json:"price_change_15m_pct,omitempty"`
+	PriceChange1hPct  *float64 `json:"price_change_1h_pct,omitempty"`
+}
+
+// OILeadershipItem captures compact market-wide OI leadership evidence.
+type OILeadershipItem struct {
+	Symbol       string  `json:"symbol"`
+	OIDelta1hPct float64 `json:"oi_delta_1h_pct"`
+	PriceChgPct  float64 `json:"price_change_1h_pct"`
+}
+
+// FlowLeadershipItem captures compact smart-money flow leadership evidence.
+type FlowLeadershipItem struct {
+	Symbol string  `json:"symbol"`
+	Amount float64 `json:"amount"`
+}
+
+// PriceLeadershipItem captures compact gainers/losers evidence.
+type PriceLeadershipItem struct {
+	Symbol string  `json:"symbol"`
+	ChgPct float64 `json:"chg_pct"`
+}
+
+// MarketLeadershipSummary captures the minimum market breadth context worth exposing to AI.
+type MarketLeadershipSummary struct {
+	OITop1h          []OILeadershipItem    `json:"oi_top_1h,omitempty"`
+	OILow1h          []OILeadershipItem    `json:"oi_low_1h,omitempty"`
+	InstInflowTop1h  []FlowLeadershipItem  `json:"inst_inflow_top_1h,omitempty"`
+	InstOutflowTop1h []FlowLeadershipItem  `json:"inst_outflow_top_1h,omitempty"`
+	PriceLeaders1h   []PriceLeadershipItem `json:"price_leaders_1h,omitempty"`
+	PriceLeaders4h   []PriceLeadershipItem `json:"price_leaders_4h,omitempty"`
+	PriceLosers1h    []PriceLeadershipItem `json:"price_losers_1h,omitempty"`
+}
+
 // OITopData 持仓量增长Top数据（用于AI决策参考）
 type OITopData struct {
 	Rank              int     // OI Top排名
@@ -73,21 +155,26 @@ type OITopData struct {
 
 // Context 交易上下文（传递给AI的完整信息）
 type Context struct {
-	CurrentTime     string                  `json:"current_time"`
-	RuntimeMinutes  int                     `json:"runtime_minutes"`
-	CallCount       int                     `json:"call_count"`
-	PayloadVersion  string                  `json:"payload_version,omitempty"`
-	ContextTF       string                  `json:"-"`
-	PriceType       string                  `json:"-"`
-	Account         AccountInfo             `json:"account"`
-	Positions       []PositionInfo          `json:"positions"`
-	CandidateCoins  []CandidateCoin         `json:"candidate_coins"`
-	MarketDataMap   map[string]*market.Data `json:"-"` // 不序列化，但内部使用
-	OITopDataMap    map[string]*OITopData   `json:"-"` // OI Top数据映射
-	Performance     interface{}             `json:"-"` // 历史表现分析（logger.PerformanceAnalysis）
-	BTCETHLeverage  int                     `json:"-"` // BTC/ETH杠杆倍数（从配置读取）
-	AltcoinLeverage int                     `json:"-"` // 山寨币杠杆倍数（从配置读取）
-	MaxPositions    int                     `json:"-"` // 最大持仓数量（用于提示）
+	CurrentTime      string                              `json:"current_time"`
+	RuntimeMinutes   int                                 `json:"runtime_minutes"`
+	CallCount        int                                 `json:"call_count"`
+	PayloadVersion   string                              `json:"payload_version,omitempty"`
+	ContextTF        string                              `json:"-"`
+	PriceType        string                              `json:"-"`
+	Account          AccountInfo                         `json:"account"`
+	Positions        []PositionInfo                      `json:"positions"`
+	CandidateCoins   []CandidateCoin                     `json:"candidate_coins"`
+	MarketDataMap    map[string]*market.Data             `json:"-"` // 不序列化，但内部使用
+	OITopDataMap     map[string]*OITopData               `json:"-"` // OI Top数据映射
+	Performance      *PerformanceSummary                 `json:"-"` // Compact performance context
+	RecentTrades     []RecentTrade                       `json:"-"` // Compact recent closed-trade memory
+	ExecutionQuality map[string]*ExecutionQualitySummary `json:"-"` // Compact order-book execution feasibility
+	VenueTradability map[string]*VenueTradabilitySummary `json:"-"` // Compact active-venue tradability state
+	QuantFlowMap     map[string]*QuantFlowSummary        `json:"-"` // Compact symbol-level quant flow context
+	MarketLeadership *MarketLeadershipSummary            `json:"-"` // Compact market-wide leadership context
+	BTCETHLeverage   int                                 `json:"-"` // BTC/ETH杠杆倍数（从配置读取）
+	AltcoinLeverage  int                                 `json:"-"` // 山寨币杠杆倍数（从配置读取）
+	MaxPositions     int                                 `json:"-"` // 最大持仓数量（用于提示）
 }
 
 // Decision AI的交易决策

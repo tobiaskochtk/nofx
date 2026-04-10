@@ -258,6 +258,29 @@ func (tm *TraderManager) GetCompetitionData() (map[string]interface{}, error) {
 	return comparison, nil
 }
 
+// getLastKnownEquity returns last known equity data from snapshots for a trader (fast DB query, used as fallback)
+func getLastKnownEquity(t *trader.AutoTrader) (totalEquity, totalPnL, totalPnLPct float64, ok bool) {
+	st := t.GetStore()
+	if st == nil {
+		return 0, 0, 0, false
+	}
+	snaps, err := st.Equity().GetLatest(t.GetID(), 1)
+	if err != nil || len(snaps) == 0 {
+		return 0, 0, 0, false
+	}
+	snap := snaps[0]
+	totalEquity = snap.TotalEquity
+	totalPnL = snap.NetPnL
+	if totalPnL == 0 {
+		totalPnL = snap.UnrealizedPnL
+	}
+	if totalEquity > 0 {
+		// Recalculate from equity snapshot if NetPnL seems off
+		totalPnLPct = (totalPnL / totalEquity) * 100
+	}
+	return totalEquity, totalPnL, totalPnLPct, true
+}
+
 // getConcurrentTraderData concurrently fetches data for multiple traders
 func (tm *TraderManager) getConcurrentTraderData(traders []*trader.AutoTrader) []map[string]interface{} {
 	type traderResult struct {
@@ -275,71 +298,106 @@ func (tm *TraderManager) getConcurrentTraderData(traders []*trader.AutoTrader) [
 			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 			defer cancel()
 
-			// Use channel for timeout control
-			accountChan := make(chan map[string]interface{}, 1)
+			// Use channel for timeout control - fetch actual account info from exchange
+			acctChan := make(chan map[string]interface{}, 1)
 			errorChan := make(chan error, 1)
 
 			go func() {
-				account, err := trader.GetAccountInfo()
+				acct, err := trader.GetAccountInfo()
 				if err != nil {
 					errorChan <- err
 				} else {
-					accountChan <- account
+					acctChan <- acct
 				}
 			}()
 
 			status := trader.GetStatus()
 			var traderData map[string]interface{}
 
+			// Get supplementary position data from DB (fast, no exchange API call)
+			var realizedPnL, totalFees float64
+			var closedTrades int
+			if st := trader.GetStore(); st != nil {
+				if summary, err := st.Position().GetTraderPnLSummary(trader.GetID()); err == nil {
+					realizedPnL = summary.RealizedPnL
+					totalFees = summary.TotalFees
+					closedTrades = summary.ClosedCount
+				}
+			}
+
 			select {
-			case account := <-accountChan:
-				// Successfully got account info
+			case acct := <-acctChan:
+				// Real account data from exchange
 				traderData = map[string]interface{}{
 					"trader_id":              trader.GetID(),
 					"trader_name":            trader.GetName(),
 					"ai_model":               trader.GetAIModel(),
 					"exchange":               trader.GetExchange(),
-					"total_equity":           account["total_equity"],
-					"total_pnl":              account["total_pnl"],
-					"total_pnl_pct":          account["total_pnl_pct"],
-					"position_count":         account["position_count"],
-					"margin_used_pct":        account["margin_used_pct"],
+					"total_equity":           acct["total_equity"],
+					"total_pnl":              acct["total_pnl"],
+					"total_pnl_pct":          acct["total_pnl_pct"],
+					"realized_pnl":           realizedPnL,
+					"unrealized_pnl":         acct["unrealized_profit"],
+					"total_fees":             totalFees,
+					"closed_trades":          closedTrades,
+					"position_count":         acct["position_count"],
+					"margin_used_pct":        acct["margin_used_pct"],
 					"is_running":             status["is_running"],
 					"system_prompt_template": trader.GetSystemPromptTemplate(),
 				}
 			case err := <-errorChan:
-				// Failed to get account info
+				// Failed to get account data - use last known equity snapshot as fallback
 				logger.Infof("⚠️ Failed to get account info for trader %s (%s/%s): %v", trader.GetName(), trader.GetID(), trader.GetExchange(), err)
+				equity, pnl, pnlPct, ok := getLastKnownEquity(trader)
+				if !ok {
+					equity = 0
+					pnl = 0
+					pnlPct = 0
+				}
 				traderData = map[string]interface{}{
 					"trader_id":              trader.GetID(),
 					"trader_name":            trader.GetName(),
 					"ai_model":               trader.GetAIModel(),
 					"exchange":               trader.GetExchange(),
-					"total_equity":           0.0,
-					"total_pnl":              0.0,
-					"total_pnl_pct":          0.0,
+					"total_equity":           equity,
+					"total_pnl":              pnl,
+					"total_pnl_pct":          pnlPct,
+					"realized_pnl":           realizedPnL,
+					"unrealized_pnl":         0.0,
+					"total_fees":             totalFees,
+					"closed_trades":          closedTrades,
 					"position_count":         0,
 					"margin_used_pct":        0.0,
 					"is_running":             status["is_running"],
 					"system_prompt_template": trader.GetSystemPromptTemplate(),
-					"error":                  "Failed to get account data",
+					"error":                  "Failed to get account data (using last snapshot)",
 				}
 			case <-ctx.Done():
-				// Timeout
+				// Timeout - use last known equity snapshot as fallback to prevent flickering
 				logger.Infof("⏰ Timeout (10s) getting account info for trader %s (%s/%s)", trader.GetName(), trader.GetID(), trader.GetExchange())
+				equity, pnl, pnlPct, ok := getLastKnownEquity(trader)
+				if !ok {
+					equity = 0
+					pnl = 0
+					pnlPct = 0
+				}
 				traderData = map[string]interface{}{
 					"trader_id":              trader.GetID(),
 					"trader_name":            trader.GetName(),
 					"ai_model":               trader.GetAIModel(),
 					"exchange":               trader.GetExchange(),
-					"total_equity":           0.0,
-					"total_pnl":              0.0,
-					"total_pnl_pct":          0.0,
+					"total_equity":           equity,
+					"total_pnl":              pnl,
+					"total_pnl_pct":          pnlPct,
+					"realized_pnl":           realizedPnL,
+					"unrealized_pnl":         0.0,
+					"total_fees":             totalFees,
+					"closed_trades":          closedTrades,
 					"position_count":         0,
 					"margin_used_pct":        0.0,
 					"is_running":             status["is_running"],
 					"system_prompt_template": trader.GetSystemPromptTemplate(),
-					"error":                  "Request timeout",
+					"error":                  "Request timeout (using last snapshot)",
 				}
 			}
 
@@ -652,6 +710,20 @@ func (tm *TraderManager) addTraderFromStore(traderCfg *store.Trader, aiModelCfg 
 		StrategyConfig:        strategyConfig,
 	}
 
+	// If the trader uses a non-claw402 LLM but the user has an enabled claw402
+	// wallet configured, reuse it for NofxOS data (AI500/OI/NetFlow/Price ranking).
+	if aiModelCfg.Provider != "claw402" {
+		if aiModels, err := st.AIModel().List(traderCfg.UserID); err == nil {
+			for _, model := range aiModels {
+				if model.Enabled && model.Provider == "claw402" && strings.TrimSpace(string(model.APIKey)) != "" {
+					traderConfig.NofxOSDataWalletKey = strings.TrimSpace(string(model.APIKey))
+					logger.Infof("🔗 Trader %s will use configured claw402 wallet for NofxOS data", traderCfg.Name)
+					break
+				}
+			}
+		}
+	}
+
 	logger.Infof("📊 Loading trader %s: ScanIntervalMinutes=%d (from DB), ScanInterval=%v",
 		traderCfg.Name, traderCfg.ScanIntervalMinutes, traderConfig.ScanInterval)
 
@@ -760,4 +832,3 @@ func (tm *TraderManager) addTraderFromStore(traderCfg *store.Trader, aiModelCfg 
 
 	return nil
 }
-

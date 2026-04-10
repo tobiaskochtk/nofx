@@ -6,13 +6,13 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"os"
 	"nofx/logger"
 	"nofx/market"
 	"nofx/provider/hyperliquid"
 	"nofx/provider/nofxos"
 	"nofx/security"
 	"nofx/store"
+	"os"
 	"strings"
 	"time"
 )
@@ -77,38 +77,60 @@ type TradingStats struct {
 
 // RecentOrder recently completed order (for AI input)
 type RecentOrder struct {
-	Symbol       string  `json:"symbol"`        // Trading pair
-	Side         string  `json:"side"`          // long/short
-	EntryPrice   float64 `json:"entry_price"`   // Entry price
-	ExitPrice    float64 `json:"exit_price"`    // Exit price
-	RealizedPnL  float64 `json:"realized_pnl"`  // Realized profit/loss
-	PnLPct       float64 `json:"pnl_pct"`       // Profit/loss percentage
-	EntryTime    string  `json:"entry_time"`    // Entry time
-	ExitTime     string  `json:"exit_time"`     // Exit time
-	HoldDuration string  `json:"hold_duration"` // Hold duration, e.g. "2h30m"
+	Symbol        string  `json:"symbol"`        // Trading pair
+	Side          string  `json:"side"`          // long/short
+	EntryPrice    float64 `json:"entry_price"`   // Entry price
+	ExitPrice     float64 `json:"exit_price"`    // Exit price
+	RealizedPnL   float64 `json:"realized_pnl"`  // Realized profit/loss
+	PnLPct        float64 `json:"pnl_pct"`       // Profit/loss percentage
+	EntryTime     string  `json:"entry_time"`    // Entry time
+	ExitTime      string  `json:"exit_time"`     // Exit time
+	HoldDuration  string  `json:"hold_duration"` // Hold duration, e.g. "2h30m"
+	ExitTimestamp int64   `json:"-"`             // Unix timestamp in seconds for compact symbol memory
+}
+
+// ExecutionQuality summarizes order-book feasibility for a symbol.
+type ExecutionQuality struct {
+	SpreadBps         *float64 `json:"spread_bps,omitempty"`
+	LiqScore          *float64 `json:"liq_score,omitempty"`
+	DepthBidUSD1Pct   *float64 `json:"depth_bid_usd_1pct,omitempty"`
+	DepthAskUSD1Pct   *float64 `json:"depth_ask_usd_1pct,omitempty"`
+	BookImbalance1Pct *float64 `json:"book_imbalance_1pct,omitempty"`
+	SlippageEst25USD  *float64 `json:"slippage_est_25usd,omitempty"`
+	SlippageEst100USD *float64 `json:"slippage_est_100usd,omitempty"`
+}
+
+// VenueTradability summarizes whether the active exchange can realistically trade a symbol.
+type VenueTradability struct {
+	VenueSupported bool   `json:"venue_supported"`
+	OrderBookState string `json:"orderbook_state,omitempty"`
+	MinNotionalOK  *bool  `json:"min_notional_ok,omitempty"`
+	PriceSource    string `json:"price_source,omitempty"`
 }
 
 // Context trading context (complete information passed to AI)
 type Context struct {
-	CurrentTime        string                             `json:"current_time"`
-	RuntimeMinutes     int                                `json:"runtime_minutes"`
-	CallCount          int                                `json:"call_count"`
-	Account            AccountInfo                        `json:"account"`
-	Positions          []PositionInfo                     `json:"positions"`
-	CandidateCoins     []CandidateCoin                    `json:"candidate_coins"`
-	PromptVariant      string                             `json:"prompt_variant,omitempty"`
-	TradingStats       *TradingStats                      `json:"trading_stats,omitempty"`
-	RecentOrders       []RecentOrder                      `json:"recent_orders,omitempty"`
-	MarketDataMap      map[string]*market.Data            `json:"-"`
-	MultiTFMarket      map[string]map[string]*market.Data `json:"-"`
-	OITopDataMap       map[string]*OITopData              `json:"-"`
-	QuantDataMap       map[string]*QuantData              `json:"-"`
-	OIRankingData      *nofxos.OIRankingData              `json:"-"` // Market-wide OI ranking data
-	NetFlowRankingData *nofxos.NetFlowRankingData         `json:"-"` // Market-wide fund flow ranking data
-	PriceRankingData   *nofxos.PriceRankingData           `json:"-"` // Market-wide price gainers/losers
-	BTCETHLeverage     int                                `json:"-"`
-	AltcoinLeverage    int                                `json:"-"`
-	Timeframes         []string                           `json:"-"`
+	CurrentTime         string                             `json:"current_time"`
+	RuntimeMinutes      int                                `json:"runtime_minutes"`
+	CallCount           int                                `json:"call_count"`
+	Account             AccountInfo                        `json:"account"`
+	Positions           []PositionInfo                     `json:"positions"`
+	CandidateCoins      []CandidateCoin                    `json:"candidate_coins"`
+	PromptVariant       string                             `json:"prompt_variant,omitempty"`
+	TradingStats        *TradingStats                      `json:"trading_stats,omitempty"`
+	RecentOrders        []RecentOrder                      `json:"recent_orders,omitempty"`
+	ExecutionQualityMap map[string]*ExecutionQuality       `json:"-"`
+	VenueTradabilityMap map[string]*VenueTradability       `json:"-"`
+	MarketDataMap       map[string]*market.Data            `json:"-"`
+	MultiTFMarket       map[string]map[string]*market.Data `json:"-"`
+	OITopDataMap        map[string]*OITopData              `json:"-"`
+	QuantDataMap        map[string]*QuantData              `json:"-"`
+	OIRankingData       *nofxos.OIRankingData              `json:"-"` // Market-wide OI ranking data
+	NetFlowRankingData  *nofxos.NetFlowRankingData         `json:"-"` // Market-wide fund flow ranking data
+	PriceRankingData    *nofxos.PriceRankingData           `json:"-"` // Market-wide price gainers/losers
+	BTCETHLeverage      int                                `json:"-"`
+	AltcoinLeverage     int                                `json:"-"`
+	Timeframes          []string                           `json:"-"`
 }
 
 // Decision AI trading decision

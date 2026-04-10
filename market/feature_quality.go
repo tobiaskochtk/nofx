@@ -34,3 +34,19 @@ func (d *Data) markFeatureFresh(key string, coverage float64, ts time.Time) {
 		UpdatedAt: ts,
 	}
 }
+
+// TouchFeatureStats refreshes all recorded feature timestamps to the provided time.
+// This is used after a full market-fetch cycle so earlier symbols in the batch do not
+// age out while later symbols are still computing.
+func (d *Data) TouchFeatureStats(ts time.Time) {
+	if d == nil || len(d.FeatureStats) == 0 {
+		return
+	}
+	if ts.IsZero() {
+		ts = time.Now()
+	}
+	for key, stat := range d.FeatureStats {
+		stat.UpdatedAt = ts
+		d.FeatureStats[key] = stat
+	}
+}

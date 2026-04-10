@@ -152,25 +152,31 @@ func (s *Server) handleEquityHistory(c *gin.Context) {
 		MarginUsedPct    float64 `json:"margin_used_pct"`   // Margin used percentage
 	}
 
-	// Use the balance of the first record as initial balance to calculate return rate
-	initialBalance := snapshots[0].Balance
-	if initialBalance == 0 {
-		initialBalance = 1 // Avoid division by zero
+	// Use the first snapshot's TotalEquity as baseline to calculate return rate
+	initialEquity := snapshots[0].TotalEquity
+	if initialEquity == 0 {
+		initialEquity = snapshots[0].Balance
+	}
+	if initialEquity == 0 {
+		initialEquity = 1 // Avoid division by zero
 	}
 
 	var history []EquityPoint
 	for _, snap := range snapshots {
+		// Calculate PnL from actual equity change (most reliable)
+		totalPnL := snap.TotalEquity - initialEquity
+
 		// Calculate PnL percentage
 		totalPnLPct := 0.0
-		if initialBalance > 0 {
-			totalPnLPct = (snap.UnrealizedPnL / initialBalance) * 100
+		if initialEquity > 0 {
+			totalPnLPct = (totalPnL / initialEquity) * 100
 		}
 
 		history = append(history, EquityPoint{
 			Timestamp:        snap.Timestamp.Format("2006-01-02 15:04:05"),
 			TotalEquity:      snap.TotalEquity,
 			AvailableBalance: snap.Balance,
-			TotalPnL:         snap.UnrealizedPnL,
+			TotalPnL:         totalPnL,
 			TotalPnLPct:      totalPnLPct,
 			PositionCount:    snap.PositionCount,
 			MarginUsedPct:    snap.MarginUsedPct,
@@ -218,6 +224,10 @@ func (s *Server) handlePublicTraderList(c *gin.Context) {
 			"total_pnl_pct":   trader["total_pnl_pct"],
 			"position_count":  trader["position_count"],
 			"margin_used_pct": trader["margin_used_pct"],
+			"realized_pnl":    trader["realized_pnl"],
+			"unrealized_pnl":  trader["unrealized_pnl"],
+			"total_fees":      trader["total_fees"],
+			"closed_trades":   trader["closed_trades"],
 		})
 	}
 

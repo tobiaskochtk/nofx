@@ -445,6 +445,23 @@ func (at *AutoTrader) buildTradingContext() (*kernel.Context, error) {
 	strategyConfig := at.strategyEngine.GetConfig()
 	btcEthLeverage := strategyConfig.RiskControl.BTCETHMaxLeverage
 	altcoinLeverage := strategyConfig.RiskControl.AltcoinMaxLeverage
+	timeframes := make([]string, 0, len(strategyConfig.Indicators.Klines.SelectedTimeframes)+1)
+	seenTF := make(map[string]struct{})
+	if primaryTF := strings.TrimSpace(strategyConfig.Indicators.Klines.PrimaryTimeframe); primaryTF != "" {
+		timeframes = append(timeframes, primaryTF)
+		seenTF[primaryTF] = struct{}{}
+	}
+	for _, tf := range strategyConfig.Indicators.Klines.SelectedTimeframes {
+		tf = strings.TrimSpace(tf)
+		if tf == "" {
+			continue
+		}
+		if _, exists := seenTF[tf]; exists {
+			continue
+		}
+		timeframes = append(timeframes, tf)
+		seenTF[tf] = struct{}{}
+	}
 	logger.Infof("📋 [%s] Strategy leverage config: BTC/ETH=%dx, Altcoin=%dx", at.name, btcEthLeverage, altcoinLeverage)
 
 	// 6. Build context
@@ -466,6 +483,7 @@ func (at *AutoTrader) buildTradingContext() (*kernel.Context, error) {
 		},
 		Positions:      positionInfos,
 		CandidateCoins: candidateCoins,
+		Timeframes:     timeframes,
 	}
 
 	// 7. Add recent closed trades (if store is available)
@@ -488,15 +506,16 @@ func (at *AutoTrader) buildTradingContext() (*kernel.Context, error) {
 				}
 
 				ctx.RecentOrders = append(ctx.RecentOrders, kernel.RecentOrder{
-					Symbol:       trade.Symbol,
-					Side:         trade.Side,
-					EntryPrice:   trade.EntryPrice,
-					ExitPrice:    trade.ExitPrice,
-					RealizedPnL:  trade.RealizedPnL,
-					PnLPct:       trade.PnLPct,
-					EntryTime:    entryTimeStr,
-					ExitTime:     exitTimeStr,
-					HoldDuration: trade.HoldDuration,
+					Symbol:        trade.Symbol,
+					Side:          trade.Side,
+					EntryPrice:    trade.EntryPrice,
+					ExitPrice:     trade.ExitPrice,
+					RealizedPnL:   trade.RealizedPnL,
+					PnLPct:        trade.PnLPct,
+					EntryTime:     entryTimeStr,
+					ExitTime:      exitTimeStr,
+					HoldDuration:  trade.HoldDuration,
+					ExitTimestamp: trade.ExitTime,
 				})
 			}
 		}
@@ -526,7 +545,10 @@ func (at *AutoTrader) buildTradingContext() (*kernel.Context, error) {
 		logger.Infof("⚠️ [%s] Store is nil, cannot get recent trades", at.name)
 	}
 
-	// 8. Get quantitative data (if enabled in strategy config)
+	// 8. Get compact execution-quality data from the live order book.
+	ctx.ExecutionQualityMap, ctx.VenueTradabilityMap = at.collectExecutionSignals(positionInfos, candidateCoins)
+
+	// 9. Get quantitative data (if enabled in strategy config)
 	if strategyConfig.Indicators.EnableQuantData {
 		// Collect symbols to query (candidate coins + position coins)
 		symbolsToQuery := make(map[string]bool)
@@ -547,7 +569,7 @@ func (at *AutoTrader) buildTradingContext() (*kernel.Context, error) {
 		logger.Infof("📊 [%s] Successfully fetched quantitative data for %d symbols", at.name, len(ctx.QuantDataMap))
 	}
 
-	// 9. Get OI ranking data (market-wide position changes)
+	// 10. Get OI ranking data (market-wide position changes)
 	if strategyConfig.Indicators.EnableOIRanking {
 		logger.Infof("📊 [%s] Fetching OI ranking data...", at.name)
 		ctx.OIRankingData = at.strategyEngine.FetchOIRankingData()
@@ -557,7 +579,7 @@ func (at *AutoTrader) buildTradingContext() (*kernel.Context, error) {
 		}
 	}
 
-	// 10. Get NetFlow ranking data (market-wide fund flow)
+	// 11. Get NetFlow ranking data (market-wide fund flow)
 	if strategyConfig.Indicators.EnableNetFlowRanking {
 		logger.Infof("💰 [%s] Fetching NetFlow ranking data...", at.name)
 		ctx.NetFlowRankingData = at.strategyEngine.FetchNetFlowRankingData()
@@ -567,7 +589,7 @@ func (at *AutoTrader) buildTradingContext() (*kernel.Context, error) {
 		}
 	}
 
-	// 11. Get Price ranking data (market-wide gainers/losers)
+	// 12. Get Price ranking data (market-wide gainers/losers)
 	if strategyConfig.Indicators.EnablePriceRanking {
 		logger.Infof("📈 [%s] Fetching Price ranking data...", at.name)
 		ctx.PriceRankingData = at.strategyEngine.FetchPriceRankingData()

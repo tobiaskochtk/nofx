@@ -119,6 +119,10 @@ export interface CompetitionTraderData {
   position_count: number
   margin_used_pct: number
   is_running: boolean
+  realized_pnl?: number
+  unrealized_pnl?: number
+  total_fees?: number
+  closed_trades?: number
 }
 
 export interface CompetitionData {

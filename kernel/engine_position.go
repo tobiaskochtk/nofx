@@ -42,6 +42,11 @@ func validateDecision(d *Decision, accountEquity float64, btcEthLeverage, altcoi
 			maxPositionValue = accountEquity * posRatio
 		}
 
+		if d.PositionSizeUSD < 0 {
+			sizePct := -d.PositionSizeUSD
+			d.PositionSizeUSD = accountEquity * sizePct
+		}
+
 		if d.Leverage <= 0 {
 			return fmt.Errorf("leverage must be greater than 0: %d", d.Leverage)
 		}
@@ -69,11 +74,9 @@ func validateDecision(d *Decision, accountEquity float64, btcEthLeverage, altcoi
 
 		tolerance := maxPositionValue * 0.01
 		if d.PositionSizeUSD > maxPositionValue+tolerance {
-			if d.Symbol == "BTCUSDT" || d.Symbol == "ETHUSDT" {
-				return fmt.Errorf("BTC/ETH single coin position value cannot exceed %.0f USDT (%.1fx account equity), actual: %.0f", maxPositionValue, posRatio, d.PositionSizeUSD)
-			} else {
-				return fmt.Errorf("altcoin single coin position value cannot exceed %.0f USDT (%.1fx account equity), actual: %.0f", maxPositionValue, posRatio, d.PositionSizeUSD)
-			}
+			logger.Infof("⚠️  [Position Size Fallback] %s position value exceeded (%.2f > %.2f), auto-adjusting to hard limit %.2f",
+				d.Symbol, d.PositionSizeUSD, maxPositionValue, maxPositionValue)
+			d.PositionSizeUSD = maxPositionValue
 		}
 		if d.StopLoss <= 0 || d.TakeProfit <= 0 {
 			return fmt.Errorf("stop loss and take profit must be greater than 0")

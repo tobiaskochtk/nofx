@@ -6,6 +6,7 @@ import (
 	"io"
 	"math"
 	"nofx/logger"
+	"nofx/pkg/types"
 	"strconv"
 	"strings"
 	"sync"
@@ -15,8 +16,11 @@ import (
 // FundingRateCache is the funding rate cache structure
 // Binance Funding Rate only updates every 8 hours, using 1-hour cache can significantly reduce API calls
 type FundingRateCache struct {
-	Rate      float64
-	UpdatedAt time.Time
+	Rate       float64
+	MarkPrice  float64
+	IndexPrice float64
+	Timestamp  int64
+	UpdatedAt  time.Time
 }
 
 // premiumIndexData keeps the richer mark/index snapshot used by the derivs sync bridge.
@@ -126,8 +130,9 @@ func GetWithExchange(symbol, exchange string) (*Data, error) {
 		oiData = &OIData{Latest: 0, Average: 0}
 	}
 
-	// Get Funding Rate
-	fundingRate, _ := getFundingRate(symbol)
+	// Get Funding Rate + premium snapshot for derivs cache sync
+	fundingRate, premium, _ := getFundingRateSnapshot(symbol)
+	syncDerivsBaseCache(symbol, oiData, premium)
 
 	// Calculate intraday series data
 	intradayData := calculateIntradaySeries(klines3m)
@@ -135,8 +140,10 @@ func GetWithExchange(symbol, exchange string) (*Data, error) {
 	// Calculate longer-term data
 	longerTermData := calculateLongerTermData(klines4h)
 
-	return &Data{
+	collectedAt := time.Now().UTC()
+	data := &Data{
 		Symbol:            symbol,
+		CollectedAt:       collectedAt,
 		CurrentPrice:      currentPrice,
 		PriceChange1h:     priceChange1h,
 		PriceChange4h:     priceChange4h,
@@ -147,7 +154,9 @@ func GetWithExchange(symbol, exchange string) (*Data, error) {
 		FundingRate:       fundingRate,
 		IntradaySeries:    intradayData,
 		LongerTermContext: longerTermData,
-	}, nil
+	}
+	attachDerivsSnapshot(data, collectedAt)
+	return data, nil
 }
 
 // GetWithTimeframes retrieves market data for specified multiple timeframes
@@ -239,7 +248,7 @@ func GetWithTimeframes(symbol string, timeframes []string, primaryTimeframe stri
 	currentRSI7 := calculateRSI(primaryKlines, 7)
 
 	// Calculate price changes
-	priceChange1h := calculatePriceChangeByBars(primaryKlines, primaryTimeframe, 60) // 1 hour
+	priceChange1h := calculatePriceChangeByBars(primaryKlines, primaryTimeframe, 60)  // 1 hour
 	priceChange4h := calculatePriceChangeByBars(primaryKlines, primaryTimeframe, 240) // 4 hours
 
 	// Get OI data
@@ -248,11 +257,14 @@ func GetWithTimeframes(symbol string, timeframes []string, primaryTimeframe stri
 		oiData = &OIData{Latest: 0, Average: 0}
 	}
 
-	// Get Funding Rate
-	fundingRate, _ := getFundingRate(symbol)
+	// Get Funding Rate + premium snapshot for derivs cache sync
+	fundingRate, premium, _ := getFundingRateSnapshot(symbol)
+	syncDerivsBaseCache(symbol, oiData, premium)
 
-	return &Data{
+	collectedAt := time.Now().UTC()
+	data := &Data{
 		Symbol:        symbol,
+		CollectedAt:   collectedAt,
 		CurrentPrice:  currentPrice,
 		PriceChange1h: priceChange1h,
 		PriceChange4h: priceChange4h,
@@ -262,7 +274,9 @@ func GetWithTimeframes(symbol string, timeframes []string, primaryTimeframe stri
 		OpenInterest:  oiData,
 		FundingRate:   fundingRate,
 		TimeframeData: timeframeData,
-	}, nil
+	}
+	attachDerivsSnapshot(data, collectedAt)
+	return data, nil
 }
 
 // getOpenInterestData retrieves OI data
@@ -299,15 +313,21 @@ func getOpenInterestData(symbol string) (*OIData, error) {
 	}, nil
 }
 
-// getFundingRate retrieves funding rate (optimized: uses 1-hour cache)
-func getFundingRate(symbol string) (float64, error) {
+// getFundingRateSnapshot retrieves funding rate and the richer premium snapshot
+// used to backfill derivs base metrics.
+func getFundingRateSnapshot(symbol string) (float64, *premiumIndexData, error) {
 	// Check cache (1-hour validity)
 	// Funding Rate only updates every 8 hours, 1-hour cache is very reasonable
 	if cached, ok := fundingRateMap.Load(symbol); ok {
 		cache := cached.(*FundingRateCache)
 		if time.Since(cache.UpdatedAt) < frCacheTTL {
 			// Cache hit, return directly
-			return cache.Rate, nil
+			return cache.Rate, &premiumIndexData{
+				FundingRate: cache.Rate,
+				MarkPrice:   cache.MarkPrice,
+				IndexPrice:  cache.IndexPrice,
+				Timestamp:   cache.Timestamp,
+			}, nil
 		}
 	}
 
@@ -317,13 +337,13 @@ func getFundingRate(symbol string) (float64, error) {
 	apiClient := NewAPIClient()
 	resp, err := apiClient.client.Get(url)
 	if err != nil {
-		return 0, err
+		return 0, nil, err
 	}
 	defer resp.Body.Close()
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return 0, err
+		return 0, nil, err
 	}
 
 	var result struct {
@@ -337,18 +357,141 @@ func getFundingRate(symbol string) (float64, error) {
 	}
 
 	if err := json.Unmarshal(body, &result); err != nil {
-		return 0, err
+		return 0, nil, err
 	}
 
 	rate, _ := strconv.ParseFloat(result.LastFundingRate, 64)
+	markPrice, _ := strconv.ParseFloat(result.MarkPrice, 64)
+	indexPrice, _ := strconv.ParseFloat(result.IndexPrice, 64)
 
 	// Update cache
 	fundingRateMap.Store(symbol, &FundingRateCache{
-		Rate:      rate,
-		UpdatedAt: time.Now(),
+		Rate:       rate,
+		MarkPrice:  markPrice,
+		IndexPrice: indexPrice,
+		Timestamp:  result.Time,
+		UpdatedAt:  time.Now(),
 	})
 
-	return rate, nil
+	return rate, &premiumIndexData{
+		FundingRate: rate,
+		MarkPrice:   markPrice,
+		IndexPrice:  indexPrice,
+		Timestamp:   result.Time,
+	}, nil
+}
+
+func attachDerivsSnapshot(data *Data, collectedAt time.Time) {
+	if data == nil {
+		return
+	}
+	if collectedAt.IsZero() {
+		collectedAt = time.Now().UTC()
+	}
+	data.CollectedAt = collectedAt
+
+	snap := buildDerivsSnapshot(data.Symbol)
+	if snap == nil || snap.Features.Derivs == nil {
+		return
+	}
+	data.Snapshot = snap
+	recordDerivsFeatureStats(data, snap.Features.Derivs, collectedAt)
+}
+
+func recordDerivsFeatureStats(data *Data, derivs *types.DerivsFeatures, ts time.Time) {
+	if data == nil || derivs == nil {
+		return
+	}
+	data.markFeatureFresh(FeatureKeyF4, feature4Coverage(derivs), ts)
+	data.markFeatureFresh(FeatureKeyF5, feature5Coverage(derivs), ts)
+	data.markFeatureFresh(FeatureKeyF6, feature6Coverage(derivs), ts)
+	data.markFeatureFresh(FeatureKeyF7, feature7Coverage(derivs), ts)
+}
+
+func feature4Coverage(d *types.DerivsFeatures) float64 {
+	if d == nil {
+		return 0
+	}
+	return coverageGroups(
+		hasAnyFloat(d.CVDNotionalZ3mShort, d.CVDNotionalZ3mLong, d.ImbNotionalZ3mShort, d.ImbNotionalZ3mLong, d.TBRNotional3m),
+		hasAnyFloat(d.SlopePrice3mShort, d.SlopeCVDZ3mShort),
+		hasAnyFloat(d.ConfidenceCVD3m),
+	)
+}
+
+func feature5Coverage(d *types.DerivsFeatures) float64 {
+	if d == nil {
+		return 0
+	}
+	return coverageGroups(
+		hasAnyFloat(d.DistUpAtr3m),
+		hasAnyFloat(d.DistDnAtr3m),
+		hasAnyString(d.PreferDirection3m) || hasAnyInt(d.LiqRiskUp3m, d.LiqRiskDown3m),
+		hasAnyFloat(d.ConfidenceLiq3m),
+	)
+}
+
+func feature6Coverage(d *types.DerivsFeatures) float64 {
+	if d == nil {
+		return 0
+	}
+	return coverageGroups(
+		hasAnyString(d.AVWAPUpName3m, d.AVWAPDnName3m) || hasAnyFloat(d.AVWAPUpDistAtr3m, d.AVWAPDnDistAtr3m),
+		hasAnyString(d.AVWAPBias3m) || hasAnyInt(d.AVWAPReclaimUp3m, d.AVWAPRejectionDn3m),
+		hasAnyFloat(d.ConfidenceAVWAP3m),
+	)
+}
+
+func feature7Coverage(d *types.DerivsFeatures) float64 {
+	if d == nil {
+		return 0
+	}
+	return coverageGroups(
+		hasAnyFloat(d.BBW3m),
+		hasAnyFloat(d.RvRatio3m),
+		hasAnyString(d.VolRegime3m) || hasAnyInt(d.SqueezeOn3m, d.SqueezeRelease3m),
+		hasAnyFloat(d.ConfidenceVol3m),
+	)
+}
+
+func coverageGroups(groups ...bool) float64 {
+	if len(groups) == 0 {
+		return 0
+	}
+	covered := 0
+	for _, group := range groups {
+		if group {
+			covered++
+		}
+	}
+	return float64(covered) / float64(len(groups))
+}
+
+func hasAnyFloat(values ...*float64) bool {
+	for _, value := range values {
+		if value != nil {
+			return true
+		}
+	}
+	return false
+}
+
+func hasAnyInt(values ...*int) bool {
+	for _, value := range values {
+		if value != nil {
+			return true
+		}
+	}
+	return false
+}
+
+func hasAnyString(values ...*string) bool {
+	for _, value := range values {
+		if value != nil && strings.TrimSpace(*value) != "" {
+			return true
+		}
+	}
+	return false
 }
 
 // Format formats and outputs market data

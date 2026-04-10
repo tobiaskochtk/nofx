@@ -3,11 +3,11 @@ package trader
 import (
 	"fmt"
 	"math"
-	"nofx/telemetry"
 	"nofx/kernel"
 	"nofx/logger"
 	"nofx/market"
 	"nofx/store"
+	"nofx/telemetry"
 	"time"
 )
 
@@ -15,6 +15,13 @@ import (
 func (at *AutoTrader) saveEquitySnapshot(ctx *kernel.Context) {
 	if at.store == nil || ctx == nil {
 		return
+	}
+
+	// Calculate per-trader PnL from positions
+	var realizedPnL, netPnL float64
+	if summary, err := at.store.Position().GetTraderPnLSummary(at.id); err == nil {
+		realizedPnL = summary.RealizedPnL
+		netPnL = realizedPnL + ctx.Account.UnrealizedPnL
 	}
 
 	snapshot := &store.EquitySnapshot{
@@ -25,6 +32,8 @@ func (at *AutoTrader) saveEquitySnapshot(ctx *kernel.Context) {
 		UnrealizedPnL: ctx.Account.UnrealizedPnL,
 		PositionCount: ctx.Account.PositionCount,
 		MarginUsedPct: ctx.Account.MarginUsedPct,
+		RealizedPnL:   realizedPnL,
+		NetPnL:        netPnL,
 	}
 
 	if err := at.store.Equity().Save(snapshot); err != nil {
@@ -187,6 +196,87 @@ func (at *AutoTrader) GetAccountInfo() (map[string]interface{}, error) {
 		"position_count":  len(positions),  // Position count
 		"margin_used":     totalMarginUsed, // Margin used
 		"margin_used_pct": marginUsedPct,   // Margin usage rate
+	}, nil
+}
+
+// GetPerformance returns per-trader performance based on their own positions.
+// Unlike GetAccountInfo which shows the shared exchange account equity,
+// this method calculates PnL from the trader's own realized and unrealized trades.
+func (at *AutoTrader) GetPerformance() (map[string]interface{}, error) {
+	if at.store == nil {
+		return nil, fmt.Errorf("store not initialized")
+	}
+
+	// Get realized PnL summary from closed positions
+	summary, err := at.store.Position().GetTraderPnLSummary(at.id)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get PnL summary: %w", err)
+	}
+
+	// Get unrealized PnL from exchange for this trader's open positions
+	unrealizedPnL := 0.0
+	openPositionCount := 0
+	totalMarginUsed := 0.0
+
+	if summary.OpenCount > 0 {
+		// Get the trader's tracked open positions from DB
+		dbPositions, err := at.store.Position().GetOpenPositions(at.id)
+		if err != nil {
+			logger.Infof("⚠️ Failed to get open positions from DB for %s: %v", at.id, err)
+		}
+
+		// Get live positions from exchange to get current unrealized PnL
+		exchangePositions, err := at.trader.GetPositions()
+		if err != nil {
+			logger.Infof("⚠️ Failed to get exchange positions for %s: %v", at.id, err)
+		} else {
+			// Build a set of symbols this trader owns (from DB positions)
+			traderSymbols := make(map[string]bool)
+			for _, dbPos := range dbPositions {
+				sym := dbPos.Symbol
+				traderSymbols[sym] = true
+			}
+
+			// Sum unrealized PnL only for positions belonging to this trader
+			for _, pos := range exchangePositions {
+				symbol := pos["symbol"].(string)
+				if traderSymbols[symbol] {
+					if pnl, ok := pos["unRealizedProfit"].(float64); ok {
+						unrealizedPnL += pnl
+					}
+					openPositionCount++
+					markPrice := pos["markPrice"].(float64)
+					quantity := pos["positionAmt"].(float64)
+					if quantity < 0 {
+						quantity = -quantity
+					}
+					leverage := 10
+					if lev, ok := pos["leverage"].(float64); ok {
+						leverage = int(lev)
+					}
+					totalMarginUsed += (quantity * markPrice) / float64(leverage)
+				}
+			}
+		}
+	}
+
+	// Net PnL = realized (from closed trades) + unrealized (from open positions) - fees
+	netPnL := summary.RealizedPnL + unrealizedPnL
+	netPnLPct := 0.0
+	if at.initialBalance > 0 {
+		netPnLPct = (netPnL / at.initialBalance) * 100
+	}
+
+	return map[string]interface{}{
+		"realized_pnl":    summary.RealizedPnL,
+		"unrealized_pnl":  unrealizedPnL,
+		"total_fees":      summary.TotalFees,
+		"net_pnl":         netPnL,
+		"net_pnl_pct":     netPnLPct,
+		"closed_trades":   summary.ClosedCount,
+		"open_positions":  openPositionCount,
+		"margin_used":     totalMarginUsed,
+		"initial_balance": at.initialBalance,
 	}, nil
 }
 

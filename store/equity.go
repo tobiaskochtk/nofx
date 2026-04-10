@@ -22,6 +22,8 @@ type EquitySnapshot struct {
 	UnrealizedPnL float64   `gorm:"column:unrealized_pnl;not null;default:0" json:"unrealized_pnl"`
 	PositionCount int       `gorm:"column:position_count;default:0" json:"position_count"`
 	MarginUsedPct float64   `gorm:"column:margin_used_pct;default:0" json:"margin_used_pct"`
+	RealizedPnL   float64   `gorm:"column:realized_pnl;default:0" json:"realized_pnl"` // Per-trader realized PnL from closed positions
+	NetPnL        float64   `gorm:"column:net_pnl;default:0" json:"net_pnl"`           // Per-trader net PnL (realized + unrealized)
 	CreatedAt     time.Time `json:"created_at"`
 }
 
