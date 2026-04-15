@@ -21,10 +21,22 @@ func buildDecisionPayloadPrompt(ctx *Context, maxPositions int) (string, error) 
 		PayloadVersion:  decisionpkg.PayloadSchemaVersion,
 		ContextTF:       resolvePayloadContextTF(ctx),
 		PriceType:       "mark",
+		Exchange:        ctx.Exchange,
+		EMAPeriods:      append([]int(nil), ctx.EMAPeriods...),
+		RSIPeriods:      append([]int(nil), ctx.RSIPeriods...),
+		FeatureFlagsSet: ctx.FeatureFlagsSet,
+		EnableF4:        ctx.EnableF4,
+		EnableF5:        ctx.EnableF5,
+		EnableF6:        ctx.EnableF6,
+		EnableF7:        ctx.EnableF7,
 		Account:         convertDecisionAccount(ctx.Account),
 		MarketDataMap:   copyMarketDataMap(ctx.MarketDataMap),
 		BTCETHLeverage:  ctx.BTCETHLeverage,
 		AltcoinLeverage: ctx.AltcoinLeverage,
+		BTCETHPosRatio:  ctx.BTCETHPosRatio,
+		AltcoinPosRatio: ctx.AltcoinPosRatio,
+		MinPositionSize: ctx.MinPositionSize,
+		MinConfidence:   ctx.MinConfidence,
 		MaxPositions:    maxPositions,
 	}
 
@@ -83,8 +95,9 @@ func buildDecisionPayloadPrompt(ctx *Context, maxPositions int) (string, error) 
 		dctx.CandidateCoins = make([]decisionpkg.CandidateCoin, 0, len(ctx.CandidateCoins))
 		for _, coin := range ctx.CandidateCoins {
 			dctx.CandidateCoins = append(dctx.CandidateCoins, decisionpkg.CandidateCoin{
-				Symbol:  coin.Symbol,
-				Sources: append([]string(nil), coin.Sources...),
+				Symbol:          coin.Symbol,
+				Sources:         append([]string(nil), coin.Sources...),
+				SelectionBucket: strings.TrimSpace(coin.SelectionBucket),
 			})
 		}
 	}

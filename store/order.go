@@ -165,6 +165,57 @@ func (s *OrderStore) CreateOrder(order *TraderOrder) error {
 	return s.db.Create(order).Error
 }
 
+// UpsertOrder creates a new order or updates mutable fields on an existing one.
+func (s *OrderStore) UpsertOrder(order *TraderOrder) error {
+	if order == nil {
+		return nil
+	}
+
+	existing, err := s.GetOrderByExchangeID(order.ExchangeID, order.ExchangeOrderID)
+	if err != nil {
+		return fmt.Errorf("failed to check existing order: %w", err)
+	}
+	if existing == nil {
+		return s.db.Create(order).Error
+	}
+
+	existing.ClientOrderID = order.ClientOrderID
+	existing.Symbol = order.Symbol
+	existing.Side = order.Side
+	existing.PositionSide = order.PositionSide
+	existing.Type = order.Type
+	existing.TimeInForce = order.TimeInForce
+	existing.Quantity = order.Quantity
+	existing.Price = order.Price
+	existing.StopPrice = order.StopPrice
+	existing.Status = order.Status
+	existing.FilledQuantity = order.FilledQuantity
+	existing.AvgFillPrice = order.AvgFillPrice
+	existing.Commission = order.Commission
+	existing.CommissionAsset = order.CommissionAsset
+	existing.Leverage = order.Leverage
+	existing.ReduceOnly = order.ReduceOnly
+	existing.ClosePosition = order.ClosePosition
+	existing.WorkingType = order.WorkingType
+	existing.PriceProtect = order.PriceProtect
+	existing.OrderAction = order.OrderAction
+	if order.RelatedPositionID != 0 {
+		existing.RelatedPositionID = order.RelatedPositionID
+	}
+	if order.CreatedAt != 0 {
+		existing.CreatedAt = order.CreatedAt
+	}
+	if order.UpdatedAt != 0 {
+		existing.UpdatedAt = order.UpdatedAt
+	}
+	if order.FilledAt != 0 {
+		existing.FilledAt = order.FilledAt
+	}
+
+	order.ID = existing.ID
+	return s.db.Save(existing).Error
+}
+
 // UpdateOrderStatus updates order status
 func (s *OrderStore) UpdateOrderStatus(id int64, status string, filledQty, avgPrice, commission float64) error {
 	updates := map[string]interface{}{

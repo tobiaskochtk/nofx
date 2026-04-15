@@ -28,6 +28,7 @@ type Store struct {
 	equity         *EquityStore
 	order          *OrderStore
 	grid           *GridStore
+	dealReview     *DealReviewStore
 	aiCharge       *AIChargeStore
 	telegramConfig TelegramConfigStore
 
@@ -158,6 +159,9 @@ func (s *Store) initTables() error {
 	if err := s.Grid().InitTables(); err != nil {
 		return fmt.Errorf("failed to initialize grid tables: %w", err)
 	}
+	if err := s.DealReview().initTables(); err != nil {
+		return fmt.Errorf("failed to initialize deal review tables: %w", err)
+	}
 	if err := s.TelegramConfig().(*telegramConfigStore).initTables(); err != nil {
 		return fmt.Errorf("failed to initialize telegram config tables: %w", err)
 	}
@@ -285,6 +289,16 @@ func (s *Store) Grid() *GridStore {
 		s.grid = NewGridStore(s.gdb)
 	}
 	return s.grid
+}
+
+// DealReview gets deal review storage.
+func (s *Store) DealReview() *DealReviewStore {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.dealReview == nil {
+		s.dealReview = NewDealReviewStore(s.gdb)
+	}
+	return s.dealReview
 }
 
 // AICharge gets AI charge storage

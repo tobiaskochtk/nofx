@@ -199,11 +199,13 @@ func (t *BybitTrader) parseClosedPnLResult(resultData interface{}) ([]types.Clos
 		createdTime, _ := strconv.ParseInt(createdTimeStr, 10, 64)
 		updatedTime, _ := strconv.ParseInt(updatedTimeStr, 10, 64)
 
-		// Calculate approximate fee from value difference
+		// Calculate approximate fee from the difference between gross trade PnL and net closed PnL.
+		// Bybit's `side` reflects the closing execution side:
+		// Sell => closing a LONG, Buy => closing a SHORT.
 		cumEntryValue, _ := strconv.ParseFloat(cumEntryValueStr, 64)
 		cumExitValue, _ := strconv.ParseFloat(cumExitValueStr, 64)
 		expectedPnL := cumExitValue - cumEntryValue
-		if side == "Sell" {
+		if side == "Buy" {
 			expectedPnL = cumEntryValue - cumExitValue
 		}
 		fee := expectedPnL - closedPnL
@@ -211,10 +213,10 @@ func (t *BybitTrader) parseClosedPnLResult(resultData interface{}) ([]types.Clos
 			fee = 0
 		}
 
-		// Normalize side
-		normalizedSide := "long"
+		// Normalize the underlying position side, not the closing execution side.
+		normalizedSide := "short"
 		if side == "Sell" {
-			normalizedSide = "short"
+			normalizedSide = "long"
 		}
 
 		record := types.ClosedPnLRecord{

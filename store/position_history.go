@@ -2,6 +2,7 @@ package store
 
 import (
 	"fmt"
+	"math"
 	"strings"
 	"time"
 
@@ -220,6 +221,11 @@ func (s *PositionStore) CreateFromClosedPnL(traderID, exchangeID, exchangeType s
 	if exists {
 		return false, nil
 	}
+	if matched, err := s.findMatchingClosedPnLPosition(traderID, exchangeID, side, record); err != nil {
+		return false, err
+	} else if matched != nil {
+		return false, nil
+	}
 
 	exitTimeMs := record.ExitTime
 	entryTimeMs := record.EntryTime
@@ -256,7 +262,7 @@ func (s *PositionStore) CreateFromClosedPnL(traderID, exchangeID, exchangeType s
 		Leverage:           record.Leverage,
 		Status:             "CLOSED",
 		CloseReason:        record.CloseType,
-		Source:             "sync",
+		Source:             "closed_pnl_sync",
 		CreatedAt:          nowMs,
 		UpdatedAt:          nowMs,
 	}
@@ -268,8 +274,57 @@ func (s *PositionStore) CreateFromClosedPnL(traderID, exchangeID, exchangeType s
 		}
 		return false, fmt.Errorf("failed to create position from closed PnL: %w", err)
 	}
+	s.syncDealReviewClosedByID(pos.ID)
 
 	return true, nil
+}
+
+func (s *PositionStore) findMatchingClosedPnLPosition(traderID, exchangeID, side string, record *ClosedPnLRecord) (*TraderPosition, error) {
+	if record == nil {
+		return nil, nil
+	}
+
+	exitTimeMs := record.ExitTime
+	if exitTimeMs == 0 {
+		return nil, nil
+	}
+
+	const (
+		timeToleranceMs   = int64(2 * 60 * 1000)
+		priceTolerance    = 0.000001
+		quantityTolerance = 0.0001
+	)
+
+	var candidates []TraderPosition
+	if err := s.db.Where(
+		"trader_id = ? AND exchange_id = ? AND status = ? AND symbol = ? AND side = ? AND exit_time BETWEEN ? AND ?",
+		traderID,
+		exchangeID,
+		"CLOSED",
+		record.Symbol,
+		side,
+		exitTimeMs-timeToleranceMs,
+		exitTimeMs+timeToleranceMs,
+	).Find(&candidates).Error; err != nil {
+		return nil, fmt.Errorf("failed to query matching closed positions: %w", err)
+	}
+
+	for i := range candidates {
+		candidate := &candidates[i]
+		qty := candidate.EntryQuantity
+		if qty == 0 {
+			qty = candidate.Quantity
+		}
+		if math.Abs(qty-record.Quantity) > quantityTolerance {
+			continue
+		}
+		if record.ExitPrice > 0 && math.Abs(candidate.ExitPrice-record.ExitPrice) > priceTolerance*math.Max(1, record.ExitPrice) {
+			continue
+		}
+		return candidate, nil
+	}
+
+	return nil, nil
 }
 
 // GetLastClosedPositionTime gets the most recent exit time (Unix ms)

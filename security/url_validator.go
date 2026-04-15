@@ -13,6 +13,9 @@ import (
 
 // Private/Reserved IP ranges that should be blocked to prevent SSRF
 var privateIPBlocks []*net.IPNet
+var trustedInternalHosts = map[string]struct{}{
+	"selfhosted-ai500": {},
+}
 
 func init() {
 	// Initialize private IP blocks
@@ -80,6 +83,11 @@ func isPrivateIP(ip net.IP) bool {
 	return false
 }
 
+func isTrustedInternalHost(host string) bool {
+	_, ok := trustedInternalHosts[strings.ToLower(strings.TrimSpace(host))]
+	return ok
+}
+
 // ValidateURL checks if a URL is safe to request (not pointing to internal networks)
 // Returns an error if the URL is potentially dangerous
 func ValidateURL(rawURL string) error {
@@ -120,6 +128,9 @@ func ValidateURL(rawURL string) error {
 		if lowerHost == blocked {
 			return &SSRFError{URL: rawURL, Reason: fmt.Sprintf("blocked hostname: %s", host)}
 		}
+	}
+	if isTrustedInternalHost(lowerHost) {
+		return nil
 	}
 
 	// Resolve the hostname to IP addresses
@@ -170,6 +181,10 @@ func SafeHTTPClient(timeout time.Duration) *http.Client {
 			}
 
 			// Resolve and check the IP
+			if isTrustedInternalHost(host) {
+				return dialer.DialContext(ctx, network, addr)
+			}
+
 			ips, err := net.LookupIP(host)
 			if err != nil {
 				return nil, fmt.Errorf("SSRF protection: failed to resolve host %s: %w", host, err)

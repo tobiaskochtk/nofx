@@ -1,14 +1,22 @@
 import { Clock, Activity, TrendingUp, BarChart2, Info, Lock, ExternalLink, Zap, Check, AlertCircle, Key } from 'lucide-react'
-import type { IndicatorConfig } from '../../types'
+import type { IndicatorConfig, SignalProviderConfig } from '../../types'
 import { indicator, ts } from '../../i18n/strategy-translations'
 import { NofxSelect } from '../ui/select'
 
 // Default NofxOS API Key
 const DEFAULT_NOFXOS_API_KEY = 'cm_568c67eae410d912c54c'
+const DEFAULT_PROVIDER_TYPE: NonNullable<SignalProviderConfig['type']> = 'nofxos'
+
+function normalizeProviderType(type?: SignalProviderConfig['type']): NonNullable<SignalProviderConfig['type']> {
+  return type === 'selfhosted_ai500' ? 'selfhosted_ai500' : 'nofxos'
+}
 
 interface IndicatorEditorProps {
   config: IndicatorConfig
+  provider?: SignalProviderConfig
   onChange: (config: IndicatorConfig) => void
+  onProviderChange: (provider: SignalProviderConfig) => void
+  requiresProvider?: boolean
   disabled?: boolean
   language: string
 }
@@ -33,7 +41,10 @@ const allTimeframes = [
 
 export function IndicatorEditor({
   config,
+  provider,
   onChange,
+  onProviderChange,
+  requiresProvider,
   disabled,
   language,
 }: IndicatorEditorProps) {
@@ -114,9 +125,36 @@ export function IndicatorEditor({
     ensureRawKlines()
   }
 
-  // Check if any NofxOS feature is enabled
-  const hasNofxosEnabled = config.enable_quant_data || config.enable_oi_ranking || config.enable_netflow_ranking || config.enable_price_ranking
-  const hasApiKey = !!config.nofxos_api_key
+  const resolvedProvider: SignalProviderConfig = {
+    type: normalizeProviderType(provider?.type),
+    base_url: provider?.base_url || '',
+    api_key: provider?.api_key || config.nofxos_api_key || '',
+  }
+
+  const isSelfhostedProvider = resolvedProvider.type === 'selfhosted_ai500'
+  const hasNofxosEnabled = requiresProvider ?? (
+    config.enable_quant_data ||
+    config.enable_oi_ranking ||
+    config.enable_netflow_ranking ||
+    config.enable_price_ranking
+  )
+  const hasApiKey = !!resolvedProvider.api_key
+  const hasBaseURL = !isSelfhostedProvider || !!resolvedProvider.base_url
+  const providerConfigured = hasApiKey && hasBaseURL
+
+  const updateProvider = (patch: Partial<SignalProviderConfig>) => {
+    if (disabled) return
+    onProviderChange({
+      ...resolvedProvider,
+      ...patch,
+    })
+  }
+
+  const updateProviderApiKey = (value: string) => {
+    if (disabled) return
+    updateProvider({ api_key: value })
+    onChange({ ...config, nofxos_api_key: value })
+  }
 
   return (
     <div className="space-y-5">
@@ -158,7 +196,7 @@ export function IndicatorEditor({
 
             {/* Status & API Docs */}
             <div className="flex items-center gap-2">
-              {hasApiKey ? (
+              {providerConfigured ? (
                 <span className="flex items-center gap-1 text-[10px] px-2 py-1 rounded-full" style={{ background: 'rgba(14, 203, 129, 0.15)', color: '#0ECB81' }}>
                   <Check className="w-3 h-3" />
                   {ts(indicator.connected, language)}
@@ -169,53 +207,110 @@ export function IndicatorEditor({
                   {ts(indicator.notConfigured, language)}
                 </span>
               )}
-              <a
-                href="https://nofxos.ai/api-docs"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="flex items-center gap-1 text-[10px] px-2 py-1 rounded-full transition-all hover:scale-[1.02]"
-                style={{
-                  background: 'rgba(139, 92, 246, 0.2)',
-                  color: '#a855f7',
-                }}
-              >
-                <ExternalLink className="w-3 h-3" />
-                {ts(indicator.viewApiDocs, language)}
-              </a>
+              {!isSelfhostedProvider && (
+                <a
+                  href="https://nofxos.ai/api-docs"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex items-center gap-1 text-[10px] px-2 py-1 rounded-full transition-all hover:scale-[1.02]"
+                  style={{
+                    background: 'rgba(139, 92, 246, 0.2)',
+                    color: '#a855f7',
+                  }}
+                >
+                  <ExternalLink className="w-3 h-3" />
+                  {ts(indicator.viewApiDocs, language)}
+                </a>
+              )}
             </div>
           </div>
 
-          {/* API Key Input */}
-          <div className="flex items-center gap-2">
-            <div className="flex-1 relative">
-              <Key className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4" style={{ color: '#848E9C' }} />
-              <input
-                type="text"
-                value={config.nofxos_api_key || ''}
-                onChange={(e) => !disabled && onChange({ ...config, nofxos_api_key: e.target.value })}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            <div>
+              <div className="text-[10px] font-medium mb-1.5" style={{ color: '#848E9C' }}>
+                {ts(indicator.providerMode, language)}
+              </div>
+              <NofxSelect
+                value={resolvedProvider.type || DEFAULT_PROVIDER_TYPE}
+                onChange={(value) => updateProvider({ type: value as SignalProviderConfig['type'] })}
                 disabled={disabled}
-                placeholder={ts(indicator.apiKeyPlaceholder, language)}
-                className="w-full pl-9 pr-3 py-2 rounded-lg text-sm font-mono"
-                style={{
-                  background: 'rgba(30, 35, 41, 0.8)',
-                  border: hasApiKey ? '1px solid rgba(14, 203, 129, 0.3)' : '1px solid rgba(139, 92, 246, 0.3)',
-                  color: '#EAECEF',
-                }}
+                className="w-full px-3 py-2 rounded-lg text-sm"
+                style={{ background: '#1E2329', border: '1px solid rgba(139, 92, 246, 0.3)', color: '#EAECEF' }}
+                options={[
+                  { value: 'nofxos', label: ts(indicator.providerOfficial, language) },
+                  { value: 'selfhosted_ai500', label: ts(indicator.providerSelfhosted, language) },
+                ]}
               />
             </div>
-            {!disabled && !config.nofxos_api_key && (
-              <button
-                type="button"
-                onClick={() => onChange({ ...config, nofxos_api_key: DEFAULT_NOFXOS_API_KEY })}
-                className="px-3 py-2 rounded-lg text-xs font-medium transition-all hover:scale-[1.02]"
-                style={{
-                  background: 'linear-gradient(135deg, #6366f1, #a855f7)',
-                  color: '#fff',
-                }}
-              >
-                {ts(indicator.fillDefault, language)}
-              </button>
+
+            {isSelfhostedProvider ? (
+              <div>
+                <div className="text-[10px] font-medium mb-1.5" style={{ color: '#848E9C' }}>
+                  {ts(indicator.providerUrl, language)}
+                </div>
+                <input
+                  type="text"
+                  value={resolvedProvider.base_url || ''}
+                  onChange={(e) => updateProvider({ base_url: e.target.value })}
+                  disabled={disabled}
+                  placeholder={ts(indicator.providerUrlPlaceholder, language)}
+                  className="w-full px-3 py-2 rounded-lg text-sm font-mono"
+                  style={{
+                    background: 'rgba(30, 35, 41, 0.8)',
+                    border: hasBaseURL ? '1px solid rgba(14, 203, 129, 0.3)' : '1px solid rgba(139, 92, 246, 0.3)',
+                    color: '#EAECEF',
+                  }}
+                />
+              </div>
+            ) : (
+              <div className="flex items-center px-3 py-2 rounded-lg text-[10px]" style={{ background: 'rgba(99, 102, 241, 0.08)', border: '1px solid rgba(99, 102, 241, 0.2)', color: '#A5B4FC' }}>
+                {ts(indicator.officialHint, language)}
+              </div>
             )}
+          </div>
+
+          {isSelfhostedProvider && (
+            <div className="mt-3 px-3 py-2 rounded-lg text-[10px]" style={{ background: 'rgba(245, 158, 11, 0.08)', border: '1px solid rgba(245, 158, 11, 0.2)', color: '#FCD34D' }}>
+              {ts(indicator.selfhostedHint, language)}
+            </div>
+          )}
+
+          {/* API Token Input */}
+          <div className="mt-3">
+            <div className="text-[10px] font-medium mb-1.5" style={{ color: '#848E9C' }}>
+              {ts(indicator.providerToken, language)}
+            </div>
+            <div className="flex items-center gap-2">
+              <div className="flex-1 relative">
+                <Key className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4" style={{ color: '#848E9C' }} />
+                <input
+                  type="text"
+                  value={resolvedProvider.api_key || ''}
+                  onChange={(e) => updateProviderApiKey(e.target.value)}
+                  disabled={disabled}
+                  placeholder={ts(indicator.providerTokenPlaceholder, language)}
+                  className="w-full pl-9 pr-3 py-2 rounded-lg text-sm font-mono"
+                  style={{
+                    background: 'rgba(30, 35, 41, 0.8)',
+                    border: hasApiKey ? '1px solid rgba(14, 203, 129, 0.3)' : '1px solid rgba(139, 92, 246, 0.3)',
+                    color: '#EAECEF',
+                  }}
+                />
+              </div>
+              {!disabled && !resolvedProvider.api_key && !isSelfhostedProvider && (
+                <button
+                  type="button"
+                  onClick={() => updateProviderApiKey(DEFAULT_NOFXOS_API_KEY)}
+                  className="px-3 py-2 rounded-lg text-xs font-medium transition-all hover:scale-[1.02]"
+                  style={{
+                    background: 'linear-gradient(135deg, #6366f1, #a855f7)',
+                    color: '#fff',
+                  }}
+                >
+                  {ts(indicator.fillDefault, language)}
+                </button>
+              )}
+            </div>
           </div>
 
           {/* NofxOS Data Sources Grid */}
@@ -448,8 +543,8 @@ export function IndicatorEditor({
               </div>
             </div>
 
-            {/* Warning if features enabled but no API key */}
-            {hasNofxosEnabled && !hasApiKey && (
+            {/* Warning if features enabled but provider is incomplete */}
+            {hasNofxosEnabled && !providerConfigured && (
               <div className="flex items-center gap-2 mt-3 p-2 rounded-lg" style={{ background: 'rgba(246, 70, 93, 0.1)', border: '1px solid rgba(246, 70, 93, 0.2)' }}>
                 <AlertCircle className="w-4 h-4 flex-shrink-0" style={{ color: '#F6465D' }} />
                 <span className="text-[10px]" style={{ color: '#F6465D' }}>
@@ -643,7 +738,56 @@ export function IndicatorEditor({
       </div>
 
       {/* ============================================ */}
-      {/* Section 3: Market Sentiment                 */}
+      {/* Section 3: Signal F-Blocks                  */}
+      {/* ============================================ */}
+      <div className="rounded-lg overflow-hidden" style={{ background: '#0B0E11', border: '1px solid #2B3139' }}>
+        <div className="px-3 py-2 flex items-center gap-2" style={{ background: '#1E2329', borderBottom: '1px solid #2B3139' }}>
+          <Zap className="w-4 h-4" style={{ color: '#a855f7' }} />
+          <span className="text-sm font-medium" style={{ color: '#EAECEF' }}>{ts(indicator.signalFeatures, language)}</span>
+          <span className="text-xs" style={{ color: '#848E9C' }}>- {ts(indicator.signalFeaturesDesc, language)}</span>
+        </div>
+
+        <div className="p-3">
+          <div className="grid grid-cols-2 gap-2">
+            {[
+              { key: 'enable_f4', label: 'f4', desc: 'f4Desc', color: '#7c3aed' },
+              { key: 'enable_f5', label: 'f5', desc: 'f5Desc', color: '#2563eb' },
+              { key: 'enable_f6', label: 'f6', desc: 'f6Desc', color: '#0d9488' },
+              { key: 'enable_f7', label: 'f7', desc: 'f7Desc', color: '#db2777' },
+            ].map(({ key, label, desc, color }) => {
+              const enabled = config[key as keyof IndicatorConfig] !== false
+              return (
+                <div
+                  key={key}
+                  className="p-2.5 rounded-lg transition-all"
+                  style={{
+                    background: enabled ? `${color}12` : 'transparent',
+                    border: `1px solid ${enabled ? `${color}35` : '#2B3139'}`,
+                  }}
+                >
+                  <div className="flex items-center justify-between mb-1">
+                    <div className="flex items-center gap-2">
+                      <div className="w-2 h-2 rounded-full" style={{ background: color }} />
+                      <span className="text-xs font-medium" style={{ color: '#EAECEF' }}>{ts(indicator[label as keyof typeof indicator], language)}</span>
+                    </div>
+                    <input
+                      type="checkbox"
+                      checked={enabled}
+                      onChange={(e) => !disabled && onChange({ ...config, [key]: e.target.checked })}
+                      disabled={disabled}
+                      className="w-4 h-4 rounded accent-violet-500"
+                    />
+                  </div>
+                  <p className="text-[10px]" style={{ color: '#5E6673' }}>{ts(indicator[desc as keyof typeof indicator], language)}</p>
+                </div>
+              )
+            })}
+          </div>
+        </div>
+      </div>
+
+      {/* ============================================ */}
+      {/* Section 4: Market Sentiment                 */}
       {/* ============================================ */}
       <div className="rounded-lg overflow-hidden" style={{ background: '#0B0E11', border: '1px solid #2B3139' }}>
         <div className="px-3 py-2 flex items-center gap-2" style={{ background: '#1E2329', borderBottom: '1px solid #2B3139' }}>

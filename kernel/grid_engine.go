@@ -17,24 +17,24 @@ import (
 
 // GridLevelInfo represents a single grid level's current state
 type GridLevelInfo struct {
-	Index          int     `json:"index"`            // Level index (0 = lowest)
-	Price          float64 `json:"price"`            // Target price for this level
-	State          string  `json:"state"`            // "empty", "pending", "filled"
-	Side           string  `json:"side"`             // "buy" or "sell"
-	OrderID        string  `json:"order_id"`         // Current order ID (if pending)
-	OrderQuantity  float64 `json:"order_quantity"`   // Order quantity
-	PositionSize   float64 `json:"position_size"`    // Position size (if filled)
-	PositionEntry  float64 `json:"position_entry"`   // Entry price (if filled)
-	AllocatedUSD   float64 `json:"allocated_usd"`    // USD allocated to this level
-	UnrealizedPnL  float64 `json:"unrealized_pnl"`   // Unrealized P&L (if filled)
+	Index         int     `json:"index"`          // Level index (0 = lowest)
+	Price         float64 `json:"price"`          // Target price for this level
+	State         string  `json:"state"`          // "empty", "pending", "filled"
+	Side          string  `json:"side"`           // "buy" or "sell"
+	OrderID       string  `json:"order_id"`       // Current order ID (if pending)
+	OrderQuantity float64 `json:"order_quantity"` // Order quantity
+	PositionSize  float64 `json:"position_size"`  // Position size (if filled)
+	PositionEntry float64 `json:"position_entry"` // Entry price (if filled)
+	AllocatedUSD  float64 `json:"allocated_usd"`  // USD allocated to this level
+	UnrealizedPnL float64 `json:"unrealized_pnl"` // Unrealized P&L (if filled)
 }
 
 // GridContext contains all information needed for AI grid decision making
 type GridContext struct {
 	// Basic info
-	Symbol       string    `json:"symbol"`
-	CurrentTime  string    `json:"current_time"`
-	CurrentPrice float64   `json:"current_price"`
+	Symbol       string  `json:"symbol"`
+	CurrentTime  string  `json:"current_time"`
+	CurrentPrice float64 `json:"current_price"`
 
 	// Grid configuration
 	GridCount       int     `json:"grid_count"`
@@ -52,22 +52,22 @@ type GridContext struct {
 	IsPaused         bool            `json:"is_paused"`
 
 	// Market data
-	ATR14          float64 `json:"atr14"`
-	BollingerUpper float64 `json:"bollinger_upper"`
+	ATR14           float64 `json:"atr14"`
+	BollingerUpper  float64 `json:"bollinger_upper"`
 	BollingerMiddle float64 `json:"bollinger_middle"`
-	BollingerLower float64 `json:"bollinger_lower"`
-	BollingerWidth float64 `json:"bollinger_width"` // Percentage
-	EMA20          float64 `json:"ema20"`
-	EMA50          float64 `json:"ema50"`
-	EMADistance    float64 `json:"ema_distance"` // Percentage
-	RSI14          float64 `json:"rsi14"`
-	MACD           float64 `json:"macd"`
-	MACDSignal     float64 `json:"macd_signal"`
-	MACDHistogram  float64 `json:"macd_histogram"`
-	FundingRate    float64 `json:"funding_rate"`
-	Volume24h      float64 `json:"volume_24h"`
-	PriceChange1h  float64 `json:"price_change_1h"`
-	PriceChange4h  float64 `json:"price_change_4h"`
+	BollingerLower  float64 `json:"bollinger_lower"`
+	BollingerWidth  float64 `json:"bollinger_width"` // Percentage
+	EMA20           float64 `json:"ema20"`
+	EMA50           float64 `json:"ema50"`
+	EMADistance     float64 `json:"ema_distance"` // Percentage
+	RSI14           float64 `json:"rsi14"`
+	MACD            float64 `json:"macd"`
+	MACDSignal      float64 `json:"macd_signal"`
+	MACDHistogram   float64 `json:"macd_histogram"`
+	FundingRate     float64 `json:"funding_rate"`
+	Volume24h       float64 `json:"volume_24h"`
+	PriceChange1h   float64 `json:"price_change_1h"`
+	PriceChange4h   float64 `json:"price_change_4h"`
 
 	// Account info
 	TotalEquity      float64 `json:"total_equity"`
@@ -541,9 +541,9 @@ func isValidGridAction(action string) bool {
 		"adjust_grid":       true,
 		"hold":              true,
 		// Also support standard actions for compatibility
-		"open_long":  true,
-		"open_short": true,
-		"close_long": true,
+		"open_long":   true,
+		"open_short":  true,
+		"close_long":  true,
 		"close_short": true,
 	}
 	return validActions[action]
@@ -574,19 +574,21 @@ func BuildGridContextFromMarketData(mktData *market.Data, config *store.GridStra
 
 	// Extract indicators from timeframe data
 	if mktData.TimeframeData != nil {
-		if tf5m, ok := mktData.TimeframeData["5m"]; ok {
-			if len(tf5m.BOLLUpper) > 0 {
-				ctx.BollingerUpper = tf5m.BOLLUpper[len(tf5m.BOLLUpper)-1]
-				ctx.BollingerMiddle = tf5m.BOLLMiddle[len(tf5m.BOLLMiddle)-1]
-				ctx.BollingerLower = tf5m.BOLLLower[len(tf5m.BOLLLower)-1]
+		if indicatorSeries := resolveGridIndicatorSeries(mktData.TimeframeData); indicatorSeries != nil {
+			if len(indicatorSeries.BOLLUpper) > 0 {
+				ctx.BollingerUpper = indicatorSeries.BOLLUpper[len(indicatorSeries.BOLLUpper)-1]
+				ctx.BollingerMiddle = indicatorSeries.BOLLMiddle[len(indicatorSeries.BOLLMiddle)-1]
+				ctx.BollingerLower = indicatorSeries.BOLLLower[len(indicatorSeries.BOLLLower)-1]
 				if ctx.BollingerMiddle > 0 {
 					ctx.BollingerWidth = (ctx.BollingerUpper - ctx.BollingerLower) / ctx.BollingerMiddle * 100
 				}
 			}
-			ctx.ATR14 = tf5m.ATR14
-			if len(tf5m.RSI14Values) > 0 {
-				ctx.RSI14 = tf5m.RSI14Values[len(tf5m.RSI14Values)-1]
+			ctx.ATR14 = indicatorSeries.ATR14
+			if len(indicatorSeries.RSI14Values) > 0 {
+				ctx.RSI14 = indicatorSeries.RSI14Values[len(indicatorSeries.RSI14Values)-1]
 			}
+			ctx.EMA20 = gridEMAValue(indicatorSeries, 20)
+			ctx.EMA50 = gridEMAValue(indicatorSeries, 50)
 		}
 	}
 
@@ -595,10 +597,17 @@ func BuildGridContextFromMarketData(mktData *market.Data, config *store.GridStra
 		if ctx.ATR14 == 0 {
 			ctx.ATR14 = mktData.LongerTermContext.ATR14
 		}
-		ctx.EMA50 = mktData.LongerTermContext.EMA50
+		if ctx.EMA20 == 0 {
+			ctx.EMA20 = mktData.LongerTermContext.EMA20
+		}
+		if ctx.EMA50 == 0 {
+			ctx.EMA50 = mktData.LongerTermContext.EMA50
+		}
 	}
 
-	ctx.EMA20 = mktData.CurrentEMA20
+	if ctx.EMA20 == 0 {
+		ctx.EMA20 = mktData.CurrentEMA20
+	}
 	ctx.MACD = mktData.CurrentMACD
 
 	// Calculate EMA distance
@@ -607,6 +616,55 @@ func BuildGridContextFromMarketData(mktData *market.Data, config *store.GridStra
 	}
 
 	return ctx
+}
+
+func resolveGridIndicatorSeries(series map[string]*market.TimeframeSeriesData) *market.TimeframeSeriesData {
+	for _, tf := range []string{"5m", "15m", "3m", "4h", "1h"} {
+		if data := series[tf]; data != nil {
+			return data
+		}
+	}
+	for _, data := range series {
+		if data != nil {
+			return data
+		}
+	}
+	return nil
+}
+
+func gridEMAValue(data *market.TimeframeSeriesData, period int) float64 {
+	if data == nil || period <= 0 {
+		return 0
+	}
+
+	switch period {
+	case 20:
+		if len(data.EMA20Values) > 0 {
+			return data.EMA20Values[len(data.EMA20Values)-1]
+		}
+	case 50:
+		if len(data.EMA50Values) > 0 {
+			return data.EMA50Values[len(data.EMA50Values)-1]
+		}
+	}
+
+	if len(data.Klines) >= period {
+		klines := make([]market.Kline, 0, len(data.Klines))
+		for _, bar := range data.Klines {
+			klines = append(klines, market.Kline{
+				OpenTime:  bar.Time,
+				Open:      bar.Open,
+				High:      bar.High,
+				Low:       bar.Low,
+				Close:     bar.Close,
+				Volume:    bar.Volume,
+				CloseTime: bar.Time,
+			})
+		}
+		return market.ExportCalculateEMA(klines, period)
+	}
+
+	return 0
 }
 
 // Helper function for max

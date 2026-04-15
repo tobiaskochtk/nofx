@@ -12,12 +12,14 @@ import { LogOut, Loader2, Eye, EyeOff, Copy, Check } from 'lucide-react'
 import { DeepVoidBackground } from '../components/common/DeepVoidBackground'
 import { NofxSelect } from '../components/ui/select'
 import { GridRiskPanel } from '../components/strategy/GridRiskPanel'
+import { TraderBucketReviewModal } from '../components/trader/TraderBucketReviewModal'
 import type {
     SystemStatus,
     AccountInfo,
     Position,
     DecisionRecord,
     Statistics,
+    TraderAI500BucketReview,
     TraderInfo,
     Exchange,
 } from '../types'
@@ -142,6 +144,10 @@ export function TraderDashboardPage({
     const chartSectionRef = useRef<HTMLDivElement>(null)
     const [showWalletAddress, setShowWalletAddress] = useState<boolean>(false)
     const [copiedAddress, setCopiedAddress] = useState<boolean>(false)
+    const [showBucketReviewModal, setShowBucketReviewModal] = useState<boolean>(false)
+    const [bucketReviewLoading, setBucketReviewLoading] = useState<boolean>(false)
+    const [bucketReviewError, setBucketReviewError] = useState<string | null>(null)
+    const [bucketReview, setBucketReview] = useState<TraderAI500BucketReview | null>(null)
 
     // Current positions pagination
     const [positionsPageSize, setPositionsPageSize] = useState<number>(20)
@@ -230,6 +236,34 @@ export function TraderDashboardPage({
             setClosingPosition(null)
         }
     }
+
+    const loadBucketReview = async () => {
+        if (!selectedTraderId) return
+
+        setBucketReviewLoading(true)
+        setBucketReviewError(null)
+        try {
+            const review = await api.getTraderAI500BucketReview(selectedTraderId, 24, 20, true)
+            setBucketReview(review)
+        } catch (err: unknown) {
+            setBucketReviewError(
+                err instanceof Error ? err.message : 'Failed to fetch AI500 bucket review'
+            )
+        } finally {
+            setBucketReviewLoading(false)
+        }
+    }
+
+    const handleOpenBucketReview = () => {
+        setShowBucketReviewModal(true)
+        void loadBucketReview()
+    }
+
+    useEffect(() => {
+        if (!showBucketReviewModal) return
+        setBucketReview(null)
+        void loadBucketReview()
+    }, [selectedTraderId])
 
     // If API failed with error, show empty state (likely backend not running)
     if (tradersError) {
@@ -767,13 +801,21 @@ export function TraderDashboardPage({
                                     </div>
                                 )}
                             </div>
-                            {/* Limit Selector */}
-                            <NofxSelect
-                                value={decisionsLimit}
-                                onChange={(val) => onDecisionsLimitChange(Number(val))}
-                                options={[{ value: 5, label: '5' }, { value: 10, label: '10' }, { value: 20, label: '20' }, { value: 50, label: '50' }, { value: 100, label: '100' }]}
-                                className="px-3 py-1.5 rounded-lg text-sm font-medium cursor-pointer transition-all bg-black/40 text-nofx-text-main border border-white/10 hover:border-nofx-accent"
-                            />
+                            <div className="flex items-center gap-2">
+                                <button
+                                    type="button"
+                                    onClick={handleOpenBucketReview}
+                                    className="px-3 py-1.5 rounded-lg text-sm font-medium transition-all bg-indigo-500/10 text-indigo-200 border border-indigo-400/20 hover:bg-indigo-500/20"
+                                >
+                                    AI500 Review
+                                </button>
+                                <NofxSelect
+                                    value={decisionsLimit}
+                                    onChange={(val) => onDecisionsLimitChange(Number(val))}
+                                    options={[{ value: 5, label: '5' }, { value: 10, label: '10' }, { value: 20, label: '20' }, { value: 50, label: '50' }, { value: 100, label: '100' }]}
+                                    className="px-3 py-1.5 rounded-lg text-sm font-medium cursor-pointer transition-all bg-black/40 text-nofx-text-main border border-white/10 hover:border-nofx-accent"
+                                />
+                            </div>
                         </div>
 
                         {/* Decisions List - Scrollable */}
@@ -821,6 +863,16 @@ export function TraderDashboardPage({
                     </div>
                 )}
             </div>
+            <TraderBucketReviewModal
+                isOpen={showBucketReviewModal}
+                traderName={selectedTrader.trader_name}
+                language={language}
+                review={bucketReview}
+                loading={bucketReviewLoading}
+                error={bucketReviewError}
+                onRefresh={() => void loadBucketReview()}
+                onClose={() => setShowBucketReviewModal(false)}
+            />
         </DeepVoidBackground>
     )
 }

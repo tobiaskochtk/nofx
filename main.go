@@ -5,13 +5,13 @@ import (
 	"nofx/auth"
 	"nofx/config"
 	"nofx/crypto"
-	"nofx/telemetry"
 	"nofx/logger"
 	"nofx/manager"
 	_ "nofx/mcp/payment"
 	_ "nofx/mcp/provider"
 	"nofx/store"
 	"nofx/telegram"
+	"nofx/telemetry"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -119,10 +119,10 @@ func main() {
 				status = "✅ Running"
 			}
 			idShort := t.ID
-		if len(idShort) > 8 {
-			idShort = idShort[:8]
-		}
-		logger.Infof("  • %s [%s] %s - AI Model: %s, Exchange: %s",
+			if len(idShort) > 8 {
+				idShort = idShort[:8]
+			}
+			logger.Infof("  • %s [%s] %s - AI Model: %s, Exchange: %s",
 				t.Name, idShort, status, t.AIModelID, t.ExchangeID)
 		}
 	}
@@ -139,6 +139,21 @@ func main() {
 		if err := server.Start(); err != nil {
 			logger.Fatalf("❌ Failed to start API server: %v", err)
 		}
+	}()
+
+	go server.RunDealReviewChallengerCompareSupervisor()
+
+	go func() {
+		if err := st.DealReview().BackfillEventDecisionArtifacts(); err != nil {
+			logger.Warnf("⚠️ Background deal review prompt backfill failed: %v", err)
+			return
+		}
+		logger.Info("✅ Background deal review prompt backfill completed")
+		if err := st.DealReview().BackfillDecisionCyclePricePoints(); err != nil {
+			logger.Warnf("⚠️ Background deal review price timeline backfill failed: %v", err)
+			return
+		}
+		logger.Info("✅ Background deal review price timeline backfill completed")
 	}()
 
 	// Start Telegram bot (if TELEGRAM_BOT_TOKEN is configured)

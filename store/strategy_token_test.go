@@ -110,3 +110,27 @@ func TestGetEffectiveCoinCount(t *testing.T) {
 		t.Errorf("ai500 coin count = %d, want 5", got)
 	}
 }
+
+func TestIndicatorFeatureToggles_DefaultEnabledAndAffectEstimate(t *testing.T) {
+	legacy := IndicatorConfig{}
+	if !legacy.FeatureF4Enabled() || !legacy.FeatureF5Enabled() || !legacy.FeatureF6Enabled() || !legacy.FeatureF7Enabled() {
+		t.Fatal("legacy configs without explicit F toggles must default to enabled")
+	}
+
+	config := GetDefaultStrategyConfig("en")
+	if !config.Indicators.FeatureF4Enabled() || !config.Indicators.FeatureF5Enabled() ||
+		!config.Indicators.FeatureF6Enabled() || !config.Indicators.FeatureF7Enabled() {
+		t.Fatal("default strategy config should keep F4-F7 enabled")
+	}
+
+	withSignals := config.EstimateTokens()
+	config.Indicators.EnableF4 = boolPtr(false)
+	config.Indicators.EnableF5 = boolPtr(false)
+	config.Indicators.EnableF6 = boolPtr(false)
+	config.Indicators.EnableF7 = boolPtr(false)
+	withoutSignals := config.EstimateTokens()
+
+	if withoutSignals.Total >= withSignals.Total {
+		t.Fatalf("disabling F4-F7 should reduce the token estimate: with=%d without=%d", withSignals.Total, withoutSignals.Total)
+	}
+}

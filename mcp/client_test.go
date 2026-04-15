@@ -133,7 +133,7 @@ func TestClient_ParseMCPResponse_EmptyContent(t *testing.T) {
 	client := NewClient().(*Client)
 	body := []byte(`{"choices":[{"message":{"content":"   "}}]}`)
 
-	_, err := client.parseMCPResponse(body)
+	_, err := client.ParseMCPResponse(body)
 	if err == nil {
 		t.Fatal("expected error for empty content, got nil")
 	}

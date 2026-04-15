@@ -54,6 +54,24 @@ func (e *StrategyEngine) BuildSystemPrompt(accountEquity float64, variant string
 	if altcoinPosValueRatio <= 0 {
 		altcoinPosValueRatio = 1.0
 	}
+	sizePctCap := altcoinPosValueRatio
+	if btcEthPosValueRatio > sizePctCap {
+		sizePctCap = btcEthPosValueRatio
+	}
+	if sizePctCap <= 0 {
+		sizePctCap = 0.25
+	}
+	if sizePctCap > 1 {
+		sizePctCap = 1
+	}
+	minPositionSize := riskControl.MinPositionSize
+	if minPositionSize <= 0 {
+		minPositionSize = 12.0
+	}
+	sizePctMin := 0.0
+	if accountEquity > 0 {
+		sizePctMin = minPositionSize / accountEquity
+	}
 
 	sb.WriteString("# Hard Constraints (Risk Control)\n\n")
 	sb.WriteString("## CODE ENFORCED (Backend validation, cannot be bypassed):\n")
@@ -80,6 +98,10 @@ func (e *StrategyEngine) BuildSystemPrompt(accountEquity float64, variant string
 	sb.WriteString(fmt.Sprintf("- Example: With equity %.0f and BTC/ETH ratio %.1fx, max is %.0f USDT\n",
 		accountEquity, btcEthPosValueRatio, accountEquity*btcEthPosValueRatio))
 	sb.WriteString("- **DO NOT** just use available_balance as position_size_usd. Use the Position Value Limits!\n\n")
+	if sizePctMin > 0 {
+		sb.WriteString(fmt.Sprintf("- If you output `size_pct`, it must convert to at least %.0f USDT. With current equity %.2f, that means `size_pct >= %.3f`\n\n",
+			minPositionSize, accountEquity, sizePctMin))
+	}
 
 	// 4. Trading frequency (editable)
 	if promptSections.TradingFrequency != "" {
@@ -131,7 +153,7 @@ func (e *StrategyEngine) BuildSystemPrompt(accountEquity float64, variant string
 	sb.WriteString("  \"cycle\": 123,\n")
 	sb.WriteString("  \"decisions\": [\n")
 	sb.WriteString(fmt.Sprintf("    {\"sym\":\"BTCUSDT\",\"action\":\"ENTER\",\"side\":\"long\",\"size_pct\":%.2f,\"leverage\":%d,\"confidence\":0.82,\"reason_codes\":[\"trend_align\",\"btc_regime_support\"],\"stops_targets\":{\"sl\":96000,\"tp\":101000}},\n",
-		btcEthPosValueRatio, riskControl.BTCETHMaxLeverage))
+		sizePctCap, riskControl.BTCETHMaxLeverage))
 	sb.WriteString("    {\"sym\":\"ETHUSDT\",\"action\":\"EXIT\",\"side\":\"long\",\"confidence\":0.74,\"reason_codes\":[\"momentum_stall\"]}\n")
 	sb.WriteString("  ]\n")
 	sb.WriteString("}\n")
@@ -139,7 +161,11 @@ func (e *StrategyEngine) BuildSystemPrompt(accountEquity float64, variant string
 	sb.WriteString("## Field Description\n\n")
 	sb.WriteString("- `action`: `ENTER` | `EXIT` | `HOLD`\n")
 	sb.WriteString("- `side`: `long` | `short`; must match symbol bias for new entries\n")
-	sb.WriteString("- `size_pct`: decimal fraction of account equity, max `0.25`\n")
+	sb.WriteString(fmt.Sprintf("- `size_pct`: decimal fraction of account equity, max `%.3f`\n", sizePctCap))
+	if sizePctMin > 0 {
+		sb.WriteString(fmt.Sprintf("- `size_pct`: for this cycle, any `ENTER` must also satisfy `size_pct >= %.3f` so the position is at least %.0f USDT\n",
+			sizePctMin, minPositionSize))
+	}
 	sb.WriteString(fmt.Sprintf("- `confidence`: use `0.00-1.00`; new entries should typically be `>= %.2f`\n", float64(riskControl.MinConfidence)/100))
 	sb.WriteString("- `reason_codes`: short machine-friendly tokens, not sentences\n")
 	sb.WriteString("- `stops_targets`: required for `ENTER`, omit for `EXIT` and `HOLD`\n")
@@ -160,10 +186,20 @@ func (e *StrategyEngine) BuildSystemPrompt(accountEquity float64, variant string
 func (e *StrategyEngine) writeAvailableIndicators(sb *strings.Builder) {
 	indicators := e.config.Indicators
 	kline := indicators.Klines
+	emaPeriods := strategyEMAPeriods(indicators)
+	emaSummaryLabel := "EMA"
+	switch len(emaPeriods) {
+	case 0:
+		emaSummaryLabel = "EMA"
+	case 1:
+		emaSummaryLabel = fmt.Sprintf("EMA%d", emaPeriods[0])
+	default:
+		emaSummaryLabel = fmt.Sprintf("EMA%d/%d", emaPeriods[0], emaPeriods[1])
+	}
 
 	sb.WriteString(fmt.Sprintf("- Compact %s market snapshot (price, EMA, MACD, RSI, OI/funding/basis)\n", kline.PrimaryTimeframe))
 	if kline.EnableMultiTimeframe {
-		sb.WriteString("- Compact multi-timeframe summaries for the selected confirmation frames (close, EMA20/50, MACD, RSI, ATR, window change)\n")
+		sb.WriteString(fmt.Sprintf("- Compact multi-timeframe summaries for the selected confirmation frames (close, %s, MACD, RSI, ATR, window change)\n", emaSummaryLabel))
 	}
 	sb.WriteString("- BTC benchmark regime snapshot with the same compact multi-timeframe confirmation\n")
 	sb.WriteString("- Compact venue-tradability block so you can distinguish venue support vs missing order book vs price-only availability\n")
@@ -174,6 +210,7 @@ func (e *StrategyEngine) writeAvailableIndicators(sb *strings.Builder) {
 	sb.WriteString("- Compact feature-availability block (`f4`-`f7`, `f10`-`f12`) to explain whether a signal is fresh, stale, low-coverage, or unavailable\n")
 	sb.WriteString("- Compact relative-strength block versus BTC across 1h/4h/context timeframe\n")
 	sb.WriteString("- Compact market leadership regime block (OI leaders, institutional flow leaders, price leaders/losers)\n")
+	sb.WriteString("- Compact relative-value / arbitrage block when available (`relative_value.top_pairs`, candidate `arb`) covering residual stretch, hedge ratio, fee-adjusted edge, and basis/funding carry\n")
 
 	if indicators.EnableEMA {
 		sb.WriteString("- EMA indicators")
@@ -519,7 +556,11 @@ func (e *StrategyEngine) formatMarketData(data *market.Data) string {
 	sb.WriteString(fmt.Sprintf("current_price = %.4f", data.CurrentPrice))
 
 	if indicators.EnableEMA {
-		sb.WriteString(fmt.Sprintf(", current_ema20 = %.3f", data.CurrentEMA20))
+		for _, period := range strategyEMAPeriods(indicators) {
+			if ema, ok := currentEMAValueForPrompt(data, indicators, period); ok {
+				sb.WriteString(fmt.Sprintf(", current_ema%d = %.3f", period, ema))
+			}
+		}
 	}
 
 	if indicators.EnableMACD {
@@ -563,8 +604,12 @@ func (e *StrategyEngine) formatMarketData(data *market.Data) string {
 				sb.WriteString(fmt.Sprintf("Mid prices: %s\n\n", formatFloatSlice(data.IntradaySeries.MidPrices)))
 			}
 
-			if indicators.EnableEMA && len(data.IntradaySeries.EMA20Values) > 0 {
-				sb.WriteString(fmt.Sprintf("EMA indicators (20-period): %s\n\n", formatFloatSlice(data.IntradaySeries.EMA20Values)))
+			if indicators.EnableEMA {
+				for _, period := range strategyEMAPeriods(indicators) {
+					if series := intradayEMASeriesForPrompt(data.IntradaySeries, period); len(series) > 0 {
+						sb.WriteString(fmt.Sprintf("EMA indicators (%d-period): %s\n\n", period, formatFloatSlice(series)))
+					}
+				}
 			}
 
 			if indicators.EnableMACD && len(data.IntradaySeries.MACDValues) > 0 {
@@ -593,8 +638,16 @@ func (e *StrategyEngine) formatMarketData(data *market.Data) string {
 			sb.WriteString(fmt.Sprintf("Longer-term context (%s timeframe):\n\n", indicators.Klines.LongerTimeframe))
 
 			if indicators.EnableEMA {
-				sb.WriteString(fmt.Sprintf("20-Period EMA: %.3f vs. 50-Period EMA: %.3f\n\n",
-					data.LongerTermContext.EMA20, data.LongerTermContext.EMA50))
+				emaParts := make([]string, 0, len(strategyEMAPeriods(indicators)))
+				for _, period := range strategyEMAPeriods(indicators) {
+					if ema, ok := longerTermEMAValueForPrompt(data.LongerTermContext, period); ok {
+						emaParts = append(emaParts, fmt.Sprintf("%d-Period EMA: %.3f", period, ema))
+					}
+				}
+				if len(emaParts) > 0 {
+					sb.WriteString(strings.Join(emaParts, " vs. "))
+					sb.WriteString("\n\n")
+				}
 			}
 
 			if indicators.EnableATR {
@@ -642,11 +695,10 @@ func (e *StrategyEngine) formatTimeframeSeriesData(sb *strings.Builder, data *ma
 	}
 
 	if indicators.EnableEMA {
-		if len(data.EMA20Values) > 0 {
-			sb.WriteString(fmt.Sprintf("EMA20: %s\n", formatFloatSlice(data.EMA20Values)))
-		}
-		if len(data.EMA50Values) > 0 {
-			sb.WriteString(fmt.Sprintf("EMA50: %s\n", formatFloatSlice(data.EMA50Values)))
+		for _, period := range strategyEMAPeriods(indicators) {
+			if series := timeframeEMASeriesForPrompt(data, period); len(series) > 0 {
+				sb.WriteString(fmt.Sprintf("EMA%d: %s\n", period, formatFloatSlice(series)))
+			}
 		}
 	}
 
@@ -786,4 +838,136 @@ func formatFloatSlice(values []float64) string {
 		strValues[i] = fmt.Sprintf("%.4f", v)
 	}
 	return "[" + strings.Join(strValues, ", ") + "]"
+}
+
+func strategyEMAPeriods(indicators store.IndicatorConfig) []int {
+	if len(indicators.EMAPeriods) == 0 {
+		return []int{20, 50}
+	}
+
+	seen := make(map[int]struct{}, len(indicators.EMAPeriods))
+	periods := make([]int, 0, 2)
+	for _, period := range indicators.EMAPeriods {
+		if period <= 0 {
+			continue
+		}
+		if _, exists := seen[period]; exists {
+			continue
+		}
+		seen[period] = struct{}{}
+		periods = append(periods, period)
+		if len(periods) == 2 {
+			break
+		}
+	}
+	if len(periods) == 0 {
+		return []int{20, 50}
+	}
+	return periods
+}
+
+func currentEMAValueForPrompt(data *market.Data, indicators store.IndicatorConfig, period int) (float64, bool) {
+	if data == nil || period <= 0 {
+		return 0, false
+	}
+
+	primaryTF := strings.TrimSpace(strings.ToLower(indicators.Klines.PrimaryTimeframe))
+	if primaryTF != "" && data.TimeframeData != nil {
+		if tfData := data.TimeframeData[primaryTF]; tfData != nil {
+			if series := timeframeEMASeriesForPrompt(tfData, period); len(series) > 0 {
+				return series[len(series)-1], true
+			}
+		}
+	}
+
+	if data.IntradaySeries != nil {
+		if series := intradayEMASeriesForPrompt(data.IntradaySeries, period); len(series) > 0 {
+			return series[len(series)-1], true
+		}
+	}
+
+	if period == 20 && data.CurrentEMA20 != 0 {
+		return data.CurrentEMA20, true
+	}
+
+	return 0, false
+}
+
+func longerTermEMAValueForPrompt(data *market.LongerTermData, period int) (float64, bool) {
+	if data == nil {
+		return 0, false
+	}
+	switch period {
+	case 20:
+		if data.EMA20 != 0 {
+			return data.EMA20, true
+		}
+	case 50:
+		if data.EMA50 != 0 {
+			return data.EMA50, true
+		}
+	}
+	return 0, false
+}
+
+func intradayEMASeriesForPrompt(data *market.IntradayData, period int) []float64 {
+	if data == nil || period <= 0 {
+		return nil
+	}
+	if period == 20 && len(data.EMA20Values) > 0 {
+		return append([]float64(nil), data.EMA20Values...)
+	}
+	return emaSeriesFromPrices(data.MidPrices, period)
+}
+
+func timeframeEMASeriesForPrompt(data *market.TimeframeSeriesData, period int) []float64 {
+	if data == nil || period <= 0 {
+		return nil
+	}
+	switch period {
+	case 20:
+		if len(data.EMA20Values) > 0 {
+			return append([]float64(nil), data.EMA20Values...)
+		}
+	case 50:
+		if len(data.EMA50Values) > 0 {
+			return append([]float64(nil), data.EMA50Values...)
+		}
+	}
+	if len(data.Klines) >= period {
+		return emaSeriesFromKlineBars(data.Klines, period)
+	}
+	return emaSeriesFromPrices(data.MidPrices, period)
+}
+
+func emaSeriesFromKlineBars(klines []market.KlineBar, period int) []float64 {
+	if len(klines) < period || period <= 0 {
+		return nil
+	}
+	prices := make([]float64, 0, len(klines))
+	for _, k := range klines {
+		prices = append(prices, k.Close)
+	}
+	return emaSeriesFromPrices(prices, period)
+}
+
+func emaSeriesFromPrices(prices []float64, period int) []float64 {
+	if len(prices) < period || period <= 0 {
+		return nil
+	}
+
+	series := make([]float64, 0, len(prices)-period+1)
+	sum := 0.0
+	for i := 0; i < period; i++ {
+		sum += prices[i]
+	}
+	ema := sum / float64(period)
+	series = append(series, ema)
+
+	multiplier := 2.0 / float64(period+1)
+	for i := period; i < len(prices); i++ {
+		ema = (prices[i]-ema)*multiplier + ema
+		series = append(series, ema)
+	}
+	return series
 }

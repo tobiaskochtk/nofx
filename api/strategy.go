@@ -11,24 +11,50 @@ import (
 	_ "nofx/mcp/payment"
 	_ "nofx/mcp/provider"
 	"nofx/store"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 )
 
-// validateStrategyConfig validates strategy configuration and returns warnings
-func validateStrategyConfig(config *store.StrategyConfig) []string {
-	var warnings []string
-
-	// Validate NofxOS API key if any NofxOS feature is enabled
-	if (config.Indicators.EnableQuantData || config.Indicators.EnableOIRanking ||
-		config.Indicators.EnableNetFlowRanking || config.Indicators.EnablePriceRanking) &&
-		config.Indicators.NofxOSAPIKey == "" {
-		warnings = append(warnings, "NofxOS API key is not configured. NofxOS data sources may not work properly.")
+func validateSignalProvider(config *store.StrategyConfig) error {
+	rawProvider := config.SignalProvider
+	if strings.TrimSpace(rawProvider.Type) == "" && strings.TrimSpace(rawProvider.BaseURL) == "" && strings.TrimSpace(rawProvider.APIKey) == "" {
+		return nil
 	}
 
-	return warnings
+	normalizedType := store.NormalizeSignalProviderType(rawProvider.Type)
+	if normalizedType == "" {
+		return fmt.Errorf("invalid signal_provider.type %q, expected one of: %q, %q", rawProvider.Type, store.SignalProviderNofxOS, store.SignalProviderSelfhostedAI500)
+	}
+	if normalizedType == store.SignalProviderSelfhostedAI500 && strings.TrimSpace(rawProvider.BaseURL) == "" {
+		return fmt.Errorf("signal_provider.base_url is required when signal_provider.type=%q", store.SignalProviderSelfhostedAI500)
+	}
+	return nil
+}
+
+// validateStrategyConfig validates strategy configuration and returns warnings.
+func validateStrategyConfig(config *store.StrategyConfig) ([]string, error) {
+	var warnings []string
+
+	if err := validateSignalProvider(config); err != nil {
+		return nil, err
+	}
+
+	if !config.RequiresSignalProvider() {
+		return warnings, nil
+	}
+
+	provider := config.ResolveSignalProvider()
+	if provider.Type == store.SignalProviderSelfhostedAI500 && provider.BaseURL == "" {
+		warnings = append(warnings, "Selfhosted AI500 base URL is not configured. Signal-provider requests may fall back to the official endpoint.")
+	}
+	if provider.APIKey == "" {
+		warnings = append(warnings, "Signal provider API key is not configured. AI500-compatible data sources may not work properly.")
+	}
+
+	return warnings, nil
 }
 
 // handleEstimateTokens estimates token usage for a strategy config (no auth required, pure computation)
@@ -184,6 +210,12 @@ func (s *Server) handleCreateStrategy(c *gin.Context) {
 	}
 
 	// Serialize configuration
+	warnings, err := validateStrategyConfig(req.Config)
+	if err != nil {
+		SafeBadRequest(c, err.Error())
+		return
+	}
+
 	configJSON, err := json.Marshal(req.Config)
 	if err != nil {
 		SafeInternalError(c, "Serialize configuration", err)
@@ -204,9 +236,6 @@ func (s *Server) handleCreateStrategy(c *gin.Context) {
 		SafeInternalError(c, "Failed to create strategy", err)
 		return
 	}
-
-	// Validate configuration and collect warnings
-	warnings := validateStrategyConfig(req.Config)
 
 	response := gin.H{
 		"id":      strategy.ID,
@@ -282,6 +311,12 @@ func (s *Server) handleUpdateStrategy(c *gin.Context) {
 		description = existing.Description
 	}
 
+	warnings, err := validateStrategyConfig(&mergedConfig)
+	if err != nil {
+		SafeBadRequest(c, err.Error())
+		return
+	}
+
 	configJSON, err := json.Marshal(mergedConfig)
 	if err != nil {
 		SafeInternalError(c, "Serialize configuration", err)
@@ -321,9 +356,6 @@ func (s *Server) handleUpdateStrategy(c *gin.Context) {
 			return
 		}
 	}
-
-	// Validate merged configuration and collect warnings
-	warnings := validateStrategyConfig(&mergedConfig)
 
 	response := gin.H{"message": "Strategy updated successfully"}
 	if len(warnings) > 0 {
@@ -607,6 +639,13 @@ func (s *Server) handleStrategyTestRun(c *gin.Context) {
 		OIRankingData:      oiRankingData,
 		NetFlowRankingData: netFlowRankingData,
 		PriceRankingData:   priceRankingData,
+		EMAPeriods:         append([]int(nil), req.Config.Indicators.EMAPeriods...),
+		RSIPeriods:         append([]int(nil), req.Config.Indicators.RSIPeriods...),
+		FeatureFlagsSet:    true,
+		EnableF4:           req.Config.Indicators.FeatureF4Enabled(),
+		EnableF5:           req.Config.Indicators.FeatureF5Enabled(),
+		EnableF6:           req.Config.Indicators.FeatureF6Enabled(),
+		EnableF7:           req.Config.Indicators.FeatureF7Enabled(),
 	}
 
 	// Build System Prompt

@@ -797,7 +797,7 @@ func (s *AutoTraderTestSuite) TestExecuteDecisionWithRecord() {
 		}
 		actionRecord := &logger.DecisionAction{}
 
-		err := s.autoTrader.executeDecisionWithRecord(decision, actionRecord)
+		err := s.autoTrader.executeDecisionWithRecord(decision, actionRecord, nil)
 		s.NoError(err)
 	})
 
@@ -808,7 +808,7 @@ func (s *AutoTraderTestSuite) TestExecuteDecisionWithRecord() {
 		}
 		actionRecord := &logger.DecisionAction{}
 
-		err := s.autoTrader.executeDecisionWithRecord(decision, actionRecord)
+		err := s.autoTrader.executeDecisionWithRecord(decision, actionRecord, nil)
 		s.NoError(err)
 	})
 
@@ -819,7 +819,7 @@ func (s *AutoTraderTestSuite) TestExecuteDecisionWithRecord() {
 		}
 		actionRecord := &logger.DecisionAction{}
 
-		err := s.autoTrader.executeDecisionWithRecord(decision, actionRecord)
+		err := s.autoTrader.executeDecisionWithRecord(decision, actionRecord, nil)
 		s.NoError(err)
 	})
 
@@ -830,7 +830,7 @@ func (s *AutoTraderTestSuite) TestExecuteDecisionWithRecord() {
 		}
 		actionRecord := &logger.DecisionAction{}
 
-		err := s.autoTrader.executeDecisionWithRecord(decision, actionRecord)
+		err := s.autoTrader.executeDecisionWithRecord(decision, actionRecord, nil)
 		s.Error(err)
 		s.Contains(err.Error(), "未知的action")
 	})

@@ -47,8 +47,12 @@ func (at *AutoTrader) saveDecision(record *store.DecisionRecord) error {
 		return nil
 	}
 
-	at.cycleNumber++
-	record.CycleNumber = at.cycleNumber
+	if record.CycleNumber <= 0 {
+		at.cycleNumber++
+		record.CycleNumber = at.cycleNumber
+	} else if record.CycleNumber > at.cycleNumber {
+		at.cycleNumber = record.CycleNumber
+	}
 	record.TraderID = at.id
 
 	if record.Timestamp.IsZero() {
@@ -59,9 +63,76 @@ func (at *AutoTrader) saveDecision(record *store.DecisionRecord) error {
 		logger.Infof("⚠️ Failed to save decision record: %v", err)
 		return err
 	}
+	if err := at.store.DealReview().CaptureDecisionCyclePricePoints(at.userID, record); err != nil {
+		logger.Infof("⚠️ Failed to capture deal-review cycle price points: %v", err)
+	}
 
 	logger.Infof("📝 Decision record saved: trader=%s, cycle=%d", at.id, at.cycleNumber)
 	return nil
+}
+
+func (at *AutoTrader) buildDealReviewDecisionInput(record *store.DecisionRecord, decision *kernel.Decision, actionRecord *store.DecisionAction) *store.DealReviewDecisionEventInput {
+	if at.store == nil || record == nil || decision == nil {
+		return nil
+	}
+
+	side := "LONG"
+	stage := store.DealReviewStageOpen
+	switch decision.Action {
+	case "open_short", "close_short":
+		side = "SHORT"
+	}
+	switch decision.Action {
+	case "close_long", "close_short":
+		stage = store.DealReviewStageClose
+	}
+
+	selectionBucket := ""
+	var candidateSources []string
+	for _, detail := range record.CandidateDetails {
+		if detail.Symbol == decision.Symbol {
+			selectionBucket = detail.SelectionBucket
+			candidateSources = append(candidateSources, detail.Sources...)
+			break
+		}
+	}
+
+	snapshot := store.DealReviewEventSnapshot{
+		AccountState:     record.AccountState,
+		Positions:        append([]store.PositionSnapshot(nil), record.Positions...),
+		CandidateCoins:   append([]string(nil), record.CandidateCoins...),
+		CandidateDetails: append([]store.CandidateDetail(nil), record.CandidateDetails...),
+		ExecutionLog:     append([]string(nil), record.ExecutionLog...),
+		SystemPrompt:     record.SystemPrompt,
+		UserPrompt:       record.InputPrompt,
+		DecisionJSON:     record.DecisionJSON,
+		RawResponse:      record.RawResponse,
+		CoTTrace:         record.CoTTrace,
+		AIRequestMs:      record.AIRequestDurationMs,
+	}
+
+	return &store.DealReviewDecisionEventInput{
+		UserID:           at.userID,
+		TraderID:         at.id,
+		ExchangeID:       at.exchangeID,
+		Stage:            stage,
+		CycleNumber:      record.CycleNumber,
+		DecisionTime:     actionRecord.Timestamp,
+		Symbol:           decision.Symbol,
+		Side:             side,
+		Action:           decision.Action,
+		Quantity:         actionRecord.Quantity,
+		PositionSizeUSD:  decision.PositionSizeUSD,
+		Price:            actionRecord.Price,
+		Leverage:         decision.Leverage,
+		StopLoss:         decision.StopLoss,
+		TakeProfit:       decision.TakeProfit,
+		Confidence:       decision.Confidence,
+		Reasoning:        decision.Reasoning,
+		SelectionBucket:  selectionBucket,
+		CandidateSources: candidateSources,
+		Snapshot:         snapshot,
+	}
 }
 
 // GetStatus gets system status (for API)
@@ -86,6 +157,7 @@ func (at *AutoTrader) GetStatus() map[string]interface{} {
 		"call_count":      at.callCount,
 		"initial_balance": at.initialBalance,
 		"scan_interval":   at.config.ScanInterval.String(),
+		"invert_signals":  at.config.InvertSignals,
 		"stop_until":      at.stopUntil.Format(time.RFC3339),
 		"last_reset_time": at.lastResetTime.Format(time.RFC3339),
 		"ai_provider":     aiProvider,
@@ -331,7 +403,7 @@ func (at *AutoTrader) GetPositions() ([]map[string]interface{}, error) {
 // recordAndConfirmOrder polls order status for actual fill data and records position
 // action: open_long, open_short, close_long, close_short
 // entryPrice: entry price when closing (0 when opening)
-func (at *AutoTrader) recordAndConfirmOrder(orderResult map[string]interface{}, symbol, action string, quantity float64, price float64, leverage int, entryPrice float64) {
+func (at *AutoTrader) recordAndConfirmOrder(orderResult map[string]interface{}, symbol, action string, quantity float64, price float64, leverage int, entryPrice float64, reviewInput *store.DealReviewDecisionEventInput) {
 	if at.store == nil {
 		return
 	}
@@ -352,6 +424,12 @@ func (at *AutoTrader) recordAndConfirmOrder(orderResult map[string]interface{}, 
 	if orderID == "" || orderID == "0" {
 		logger.Infof("  ⚠️ Order ID is empty, skipping record")
 		return
+	}
+	if reviewInput != nil {
+		reviewInput.ExchangeOrderID = orderID
+		if _, err := at.store.DealReview().CreatePendingDecisionEvent(reviewInput); err != nil {
+			logger.Infof("  ⚠️ Failed to create deal-review event: %v", err)
+		}
 	}
 
 	// Determine positionSide
@@ -414,6 +492,11 @@ func (at *AutoTrader) recordAndConfirmOrder(orderResult map[string]interface{}, 
 				break
 			} else if statusStr == "CANCELED" || statusStr == "EXPIRED" || statusStr == "REJECTED" {
 				logger.Infof("  ⚠️ Order %s, skipping position record", statusStr)
+				if reviewInput != nil {
+					if err := at.store.DealReview().CancelPendingEvent(at.id, orderID, reviewInput.Stage); err != nil {
+						logger.Infof("  ⚠️ Failed to cancel pending deal-review event: %v", err)
+					}
+				}
 				// Update order status
 				if err := at.store.Order().UpdateOrderStatus(orderRecord.ID, statusStr, 0, 0, 0); err != nil {
 					logger.Infof("  ⚠️ Failed to update order status: %v", err)

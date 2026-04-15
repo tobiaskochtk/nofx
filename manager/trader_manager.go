@@ -703,16 +703,21 @@ func (tm *TraderManager) addTraderFromStore(traderCfg *store.Trader, aiModelCfg 
 		QwenKey:               "",
 		CustomAPIURL:          aiModelCfg.CustomAPIURL,
 		CustomModelName:       aiModelCfg.CustomModelName,
+		CustomPrompt:          traderCfg.CustomPrompt,
+		OverrideBasePrompt:    traderCfg.OverrideBasePrompt,
+		SystemPromptTemplate:  traderCfg.SystemPromptTemplate,
 		ScanInterval:          time.Duration(traderCfg.ScanIntervalMinutes) * time.Minute,
 		InitialBalance:        traderCfg.InitialBalance,
+		InvertSignals:         traderCfg.InvertSignals,
 		IsCrossMargin:         traderCfg.IsCrossMargin,
 		ShowInCompetition:     traderCfg.ShowInCompetition,
 		StrategyConfig:        strategyConfig,
 	}
 
-	// If the trader uses a non-claw402 LLM but the user has an enabled claw402
-	// wallet configured, reuse it for NofxOS data (AI500/OI/NetFlow/Price ranking).
-	if aiModelCfg.Provider != "claw402" {
+	provider := strategyConfig.ResolveSignalProvider()
+	if aiModelCfg.Provider != "claw402" && strategyConfig.RequiresSignalProvider() && provider.Type == store.SignalProviderNofxOS {
+		// Reuse the claw402 wallet only when the strategy still pulls signal data
+		// from the official nofxos provider.
 		if aiModels, err := st.AIModel().List(traderCfg.UserID); err == nil {
 			for _, model := range aiModels {
 				if model.Enabled && model.Provider == "claw402" && strings.TrimSpace(string(model.APIKey)) != "" {
@@ -801,19 +806,16 @@ func (tm *TraderManager) addTraderFromStore(traderCfg *store.Trader, aiModelCfg 
 		return fmt.Errorf("failed to create trader: %w", err)
 	}
 
-	// Set custom prompt (if exists)
-	if traderCfg.CustomPrompt != "" {
-		at.SetCustomPrompt(traderCfg.CustomPrompt)
-		at.SetOverrideBasePrompt(traderCfg.OverrideBasePrompt)
-		if traderCfg.OverrideBasePrompt {
-			logger.Infof("✓ Set custom trading strategy prompt (overriding base prompt)")
-		} else {
-			logger.Infof("✓ Set custom trading strategy prompt (supplementing base prompt)")
-		}
-	}
-
 	tm.traders[traderCfg.ID] = at
 	logger.Infof("✓ Trader '%s' (%s + %s/%s) loaded to memory", traderCfg.Name, aiModelCfg.Provider, exchangeCfg.ExchangeType, exchangeCfg.AccountName)
+
+	// Run a one-shot closed-PnL history backfill on load so externally closed or partially
+	// reduced deals become visible in history even for traders that are not currently running.
+	go func(trader *trader.AutoTrader, traderName string) {
+		if err := trader.SyncClosedPnLHistoryOnce(); err != nil {
+			logger.Infof("⚠️ Trader '%s' closed PnL backfill skipped: %v", traderName, err)
+		}
+	}(at, traderCfg.Name)
 
 	// Auto-start if trader was running before shutdown
 	if traderCfg.IsRunning {

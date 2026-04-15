@@ -35,8 +35,10 @@ func (at *AutoTrader) runCycle() error {
 
 	// Create decision record
 	record := &store.DecisionRecord{
-		ExecutionLog: []string{},
-		Success:      true,
+		CycleNumber:      at.cycleNumber + 1,
+		CandidateMetaVer: store.DecisionCandidateMetadataVersion,
+		ExecutionLog:     []string{},
+		Success:          true,
 	}
 
 	// 1. Check if trading needs to be stopped
@@ -69,6 +71,28 @@ func (at *AutoTrader) runCycle() error {
 	// NOTE: Must be called BEFORE candidate coins check to ensure equity is always recorded
 	at.saveEquitySnapshot(ctx)
 
+	record.AccountState = store.AccountSnapshot{
+		TotalBalance:          ctx.Account.TotalEquity,
+		AvailableBalance:      ctx.Account.AvailableBalance,
+		TotalUnrealizedProfit: ctx.Account.UnrealizedPnL,
+		PositionCount:         ctx.Account.PositionCount,
+		MarginUsedPct:         ctx.Account.MarginUsedPct,
+		InitialBalance:        at.initialBalance,
+	}
+	record.Positions = make([]store.PositionSnapshot, 0, len(ctx.Positions))
+	for _, pos := range ctx.Positions {
+		record.Positions = append(record.Positions, store.PositionSnapshot{
+			Symbol:           pos.Symbol,
+			Side:             pos.Side,
+			PositionAmt:      pos.Quantity,
+			EntryPrice:       pos.EntryPrice,
+			MarkPrice:        pos.MarkPrice,
+			UnrealizedProfit: pos.UnrealizedPnL,
+			Leverage:         float64(pos.Leverage),
+			LiquidationPrice: pos.LiquidationPrice,
+		})
+	}
+
 	// If no candidate coins available, log but do not error
 	if len(ctx.CandidateCoins) == 0 {
 		logger.Infof("ℹ️  No candidate coins available, skipping this cycle")
@@ -88,6 +112,11 @@ func (at *AutoTrader) runCycle() error {
 	logger.Info(strings.Repeat("=", 70))
 	for _, coin := range ctx.CandidateCoins {
 		record.CandidateCoins = append(record.CandidateCoins, coin.Symbol)
+		record.CandidateDetails = append(record.CandidateDetails, store.CandidateDetail{
+			Symbol:          coin.Symbol,
+			Sources:         append([]string(nil), coin.Sources...),
+			SelectionBucket: coin.SelectionBucket,
+		})
 	}
 
 	logger.Infof("📊 Account equity: %.2f USDT | Available: %.2f USDT | Positions: %d",
@@ -110,10 +139,6 @@ func (at *AutoTrader) runCycle() error {
 		record.InputPrompt = aiDecision.UserPrompt
 		record.CoTTrace = aiDecision.CoTTrace
 		record.RawResponse = aiDecision.RawResponse // Save raw AI response for debugging
-		if len(aiDecision.Decisions) > 0 {
-			decisionJSON, _ := json.MarshalIndent(aiDecision.Decisions, "", "  ")
-			record.DecisionJSON = string(decisionJSON)
-		}
 	}
 
 	// Record AI charge (track cost regardless of decision outcome)
@@ -175,6 +200,17 @@ func (at *AutoTrader) runCycle() error {
 		logger.Infof("🛡️ [%s] SAFE MODE DEACTIVATED — AI is working again. Resuming normal trading.", at.name)
 		at.safeMode = false
 		at.safeModeReason = ""
+	}
+
+	if at.config.InvertSignals && len(aiDecision.Decisions) > 0 {
+		originalDecisions := append([]kernel.Decision(nil), aiDecision.Decisions...)
+		aiDecision.Decisions = at.maybeInvertDecisions(aiDecision.Decisions, ctx.MarketDataMap)
+		logInvertedDecisions(at.name, originalDecisions, aiDecision.Decisions)
+	}
+
+	if len(aiDecision.Decisions) > 0 {
+		decisionJSON, _ := json.MarshalIndent(aiDecision.Decisions, "", "  ")
+		record.DecisionJSON = string(decisionJSON)
 	}
 
 	// // 5. Print system prompt
@@ -264,7 +300,7 @@ func (at *AutoTrader) runCycle() error {
 			Success:    false,
 		}
 
-		if err := at.executeDecisionWithRecord(&d, &actionRecord); err != nil {
+		if err := at.executeDecisionWithRecord(&d, &actionRecord, record); err != nil {
 			logger.Infof("❌ Failed to execute decision (%s %s): %v", d.Symbol, d.Action, err)
 			actionRecord.Error = err.Error()
 			record.ExecutionLog = append(record.ExecutionLog, fmt.Sprintf("❌ %s %s failed: %v", d.Symbol, d.Action, err))
@@ -469,8 +505,13 @@ func (at *AutoTrader) buildTradingContext() (*kernel.Context, error) {
 		CurrentTime:     time.Now().UTC().Format("2006-01-02 15:04:05 UTC"),
 		RuntimeMinutes:  int(time.Since(at.startTime).Minutes()),
 		CallCount:       at.callCount,
+		Exchange:        at.exchange,
 		BTCETHLeverage:  btcEthLeverage,
 		AltcoinLeverage: altcoinLeverage,
+		BTCETHPosRatio:  strategyConfig.RiskControl.BTCETHMaxPositionValueRatio,
+		AltcoinPosRatio: strategyConfig.RiskControl.AltcoinMaxPositionValueRatio,
+		MinPositionSize: strategyConfig.RiskControl.MinPositionSize,
+		MinConfidence:   strategyConfig.RiskControl.MinConfidence,
 		Account: kernel.AccountInfo{
 			TotalEquity:      totalEquity,
 			AvailableBalance: availableBalance,
@@ -481,9 +522,16 @@ func (at *AutoTrader) buildTradingContext() (*kernel.Context, error) {
 			MarginUsedPct:    marginUsedPct,
 			PositionCount:    len(positionInfos),
 		},
-		Positions:      positionInfos,
-		CandidateCoins: candidateCoins,
-		Timeframes:     timeframes,
+		Positions:       positionInfos,
+		CandidateCoins:  candidateCoins,
+		Timeframes:      timeframes,
+		EMAPeriods:      append([]int(nil), strategyConfig.Indicators.EMAPeriods...),
+		RSIPeriods:      append([]int(nil), strategyConfig.Indicators.RSIPeriods...),
+		FeatureFlagsSet: true,
+		EnableF4:        strategyConfig.Indicators.FeatureF4Enabled(),
+		EnableF5:        strategyConfig.Indicators.FeatureF5Enabled(),
+		EnableF6:        strategyConfig.Indicators.FeatureF6Enabled(),
+		EnableF7:        strategyConfig.Indicators.FeatureF7Enabled(),
 	}
 
 	// 7. Add recent closed trades (if store is available)

@@ -38,6 +38,12 @@ export interface PromptSectionsConfig {
   decision_process?: string;
 }
 
+export interface SignalProviderConfig {
+  type?: 'nofxos' | 'official_nofxos' | 'selfhosted_ai500';
+  base_url?: string;
+  api_key?: string;
+}
+
 export interface StrategyConfig {
   // Strategy type: "ai_trading" (default) or "grid_trading"
   strategy_type?: 'ai_trading' | 'grid_trading';
@@ -46,6 +52,7 @@ export interface StrategyConfig {
   language?: 'zh' | 'en';
   coin_source: CoinSourceConfig;
   indicators: IndicatorConfig;
+  signal_provider?: SignalProviderConfig;
   custom_prompt?: string;
   risk_control: RiskControlConfig;
   prompt_sections?: PromptSectionsConfig;
@@ -113,6 +120,10 @@ export interface IndicatorConfig {
   enable_volume: boolean;
   enable_oi: boolean;
   enable_funding_rate: boolean;
+  enable_f4?: boolean;
+  enable_f5?: boolean;
+  enable_f6?: boolean;
+  enable_f7?: boolean;
   ema_periods?: number[];
   rsi_periods?: number[];
   atr_periods?: number[];

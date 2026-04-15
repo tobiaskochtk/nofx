@@ -46,6 +46,7 @@ func (s *Server) handleTraderList(c *gin.Context) {
 			"ai_model":            trader.AIModelID, // Use complete ID
 			"exchange_id":         trader.ExchangeID,
 			"is_running":          isRunning,
+			"invert_signals":      trader.InvertSignals,
 			"show_in_competition": trader.ShowInCompetition,
 			"initial_balance":     trader.InitialBalance,
 			"strategy_id":         trader.StrategyID,
@@ -93,6 +94,7 @@ func (s *Server) handleGetTraderConfig(c *gin.Context) {
 		"strategy_id":           traderConfig.StrategyID,
 		"initial_balance":       traderConfig.InitialBalance,
 		"scan_interval_minutes": traderConfig.ScanIntervalMinutes,
+		"invert_signals":        traderConfig.InvertSignals,
 		"btc_eth_leverage":      traderConfig.BTCETHLeverage,
 		"altcoin_leverage":      traderConfig.AltcoinLeverage,
 		"trading_symbols":       traderConfig.TradingSymbols,

@@ -3,6 +3,7 @@ package store
 import (
 	"fmt"
 	"math"
+	"nofx/logger"
 	"strconv"
 	"strings"
 	"time"
@@ -191,13 +192,17 @@ func (s *PositionStore) Create(pos *TraderPosition) error {
 	if pos.EntryQuantity == 0 {
 		pos.EntryQuantity = pos.Quantity
 	}
-	return s.db.Create(pos).Error
+	if err := s.db.Create(pos).Error; err != nil {
+		return err
+	}
+	s.syncDealReviewOpen(pos)
+	return nil
 }
 
 // ClosePosition closes position
 func (s *PositionStore) ClosePosition(id int64, exitPrice float64, exitOrderID string, realizedPnL float64, fee float64, closeReason string) error {
 	nowMs := time.Now().UTC().UnixMilli()
-	return s.db.Model(&TraderPosition{}).Where("id = ?", id).Updates(map[string]interface{}{
+	if err := s.db.Model(&TraderPosition{}).Where("id = ?", id).Updates(map[string]interface{}{
 		"exit_price":    exitPrice,
 		"exit_order_id": exitOrderID,
 		"exit_time":     nowMs,
@@ -206,7 +211,11 @@ func (s *PositionStore) ClosePosition(id int64, exitPrice float64, exitOrderID s
 		"status":        "CLOSED",
 		"close_reason":  closeReason,
 		"updated_at":    nowMs,
-	}).Error
+	}).Error; err != nil {
+		return err
+	}
+	s.syncDealReviewClosedByID(id)
+	return nil
 }
 
 // UpdatePositionQuantityAndPrice updates position quantity and recalculates entry price
@@ -229,13 +238,19 @@ func (s *PositionStore) UpdatePositionQuantityAndPrice(id int64, addQty float64,
 	newFee := pos.Fee + addFee
 	nowMs := time.Now().UTC().UnixMilli()
 
-	return s.db.Model(&TraderPosition{}).Where("id = ?", id).Updates(map[string]interface{}{
+	if err := s.db.Model(&TraderPosition{}).Where("id = ?", id).Updates(map[string]interface{}{
 		"quantity":       newQty,
 		"entry_quantity": newEntryQty,
 		"entry_price":    newEntryPrice,
 		"fee":            newFee,
 		"updated_at":     nowMs,
-	}).Error
+	}).Error; err != nil {
+		return err
+	}
+	if updated, err := s.GetByID(id); err == nil {
+		s.syncDealReviewOpen(updated)
+	}
+	return nil
 }
 
 // ReducePositionQuantity reduces position quantity for partial close
@@ -266,7 +281,7 @@ func (s *PositionStore) ReducePositionQuantity(id int64, reduceQty float64, exit
 	const QUANTITY_TOLERANCE = 0.0001
 	if newQty <= QUANTITY_TOLERANCE {
 		// Auto-close: set status to CLOSED
-		return s.db.Model(&TraderPosition{}).Where("id = ?", id).Updates(map[string]interface{}{
+		if err := s.db.Model(&TraderPosition{}).Where("id = ?", id).Updates(map[string]interface{}{
 			"quantity":     0,
 			"fee":          newFee,
 			"exit_price":   newExitPrice,
@@ -275,16 +290,26 @@ func (s *PositionStore) ReducePositionQuantity(id int64, reduceQty float64, exit
 			"exit_time":    nowMs,
 			"close_reason": "sync",
 			"updated_at":   nowMs,
-		}).Error
+		}).Error; err != nil {
+			return err
+		}
+		s.syncDealReviewClosedByID(id)
+		return nil
 	}
 
-	return s.db.Model(&TraderPosition{}).Where("id = ?", id).Updates(map[string]interface{}{
+	if err := s.db.Model(&TraderPosition{}).Where("id = ?", id).Updates(map[string]interface{}{
 		"quantity":     newQty,
 		"fee":          newFee,
 		"exit_price":   newExitPrice,
 		"realized_pnl": newPnL,
 		"updated_at":   nowMs,
-	}).Error
+	}).Error; err != nil {
+		return err
+	}
+	if updated, err := s.GetByID(id); err == nil {
+		s.syncDealReviewOpen(updated)
+	}
+	return nil
 }
 
 // UpdatePositionExchangeInfo updates exchange_id and exchange_type
@@ -310,7 +335,7 @@ func (s *PositionStore) ClosePositionFully(id int64, exitPrice float64, exitOrde
 		quantity = pos.EntryQuantity
 	}
 
-	return s.db.Model(&TraderPosition{}).Where("id = ?", id).Updates(map[string]interface{}{
+	if err := s.db.Model(&TraderPosition{}).Where("id = ?", id).Updates(map[string]interface{}{
 		"quantity":      quantity,
 		"exit_price":    exitPrice,
 		"exit_order_id": exitOrderID,
@@ -320,7 +345,11 @@ func (s *PositionStore) ClosePositionFully(id int64, exitPrice float64, exitOrde
 		"status":        "CLOSED",
 		"close_reason":  closeReason,
 		"updated_at":    time.Now().UTC().UnixMilli(),
-	}).Error
+	}).Error; err != nil {
+		return err
+	}
+	s.syncDealReviewClosedByID(id)
+	return nil
 }
 
 // DeleteAllOpenPositions deletes all OPEN positions for a trader
@@ -455,6 +484,40 @@ func (s *PositionStore) GetOpenPositionByExchangePositionID(exchangeID, exchange
 	return &pos, nil
 }
 
+// GetByID returns a position by primary key.
+func (s *PositionStore) GetByID(id int64) (*TraderPosition, error) {
+	var pos TraderPosition
+	err := s.db.Where("id = ?", id).First(&pos).Error
+	if err != nil {
+		return nil, err
+	}
+	if pos.EntryQuantity == 0 {
+		pos.EntryQuantity = pos.Quantity
+	}
+	return &pos, nil
+}
+
+func (s *PositionStore) GetByExitOrderID(exchangeID, exitOrderID string) ([]*TraderPosition, error) {
+	if strings.TrimSpace(exchangeID) == "" || strings.TrimSpace(exitOrderID) == "" {
+		return nil, nil
+	}
+
+	var positions []*TraderPosition
+	err := s.db.Where("exchange_id = ? AND exit_order_id = ?", strings.TrimSpace(exchangeID), strings.TrimSpace(exitOrderID)).
+		Order("id DESC").
+		Find(&positions).Error
+	if err != nil {
+		return nil, fmt.Errorf("failed to query positions by exit order id: %w", err)
+	}
+
+	for _, pos := range positions {
+		if pos.EntryQuantity == 0 {
+			pos.EntryQuantity = pos.Quantity
+		}
+	}
+	return positions, nil
+}
+
 // CreateOpenPosition creates an open position
 func (s *PositionStore) CreateOpenPosition(pos *TraderPosition) error {
 	if pos.ExchangePositionID != "" && pos.ExchangeID != "" {
@@ -498,14 +561,14 @@ func (s *PositionStore) CreateOpenPosition(pos *TraderPosition) error {
 		}
 		return fmt.Errorf("failed to create open position: %w", err)
 	}
-
+	s.syncDealReviewOpen(pos)
 	return nil
 }
 
 // ClosePositionWithAccurateData closes a position with accurate data from exchange
 // exitTimeMs is Unix milliseconds UTC
 func (s *PositionStore) ClosePositionWithAccurateData(id int64, exitPrice float64, exitOrderID string, exitTimeMs int64, realizedPnL float64, fee float64, closeReason string) error {
-	return s.db.Model(&TraderPosition{}).Where("id = ?", id).Updates(map[string]interface{}{
+	if err := s.db.Model(&TraderPosition{}).Where("id = ?", id).Updates(map[string]interface{}{
 		"exit_price":    exitPrice,
 		"exit_order_id": exitOrderID,
 		"exit_time":     exitTimeMs,
@@ -514,7 +577,11 @@ func (s *PositionStore) ClosePositionWithAccurateData(id int64, exitPrice float6
 		"status":        "CLOSED",
 		"close_reason":  closeReason,
 		"updated_at":    time.Now().UTC().UnixMilli(),
-	}).Error
+	}).Error; err != nil {
+		return err
+	}
+	s.syncDealReviewClosedByID(id)
+	return nil
 }
 
 // TraderPnLSummary contains per-trader PnL calculated from their own positions
@@ -557,4 +624,24 @@ func (s *PositionStore) GetTraderPnLSummary(traderID string) (*TraderPnLSummary,
 	summary.OpenCount = int(openCount)
 
 	return summary, nil
+}
+
+func (s *PositionStore) syncDealReviewOpen(pos *TraderPosition) {
+	if pos == nil || pos.ID == 0 {
+		return
+	}
+	if err := NewDealReviewStore(s.db).SyncOpenPosition(pos); err != nil {
+		logger.Warnf("⚠️ Failed to sync deal-review open case for position %d: %v", pos.ID, err)
+	}
+}
+
+func (s *PositionStore) syncDealReviewClosedByID(id int64) {
+	pos, err := s.GetByID(id)
+	if err != nil {
+		logger.Warnf("⚠️ Failed to load closed position %d for deal-review sync: %v", id, err)
+		return
+	}
+	if err := NewDealReviewStore(s.db).SyncPosition(pos); err != nil {
+		logger.Warnf("⚠️ Failed to sync full deal-review case for position %d: %v", id, err)
+	}
 }

@@ -6,13 +6,13 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"os"
 	"nofx/logger"
 	"nofx/market"
 	"nofx/provider/hyperliquid"
 	"nofx/provider/nofxos"
 	"nofx/security"
 	"nofx/store"
+	"os"
 	"strings"
 	"time"
 )
@@ -51,8 +51,9 @@ type AccountInfo struct {
 
 // CandidateCoin candidate coin (from coin pool)
 type CandidateCoin struct {
-	Symbol  string   `json:"symbol"`
-	Sources []string `json:"sources"` // Sources: "ai500" and/or "oi_top"
+	Symbol          string   `json:"symbol"`
+	Sources         []string `json:"sources"` // Sources: "ai500" and/or "oi_top"
+	SelectionBucket string   `json:"selection_bucket,omitempty"`
 }
 
 // OITopData open interest growth top data (for AI decision reference)
@@ -113,6 +114,7 @@ type Context struct {
 	CurrentTime         string                             `json:"current_time"`
 	RuntimeMinutes      int                                `json:"runtime_minutes"`
 	CallCount           int                                `json:"call_count"`
+	Exchange            string                             `json:"-"`
 	Account             AccountInfo                        `json:"account"`
 	Positions           []PositionInfo                     `json:"positions"`
 	CandidateCoins      []CandidateCoin                    `json:"candidate_coins"`
@@ -130,7 +132,18 @@ type Context struct {
 	PriceRankingData    *nofxos.PriceRankingData           `json:"-"` // Market-wide price gainers/losers
 	BTCETHLeverage      int                                `json:"-"`
 	AltcoinLeverage     int                                `json:"-"`
+	BTCETHPosRatio      float64                            `json:"-"`
+	AltcoinPosRatio     float64                            `json:"-"`
+	MinPositionSize     float64                            `json:"-"`
+	MinConfidence       int                                `json:"-"`
 	Timeframes          []string                           `json:"-"`
+	EMAPeriods          []int                              `json:"-"`
+	RSIPeriods          []int                              `json:"-"`
+	FeatureFlagsSet     bool                               `json:"-"`
+	EnableF4            bool                               `json:"-"`
+	EnableF5            bool                               `json:"-"`
+	EnableF6            bool                               `json:"-"`
+	EnableF7            bool                               `json:"-"`
 }
 
 // Decision AI trading decision
@@ -351,32 +364,39 @@ type StrategyEngine struct {
 // NewStrategyEngine creates strategy execution engine.
 // claw402WalletKey is optional — if provided, nofxos data requests are routed through claw402.
 func NewStrategyEngine(config *store.StrategyConfig, claw402WalletKey ...string) *StrategyEngine {
-	// Create NofxOS client with API key from config
-	apiKey := config.Indicators.NofxOSAPIKey
-	if apiKey == "" {
-		apiKey = nofxos.DefaultAuthKey
-	}
-	client := nofxos.NewClient(nofxos.DefaultBaseURL, apiKey)
-
-	// If claw402 wallet key is provided (from trader's AI config), route through claw402
-	walletKey := ""
-	if len(claw402WalletKey) > 0 {
-		walletKey = claw402WalletKey[0]
-	}
-	if walletKey == "" {
-		walletKey = os.Getenv("CLAW402_WALLET_KEY")
-	}
-	if walletKey != "" {
-		claw402URL := os.Getenv("CLAW402_URL")
-		if claw402URL == "" {
-			claw402URL = "https://claw402.ai"
+	provider := config.ResolveSignalProvider()
+	baseURL := provider.BaseURL
+	if baseURL == "" {
+		baseURL = nofxos.DefaultBaseURL
+		if provider.Type == store.SignalProviderSelfhostedAI500 {
+			logger.Warnf("⚠️ Selfhosted AI500 provider selected without base URL; falling back to %s", baseURL)
 		}
-		claw402Client, err := nofxos.NewClaw402DataClient(claw402URL, walletKey, &logger.MCPLogger{})
-		if err == nil {
-			client.SetClaw402(claw402Client)
-			logger.Infof("🔗 NofxOS data routed through claw402 (%s)", claw402URL)
-		} else {
-			logger.Warnf("⚠️ Failed to init claw402 data client: %v (using direct nofxos.ai)", err)
+	}
+	client := nofxos.NewClient(baseURL, provider.APIKey)
+
+	if provider.Type == store.SignalProviderSelfhostedAI500 {
+		logger.Infof("🔗 Signal data routed to selfhosted AI500 provider (%s)", baseURL)
+	} else {
+		// If claw402 wallet key is provided (from trader's AI config), route through claw402
+		walletKey := ""
+		if len(claw402WalletKey) > 0 {
+			walletKey = claw402WalletKey[0]
+		}
+		if walletKey == "" {
+			walletKey = os.Getenv("CLAW402_WALLET_KEY")
+		}
+		if walletKey != "" {
+			claw402URL := os.Getenv("CLAW402_URL")
+			if claw402URL == "" {
+				claw402URL = "https://claw402.ai"
+			}
+			claw402Client, err := nofxos.NewClaw402DataClient(claw402URL, walletKey, &logger.MCPLogger{})
+			if err == nil {
+				client.SetClaw402(claw402Client)
+				logger.Infof("🔗 NofxOS data routed through claw402 (%s)", claw402URL)
+			} else {
+				logger.Warnf("⚠️ Failed to init claw402 data client: %v (using direct nofxos.ai)", err)
+			}
 		}
 	}
 
@@ -409,6 +429,15 @@ func (e *StrategyEngine) GetConfig() *store.StrategyConfig {
 	return e.config
 }
 
+// SetConfig swaps the effective runtime config used for prompt building without
+// changing the already-resolved signal-provider client.
+func (e *StrategyEngine) SetConfig(config *store.StrategyConfig) {
+	if config == nil {
+		return
+	}
+	e.config = config
+}
+
 // ============================================================================
 // Candidate Coins
 // ============================================================================
@@ -416,7 +445,7 @@ func (e *StrategyEngine) GetConfig() *store.StrategyConfig {
 // GetCandidateCoins gets candidate coins based on strategy configuration
 func (e *StrategyEngine) GetCandidateCoins() ([]CandidateCoin, error) {
 	var candidates []CandidateCoin
-	symbolSources := make(map[string][]string)
+	candidateMap := make(map[string]CandidateCoin)
 
 	coinSource := e.config.CoinSource
 
@@ -537,7 +566,7 @@ func (e *StrategyEngine) GetCandidateCoins() ([]CandidateCoin, error) {
 				logger.Infof("⚠️  Failed to get AI500 coins: %v", err)
 			} else {
 				for _, coin := range poolCoins {
-					symbolSources[coin.Symbol] = append(symbolSources[coin.Symbol], "ai500")
+					mergeCandidateCoin(candidateMap, coin)
 				}
 			}
 		}
@@ -548,7 +577,7 @@ func (e *StrategyEngine) GetCandidateCoins() ([]CandidateCoin, error) {
 				logger.Infof("⚠️  Failed to get OI Top: %v", err)
 			} else {
 				for _, coin := range oiCoins {
-					symbolSources[coin.Symbol] = append(symbolSources[coin.Symbol], "oi_top")
+					mergeCandidateCoin(candidateMap, coin)
 				}
 			}
 		}
@@ -559,7 +588,7 @@ func (e *StrategyEngine) GetCandidateCoins() ([]CandidateCoin, error) {
 				logger.Infof("⚠️  Failed to get OI Low: %v", err)
 			} else {
 				for _, coin := range oiLowCoins {
-					symbolSources[coin.Symbol] = append(symbolSources[coin.Symbol], "oi_low")
+					mergeCandidateCoin(candidateMap, coin)
 				}
 			}
 		}
@@ -570,7 +599,7 @@ func (e *StrategyEngine) GetCandidateCoins() ([]CandidateCoin, error) {
 				logger.Infof("⚠️  Failed to get Hyperliquid All coins: %v", err)
 			} else {
 				for _, coin := range hyperCoins {
-					symbolSources[coin.Symbol] = append(symbolSources[coin.Symbol], "hyper_all")
+					mergeCandidateCoin(candidateMap, coin)
 				}
 			}
 		}
@@ -581,31 +610,77 @@ func (e *StrategyEngine) GetCandidateCoins() ([]CandidateCoin, error) {
 				logger.Infof("⚠️  Failed to get Hyperliquid Main coins: %v", err)
 			} else {
 				for _, coin := range hyperMainCoins {
-					symbolSources[coin.Symbol] = append(symbolSources[coin.Symbol], "hyper_main")
+					mergeCandidateCoin(candidateMap, coin)
 				}
 			}
 		}
 
 		for _, symbol := range coinSource.StaticCoins {
 			symbol = market.Normalize(symbol)
-			if _, exists := symbolSources[symbol]; !exists {
-				symbolSources[symbol] = []string{"static"}
-			} else {
-				symbolSources[symbol] = append(symbolSources[symbol], "static")
-			}
+			mergeCandidateCoin(candidateMap, CandidateCoin{
+				Symbol:  symbol,
+				Sources: []string{"static"},
+			})
 		}
 
-		for symbol, sources := range symbolSources {
-			candidates = append(candidates, CandidateCoin{
-				Symbol:  symbol,
-				Sources: sources,
-			})
+		for _, coin := range candidateMap {
+			candidates = append(candidates, coin)
 		}
 		return e.filterExcludedCoins(candidates), nil
 
 	default:
 		return nil, fmt.Errorf("unknown coin source type: %s", coinSource.SourceType)
 	}
+}
+
+func mergeCandidateCoin(candidateMap map[string]CandidateCoin, coin CandidateCoin) {
+	symbol := market.Normalize(coin.Symbol)
+	if symbol == "" {
+		return
+	}
+	current, exists := candidateMap[symbol]
+	if !exists {
+		candidateMap[symbol] = CandidateCoin{
+			Symbol:          symbol,
+			Sources:         dedupeCandidateSources(coin.Sources),
+			SelectionBucket: strings.TrimSpace(coin.SelectionBucket),
+		}
+		return
+	}
+
+	current.Sources = mergeCandidateSources(current.Sources, coin.Sources)
+	if strings.TrimSpace(current.SelectionBucket) == "" {
+		current.SelectionBucket = strings.TrimSpace(coin.SelectionBucket)
+	}
+	candidateMap[symbol] = current
+}
+
+func mergeCandidateSources(existing, incoming []string) []string {
+	merged := append([]string(nil), existing...)
+	seen := make(map[string]struct{}, len(existing))
+	for _, source := range existing {
+		source = strings.TrimSpace(source)
+		if source == "" {
+			continue
+		}
+		seen[source] = struct{}{}
+	}
+	for _, source := range incoming {
+		source = strings.TrimSpace(source)
+		if source == "" {
+			continue
+		}
+		if _, exists := seen[source]; exists {
+			continue
+		}
+		seen[source] = struct{}{}
+		merged = append(merged, source)
+	}
+	return merged
+}
+
+func dedupeCandidateSources(sources []string) []string {
+	return mergeCandidateSources(nil, sources)
 }
 
 // filterExcludedCoins removes excluded coins from the candidates list
@@ -639,16 +714,17 @@ func (e *StrategyEngine) getAI500Coins(limit int) ([]CandidateCoin, error) {
 		limit = 30
 	}
 
-	symbols, err := e.nofxosClient.GetTopRatedCoins(limit)
+	coins, err := e.nofxosClient.GetTopRatedCoinData(limit)
 	if err != nil {
 		return nil, err
 	}
 
 	var candidates []CandidateCoin
-	for _, symbol := range symbols {
+	for _, coin := range coins {
 		candidates = append(candidates, CandidateCoin{
-			Symbol:  symbol,
-			Sources: []string{"ai500"},
+			Symbol:          market.Normalize(coin.Pair),
+			Sources:         []string{"ai500"},
+			SelectionBucket: strings.TrimSpace(coin.SelectionBucket),
 		})
 	}
 	return candidates, nil

@@ -34,9 +34,33 @@ type BybitTrade struct {
 	OrderAction string // open_long, open_short, close_long, close_short
 }
 
+type BybitTriggerOrder struct {
+	Symbol         string
+	OrderID        string
+	Side           string
+	OrderType      string
+	StopOrderType  string
+	TriggerPrice   float64
+	OrderPrice     float64
+	Quantity       float64
+	FilledQuantity float64
+	AvgFillPrice   float64
+	ExecFee        float64
+	Status         string
+	ReduceOnly     bool
+	CloseOnTrigger bool
+	CreatedTime    time.Time
+	UpdatedTime    time.Time
+	OrderAction    string
+}
+
 // GetTrades retrieves trade/execution records from Bybit
 func (t *BybitTrader) GetTrades(startTime time.Time, limit int) ([]BybitTrade, error) {
 	return t.getTradesViaHTTP(startTime, limit)
+}
+
+func (t *BybitTrader) GetTriggerOrderHistory(startTime time.Time, limit int) ([]BybitTriggerOrder, error) {
+	return t.getTriggerOrderHistoryViaHTTP(startTime, limit)
 }
 
 // getTradesViaHTTP makes direct HTTP call to Bybit API for execution list
@@ -175,6 +199,292 @@ func (t *BybitTrader) parseTradesResult(list []map[string]interface{}) ([]BybitT
 	return trades, nil
 }
 
+func (t *BybitTrader) getTriggerOrderHistoryViaHTTP(startTime time.Time, limit int) ([]BybitTriggerOrder, error) {
+	queryParams := fmt.Sprintf("category=linear&orderFilter=StopOrder&startTime=%d&limit=%d", startTime.UnixMilli(), limit)
+	url := "https://api.bybit.com/v5/order/history?" + queryParams
+
+	timestamp := fmt.Sprintf("%d", time.Now().UnixMilli())
+	recvWindow := "10000"
+	signPayload := timestamp + t.apiKey + recvWindow + queryParams
+
+	h := hmac.New(sha256.New, []byte(t.secretKey))
+	h.Write([]byte(signPayload))
+	signature := hex.EncodeToString(h.Sum(nil))
+
+	req, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+
+	req.Header.Set("X-BAPI-API-KEY", t.apiKey)
+	req.Header.Set("X-BAPI-SIGN", signature)
+	req.Header.Set("X-BAPI-SIGN-TYPE", "2")
+	req.Header.Set("X-BAPI-TIMESTAMP", timestamp)
+	req.Header.Set("X-BAPI-RECV-WINDOW", recvWindow)
+	req.Header.Set("Content-Type", "application/json")
+
+	httpClient := http.DefaultClient
+	if t.client != nil && t.client.HTTPClient != nil {
+		httpClient = t.client.HTTPClient
+	}
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to call Bybit API: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read response: %w", err)
+	}
+
+	var result struct {
+		RetCode int    `json:"retCode"`
+		RetMsg  string `json:"retMsg"`
+		Result  struct {
+			List []map[string]interface{} `json:"list"`
+		} `json:"result"`
+	}
+
+	if err := json.Unmarshal(body, &result); err != nil {
+		return nil, fmt.Errorf("failed to parse response: %w", err)
+	}
+
+	if result.RetCode != 0 {
+		return nil, fmt.Errorf("Bybit API error: %s", result.RetMsg)
+	}
+
+	return parseBybitTriggerOrdersResult(result.Result.List)
+}
+
+func parseBybitTriggerOrdersResult(list []map[string]interface{}) ([]BybitTriggerOrder, error) {
+	orders := make([]BybitTriggerOrder, 0, len(list))
+
+	for _, item := range list {
+		symbol, _ := item["symbol"].(string)
+		orderID, _ := item["orderId"].(string)
+		side, _ := item["side"].(string)
+		orderType, _ := item["orderType"].(string)
+		stopOrderType, _ := item["stopOrderType"].(string)
+		orderStatus, _ := item["orderStatus"].(string)
+		orderLinkID, _ := item["orderLinkId"].(string)
+
+		triggerPrice, _ := parseBybitFloatField(item["triggerPrice"])
+		orderPrice, _ := parseBybitFloatField(item["price"])
+		quantity, _ := parseBybitFloatField(item["qty"])
+		filledQuantity, _ := parseBybitFloatField(item["cumExecQty"])
+		avgFillPrice, _ := parseBybitFloatField(item["avgPrice"])
+		execFee, _ := parseBybitFloatField(item["cumExecFee"])
+		createdTime, _ := parseBybitTimeField(item["createdTime"])
+		updatedTime, _ := parseBybitTimeField(item["updatedTime"])
+
+		reduceOnly := parseBybitBoolField(item["reduceOnly"])
+		closeOnTrigger := parseBybitBoolField(item["closeOnTrigger"])
+		if !reduceOnly && orderLinkID != "" {
+			reduceOnly = strings.Contains(strings.ToLower(orderLinkID), "reduce")
+		}
+
+		orderAction := inferBybitTriggerOrderAction(side, reduceOnly)
+		if orderID == "" || symbol == "" || orderAction == "" {
+			continue
+		}
+
+		orders = append(orders, BybitTriggerOrder{
+			Symbol:         symbol,
+			OrderID:        orderID,
+			Side:           side,
+			OrderType:      orderType,
+			StopOrderType:  stopOrderType,
+			TriggerPrice:   triggerPrice,
+			OrderPrice:     orderPrice,
+			Quantity:       quantity,
+			FilledQuantity: filledQuantity,
+			AvgFillPrice:   avgFillPrice,
+			ExecFee:        execFee,
+			Status:         normalizeBybitOrderStatus(orderStatus),
+			ReduceOnly:     reduceOnly,
+			CloseOnTrigger: closeOnTrigger,
+			CreatedTime:    createdTime,
+			UpdatedTime:    updatedTime,
+			OrderAction:    orderAction,
+		})
+	}
+
+	return orders, nil
+}
+
+func parseBybitFloatField(value any) (float64, error) {
+	switch v := value.(type) {
+	case string:
+		if strings.TrimSpace(v) == "" {
+			return 0, nil
+		}
+		return strconv.ParseFloat(v, 64)
+	case float64:
+		return v, nil
+	case int64:
+		return float64(v), nil
+	case int:
+		return float64(v), nil
+	default:
+		return 0, nil
+	}
+}
+
+func parseBybitTimeField(value any) (time.Time, error) {
+	switch v := value.(type) {
+	case string:
+		if strings.TrimSpace(v) == "" {
+			return time.Time{}, nil
+		}
+		ms, err := strconv.ParseInt(v, 10, 64)
+		if err != nil {
+			return time.Time{}, err
+		}
+		return time.UnixMilli(ms).UTC(), nil
+	case float64:
+		return time.UnixMilli(int64(v)).UTC(), nil
+	case int64:
+		return time.UnixMilli(v).UTC(), nil
+	default:
+		return time.Time{}, nil
+	}
+}
+
+func parseBybitBoolField(value any) bool {
+	switch v := value.(type) {
+	case bool:
+		return v
+	case string:
+		normalized := strings.ToLower(strings.TrimSpace(v))
+		return normalized == "true" || normalized == "1"
+	case float64:
+		return v != 0
+	case int64:
+		return v != 0
+	case int:
+		return v != 0
+	default:
+		return false
+	}
+}
+
+func inferBybitTriggerOrderAction(side string, reduceOnly bool) string {
+	if strings.EqualFold(strings.TrimSpace(side), "sell") {
+		return "close_long"
+	}
+	if strings.EqualFold(strings.TrimSpace(side), "buy") {
+		return "close_short"
+	}
+	return ""
+}
+
+func normalizeBybitOrderStatus(status string) string {
+	switch strings.ToLower(strings.TrimSpace(status)) {
+	case "filled":
+		return "FILLED"
+	case "new", "created", "untriggered", "triggered", "active":
+		return "NEW"
+	case "cancelled", "cancelledbyuser", "rejected", "deactivated":
+		return "CANCELED"
+	case "partiallyfilled":
+		return "PARTIALLY_FILLED"
+	default:
+		return strings.ToUpper(strings.TrimSpace(status))
+	}
+}
+
+func normalizeBybitTriggerOrderType(orderType, stopOrderType string) string {
+	normalizedStopType := strings.TrimSpace(stopOrderType)
+	if normalizedStopType != "" {
+		return normalizedStopType
+	}
+	normalizedOrderType := strings.TrimSpace(orderType)
+	if normalizedOrderType != "" {
+		return normalizedOrderType
+	}
+	return "StopOrder"
+}
+
+func (t *BybitTrader) syncTriggerOrdersFromBybit(traderID string, exchangeID string, exchangeType string, st *store.Store, startTime time.Time) (int, error) {
+	triggerOrders, err := t.GetTriggerOrderHistory(startTime, 500)
+	if err != nil {
+		return 0, fmt.Errorf("failed to get trigger order history: %w", err)
+	}
+	if len(triggerOrders) == 0 {
+		return 0, nil
+	}
+
+	sort.Slice(triggerOrders, func(i, j int) bool {
+		return triggerOrders[i].UpdatedTime.UnixMilli() < triggerOrders[j].UpdatedTime.UnixMilli()
+	})
+
+	syncedCount := 0
+	for _, triggerOrder := range triggerOrders {
+		symbol := market.Normalize(triggerOrder.Symbol)
+		positionSide := "LONG"
+		side := strings.ToUpper(strings.TrimSpace(triggerOrder.Side))
+		if strings.Contains(triggerOrder.OrderAction, "short") {
+			positionSide = "SHORT"
+		}
+
+		updatedAt := triggerOrder.UpdatedTime.UTC().UnixMilli()
+		if updatedAt == 0 {
+			updatedAt = triggerOrder.CreatedTime.UTC().UnixMilli()
+		}
+		createdAt := triggerOrder.CreatedTime.UTC().UnixMilli()
+		if createdAt == 0 {
+			createdAt = updatedAt
+		}
+
+		orderRecord := &store.TraderOrder{
+			TraderID:        traderID,
+			ExchangeID:      exchangeID,
+			ExchangeType:    exchangeType,
+			ExchangeOrderID: triggerOrder.OrderID,
+			Symbol:          symbol,
+			Side:            side,
+			PositionSide:    positionSide,
+			Type:            normalizeBybitTriggerOrderType(triggerOrder.OrderType, triggerOrder.StopOrderType),
+			Quantity:        triggerOrder.Quantity,
+			Price:           triggerOrder.OrderPrice,
+			StopPrice:       triggerOrder.TriggerPrice,
+			Status:          triggerOrder.Status,
+			FilledQuantity:  triggerOrder.FilledQuantity,
+			AvgFillPrice:    triggerOrder.AvgFillPrice,
+			Commission:      triggerOrder.ExecFee,
+			CommissionAsset: "USDT",
+			ReduceOnly:      true,
+			ClosePosition:   triggerOrder.CloseOnTrigger,
+			OrderAction:     triggerOrder.OrderAction,
+			CreatedAt:       createdAt,
+			UpdatedAt:       updatedAt,
+		}
+		if triggerOrder.Status == "FILLED" {
+			orderRecord.FilledAt = updatedAt
+		}
+
+		if err := st.Order().UpsertOrder(orderRecord); err != nil {
+			return syncedCount, fmt.Errorf("failed to upsert trigger order %s: %w", triggerOrder.OrderID, err)
+		}
+		syncedCount++
+
+		if triggerOrder.Status == "FILLED" {
+			positions, err := st.Position().GetByExitOrderID(exchangeID, triggerOrder.OrderID)
+			if err != nil {
+				return syncedCount, fmt.Errorf("failed to load positions for trigger order %s: %w", triggerOrder.OrderID, err)
+			}
+			for _, pos := range positions {
+				if err := st.DealReview().SyncPosition(pos); err != nil {
+					logger.Infof("  ⚠️ Failed to resync deal review for trigger order %s / position %d: %v", triggerOrder.OrderID, pos.ID, err)
+				}
+			}
+		}
+	}
+
+	return syncedCount, nil
+}
+
 // SyncOrdersFromBybit syncs Bybit exchange order history to local database
 // Also creates/updates position records to ensure orders/fills/positions data consistency
 // exchangeID: Exchange account UUID (from exchanges.id)
@@ -188,6 +498,13 @@ func (t *BybitTrader) SyncOrdersFromBybit(traderID string, exchangeID string, ex
 	startTime := time.Now().Add(-24 * time.Hour)
 
 	logger.Infof("🔄 Syncing Bybit trades from: %s", startTime.Format(time.RFC3339))
+
+	triggerSyncedCount, err := t.syncTriggerOrdersFromBybit(traderID, exchangeID, exchangeType, st, startTime)
+	if err != nil {
+		logger.Infof("⚠️  Bybit trigger-order sync failed: %v", err)
+	} else if triggerSyncedCount > 0 {
+		logger.Infof("📥 Synced %d Bybit trigger orders", triggerSyncedCount)
+	}
 
 	// Use GetTrades method to fetch trade records
 	trades, err := t.GetTrades(startTime, 1000)
@@ -303,8 +620,14 @@ func (t *BybitTrader) SyncOrdersFromBybit(traderID string, exchangeID string, ex
 
 // StartOrderSync starts background order sync task for Bybit
 func (t *BybitTrader) StartOrderSync(traderID string, exchangeID string, exchangeType string, st *store.Store, interval time.Duration) {
-	ticker := time.NewTicker(interval)
 	go func() {
+		if err := t.SyncOrdersFromBybit(traderID, exchangeID, exchangeType, st); err != nil {
+			logger.Infof("⚠️  Bybit order sync failed: %v", err)
+		}
+
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+
 		for range ticker.C {
 			if err := t.SyncOrdersFromBybit(traderID, exchangeID, exchangeType, st); err != nil {
 				logger.Infof("⚠️  Bybit order sync failed: %v", err)

@@ -11,10 +11,15 @@ import (
 
 func TestAssembleLivePayload_UsesV4Contract(t *testing.T) {
 	ctx := &Context{
-		PayloadVersion: PayloadSchemaVersion,
-		CurrentTime:    "2025-11-16 04:57:11",
-		RuntimeMinutes: 1788,
-		CallCount:      597,
+		PayloadVersion:  PayloadSchemaVersion,
+		CurrentTime:     "2025-11-16 04:57:11",
+		RuntimeMinutes:  1788,
+		CallCount:       597,
+		BTCETHLeverage:  5,
+		AltcoinLeverage: 10,
+		AltcoinPosRatio: 1.0,
+		MinPositionSize: 12,
+		MaxPositions:    3,
 		Account: AccountInfo{
 			TotalEquity:      79.231,
 			AvailableBalance: 79.231,
@@ -52,6 +57,21 @@ func TestAssembleLivePayload_UsesV4Contract(t *testing.T) {
 	if len(payload.Policy.EntryRule.SelectBestBy) != 3 {
 		t.Fatalf("policy entry_rule.select_best_by should include 3 sort keys")
 	}
+	if payload.Policy.SizeCap != 1.0 {
+		t.Fatalf("policy size_cap should respect altcoin ratio, got %.3f", payload.Policy.SizeCap)
+	}
+	if payload.Policy.SizeFloorUSDT != 12 {
+		t.Fatalf("policy size_floor_usdt should reflect min position size, got %.3f", payload.Policy.SizeFloorUSDT)
+	}
+	if payload.Policy.SizePctMin != 0.151 {
+		t.Fatalf("policy size_pct_min should be derived from equity, got %.3f", payload.Policy.SizePctMin)
+	}
+	if payload.Policy.MaxLeverage != 10 {
+		t.Fatalf("policy max_leverage should reflect strategy leverage, got %d", payload.Policy.MaxLeverage)
+	}
+	if payload.Policy.MaxNewPositions != 1 {
+		t.Fatalf("policy max_new_positions should stay capped to single_best mode, got %d", payload.Policy.MaxNewPositions)
+	}
 	if payload.OutputContract.Format != "json_only" {
 		t.Fatalf("output_contract.format should be json_only")
 	}
@@ -87,6 +107,18 @@ func TestAssembleLivePayload_UsesV4Contract(t *testing.T) {
 	}
 	if !payload.OutputContract.Constraints.DecisionsMustBeArray {
 		t.Fatalf("decisions_must_be_array should be true")
+	}
+	if payload.OutputContract.Constraints.SizeFloorUSDT != 12 {
+		t.Fatalf("constraints size_floor_usdt should reflect min position size, got %.3f", payload.OutputContract.Constraints.SizeFloorUSDT)
+	}
+	if payload.OutputContract.Constraints.SizePctMin != 0.151 {
+		t.Fatalf("constraints size_pct_min should reflect min position size ratio, got %.3f", payload.OutputContract.Constraints.SizePctMin)
+	}
+	if payload.OutputContract.Constraints.SizePctMax != 1.0 {
+		t.Fatalf("constraints size_pct_max should respect altcoin ratio, got %.3f", payload.OutputContract.Constraints.SizePctMax)
+	}
+	if payload.OutputContract.Constraints.LeverageMax != 10 {
+		t.Fatalf("constraints leverage_max should reflect strategy leverage, got %d", payload.OutputContract.Constraints.LeverageMax)
 	}
 	if payload.OutputContract.Constraints.DecisionsLenMin != 0 || payload.OutputContract.Constraints.DecisionsLenMax != 1 {
 		t.Fatalf("decisions length constraints should be [0,1]")
@@ -131,6 +163,9 @@ func TestBuildCandidatePayload_IncludesSemanticFeaturesAndQoS(t *testing.T) {
 				RSI7Values:  []float64{52, 56},
 				RSI14Values: []float64{49, 53},
 				ATR14:       1.2,
+				BOLLUpper:   []float64{101.2, 102.4},
+				BOLLMiddle:  []float64{98.1, 99.2},
+				BOLLLower:   []float64{95.0, 96.1},
 			},
 			"15m": {
 				Timeframe: "15m",
@@ -191,8 +226,9 @@ func TestBuildCandidatePayload_IncludesSemanticFeaturesAndQoS(t *testing.T) {
 	}
 
 	ctx := &Context{
+		Exchange:       "bybit",
 		MarketDataMap:  map[string]*market.Data{symbol: data},
-		CandidateCoins: []CandidateCoin{{Symbol: symbol, Sources: []string{"ai500", "oi_top"}}},
+		CandidateCoins: []CandidateCoin{{Symbol: symbol, Sources: []string{"ai500", "oi_top"}, SelectionBucket: "adaptive"}},
 		VenueTradability: map[string]*VenueTradabilitySummary{
 			symbol: {
 				VenueSupported: true,
@@ -233,7 +269,7 @@ func TestBuildCandidatePayload_IncludesSemanticFeaturesAndQoS(t *testing.T) {
 		Account:        AccountInfo{TotalEquity: 100, AvailableBalance: 100},
 	}
 	diag := &payloadDiagnostics{FeaturePass: make(map[string][]string)}
-	cand, ok := buildCandidatePayload(ctx, CandidateCoin{Symbol: symbol, Sources: []string{"ai500", "oi_top"}}, diag, reqPayload{RequiredTF: "3m"}, defaultContextPriceType)
+	cand, ok := buildCandidatePayload(ctx, CandidateCoin{Symbol: symbol, Sources: []string{"ai500", "oi_top"}, SelectionBucket: "adaptive"}, diag, reqPayload{RequiredTF: "3m"}, defaultContextPriceType)
 	if !ok {
 		t.Fatalf("buildCandidatePayload should return candidate")
 	}
@@ -252,6 +288,9 @@ func TestBuildCandidatePayload_IncludesSemanticFeaturesAndQoS(t *testing.T) {
 	if len(cand.SourceTags) != 2 || cand.SourceTags[0] != "ai500" || cand.SourceTags[1] != "oi_top" {
 		t.Fatalf("candidate source tags should be preserved")
 	}
+	if cand.SelectionBucket != "adaptive" {
+		t.Fatalf("selection_bucket should be preserved, got %q", cand.SelectionBucket)
+	}
 	if len(cand.Timeframes) != 3 {
 		t.Fatalf("expected 3 timeframe summaries, got %d", len(cand.Timeframes))
 	}
@@ -260,6 +299,12 @@ func TestBuildCandidatePayload_IncludesSemanticFeaturesAndQoS(t *testing.T) {
 	}
 	if cand.Context.PriceChange1h == nil || cand.Context.PriceChange4h == nil {
 		t.Fatalf("1h and 4h price changes should be included in context")
+	}
+	if cand.Context.BOLLUpper == nil || cand.Context.BOLLMiddle == nil || cand.Context.BOLLLower == nil {
+		t.Fatalf("primary bollinger bands should be included in context when available")
+	}
+	if cand.Timeframes[0].BOLLUpper == nil || cand.Timeframes[0].BOLLMiddle == nil || cand.Timeframes[0].BOLLLower == nil {
+		t.Fatalf("timeframe bollinger bands should be included when available")
 	}
 	if cand.QuantFlow == nil || cand.QuantFlow.InstFuture1h == nil || *cand.QuantFlow.InstFuture1h != 22.8 {
 		t.Fatalf("quant flow summary should be included for candidates")
@@ -284,6 +329,215 @@ func TestBuildCandidatePayload_IncludesSemanticFeaturesAndQoS(t *testing.T) {
 	}
 	if len(diag.FeaturePass[symbol]) != 4 {
 		t.Fatalf("expected 4 passed feature gates, got %d", len(diag.FeaturePass[symbol]))
+	}
+}
+
+func TestAssembleLivePayload_IncludesRelativeValuePairs(t *testing.T) {
+	now := time.Now().UTC()
+	buildSeries := func(multiplier float64, shock float64) []market.KlineBar {
+		out := make([]market.KlineBar, 0, 48)
+		for i := 0; i < 48; i++ {
+			base := 100.0 + float64(i)*0.7
+			closePx := multiplier * base
+			if i == 47 {
+				closePx += shock
+			}
+			out = append(out, market.KlineBar{
+				Time:   int64(i + 1),
+				Open:   closePx - 0.4,
+				High:   closePx + 0.6,
+				Low:    closePx - 0.8,
+				Close:  closePx,
+				Volume: 1000 + float64(i*10),
+			})
+		}
+		return out
+	}
+
+	ctx := &Context{
+		PayloadVersion: PayloadSchemaVersion,
+		Exchange:       "bybit",
+		CurrentTime:    "2026-04-11 10:00:00",
+		RuntimeMinutes: 5,
+		CallCount:      3,
+		Account:        AccountInfo{TotalEquity: 1000, AvailableBalance: 900},
+		CandidateCoins: []CandidateCoin{
+			{Symbol: "BTCUSDT", Sources: []string{"static"}},
+			{Symbol: "ETHUSDT", Sources: []string{"static"}},
+			{Symbol: "SOLUSDT", Sources: []string{"static"}},
+		},
+		ExecutionQuality: map[string]*ExecutionQualitySummary{
+			"BTCUSDT": {SpreadBps: floatPtr(2.0), SlippageEst100USD: floatPtr(0.8)},
+			"ETHUSDT": {SpreadBps: floatPtr(3.0), SlippageEst100USD: floatPtr(1.0)},
+			"SOLUSDT": {SpreadBps: floatPtr(4.0), SlippageEst100USD: floatPtr(1.1)},
+		},
+		MarketDataMap: map[string]*market.Data{
+			"BTCUSDT": {
+				Symbol:       "BTCUSDT",
+				CollectedAt:  now,
+				CurrentPrice: 133.0,
+				CurrentMACD:  0.5,
+				CurrentRSI7:  55,
+				Snapshot: &snapshot.Snapshot{
+					Symbol: "BTCUSDT",
+					Features: snapshot.SnapshotContent{
+						Derivs: &types.DerivsFeatures{
+							FundingLatestBps: floatPtr(2.3),
+							BasisPct:         floatPtr(0.006),
+							BasisZ14d:        floatPtr(1.4),
+						},
+					},
+				},
+				TimeframeData: map[string]*market.TimeframeSeriesData{
+					"1h": {Timeframe: "1h", Klines: buildSeries(1.0, 0)},
+				},
+			},
+			"ETHUSDT": {
+				Symbol:       "ETHUSDT",
+				CollectedAt:  now,
+				CurrentPrice: 269.0,
+				CurrentMACD:  0.4,
+				CurrentRSI7:  57,
+				TimeframeData: map[string]*market.TimeframeSeriesData{
+					"1h": {Timeframe: "1h", Klines: buildSeries(2.0, 6.5)},
+				},
+			},
+			"SOLUSDT": {
+				Symbol:       "SOLUSDT",
+				CollectedAt:  now,
+				CurrentPrice: 160.0,
+				CurrentMACD:  0.2,
+				CurrentRSI7:  53,
+				TimeframeData: map[string]*market.TimeframeSeriesData{
+					"1h": {Timeframe: "1h", Klines: buildSeries(1.2, -1.5)},
+				},
+			},
+		},
+	}
+
+	payload, _, err := assembleLivePayload(ctx)
+	if err != nil {
+		t.Fatalf("assembleLivePayload failed: %v", err)
+	}
+	if payload.RelativeValue == nil || len(payload.RelativeValue.TopPairs) == 0 {
+		t.Fatalf("relative value top pairs should be included")
+	}
+	if payload.Candidates[0].Arbitrage == nil {
+		t.Fatalf("candidate arbitrage anchor should be included")
+	}
+	foundCostAndCarry := false
+	foundResidual := false
+	for _, cand := range payload.Candidates {
+		if cand.Arbitrage == nil {
+			continue
+		}
+		if cand.Arbitrage.F15TakerFeeBps != nil &&
+			*cand.Arbitrage.F15TakerFeeBps == 5.5 &&
+			cand.Arbitrage.F15Roundtrip100USDBps != nil &&
+			*cand.Arbitrage.F15Roundtrip100USDBps > 0 &&
+			cand.Arbitrage.F16BasisBps != nil &&
+			cand.Arbitrage.F16Funding8hBps != nil &&
+			cand.Arbitrage.F16CarryBias != "" {
+			foundCostAndCarry = true
+			break
+		}
+	}
+	for _, pair := range payload.RelativeValue.TopPairs {
+		if pair.F13ResidualZ != nil && pair.F14HedgeRatio != nil {
+			foundResidual = true
+			break
+		}
+	}
+	if !foundCostAndCarry {
+		t.Fatalf("candidate arbitrage block should include f15/f16 cost and carry metrics")
+	}
+	if !foundResidual {
+		t.Fatalf("relative value payload should include f13/f14 metrics")
+	}
+}
+
+func TestBuildCandidatePayload_UsesStrategyConfiguredEMAPeriods(t *testing.T) {
+	symbol := "SOLUSDT"
+	klines := make([]market.KlineBar, 0, 32)
+	for i := 0; i < 32; i++ {
+		closePx := float64(100 + i)
+		klines = append(klines, market.KlineBar{
+			Time:   int64(i + 1),
+			Open:   closePx - 0.5,
+			High:   closePx + 0.5,
+			Low:    closePx - 1.0,
+			Close:  closePx,
+			Volume: float64(1000 + i*10),
+		})
+	}
+
+	ctx := &Context{
+		PayloadVersion: PayloadSchemaVersion,
+		ContextTF:      "15m",
+		CurrentTime:    "2026-04-11 10:00:00",
+		RuntimeMinutes: 1,
+		CallCount:      1,
+		Account:        AccountInfo{TotalEquity: 1000, AvailableBalance: 1000},
+		EMAPeriods:     []int{9, 21},
+		RSIPeriods:     []int{14},
+		MarketDataMap: map[string]*market.Data{
+			symbol: {
+				Symbol:        symbol,
+				CollectedAt:   time.Now().UTC(),
+				CurrentPrice:  131,
+				CurrentMACD:   1.25,
+				CurrentRSI7:   63,
+				PriceChange1h: 2.1,
+				PriceChange4h: 5.4,
+				OpenInterest:  &market.OIData{Latest: 54321},
+				TimeframeData: map[string]*market.TimeframeSeriesData{
+					"15m": {
+						Timeframe: "15m",
+						Klines:    klines,
+						MACDValues: []float64{
+							0.8, 1.0, 1.25,
+						},
+						RSI7Values: []float64{
+							58, 60, 63,
+						},
+						RSI14Values: []float64{
+							54, 56, 59,
+						},
+					},
+				},
+			},
+		},
+		CandidateCoins: []CandidateCoin{{Symbol: symbol, Sources: []string{"ai500"}, SelectionBucket: "primary"}},
+	}
+
+	diag := &payloadDiagnostics{FeaturePass: make(map[string][]string)}
+	cand, ok := buildCandidatePayload(ctx, ctx.CandidateCoins[0], diag, reqPayload{RequiredTF: "15m"}, defaultContextPriceType)
+	if !ok {
+		t.Fatalf("buildCandidatePayload should return candidate")
+	}
+	if cand.Context.EMAFastPeriod != 9 || cand.Context.EMASlowPeriod != 21 {
+		t.Fatalf("expected ctx EMA periods 9/21, got %d/%d", cand.Context.EMAFastPeriod, cand.Context.EMASlowPeriod)
+	}
+	if cand.Context.EMAFast == nil || cand.Context.EMASlow == nil {
+		t.Fatalf("expected ctx EMA values for configured periods")
+	}
+	if cand.Context.RSIPeriod != 14 || cand.Context.RSI == nil {
+		t.Fatalf("expected ctx primary RSI period/value 14")
+	}
+	if len(cand.Timeframes) != 1 {
+		t.Fatalf("expected one timeframe summary, got %d", len(cand.Timeframes))
+	}
+	if cand.Timeframes[0].EMAFastPeriod != 9 || cand.Timeframes[0].EMASlowPeriod != 21 {
+		t.Fatalf("expected timeframe EMA periods 9/21, got %d/%d", cand.Timeframes[0].EMAFastPeriod, cand.Timeframes[0].EMASlowPeriod)
+	}
+	if cand.Timeframes[0].EMAFast == nil || cand.Timeframes[0].EMASlow == nil {
+		t.Fatalf("expected timeframe EMA values for configured periods")
+	}
+	if cand.Timeframes[0].RSIPeriod != 14 || cand.Timeframes[0].RSI == nil {
+		t.Fatalf("expected timeframe primary RSI period/value 14")
+	}
+	if cand.SelectionBucket != "primary" {
+		t.Fatalf("expected selection_bucket=primary, got %q", cand.SelectionBucket)
 	}
 }
 
@@ -497,20 +751,20 @@ func TestBuildContextBlock_IncludesBaseDerivsSignals(t *testing.T) {
 			},
 		},
 	}
-	ctx := buildContextBlock(data)
-	if ctx.OIDelta1hPct == nil || *ctx.OIDelta1hPct == 0 {
+	block := buildContextBlock(&Context{}, data)
+	if block.OIDelta1hPct == nil || *block.OIDelta1hPct == 0 {
 		t.Fatalf("oi_d1h_pct should be included")
 	}
-	if ctx.OIPriceDiv == nil || *ctx.OIPriceDiv != "confirming" {
+	if block.OIPriceDiv == nil || *block.OIPriceDiv != "confirming" {
 		t.Fatalf("oi_div should be included")
 	}
-	if ctx.FundingMedianZ7d == nil || ctx.FundingDispersionBps == nil || ctx.BasisZ14d == nil {
+	if block.FundingMedianZ7d == nil || block.FundingDispersionBps == nil || block.BasisZ14d == nil {
 		t.Fatalf("fund_z, fund_disp_bps, basis_z should be included")
 	}
-	if ctx.Source.OI == "" || ctx.Source.Fund == "" || ctx.Source.Basis == "" {
+	if block.Source.OI == "" || block.Source.Fund == "" || block.Source.Basis == "" {
 		t.Fatalf("source status fields should be included")
 	}
-	if ctx.TF != defaultContextTF || ctx.PxType != defaultContextPriceType {
+	if block.TF != defaultContextTF || block.PxType != defaultContextPriceType {
 		t.Fatalf("tf and px_type should be explicit")
 	}
 }
@@ -537,12 +791,86 @@ func TestBuildFeatureBlock_FiltersFailedQoS(t *testing.T) {
 		},
 	}
 	diag := &payloadDiagnostics{FeaturePass: make(map[string][]string)}
-	features := buildFeatureBlock(data, diag, "BTCUSDT")
+	features := buildFeatureBlock(&Context{}, data, diag, "BTCUSDT")
 	if features.Orderflow != nil || features.Risk != nil || features.Levels != nil || features.Volatility != nil {
 		t.Fatalf("all feature blocks should be nil when QoS gates fail")
 	}
 	if len(diag.FeaturePass["BTCUSDT"]) != 0 {
 		t.Fatalf("no feature should pass qos gate")
+	}
+}
+
+func TestBuildCandidatePayload_RespectsFeatureToggleFlags(t *testing.T) {
+	now := time.Now().UTC()
+	symbol := "ETHUSDT"
+	data := &market.Data{
+		Symbol:       symbol,
+		CollectedAt:  now,
+		CurrentPrice: 2500,
+		CurrentEMA20: 2485,
+		CurrentMACD:  0.4,
+		CurrentRSI7:  58,
+		OpenInterest: &market.OIData{Latest: 120000},
+		FeatureStats: map[string]market.FeatureStat{
+			market.FeatureKeyF4: {Coverage: 1, UpdatedAt: now},
+			market.FeatureKeyF5: {Coverage: 1, UpdatedAt: now},
+			market.FeatureKeyF6: {Coverage: 1, UpdatedAt: now},
+			market.FeatureKeyF7: {Coverage: 1, UpdatedAt: now},
+		},
+		TimeframeData: map[string]*market.TimeframeSeriesData{
+			"3m": {
+				Timeframe:   "3m",
+				Klines:      []market.KlineBar{{Close: 2480, Volume: 10}, {Close: 2500, Volume: 12}},
+				EMA20Values: []float64{2485, 2490},
+				MACDValues:  []float64{0.2, 0.4},
+				RSI7Values:  []float64{55, 58},
+				RSI14Values: []float64{53, 56},
+			},
+		},
+		Snapshot: &snapshot.Snapshot{
+			Symbol: symbol,
+			Features: snapshot.SnapshotContent{
+				Derivs: &types.DerivsFeatures{
+					ConfidenceCVD3m:   floatPtr(0.9),
+					ConfidenceLiq3m:   floatPtr(0.8),
+					ConfidenceAVWAP3m: floatPtr(0.85),
+					ConfidenceVol3m:   floatPtr(0.82),
+				},
+			},
+		},
+	}
+	ctx := &Context{
+		PayloadVersion:  PayloadSchemaVersion,
+		ContextTF:       "3m",
+		CurrentTime:     "2026-04-11 10:00:00",
+		RuntimeMinutes:  1,
+		CallCount:       1,
+		Account:         AccountInfo{TotalEquity: 1000, AvailableBalance: 1000},
+		FeatureFlagsSet: true,
+		EnableF4:        false,
+		EnableF5:        true,
+		EnableF6:        false,
+		EnableF7:        true,
+		MarketDataMap:   map[string]*market.Data{symbol: data},
+		CandidateCoins:  []CandidateCoin{{Symbol: symbol, Sources: []string{"ai500"}}},
+	}
+
+	diag := &payloadDiagnostics{FeaturePass: make(map[string][]string)}
+	cand, ok := buildCandidatePayload(ctx, ctx.CandidateCoins[0], diag, reqPayload{RequiredTF: "3m"}, defaultContextPriceType)
+	if !ok {
+		t.Fatalf("buildCandidatePayload should return candidate")
+	}
+	if cand.Features.Orderflow != nil || cand.Features.Levels != nil {
+		t.Fatalf("disabled F4/F6 feature blocks should be omitted")
+	}
+	if cand.Features.Risk == nil || cand.Features.Volatility == nil {
+		t.Fatalf("enabled F5/F7 feature blocks should still be included")
+	}
+	if cand.FeatureEnv == nil || cand.FeatureEnv.F4 != "disabled" || cand.FeatureEnv.F6 != "disabled" {
+		t.Fatalf("feature availability should mark disabled feature gates explicitly")
+	}
+	if cand.FeatureEnv.F5 != "ok" || cand.FeatureEnv.F7 != "ok" {
+		t.Fatalf("enabled feature gates should remain active")
 	}
 }
 

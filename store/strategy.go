@@ -3,6 +3,8 @@ package store
 import (
 	"encoding/json"
 	"fmt"
+	"nofx/provider/nofxos"
+	"os"
 	"sort"
 	"strings"
 	"time"
@@ -94,6 +96,8 @@ type StrategyConfig struct {
 	CoinSource CoinSourceConfig `json:"coin_source"`
 	// quantitative data configuration
 	Indicators IndicatorConfig `json:"indicators"`
+	// signal data provider configuration
+	SignalProvider SignalProviderConfig `json:"signal_provider,omitempty"`
 	// custom prompt (appended at the end)
 	CustomPrompt string `json:"custom_prompt,omitempty"`
 	// risk control configuration
@@ -103,6 +107,110 @@ type StrategyConfig struct {
 
 	// Grid trading configuration (only used when StrategyType == "grid_trading")
 	GridConfig *GridStrategyConfig `json:"grid_config,omitempty"`
+}
+
+const (
+	SignalProviderNofxOS          = "nofxos"
+	SignalProviderOfficialNofxOS  = "official_nofxos" // Deprecated alias kept for backward compatibility
+	SignalProviderSelfhostedAI500 = "selfhosted_ai500"
+	DefaultSelfhostedAI500BaseURL = "http://selfhosted-ai500:8081"
+)
+
+// SignalProviderConfig controls which provider serves AI500-compatible signal data.
+type SignalProviderConfig struct {
+	Type    string `json:"type,omitempty"`
+	BaseURL string `json:"base_url,omitempty"`
+	APIKey  string `json:"api_key,omitempty"`
+}
+
+// NormalizeSignalProviderType canonicalizes provider type aliases to the public contract values.
+func NormalizeSignalProviderType(raw string) string {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "", SignalProviderNofxOS, SignalProviderOfficialNofxOS:
+		return SignalProviderNofxOS
+	case SignalProviderSelfhostedAI500:
+		return SignalProviderSelfhostedAI500
+	default:
+		return ""
+	}
+}
+
+// ResolveSelfhostedAI500BaseURL returns the internal base URL used by the backend
+// when a selfhosted provider config does not persist an explicit endpoint yet.
+func ResolveSelfhostedAI500BaseURL() string {
+	if value := strings.TrimSpace(os.Getenv("SELFHOSTED_AI500_INTERNAL_URL")); value != "" {
+		return value
+	}
+	if value := strings.TrimSpace(os.Getenv("SELFHOSTED_AI500_BASE_URL")); value != "" {
+		return value
+	}
+	return DefaultSelfhostedAI500BaseURL
+}
+
+// ResolveSelfhostedAI500APIKey upgrades legacy/default provider keys to the local
+// selfhosted auth token when available, while preserving explicit custom tokens.
+func ResolveSelfhostedAI500APIKey(apiKey string) string {
+	resolved := strings.TrimSpace(apiKey)
+	envToken := strings.TrimSpace(os.Getenv("SELFHOSTED_AI500_AUTH_TOKEN"))
+	if envToken != "" && (resolved == "" || resolved == nofxos.DefaultAuthKey) {
+		return envToken
+	}
+	return resolved
+}
+
+// ResolveSignalProvider returns the effective provider config with backward-compatible fallbacks.
+func (c *StrategyConfig) ResolveSignalProvider() SignalProviderConfig {
+	provider := c.SignalProvider
+	provider.Type = NormalizeSignalProviderType(provider.Type)
+	provider.BaseURL = strings.TrimSpace(provider.BaseURL)
+	provider.APIKey = strings.TrimSpace(provider.APIKey)
+
+	if provider.Type == "" {
+		if provider.BaseURL != "" && !strings.EqualFold(provider.BaseURL, nofxos.DefaultBaseURL) {
+			provider.Type = SignalProviderSelfhostedAI500
+		} else {
+			provider.Type = SignalProviderNofxOS
+		}
+	}
+
+	switch provider.Type {
+	case SignalProviderSelfhostedAI500:
+		if provider.BaseURL == "" {
+			provider.BaseURL = ResolveSelfhostedAI500BaseURL()
+		}
+		if provider.APIKey == "" {
+			provider.APIKey = strings.TrimSpace(c.Indicators.NofxOSAPIKey)
+		}
+		provider.APIKey = ResolveSelfhostedAI500APIKey(provider.APIKey)
+		return provider
+	default:
+		provider.Type = SignalProviderNofxOS
+		provider.BaseURL = nofxos.DefaultBaseURL
+		if provider.APIKey == "" {
+			provider.APIKey = strings.TrimSpace(c.Indicators.NofxOSAPIKey)
+		}
+		if provider.APIKey == "" {
+			provider.APIKey = nofxos.DefaultAuthKey
+		}
+		return provider
+	}
+}
+
+// RequiresSignalProvider reports whether the strategy uses AI500-compatible provider data.
+func (c *StrategyConfig) RequiresSignalProvider() bool {
+	switch c.CoinSource.SourceType {
+	case "ai500", "oi_top", "oi_low":
+		return true
+	case "mixed":
+		if c.CoinSource.UseAI500 || c.CoinSource.UseOITop || c.CoinSource.UseOILow {
+			return true
+		}
+	}
+
+	return c.Indicators.EnableQuantData ||
+		c.Indicators.EnableOIRanking ||
+		c.Indicators.EnableNetFlowRanking ||
+		c.Indicators.EnablePriceRanking
 }
 
 // GridStrategyConfig grid trading specific configuration
@@ -195,6 +303,11 @@ type IndicatorConfig struct {
 	EnableVolume      bool `json:"enable_volume"`
 	EnableOI          bool `json:"enable_oi"`           // open interest
 	EnableFundingRate bool `json:"enable_funding_rate"` // funding rate
+	// Derived signal blocks (legacy configs default to enabled when omitted)
+	EnableF4 *bool `json:"enable_f4,omitempty"` // Orderflow microstructure
+	EnableF5 *bool `json:"enable_f5,omitempty"` // Liquidation / risk map
+	EnableF6 *bool `json:"enable_f6,omitempty"` // Levels / AVWAP structure
+	EnableF7 *bool `json:"enable_f7,omitempty"` // Volatility / squeeze structure
 	// EMA period configuration
 	EMAPeriods []int `json:"ema_periods,omitempty"` // default [20, 50]
 	// RSI period configuration
@@ -229,6 +342,34 @@ type IndicatorConfig struct {
 	EnablePriceRanking   bool   `json:"enable_price_ranking"`             // whether to enable price ranking data
 	PriceRankingDuration string `json:"price_ranking_duration,omitempty"` // durations: "1h" or "1h,4h,24h"
 	PriceRankingLimit    int    `json:"price_ranking_limit,omitempty"`    // number of entries per ranking (default 10)
+}
+
+func boolPtr(value bool) *bool {
+	return &value
+}
+
+func effectiveOptionalBool(value *bool) bool {
+	return value == nil || *value
+}
+
+// FeatureF4Enabled reports whether the orderflow feature block should be exposed.
+func (c IndicatorConfig) FeatureF4Enabled() bool {
+	return effectiveOptionalBool(c.EnableF4)
+}
+
+// FeatureF5Enabled reports whether the risk feature block should be exposed.
+func (c IndicatorConfig) FeatureF5Enabled() bool {
+	return effectiveOptionalBool(c.EnableF5)
+}
+
+// FeatureF6Enabled reports whether the levels feature block should be exposed.
+func (c IndicatorConfig) FeatureF6Enabled() bool {
+	return effectiveOptionalBool(c.EnableF6)
+}
+
+// FeatureF7Enabled reports whether the volatility feature block should be exposed.
+func (c IndicatorConfig) FeatureF7Enabled() bool {
+	return effectiveOptionalBool(c.EnableF7)
 }
 
 // KlineConfig K-line configuration
@@ -318,6 +459,11 @@ func GetDefaultStrategyConfig(lang string) StrategyConfig {
 			UseOILow:   false,
 			OILowLimit: 3,
 		},
+		SignalProvider: SignalProviderConfig{
+			Type:    SignalProviderNofxOS,
+			BaseURL: nofxos.DefaultBaseURL,
+			APIKey:  nofxos.DefaultAuthKey,
+		},
 		Indicators: IndicatorConfig{
 			Klines: KlineConfig{
 				PrimaryTimeframe:     "5m",
@@ -336,12 +482,16 @@ func GetDefaultStrategyConfig(lang string) StrategyConfig {
 			EnableVolume:      true,
 			EnableOI:          true,
 			EnableFundingRate: true,
+			EnableF4:          boolPtr(true),
+			EnableF5:          boolPtr(true),
+			EnableF6:          boolPtr(true),
+			EnableF7:          boolPtr(true),
 			EMAPeriods:        []int{20, 50},
 			RSIPeriods:        []int{7, 14},
 			ATRPeriods:        []int{14},
 			BOLLPeriods:       []int{20},
 			// NofxOS unified API key
-			NofxOSAPIKey: "cm_568c67eae410d912c54c",
+			NofxOSAPIKey: nofxos.DefaultAuthKey,
 			// Quant data
 			EnableQuantData:    true,
 			EnableQuantOI:      true,
@@ -563,6 +713,26 @@ func (s *Strategy) ParseConfig() (*StrategyConfig, error) {
 	return &config, nil
 }
 
+// Clone creates a deep copy of the strategy config so trader-level runtime
+// prompt overrides do not mutate the persisted strategy definition.
+func (c *StrategyConfig) Clone() (*StrategyConfig, error) {
+	if c == nil {
+		return nil, nil
+	}
+
+	data, err := json.Marshal(c)
+	if err != nil {
+		return nil, fmt.Errorf("failed to serialize strategy configuration clone: %w", err)
+	}
+
+	var cloned StrategyConfig
+	if err := json.Unmarshal(data, &cloned); err != nil {
+		return nil, fmt.Errorf("failed to deserialize strategy configuration clone: %w", err)
+	}
+
+	return &cloned, nil
+}
+
 // SetConfig set strategy configuration
 func (s *Strategy) SetConfig(config *StrategyConfig) error {
 	data, err := json.Marshal(config)
@@ -728,6 +898,18 @@ func (c *StrategyConfig) EstimateTokens() TokenEstimate {
 	// OI + Funding per coin
 	if c.Indicators.EnableOI || c.Indicators.EnableFundingRate {
 		totalMarketChars += numCoins * 100
+	}
+	if c.Indicators.FeatureF4Enabled() {
+		totalMarketChars += numCoins * 140
+	}
+	if c.Indicators.FeatureF5Enabled() {
+		totalMarketChars += numCoins * 120
+	}
+	if c.Indicators.FeatureF6Enabled() {
+		totalMarketChars += numCoins * 120
+	}
+	if c.Indicators.FeatureF7Enabled() {
+		totalMarketChars += numCoins * 110
 	}
 
 	breakdown.MarketData = totalMarketChars / 4 // numeric data: ~4 chars per token

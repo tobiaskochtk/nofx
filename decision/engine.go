@@ -57,8 +57,9 @@ type AccountInfo struct {
 
 // CandidateCoin 候选币种（来自币种池）
 type CandidateCoin struct {
-	Symbol  string   `json:"symbol"`
-	Sources []string `json:"sources"` // 来源: "ai500" 和/或 "oi_top"
+	Symbol          string   `json:"symbol"`
+	Sources         []string `json:"sources"` // 来源: "ai500" 和/或 "oi_top"
+	SelectionBucket string   `json:"selection_bucket,omitempty"`
 }
 
 // PerformanceSummary captures compact trader-level performance context for AI.
@@ -161,6 +162,7 @@ type Context struct {
 	PayloadVersion   string                              `json:"payload_version,omitempty"`
 	ContextTF        string                              `json:"-"`
 	PriceType        string                              `json:"-"`
+	Exchange         string                              `json:"-"`
 	Account          AccountInfo                         `json:"account"`
 	Positions        []PositionInfo                      `json:"positions"`
 	CandidateCoins   []CandidateCoin                     `json:"candidate_coins"`
@@ -174,7 +176,18 @@ type Context struct {
 	MarketLeadership *MarketLeadershipSummary            `json:"-"` // Compact market-wide leadership context
 	BTCETHLeverage   int                                 `json:"-"` // BTC/ETH杠杆倍数（从配置读取）
 	AltcoinLeverage  int                                 `json:"-"` // 山寨币杠杆倍数（从配置读取）
+	BTCETHPosRatio   float64                             `json:"-"` // BTC/ETH 单仓位名义价值上限（账户净值倍数）
+	AltcoinPosRatio  float64                             `json:"-"` // 山寨币单仓位名义价值上限（账户净值倍数）
+	MinPositionSize  float64                             `json:"-"` // 最小开仓名义价值（USDT）
+	MinConfidence    int                                 `json:"-"` // 最低开仓信心度（0-100）
 	MaxPositions     int                                 `json:"-"` // 最大持仓数量（用于提示）
+	EMAPeriods       []int                               `json:"-"` // Strategy-configured EMA periods for compact payload
+	RSIPeriods       []int                               `json:"-"` // Strategy-configured RSI periods for compact payload
+	FeatureFlagsSet  bool                                `json:"-"` // Whether F4-F7 flags were explicitly configured
+	EnableF4         bool                                `json:"-"` // Feature gate for F4 orderflow block
+	EnableF5         bool                                `json:"-"` // Feature gate for F5 risk block
+	EnableF6         bool                                `json:"-"` // Feature gate for F6 levels block
+	EnableF7         bool                                `json:"-"` // Feature gate for F7 volatility block
 }
 
 // Decision AI的交易决策

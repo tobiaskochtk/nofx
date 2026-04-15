@@ -9,6 +9,37 @@
 # docker compose -f docker-compose.prod.yml up -d
 
 services:
+  selfhosted-ai500:
+    profiles: ["selfhosted-ai500"]
+    build:
+      context: .
+      dockerfile: ./services/selfhosted-ai500/Dockerfile
+    container_name: selfhosted-ai500
+    restart: unless-stopped
+    ports:
+      - "${SELFHOSTED_AI500_PORT:-8081}:8081"
+    volumes:
+      - ./data/selfhosted-ai500:/app/data
+      - /etc/localtime:/etc/localtime:ro
+    environment:
+      - SELFHOSTED_AI500_PORT=8081
+      - SELFHOSTED_AI500_AUTH_TOKEN=${SELFHOSTED_AI500_AUTH_TOKEN:-local-selfhosted-ai500-token}
+      - SELFHOSTED_AI500_DB_PATH=/app/data/selfhosted-ai500.db
+      - SELFHOSTED_AI500_EXCHANGES=${SELFHOSTED_AI500_EXCHANGES:-hyperliquid,binance,bybit}
+      - SELFHOSTED_AI500_REFRESH_SECS=${SELFHOSTED_AI500_REFRESH_SECS:-60}
+      - SELFHOSTED_AI500_UNIVERSE_LIMIT=${SELFHOSTED_AI500_UNIVERSE_LIMIT:-120}
+      - SELFHOSTED_AI500_SCORE_THRESHOLD=${SELFHOSTED_AI500_SCORE_THRESHOLD:-70}
+      - SELFHOSTED_AI500_BOOTSTRAP_CONCURRENCY=${SELFHOSTED_AI500_BOOTSTRAP_CONCURRENCY:-8}
+      - SELFHOSTED_AI500_SNAPSHOT_RETENTION_HOURS=${SELFHOSTED_AI500_SNAPSHOT_RETENTION_HOURS:-72}
+    networks:
+      - nofx-network
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8081/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
   nofx:
     image: ghcr.io/nofxaios/nofx/nofx-backend:latest
     container_name: nofx-trading

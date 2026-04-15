@@ -15,6 +15,7 @@ import { FAQPage } from './pages/FAQPage'
 import { StrategyStudioPage } from './pages/StrategyStudioPage'
 import { StrategyMarketPage } from './pages/StrategyMarketPage'
 import { DataPage } from './pages/DataPage'
+import { DealReviewPage } from './pages/DealReviewPage'
 import { BeginnerOnboardingPage } from './pages/BeginnerOnboardingPage'
 import { LoginRequiredOverlay } from './components/auth/LoginRequiredOverlay'
 import HeaderBar from './components/common/HeaderBar'
@@ -42,12 +43,11 @@ type Page =
   | 'trader'
   | 'strategy'
   | 'strategy-market'
+  | 'deal-review'
   | 'data'
   | 'faq'
   | 'login'
   | 'register'
-
-
 
 function App() {
   const { language, setLanguage } = useLanguage()
@@ -63,7 +63,9 @@ function App() {
     if (path === '/welcome') return 'traders'
     if (path === '/traders' || hash === 'traders') return 'traders'
     if (path === '/strategy' || hash === 'strategy') return 'strategy'
-    if (path === '/strategy-market' || hash === 'strategy-market') return 'strategy-market'
+    if (path === '/strategy-market' || hash === 'strategy-market')
+      return 'strategy-market'
+    if (path === '/deal-review' || hash === 'deal-review') return 'deal-review'
     if (path === '/data' || hash === 'data') return 'data'
     if (path === '/dashboard' || hash === 'trader' || hash === 'details')
       return 'trader'
@@ -82,15 +84,16 @@ function App() {
   // Unified page navigation handler
   const navigateToPage = (page: Page) => {
     const pathMap: Record<Page, string> = {
-      'competition': '/competition',
+      competition: '/competition',
       'strategy-market': '/strategy-market',
-      'data': '/data',
-      'traders': '/traders',
-      'trader': '/dashboard',
-      'strategy': '/strategy',
-      'faq': '/faq',
-      'login': '/login',
-      'register': '/register',
+      'deal-review': '/deal-review',
+      data: '/data',
+      traders: '/traders',
+      trader: '/dashboard',
+      strategy: '/strategy',
+      faq: '/faq',
+      login: '/login',
+      register: '/register',
     }
     const path = pathMap[page]
     if (path) {
@@ -102,7 +105,9 @@ function App() {
 
   const [currentPage, setCurrentPage] = useState<Page>(getInitialPage())
   // 从 URL 参数读取初始 trader 标识（格式: name-id前4位）
-  const [selectedTraderSlug, setSelectedTraderSlug] = useState<string | undefined>(() => {
+  const [selectedTraderSlug, setSelectedTraderSlug] = useState<
+    string | undefined
+  >(() => {
     const params = new URLSearchParams(window.location.search)
     return params.get('trader') || undefined
   })
@@ -120,12 +125,12 @@ function App() {
     const lastDashIndex = slug.lastIndexOf('-')
     if (lastDashIndex === -1) {
       // 没有 dash，直接按 name 匹配
-      return traderList.find(t => t.trader_name === slug)
+      return traderList.find((t) => t.trader_name === slug)
     }
     const name = slug.slice(0, lastDashIndex)
     const idPrefix = slug.slice(lastDashIndex + 1)
-    return traderList.find(t =>
-      t.trader_name === name && t.trader_id.startsWith(idPrefix)
+    return traderList.find(
+      (t) => t.trader_name === name && t.trader_id.startsWith(idPrefix)
     )
   }
   const [lastUpdate, setLastUpdate] = useState<string>('--:--:--')
@@ -161,6 +166,8 @@ function App() {
         setCurrentPage('strategy')
       } else if (path === '/strategy-market' || hash === 'strategy-market') {
         setCurrentPage('strategy-market')
+      } else if (path === '/deal-review' || hash === 'deal-review') {
+        setCurrentPage('deal-review')
       } else if (path === '/data' || hash === 'data') {
         setCurrentPage('data')
       } else if (
@@ -259,10 +266,15 @@ function App() {
       revalidateOnFocus: false,
       dedupingInterval: 10000,
       onErrorRetry: (_err, _key, _config, revalidate, { retryCount }) => {
-        if (retryCount >= 2) { setAccountPollOff(true); return }
+        if (retryCount >= 2) {
+          setAccountPollOff(true)
+          return
+        }
         setTimeout(() => revalidate({ retryCount }), 500)
       },
-      onSuccess: () => { if (accountPollOff) setAccountPollOff(false) },
+      onSuccess: () => {
+        if (accountPollOff) setAccountPollOff(false)
+      },
     }
   )
 
@@ -276,10 +288,15 @@ function App() {
       revalidateOnFocus: false,
       dedupingInterval: 10000,
       onErrorRetry: (_err, _key, _config, revalidate, { retryCount }) => {
-        if (retryCount >= 2) { setPositionsPollOff(true); return }
+        if (retryCount >= 2) {
+          setPositionsPollOff(true)
+          return
+        }
         setTimeout(() => revalidate({ retryCount }), 500)
       },
-      onSuccess: () => { if (positionsPollOff) setPositionsPollOff(false) },
+      onSuccess: () => {
+        if (positionsPollOff) setPositionsPollOff(false)
+      },
     }
   )
 
@@ -293,10 +310,15 @@ function App() {
       revalidateOnFocus: false,
       dedupingInterval: 20000,
       onErrorRetry: (_err, _key, _config, revalidate, { retryCount }) => {
-        if (retryCount >= 2) { setDecisionsPollOff(true); return }
+        if (retryCount >= 2) {
+          setDecisionsPollOff(true)
+          return
+        }
         setTimeout(() => revalidate({ retryCount }), 500)
       },
-      onSuccess: () => { if (decisionsPollOff) setDecisionsPollOff(false) },
+      onSuccess: () => {
+        if (decisionsPollOff) setDecisionsPollOff(false)
+      },
     }
   )
 
@@ -348,7 +370,10 @@ function App() {
   }, [route])
 
   const showBeginnerOnboarding =
-    route === '/welcome' && (!!user || hasPersistedAuth) && getUserMode() === 'beginner' && !hasCompletedBeginnerOnboarding()
+    route === '/welcome' &&
+    (!!user || hasPersistedAuth) &&
+    getUserMode() === 'beginner' &&
+    !hasCompletedBeginnerOnboarding()
 
   // Show loading spinner while checking auth or config
   if (isLoading || configLoading) {
@@ -430,7 +455,10 @@ function App() {
       return null
     }
     return (
-      <div className="min-h-screen" style={{ background: '#0B0E11', color: '#EAECEF' }}>
+      <div
+        className="min-h-screen"
+        style={{ background: '#0B0E11', color: '#EAECEF' }}
+      >
         <HeaderBar
           isLoggedIn={!!user}
           language={language}
@@ -517,11 +545,27 @@ function App() {
               <DataPage />
             ) : currentPage === 'strategy-market' ? (
               <StrategyMarketPage />
+            ) : currentPage === 'deal-review' ? (
+              <DealReviewPage
+                traders={traders}
+                tradersError={tradersError}
+                selectedTraderId={selectedTraderId}
+                onTraderSelect={(traderId) => {
+                  setSelectedTraderId(traderId)
+                  const trader = traders?.find((t) => t.trader_id === traderId)
+                  if (trader) {
+                    const slug = getTraderSlug(trader)
+                    setSelectedTraderSlug(slug)
+                  }
+                }}
+              />
             ) : currentPage === 'traders' ? (
               <AITradersPage
                 onTraderSelect={(traderId) => {
                   setSelectedTraderId(traderId)
-                  const trader = traders?.find((item) => item.trader_id === traderId)
+                  const trader = traders?.find(
+                    (item) => item.trader_id === traderId
+                  )
                   const url = new URL(window.location.href)
                   url.pathname = '/dashboard'
                   if (trader) {
@@ -560,7 +604,7 @@ function App() {
                 onTraderSelect={(traderId) => {
                   setSelectedTraderId(traderId)
                   // 更新 URL 参数（使用 slug: name-id前4位）
-                  const trader = traders?.find(t => t.trader_id === traderId)
+                  const trader = traders?.find((t) => t.trader_id === traderId)
                   if (trader) {
                     const slug = getTraderSlug(trader)
                     setSelectedTraderSlug(slug)
@@ -583,115 +627,115 @@ function App() {
 
       {/* Footer */}
       <footer
-          className="mt-16"
-          style={{ borderTop: '1px solid #2B3139', background: '#181A20' }}
+        className="mt-16"
+        style={{ borderTop: '1px solid #2B3139', background: '#181A20' }}
+      >
+        <div
+          className="max-w-[1920px] mx-auto px-6 py-6 text-center text-sm"
+          style={{ color: '#5E6673' }}
         >
-          <div
-            className="max-w-[1920px] mx-auto px-6 py-6 text-center text-sm"
-            style={{ color: '#5E6673' }}
-          >
-            <p>{t('footerTitle', language)}</p>
-            <p className="mt-1">{t('footerWarning', language)}</p>
-            <div className="mt-4 flex items-center justify-center gap-3 flex-wrap">
-              {/* GitHub */}
-              <a
-                href={OFFICIAL_LINKS.github}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="inline-flex items-center gap-2 px-3 py-2 rounded text-sm font-semibold transition-all hover:scale-105"
-                style={{
-                  background: '#1E2329',
-                  color: '#848E9C',
-                  border: '1px solid #2B3139',
-                }}
-                onMouseEnter={(e) => {
-                  e.currentTarget.style.background = '#2B3139'
-                  e.currentTarget.style.color = '#EAECEF'
-                  e.currentTarget.style.borderColor = '#F0B90B'
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.background = '#1E2329'
-                  e.currentTarget.style.color = '#848E9C'
-                  e.currentTarget.style.borderColor = '#2B3139'
-                }}
+          <p>{t('footerTitle', language)}</p>
+          <p className="mt-1">{t('footerWarning', language)}</p>
+          <div className="mt-4 flex items-center justify-center gap-3 flex-wrap">
+            {/* GitHub */}
+            <a
+              href={OFFICIAL_LINKS.github}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-2 px-3 py-2 rounded text-sm font-semibold transition-all hover:scale-105"
+              style={{
+                background: '#1E2329',
+                color: '#848E9C',
+                border: '1px solid #2B3139',
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.background = '#2B3139'
+                e.currentTarget.style.color = '#EAECEF'
+                e.currentTarget.style.borderColor = '#F0B90B'
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.background = '#1E2329'
+                e.currentTarget.style.color = '#848E9C'
+                e.currentTarget.style.borderColor = '#2B3139'
+              }}
+            >
+              <svg
+                width="18"
+                height="18"
+                viewBox="0 0 16 16"
+                fill="currentColor"
               >
-                <svg
-                  width="18"
-                  height="18"
-                  viewBox="0 0 16 16"
-                  fill="currentColor"
-                >
-                  <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z" />
-                </svg>
-                GitHub
-              </a>
-              {/* Twitter/X */}
-              <a
-                href={OFFICIAL_LINKS.twitter}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="inline-flex items-center gap-2 px-3 py-2 rounded text-sm font-semibold transition-all hover:scale-105"
-                style={{
-                  background: '#1E2329',
-                  color: '#848E9C',
-                  border: '1px solid #2B3139',
-                }}
-                onMouseEnter={(e) => {
-                  e.currentTarget.style.background = '#2B3139'
-                  e.currentTarget.style.color = '#EAECEF'
-                  e.currentTarget.style.borderColor = '#1DA1F2'
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.background = '#1E2329'
-                  e.currentTarget.style.color = '#848E9C'
-                  e.currentTarget.style.borderColor = '#2B3139'
-                }}
+                <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z" />
+              </svg>
+              GitHub
+            </a>
+            {/* Twitter/X */}
+            <a
+              href={OFFICIAL_LINKS.twitter}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-2 px-3 py-2 rounded text-sm font-semibold transition-all hover:scale-105"
+              style={{
+                background: '#1E2329',
+                color: '#848E9C',
+                border: '1px solid #2B3139',
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.background = '#2B3139'
+                e.currentTarget.style.color = '#EAECEF'
+                e.currentTarget.style.borderColor = '#1DA1F2'
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.background = '#1E2329'
+                e.currentTarget.style.color = '#848E9C'
+                e.currentTarget.style.borderColor = '#2B3139'
+              }}
+            >
+              <svg
+                width="16"
+                height="16"
+                viewBox="0 0 24 24"
+                fill="currentColor"
               >
-                <svg
-                  width="16"
-                  height="16"
-                  viewBox="0 0 24 24"
-                  fill="currentColor"
-                >
-                  <path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z" />
-                </svg>
-                Twitter
-              </a>
-              {/* Telegram */}
-              <a
-                href={OFFICIAL_LINKS.telegram}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="inline-flex items-center gap-2 px-3 py-2 rounded text-sm font-semibold transition-all hover:scale-105"
-                style={{
-                  background: '#1E2329',
-                  color: '#848E9C',
-                  border: '1px solid #2B3139',
-                }}
-                onMouseEnter={(e) => {
-                  e.currentTarget.style.background = '#2B3139'
-                  e.currentTarget.style.color = '#EAECEF'
-                  e.currentTarget.style.borderColor = '#0088cc'
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.background = '#1E2329'
-                  e.currentTarget.style.color = '#848E9C'
-                  e.currentTarget.style.borderColor = '#2B3139'
-                }}
+                <path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z" />
+              </svg>
+              Twitter
+            </a>
+            {/* Telegram */}
+            <a
+              href={OFFICIAL_LINKS.telegram}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-2 px-3 py-2 rounded text-sm font-semibold transition-all hover:scale-105"
+              style={{
+                background: '#1E2329',
+                color: '#848E9C',
+                border: '1px solid #2B3139',
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.background = '#2B3139'
+                e.currentTarget.style.color = '#EAECEF'
+                e.currentTarget.style.borderColor = '#0088cc'
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.background = '#1E2329'
+                e.currentTarget.style.color = '#848E9C'
+                e.currentTarget.style.borderColor = '#2B3139'
+              }}
+            >
+              <svg
+                width="16"
+                height="16"
+                viewBox="0 0 24 24"
+                fill="currentColor"
               >
-                <svg
-                  width="16"
-                  height="16"
-                  viewBox="0 0 24 24"
-                  fill="currentColor"
-                >
-                  <path d="M11.944 0A12 12 0 0 0 0 12a12 12 0 0 0 12 12 12 12 0 0 0 12-12A12 12 0 0 0 12 0a12 12 0 0 0-.056 0zm4.962 7.224c.1-.002.321.023.465.14a.506.506 0 0 1 .171.325c.016.093.036.306.02.472-.18 1.898-.962 6.502-1.36 8.627-.168.9-.499 1.201-.82 1.23-.696.065-1.225-.46-1.9-.902-1.056-.693-1.653-1.124-2.678-1.8-1.185-.78-.417-1.21.258-1.91.177-.184 3.247-2.977 3.307-3.23.007-.032.014-.15-.056-.212s-.174-.041-.249-.024c-.106.024-1.793 1.14-5.061 3.345-.48.33-.913.49-1.302.48-.428-.008-1.252-.241-1.865-.44-.752-.245-1.349-.374-1.297-.789.027-.216.325-.437.893-.663 3.498-1.524 5.83-2.529 6.998-3.014 3.332-1.386 4.025-1.627 4.476-1.635z" />
-                </svg>
-                Telegram
-              </a>
-            </div>
+                <path d="M11.944 0A12 12 0 0 0 0 12a12 12 0 0 0 12 12 12 12 0 0 0 12-12A12 12 0 0 0 12 0a12 12 0 0 0-.056 0zm4.962 7.224c.1-.002.321.023.465.14a.506.506 0 0 1 .171.325c.016.093.036.306.02.472-.18 1.898-.962 6.502-1.36 8.627-.168.9-.499 1.201-.82 1.23-.696.065-1.225-.46-1.9-.902-1.056-.693-1.653-1.124-2.678-1.8-1.185-.78-.417-1.21.258-1.91.177-.184 3.247-2.977 3.307-3.23.007-.032.014-.15-.056-.212s-.174-.041-.249-.024c-.106.024-1.793 1.14-5.061 3.345-.48.33-.913.49-1.302.48-.428-.008-1.252-.241-1.865-.44-.752-.245-1.349-.374-1.297-.789.027-.216.325-.437.893-.663 3.498-1.524 5.83-2.529 6.998-3.014 3.332-1.386 4.025-1.627 4.476-1.635z" />
+              </svg>
+              Telegram
+            </a>
           </div>
-        </footer>
+        </div>
+      </footer>
 
       {/* Login Required Overlay */}
       <LoginRequiredOverlay
@@ -704,7 +748,6 @@ function App() {
     </div>
   )
 }
-
 
 // Wrap App with providers
 export default function AppWithProviders() {

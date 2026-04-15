@@ -46,9 +46,9 @@ var requiredCandidateFields = []string{
 var requiredCandidateContextFields = []string{
 	"tf",
 	"px_type",
-	"ema20",
+	"ema_fast",
 	"macd",
-	"rsi7",
+	"rsi",
 	"oi",
 	"oi_d1h_pct",
 	"fund_bps",
@@ -71,6 +71,7 @@ type livePayload struct {
 	Account          accountPayload           `json:"account"`
 	Benchmark        *benchmarkPayload        `json:"benchmark,omitempty"`
 	MarketLeadership *marketLeadershipPayload `json:"market_leadership,omitempty"`
+	RelativeValue    *relativeValuePayload    `json:"relative_value,omitempty"`
 	Performance      *performancePayload      `json:"performance,omitempty"`
 	RecentTrades     []recentTradePayload     `json:"recent_trades,omitempty"`
 	Defs             defsPayload              `json:"defs"`
@@ -104,10 +105,20 @@ type defsPayload struct {
 	Chg1h      string `json:"chg_1h"`
 	Chg4h      string `json:"chg_4h"`
 	TFChgPct   string `json:"tf_chg_pct"`
+	EMAFast    string `json:"ema_fast"`
+	EMASlow    string `json:"ema_slow,omitempty"`
 	MACD       string `json:"macd"`
+	RSIPeriod  string `json:"rsi_period,omitempty"`
+	RSI        string `json:"rsi"`
 	RSI7       string `json:"rsi7"`
+	RSI14      string `json:"rsi14,omitempty"`
 	Score      string `json:"score"`
 	Confidence string `json:"confidence"`
+	F13ResZ    string `json:"f13_residual_z,omitempty"`
+	F14Hedge   string `json:"f14_hedge_ratio,omitempty"`
+	F15Cost100 string `json:"f15_roundtrip_100usd_bps,omitempty"`
+	F15Net     string `json:"f15_net_after_cost_bps,omitempty"`
+	F16Carry   string `json:"f16_carry_bias,omitempty"`
 }
 
 type enumsPayload struct {
@@ -119,6 +130,9 @@ type reqPayload struct {
 	MaxStaleS                  int      `json:"max_stale_s"`
 	RequiredCandidateFields    []string `json:"required_candidate_fields"`
 	RequiredCandidateCtxFields []string `json:"required_candidate_ctx_fields"`
+	EMAFastPeriod              int      `json:"ema_fast_period,omitempty"`
+	EMASlowPeriod              int      `json:"ema_slow_period,omitempty"`
+	RSIPeriod                  int      `json:"rsi_period,omitempty"`
 	NullableOKAny              []string `json:"nullable_ok_any"`
 }
 
@@ -126,6 +140,8 @@ type policyPayload struct {
 	AllowedActions       []string         `json:"allowed_actions"`
 	AllowedSides         []string         `json:"allowed_sides"`
 	SizeCap              float64          `json:"size_cap"`
+	SizeFloorUSDT        float64          `json:"size_floor_usdt,omitempty"`
+	SizePctMin           float64          `json:"size_pct_min,omitempty"`
 	MaxLeverage          int              `json:"max_leverage"`
 	MaxNewPositions      int              `json:"max_new_positions"`
 	ManagePositionsFirst bool             `json:"manage_positions_first"`
@@ -152,6 +168,8 @@ type outputContractPayload struct {
 
 type outputConstraintsPayload struct {
 	SizePctMax                 float64 `json:"size_pct_max"`
+	SizeFloorUSDT              float64 `json:"size_floor_usdt,omitempty"`
+	SizePctMin                 float64 `json:"size_pct_min,omitempty"`
 	LeverageMax                int     `json:"leverage_max"`
 	MaxNewPositions            int     `json:"max_new_positions"`
 	SideMustMatchCandidateBias bool    `json:"side_must_match_candidate_bias"`
@@ -214,15 +232,24 @@ type priceLeadershipPayload struct {
 }
 
 type timeframeSummaryData struct {
-	TF     string   `json:"tf"`
-	Close  float64  `json:"close"`
-	EMA20  *float64 `json:"ema20,omitempty"`
-	EMA50  *float64 `json:"ema50,omitempty"`
-	MACD   *float64 `json:"macd,omitempty"`
-	RSI7   *float64 `json:"rsi7,omitempty"`
-	RSI14  *float64 `json:"rsi14,omitempty"`
-	ATR14  *float64 `json:"atr14,omitempty"`
-	ChgPct *float64 `json:"chg_pct,omitempty"`
+	TF            string   `json:"tf"`
+	Close         float64  `json:"close"`
+	EMAFastPeriod int      `json:"ema_fast_period,omitempty"`
+	EMAFast       *float64 `json:"ema_fast,omitempty"`
+	EMASlowPeriod int      `json:"ema_slow_period,omitempty"`
+	EMASlow       *float64 `json:"ema_slow,omitempty"`
+	EMA20         *float64 `json:"ema20,omitempty"`
+	EMA50         *float64 `json:"ema50,omitempty"`
+	MACD          *float64 `json:"macd,omitempty"`
+	RSIPeriod     int      `json:"rsi_period,omitempty"`
+	RSI           *float64 `json:"rsi,omitempty"`
+	RSI7          *float64 `json:"rsi7,omitempty"`
+	RSI14         *float64 `json:"rsi14,omitempty"`
+	ATR14         *float64 `json:"atr14,omitempty"`
+	BOLLUpper     *float64 `json:"boll_upper,omitempty"`
+	BOLLMiddle    *float64 `json:"boll_middle,omitempty"`
+	BOLLLower     *float64 `json:"boll_lower,omitempty"`
+	ChgPct        *float64 `json:"chg_pct,omitempty"`
 }
 
 type positionPayload struct {
@@ -253,27 +280,100 @@ type positionPayload struct {
 }
 
 type candidatePayload struct {
-	Symbol      string                      `json:"sym"`
-	PxMark      float64                     `json:"px_mark"`
-	PxLast      *float64                    `json:"px_last"`
-	PxIndex     *float64                    `json:"px_index"`
-	SideBias    string                      `json:"side_bias"`
-	Score       float64                     `json:"score"`
-	Confidence  float64                     `json:"confidence"`
-	SourceTags  []string                    `json:"src_tags,omitempty"`
-	SpreadBps   *float64                    `json:"spread_bps"`
-	LiqScore    *float64                    `json:"liq_score"`
-	Context     contextBlock                `json:"ctx"`
-	Timeframes  []timeframeSummaryData      `json:"mtf,omitempty"`
-	Venue       *venueTradabilityPayload    `json:"venue_tradability,omitempty"`
-	Execution   *executionQualityPayload    `json:"execution_quality,omitempty"`
-	Volume      *volumeParticipationPayload `json:"volume_participation,omitempty"`
-	SymbolMem   *symbolMemoryPayload        `json:"symbol_memory,omitempty"`
-	QuantFlow   *quantFlowPayload           `json:"quant_flow,omitempty"`
-	FeatureEnv  *featureAvailabilityPayload `json:"feature_availability,omitempty"`
-	RelStrength *relativeStrengthPayload    `json:"relative_strength,omitempty"`
-	Features    featurePayload              `json:"feat"`
-	QoS         symbolQoS                   `json:"qos"`
+	Symbol          string                      `json:"sym"`
+	PxMark          float64                     `json:"px_mark"`
+	PxLast          *float64                    `json:"px_last"`
+	PxIndex         *float64                    `json:"px_index"`
+	SideBias        string                      `json:"side_bias"`
+	Score           float64                     `json:"score"`
+	Confidence      float64                     `json:"confidence"`
+	SourceTags      []string                    `json:"src_tags,omitempty"`
+	SelectionBucket string                      `json:"selection_bucket,omitempty"`
+	SpreadBps       *float64                    `json:"spread_bps"`
+	LiqScore        *float64                    `json:"liq_score"`
+	Context         contextBlock                `json:"ctx"`
+	Timeframes      []timeframeSummaryData      `json:"mtf,omitempty"`
+	Venue           *venueTradabilityPayload    `json:"venue_tradability,omitempty"`
+	Execution       *executionQualityPayload    `json:"execution_quality,omitempty"`
+	Volume          *volumeParticipationPayload `json:"volume_participation,omitempty"`
+	SymbolMem       *symbolMemoryPayload        `json:"symbol_memory,omitempty"`
+	QuantFlow       *quantFlowPayload           `json:"quant_flow,omitempty"`
+	FeatureEnv      *featureAvailabilityPayload `json:"feature_availability,omitempty"`
+	RelStrength     *relativeStrengthPayload    `json:"relative_strength,omitempty"`
+	Arbitrage       *candidateArbitragePayload  `json:"arb,omitempty"`
+	Features        featurePayload              `json:"feat"`
+	QoS             symbolQoS                   `json:"qos"`
+}
+
+type relativeValuePayload struct {
+	TF       string                     `json:"tf"`
+	Venue    string                     `json:"venue,omitempty"`
+	TopPairs []relativeValuePairPayload `json:"top_pairs,omitempty"`
+}
+
+type relativeValuePairPayload struct {
+	Symbol                    string   `json:"sym"`
+	HedgeSymbol               string   `json:"hedge_sym"`
+	TF                        string   `json:"tf"`
+	F13ResidualBps            *float64 `json:"f13_residual_bps,omitempty"`
+	F13ResidualZ              *float64 `json:"f13_residual_z,omitempty"`
+	F13HalfLifeH              *float64 `json:"f13_half_life_h,omitempty"`
+	F13SuggestedLeg           string   `json:"f13_suggested_leg,omitempty"`
+	F14HedgeRatio             *float64 `json:"f14_hedge_ratio,omitempty"`
+	F14ReturnsCorr24h         *float64 `json:"f14_returns_corr_24h,omitempty"`
+	F14Confidence             *float64 `json:"f14_confidence,omitempty"`
+	F15PairRoundtrip100USDBps *float64 `json:"f15_pair_roundtrip_100usd_bps,omitempty"`
+	F15NetAfterCostBps        *float64 `json:"f15_net_after_cost_bps,omitempty"`
+}
+
+type candidateArbitragePayload struct {
+	HedgeSymbol           string   `json:"hedge_sym,omitempty"`
+	TF                    string   `json:"tf,omitempty"`
+	F13ResidualBps        *float64 `json:"f13_residual_bps,omitempty"`
+	F13ResidualZ          *float64 `json:"f13_residual_z,omitempty"`
+	F13HalfLifeH          *float64 `json:"f13_half_life_h,omitempty"`
+	F13SuggestedLeg       string   `json:"f13_suggested_leg,omitempty"`
+	F14HedgeRatio         *float64 `json:"f14_hedge_ratio,omitempty"`
+	F14ReturnsCorr24h     *float64 `json:"f14_returns_corr_24h,omitempty"`
+	F14Confidence         *float64 `json:"f14_confidence,omitempty"`
+	F15MakerFeeBps        *float64 `json:"f15_maker_fee_bps,omitempty"`
+	F15TakerFeeBps        *float64 `json:"f15_taker_fee_bps,omitempty"`
+	F15Slippage25USDBps   *float64 `json:"f15_slippage_25usd_bps,omitempty"`
+	F15Slippage100USDBps  *float64 `json:"f15_slippage_100usd_bps,omitempty"`
+	F15Entry25USDBps      *float64 `json:"f15_entry_25usd_bps,omitempty"`
+	F15Entry100USDBps     *float64 `json:"f15_entry_100usd_bps,omitempty"`
+	F15Roundtrip25USDBps  *float64 `json:"f15_roundtrip_25usd_bps,omitempty"`
+	F15Roundtrip100USDBps *float64 `json:"f15_roundtrip_100usd_bps,omitempty"`
+	F15Source             string   `json:"f15_source,omitempty"`
+	F16BasisBps           *float64 `json:"f16_basis_bps,omitempty"`
+	F16BasisZ             *float64 `json:"f16_basis_z,omitempty"`
+	F16Funding8hBps       *float64 `json:"f16_funding_8h_bps,omitempty"`
+	F16LongCarry8hBps     *float64 `json:"f16_long_carry_8h_bps,omitempty"`
+	F16ShortCarry8hBps    *float64 `json:"f16_short_carry_8h_bps,omitempty"`
+	F16CarryBias          string   `json:"f16_carry_bias,omitempty"`
+	F16Confidence         *float64 `json:"f16_confidence,omitempty"`
+}
+
+type feeSchedulePayload struct {
+	MakerBps float64
+	TakerBps float64
+	Source   string
+}
+
+type pairSignal struct {
+	Symbol                    string
+	HedgeSymbol               string
+	TF                        string
+	F13ResidualBps            *float64
+	F13ResidualZ              *float64
+	F13HalfLifeH              *float64
+	F13SuggestedLeg           string
+	F14HedgeRatio             *float64
+	F14ReturnsCorr24h         *float64
+	F14Confidence             *float64
+	F15PairRoundtrip100USDBps *float64
+	F15NetAfterCostBps        *float64
+	Score                     float64
 }
 
 type quantFlowPayload struct {
@@ -344,9 +444,19 @@ type relativeStrengthPayload struct {
 type contextBlock struct {
 	TF                   string         `json:"tf"`
 	PxType               string         `json:"px_type"`
-	EMA20                *float64       `json:"ema20"`
+	EMAFastPeriod        int            `json:"ema_fast_period,omitempty"`
+	EMAFast              *float64       `json:"ema_fast"`
+	EMASlowPeriod        int            `json:"ema_slow_period,omitempty"`
+	EMASlow              *float64       `json:"ema_slow,omitempty"`
+	EMA20                *float64       `json:"ema20,omitempty"`
 	MACD                 *float64       `json:"macd"`
+	RSIPeriod            int            `json:"rsi_period,omitempty"`
+	RSI                  *float64       `json:"rsi"`
 	RSI7                 *float64       `json:"rsi7"`
+	RSI14                *float64       `json:"rsi14,omitempty"`
+	BOLLUpper            *float64       `json:"boll_upper,omitempty"`
+	BOLLMiddle           *float64       `json:"boll_middle,omitempty"`
+	BOLLLower            *float64       `json:"boll_lower,omitempty"`
 	PriceChange1h        *float64       `json:"chg_1h,omitempty"`
 	PriceChange4h        *float64       `json:"chg_4h,omitempty"`
 	OI                   *float64       `json:"oi"`
@@ -464,6 +574,13 @@ func assembleLivePayload(ctx *Context) (*livePayload, *payloadDiagnostics, error
 	if version != PayloadSchemaVersion {
 		return nil, nil, fmt.Errorf("payload version %s not supported, upgrade to %s", version, PayloadSchemaVersion)
 	}
+	emaFastPeriod, emaSlowPeriod := resolveEMAPair(ctx)
+	rsiPeriod := resolveRSIPeriod(ctx)
+	sizeCap := normalizeSizeCap(ctx.AltcoinPosRatio)
+	minPositionSize := normalizeMinPositionSize(ctx.MinPositionSize)
+	sizePctMin := computeSizePctMin(ctx.Account.TotalEquity, minPositionSize)
+	maxLeverage := normalizePayloadMaxLeverage(ctx.BTCETHLeverage, ctx.AltcoinLeverage)
+	maxNewPositions := normalizeMaxNewPositions(ctx.MaxPositions, len(ctx.Positions))
 
 	live := &livePayload{
 		Schema:       version,
@@ -488,10 +605,20 @@ func assembleLivePayload(ctx *Context) (*livePayload, *payloadDiagnostics, error
 			Chg1h:      "price_change_pct_over_1h_from_current_market_snapshot",
 			Chg4h:      "price_change_pct_over_4h_from_current_market_snapshot",
 			TFChgPct:   "percent_change_over_the_loaded_series_window_for_this_timeframe_summary",
+			EMAFast:    "strategy-configured_fast_ema_on_ctx.tf",
+			EMASlow:    "strategy-configured_slow_ema_on_ctx.tf_when_defined",
 			MACD:       "macd_line_minus_signal_line",
+			RSIPeriod:  "strategy-configured_primary_rsi_period_on_ctx.tf",
+			RSI:        "strategy-configured_primary_rsi_on_ctx.tf",
 			RSI7:       "rsi_period_7_on_ctx.tf",
+			RSI14:      "rsi_period_14_on_ctx.tf",
 			Score:      "normalized_score_0_to_1; higher=better_for_side_bias",
 			Confidence: "estimated_signal_reliability_0_to_1",
+			F13ResZ:    "pair_spread_residual_zscore_on_relative_value.tf; positive=symbol_rich_vs_hedge",
+			F14Hedge:   "ols_hedge_ratio_of_symbol_vs_hedge_on_log_prices",
+			F15Cost100: "estimated_roundtrip_cost_for_100usd_notional_in_bps",
+			F15Net:     "absolute_residual_edge_minus_estimated_roundtrip_cost_in_bps",
+			F16Carry:   "basis_funding_implied_carry_bias_for_the_candidate",
 		},
 		Enums: enumsPayload{
 			OIDiv: []string{"confirming", "divergent", "neutral"},
@@ -501,14 +628,19 @@ func assembleLivePayload(ctx *Context) (*livePayload, *payloadDiagnostics, error
 			MaxStaleS:                  requiredMaxStaleSeconds,
 			RequiredCandidateFields:    append([]string(nil), requiredCandidateFields...),
 			RequiredCandidateCtxFields: append([]string(nil), requiredCandidateContextFields...),
+			EMAFastPeriod:              emaFastPeriod,
+			EMASlowPeriod:              emaSlowPeriod,
+			RSIPeriod:                  rsiPeriod,
 			NullableOKAny:              append([]string(nil), nullableOKFields...),
 		},
 		Policy: policyPayload{
 			AllowedActions:       []string{"HOLD", "ENTER", "EXIT"},
 			AllowedSides:         []string{"long", "short"},
-			SizeCap:              0.25,
-			MaxLeverage:          5,
-			MaxNewPositions:      1,
+			SizeCap:              sizeCap,
+			SizeFloorUSDT:        minPositionSize,
+			SizePctMin:           sizePctMin,
+			MaxLeverage:          maxLeverage,
+			MaxNewPositions:      maxNewPositions,
 			ManagePositionsFirst: true,
 			ObeySideBias:         true,
 			ExitOnlyIfInPos:      true,
@@ -529,9 +661,11 @@ func assembleLivePayload(ctx *Context) (*livePayload, *payloadDiagnostics, error
 			},
 			DecisionFields: []string{"sym", "action", "side", "size_pct", "leverage", "confidence", "reason_codes", "stops_targets"},
 			Constraints: outputConstraintsPayload{
-				SizePctMax:                 0.25,
-				LeverageMax:                5,
-				MaxNewPositions:            1,
+				SizePctMax:                 sizeCap,
+				SizeFloorUSDT:              minPositionSize,
+				SizePctMin:                 sizePctMin,
+				LeverageMax:                maxLeverage,
+				MaxNewPositions:            maxNewPositions,
 				SideMustMatchCandidateBias: true,
 				ExitRequiresOpenPosition:   true,
 				DecisionsLenMax:            1,
@@ -578,6 +712,16 @@ func assembleLivePayload(ctx *Context) (*livePayload, *payloadDiagnostics, error
 		live.Candidates = candidates[:limit]
 	}
 
+	pairAnchors, topPairs := buildPairSignals(ctx, live.Candidates)
+	if rv := buildRelativeValuePayload(ctx, topPairs); rv != nil {
+		live.RelativeValue = rv
+	}
+	if len(live.Candidates) > 0 {
+		for i := range live.Candidates {
+			live.Candidates[i].Arbitrage = buildCandidateArbitragePayload(ctx, live.Candidates[i], pairAnchors[live.Candidates[i].Symbol])
+		}
+	}
+
 	if err := validateLivePayload(live); err != nil {
 		return nil, nil, err
 	}
@@ -611,16 +755,16 @@ func resolveContextPriceType(ctx *Context) string {
 func buildPositionPayload(ctx *Context, pos *PositionInfo, diag *payloadDiagnostics, req reqPayload, contextPriceType string) positionPayload {
 	symbol := strings.ToUpper(pos.Symbol)
 	data := ctx.MarketDataMap[symbol]
-	context := buildContextBlock(data)
+	context := buildContextBlock(ctx, data)
 	timeframes := buildTimeframeSummaries(ctx, data)
 	venue := buildVenueTradabilityPayload(ctx.VenueTradability[symbol])
 	execution := buildExecutionQualityPayload(ctx.ExecutionQuality[symbol])
 	volume := buildVolumeParticipationPayload(ctx, data, req.RequiredTF)
 	symbolMemory := buildSymbolMemoryPayload(ctx.RecentTrades, symbol)
-	features := buildFeatureBlock(data, diag, symbol)
+	features := buildFeatureBlock(ctx, data, diag, symbol)
 	missing := collectMissingFields(&context)
 	qos := buildSymbolQoS(data, pos.UpdateTime, missing)
-	featureEnv := buildFeatureAvailabilityPayload(data, ctx.VenueTradability[symbol], execution, volume, symbolMemory, qos.StaleS, req.RequiredTF)
+	featureEnv := buildFeatureAvailabilityPayload(ctx, data, ctx.VenueTradability[symbol], execution, volume, symbolMemory, qos.StaleS, req.RequiredTF)
 	relStrength := buildRelativeStrengthPayload(ctx, symbol, data, req.RequiredTF)
 
 	pxMark := roundTo(pos.MarkPrice, 6)
@@ -685,16 +829,16 @@ func buildCandidatePayload(ctx *Context, coin CandidateCoin, diag *payloadDiagno
 		return candidatePayload{}, false
 	}
 
-	context := buildContextBlock(data)
+	context := buildContextBlock(ctx, data)
 	timeframes := buildTimeframeSummaries(ctx, data)
 	venue := buildVenueTradabilityPayload(ctx.VenueTradability[symbol])
 	execution := buildExecutionQualityPayload(ctx.ExecutionQuality[symbol])
 	volume := buildVolumeParticipationPayload(ctx, data, req.RequiredTF)
 	symbolMemory := buildSymbolMemoryPayload(ctx.RecentTrades, symbol)
-	features := buildFeatureBlock(data, diag, symbol)
+	features := buildFeatureBlock(ctx, data, diag, symbol)
 	missing := collectMissingFields(&context)
 	qos := buildSymbolQoS(data, 0, missing)
-	featureEnv := buildFeatureAvailabilityPayload(data, ctx.VenueTradability[symbol], execution, volume, symbolMemory, qos.StaleS, req.RequiredTF)
+	featureEnv := buildFeatureAvailabilityPayload(ctx, data, ctx.VenueTradability[symbol], execution, volume, symbolMemory, qos.StaleS, req.RequiredTF)
 	relStrength := buildRelativeStrengthPayload(ctx, symbol, data, req.RequiredTF)
 
 	pxMark := roundTo(data.CurrentPrice, 6)
@@ -708,27 +852,28 @@ func buildCandidatePayload(ctx *Context, coin CandidateCoin, diag *payloadDiagno
 	confidence := roundTo(derivsConfidenceScore(microDerivs(data)), 3)
 
 	cand := candidatePayload{
-		Symbol:      symbol,
-		PxMark:      pxMark,
-		PxLast:      pxLast,
-		PxIndex:     pxIndex,
-		SideBias:    deriveSideBias(data),
-		Score:       score,
-		Confidence:  confidence,
-		SourceTags:  normalizeSourceTags(coin.Sources),
-		SpreadBps:   executionSpreadBps(execution),
-		LiqScore:    executionLiqScore(execution),
-		Context:     context,
-		Timeframes:  timeframes,
-		Venue:       venue,
-		Execution:   execution,
-		Volume:      volume,
-		SymbolMem:   symbolMemory,
-		QuantFlow:   buildQuantFlowPayload(ctx.QuantFlowMap[symbol]),
-		FeatureEnv:  featureEnv,
-		RelStrength: relStrength,
-		Features:    features,
-		QoS:         qos,
+		Symbol:          symbol,
+		PxMark:          pxMark,
+		PxLast:          pxLast,
+		PxIndex:         pxIndex,
+		SideBias:        deriveSideBias(data),
+		Score:           score,
+		Confidence:      confidence,
+		SourceTags:      normalizeSourceTags(coin.Sources),
+		SelectionBucket: normalizeSelectionBucket(coin.SelectionBucket),
+		SpreadBps:       executionSpreadBps(execution),
+		LiqScore:        executionLiqScore(execution),
+		Context:         context,
+		Timeframes:      timeframes,
+		Venue:           venue,
+		Execution:       execution,
+		Volume:          volume,
+		SymbolMem:       symbolMemory,
+		QuantFlow:       buildQuantFlowPayload(ctx.QuantFlowMap[symbol]),
+		FeatureEnv:      featureEnv,
+		RelStrength:     relStrength,
+		Features:        features,
+		QoS:             qos,
 	}
 	if req.RequiredTF != "" {
 		cand.Context.TF = req.RequiredTF
@@ -747,7 +892,7 @@ func buildBenchmarkPayload(ctx *Context, symbol string) *benchmarkPayload {
 	if data == nil {
 		return nil
 	}
-	context := buildContextBlock(data)
+	context := buildContextBlock(ctx, data)
 	if reqTF := resolveRequiredTF(ctx); reqTF != "" {
 		context.TF = reqTF
 	}
@@ -802,6 +947,641 @@ func buildMarketLeadershipPayload(summary *MarketLeadershipSummary) *marketLeade
 		return nil
 	}
 	return out
+}
+
+func buildRelativeValuePayload(ctx *Context, topPairs []pairSignal) *relativeValuePayload {
+	if len(topPairs) == 0 {
+		return nil
+	}
+	tf := topPairs[0].TF
+	for _, pair := range topPairs[1:] {
+		if pair.TF != tf {
+			tf = "mixed"
+			break
+		}
+	}
+	out := &relativeValuePayload{
+		TF:       tf,
+		Venue:    normalizeExchange(ctx),
+		TopPairs: make([]relativeValuePairPayload, 0, len(topPairs)),
+	}
+	for _, pair := range topPairs {
+		out.TopPairs = append(out.TopPairs, relativeValuePairPayload{
+			Symbol:                    pair.Symbol,
+			HedgeSymbol:               pair.HedgeSymbol,
+			TF:                        pair.TF,
+			F13ResidualBps:            roundedCopy(pair.F13ResidualBps, 3),
+			F13ResidualZ:              roundedCopy(pair.F13ResidualZ, 3),
+			F13HalfLifeH:              roundedCopy(pair.F13HalfLifeH, 2),
+			F13SuggestedLeg:           pair.F13SuggestedLeg,
+			F14HedgeRatio:             roundedCopy(pair.F14HedgeRatio, 4),
+			F14ReturnsCorr24h:         roundedCopy(pair.F14ReturnsCorr24h, 3),
+			F14Confidence:             roundedCopy(pair.F14Confidence, 3),
+			F15PairRoundtrip100USDBps: roundedCopy(pair.F15PairRoundtrip100USDBps, 3),
+			F15NetAfterCostBps:        roundedCopy(pair.F15NetAfterCostBps, 3),
+		})
+	}
+	return out
+}
+
+func buildCandidateArbitragePayload(ctx *Context, cand candidatePayload, pair *pairSignal) *candidateArbitragePayload {
+	out := &candidateArbitragePayload{}
+	if pair != nil {
+		out.HedgeSymbol = pair.HedgeSymbol
+		out.TF = pair.TF
+		out.F13ResidualBps = roundedCopy(pair.F13ResidualBps, 3)
+		out.F13ResidualZ = roundedCopy(pair.F13ResidualZ, 3)
+		out.F13HalfLifeH = roundedCopy(pair.F13HalfLifeH, 2)
+		out.F13SuggestedLeg = pair.F13SuggestedLeg
+		out.F14HedgeRatio = roundedCopy(pair.F14HedgeRatio, 4)
+		out.F14ReturnsCorr24h = roundedCopy(pair.F14ReturnsCorr24h, 3)
+		out.F14Confidence = roundedCopy(pair.F14Confidence, 3)
+	}
+	if fee := buildFeeEdgeSignal(ctx, cand.Execution); fee != nil {
+		out.F15MakerFeeBps = roundedCopy(fee.MakerFeeBps, 3)
+		out.F15TakerFeeBps = roundedCopy(fee.TakerFeeBps, 3)
+		out.F15Slippage25USDBps = roundedCopy(fee.Slippage25USDBps, 3)
+		out.F15Slippage100USDBps = roundedCopy(fee.Slippage100USDBps, 3)
+		out.F15Entry25USDBps = roundedCopy(fee.Entry25USDBps, 3)
+		out.F15Entry100USDBps = roundedCopy(fee.Entry100USDBps, 3)
+		out.F15Roundtrip25USDBps = roundedCopy(fee.Roundtrip25USDBps, 3)
+		out.F15Roundtrip100USDBps = roundedCopy(fee.Roundtrip100USDBps, 3)
+		out.F15Source = fee.Source
+	}
+	if carry := buildBasisCarrySignal(cand.Context); carry != nil {
+		out.F16BasisBps = roundedCopy(carry.BasisBps, 3)
+		out.F16BasisZ = roundedCopy(carry.BasisZ, 3)
+		out.F16Funding8hBps = roundedCopy(carry.Funding8hBps, 3)
+		out.F16LongCarry8hBps = roundedCopy(carry.LongCarry8hBps, 3)
+		out.F16ShortCarry8hBps = roundedCopy(carry.ShortCarry8hBps, 3)
+		out.F16CarryBias = carry.CarryBias
+		out.F16Confidence = roundedCopy(carry.Confidence, 3)
+	}
+	if out.HedgeSymbol == "" &&
+		out.F13ResidualBps == nil &&
+		out.F13ResidualZ == nil &&
+		out.F13HalfLifeH == nil &&
+		out.F14HedgeRatio == nil &&
+		out.F14ReturnsCorr24h == nil &&
+		out.F14Confidence == nil &&
+		out.F15MakerFeeBps == nil &&
+		out.F15TakerFeeBps == nil &&
+		out.F15Slippage25USDBps == nil &&
+		out.F15Slippage100USDBps == nil &&
+		out.F15Entry25USDBps == nil &&
+		out.F15Entry100USDBps == nil &&
+		out.F15Roundtrip25USDBps == nil &&
+		out.F15Roundtrip100USDBps == nil &&
+		out.F15Source == "" &&
+		out.F16BasisBps == nil &&
+		out.F16BasisZ == nil &&
+		out.F16Funding8hBps == nil &&
+		out.F16LongCarry8hBps == nil &&
+		out.F16ShortCarry8hBps == nil &&
+		out.F16CarryBias == "" &&
+		out.F16Confidence == nil {
+		return nil
+	}
+	return out
+}
+
+type feeEdgeSignal struct {
+	MakerFeeBps        *float64
+	TakerFeeBps        *float64
+	Slippage25USDBps   *float64
+	Slippage100USDBps  *float64
+	Entry25USDBps      *float64
+	Entry100USDBps     *float64
+	Roundtrip25USDBps  *float64
+	Roundtrip100USDBps *float64
+	Source             string
+}
+
+func buildFeeEdgeSignal(ctx *Context, execution *executionQualityPayload) *feeEdgeSignal {
+	schedule := feeScheduleForExchange(normalizeExchange(ctx))
+	if schedule == nil || execution == nil {
+		return nil
+	}
+	spreadHalf := 0.0
+	spreadFull := 0.0
+	if execution.SpreadBps != nil {
+		spreadHalf = *execution.SpreadBps / 2
+		spreadFull = *execution.SpreadBps
+	}
+	entry25 := feeEdgeSignal{
+		MakerFeeBps:       roundedFinitePtr(schedule.MakerBps, 3),
+		TakerFeeBps:       roundedFinitePtr(schedule.TakerBps, 3),
+		Slippage25USDBps:  roundedCopy(execution.SlippageEst25USD, 3),
+		Slippage100USDBps: roundedCopy(execution.SlippageEst100USD, 3),
+		Source:            schedule.Source,
+	}
+	if execution.SlippageEst25USD != nil {
+		v := spreadHalf + schedule.TakerBps + *execution.SlippageEst25USD
+		entry25.Entry25USDBps = roundedFinitePtr(v, 3)
+		v = spreadFull + 2*schedule.TakerBps + 2*(*execution.SlippageEst25USD)
+		entry25.Roundtrip25USDBps = roundedFinitePtr(v, 3)
+	}
+	if execution.SlippageEst100USD != nil {
+		v := spreadHalf + schedule.TakerBps + *execution.SlippageEst100USD
+		entry25.Entry100USDBps = roundedFinitePtr(v, 3)
+		v = spreadFull + 2*schedule.TakerBps + 2*(*execution.SlippageEst100USD)
+		entry25.Roundtrip100USDBps = roundedFinitePtr(v, 3)
+	}
+	return &entry25
+}
+
+type basisCarrySignal struct {
+	BasisBps        *float64
+	BasisZ          *float64
+	Funding8hBps    *float64
+	LongCarry8hBps  *float64
+	ShortCarry8hBps *float64
+	CarryBias       string
+	Confidence      *float64
+}
+
+func buildBasisCarrySignal(ctx contextBlock) *basisCarrySignal {
+	if ctx.BasisPct == nil && ctx.BasisZ14d == nil && ctx.FundingBps == nil {
+		return nil
+	}
+	out := &basisCarrySignal{
+		BasisZ:       roundedCopy(ctx.BasisZ14d, 3),
+		Funding8hBps: roundedCopy(ctx.FundingBps, 3),
+	}
+	if ctx.BasisPct != nil {
+		v := *ctx.BasisPct * 100
+		out.BasisBps = roundedFinitePtr(v, 3)
+	}
+	if ctx.FundingBps != nil {
+		longCarry := -*ctx.FundingBps
+		shortCarry := *ctx.FundingBps
+		out.LongCarry8hBps = roundedFinitePtr(longCarry, 3)
+		out.ShortCarry8hBps = roundedFinitePtr(shortCarry, 3)
+	}
+	switch {
+	case ctx.BasisPct != nil && ctx.FundingBps != nil && *ctx.BasisPct > 0 && *ctx.FundingBps > 0:
+		out.CarryBias = "short_perp_favored"
+	case ctx.BasisPct != nil && ctx.FundingBps != nil && *ctx.BasisPct < 0 && *ctx.FundingBps < 0:
+		out.CarryBias = "long_perp_favored"
+	case ctx.BasisPct != nil && *ctx.BasisPct > 0:
+		out.CarryBias = "basis_short_perp_reversion"
+	case ctx.BasisPct != nil && *ctx.BasisPct < 0:
+		out.CarryBias = "basis_long_perp_reversion"
+	case ctx.FundingBps != nil && *ctx.FundingBps > 0:
+		out.CarryBias = "funding_short_perp_carry"
+	case ctx.FundingBps != nil && *ctx.FundingBps < 0:
+		out.CarryBias = "funding_long_perp_carry"
+	default:
+		out.CarryBias = "neutral"
+	}
+	confidence := 0.0
+	if out.BasisZ != nil {
+		confidence += 0.55 * clampFloat(math.Abs(*out.BasisZ)/3, 0, 1)
+	}
+	if out.Funding8hBps != nil {
+		confidence += 0.45 * clampFloat(math.Abs(*out.Funding8hBps)/8, 0, 1)
+	}
+	out.Confidence = roundedFinitePtr(confidence, 3)
+	return out
+}
+
+func buildPairSignals(ctx *Context, candidates []candidatePayload) (map[string]*pairSignal, []pairSignal) {
+	anchors := make(map[string]*pairSignal)
+	if ctx == nil || len(candidates) < 2 {
+		return anchors, nil
+	}
+	all := make([]pairSignal, 0, len(candidates)*2)
+	seenPairs := make(map[string]pairSignal)
+	for i := 0; i < len(candidates); i++ {
+		for j := 0; j < len(candidates); j++ {
+			if i == j {
+				continue
+			}
+			pair, ok := buildPairSignal(ctx, candidates[i], candidates[j])
+			if !ok {
+				continue
+			}
+			all = append(all, pair)
+			if current, exists := anchors[pair.Symbol]; !exists || pair.Score > current.Score {
+				cp := pair
+				anchors[pair.Symbol] = &cp
+			}
+			key := canonicalPairKey(pair.Symbol, pair.HedgeSymbol)
+			if existing, exists := seenPairs[key]; !exists || pair.Score > existing.Score {
+				seenPairs[key] = pair
+			}
+		}
+	}
+	if len(seenPairs) == 0 {
+		return anchors, nil
+	}
+	topPairs := make([]pairSignal, 0, len(seenPairs))
+	for _, pair := range seenPairs {
+		topPairs = append(topPairs, pair)
+	}
+	sort.SliceStable(topPairs, func(i, j int) bool {
+		if topPairs[i].Score == topPairs[j].Score {
+			return topPairs[i].Symbol < topPairs[j].Symbol
+		}
+		return topPairs[i].Score > topPairs[j].Score
+	})
+	if len(topPairs) > 3 {
+		topPairs = topPairs[:3]
+	}
+	return anchors, topPairs
+}
+
+func buildPairSignal(ctx *Context, base, hedge candidatePayload) (pairSignal, bool) {
+	baseData := ctx.MarketDataMap[base.Symbol]
+	hedgeData := ctx.MarketDataMap[hedge.Symbol]
+	tf, baseSeries, hedgeSeries, barHours, ok := selectPairSeries(baseData, hedgeData)
+	if !ok {
+		return pairSignal{}, false
+	}
+	baseLogs, ok := toLogSeries(baseSeries)
+	if !ok {
+		return pairSignal{}, false
+	}
+	hedgeLogs, ok := toLogSeries(hedgeSeries)
+	if !ok {
+		return pairSignal{}, false
+	}
+	hedgeRatio, intercept, ok := olsSlopeIntercept(hedgeLogs, baseLogs)
+	if !ok {
+		return pairSignal{}, false
+	}
+	residuals := make([]float64, 0, len(baseLogs))
+	for i := range baseLogs {
+		residuals = append(residuals, baseLogs[i]-(intercept+hedgeRatio*hedgeLogs[i]))
+	}
+	residualBps, residualZ, ok := residualMetrics(residuals)
+	if !ok {
+		return pairSignal{}, false
+	}
+	corr := returnsCorrelation(baseLogs, hedgeLogs, 24)
+	halfLife := halfLifeHours(residuals, barHours)
+	confidence := pairConfidence(residualZ, corr, len(residuals), halfLife)
+	costBps := pairRoundtripCostBps(ctx, base.Symbol, hedge.Symbol)
+	netAfterCost := residualNetAfterCost(residualBps, costBps)
+	score := pairSignalScore(residualBps, netAfterCost, confidence)
+	return pairSignal{
+		Symbol:                    base.Symbol,
+		HedgeSymbol:               hedge.Symbol,
+		TF:                        tf,
+		F13ResidualBps:            residualBps,
+		F13ResidualZ:              residualZ,
+		F13HalfLifeH:              halfLife,
+		F13SuggestedLeg:           suggestedPairLeg(residualZ),
+		F14HedgeRatio:             roundedFinitePtr(hedgeRatio, 4),
+		F14ReturnsCorr24h:         corr,
+		F14Confidence:             confidence,
+		F15PairRoundtrip100USDBps: costBps,
+		F15NetAfterCostBps:        netAfterCost,
+		Score:                     score,
+	}, true
+}
+
+func selectPairSeries(baseData, hedgeData *market.Data) (string, []float64, []float64, float64, bool) {
+	if baseData == nil || hedgeData == nil {
+		return "", nil, nil, 0, false
+	}
+	preferred := []string{"1h", "4h", "15m", "5m"}
+	for _, tf := range preferred {
+		baseSeries := timeframeCloseSeries(baseData, tf)
+		hedgeSeries := timeframeCloseSeries(hedgeData, tf)
+		n := minInt(len(baseSeries), len(hedgeSeries))
+		if n < 24 {
+			continue
+		}
+		if n > 72 {
+			n = 72
+		}
+		baseSeries = append([]float64(nil), baseSeries[len(baseSeries)-n:]...)
+		hedgeSeries = append([]float64(nil), hedgeSeries[len(hedgeSeries)-n:]...)
+		return tf, baseSeries, hedgeSeries, timeframeHours(tf), true
+	}
+	return "", nil, nil, 0, false
+}
+
+func timeframeCloseSeries(data *market.Data, tf string) []float64 {
+	if data == nil || data.TimeframeData == nil {
+		return nil
+	}
+	tfData := data.TimeframeData[tf]
+	if tfData == nil {
+		return nil
+	}
+	if len(tfData.Klines) > 0 {
+		out := make([]float64, 0, len(tfData.Klines))
+		for _, bar := range tfData.Klines {
+			if bar.Close <= 0 || math.IsNaN(bar.Close) || math.IsInf(bar.Close, 0) {
+				continue
+			}
+			out = append(out, bar.Close)
+		}
+		return out
+	}
+	out := make([]float64, 0, len(tfData.MidPrices))
+	for _, price := range tfData.MidPrices {
+		if price <= 0 || math.IsNaN(price) || math.IsInf(price, 0) {
+			continue
+		}
+		out = append(out, price)
+	}
+	return out
+}
+
+func timeframeHours(tf string) float64 {
+	switch strings.ToLower(strings.TrimSpace(tf)) {
+	case "1m":
+		return 1.0 / 60.0
+	case "3m":
+		return 3.0 / 60.0
+	case "5m":
+		return 5.0 / 60.0
+	case "15m":
+		return 15.0 / 60.0
+	case "1h":
+		return 1
+	case "2h":
+		return 2
+	case "4h":
+		return 4
+	case "1d":
+		return 24
+	default:
+		return 1
+	}
+}
+
+func toLogSeries(series []float64) ([]float64, bool) {
+	if len(series) < 2 {
+		return nil, false
+	}
+	out := make([]float64, 0, len(series))
+	for _, value := range series {
+		if value <= 0 || math.IsNaN(value) || math.IsInf(value, 0) {
+			return nil, false
+		}
+		out = append(out, math.Log(value))
+	}
+	return out, true
+}
+
+func olsSlopeIntercept(x, y []float64) (float64, float64, bool) {
+	if len(x) != len(y) || len(x) < 2 {
+		return 0, 0, false
+	}
+	meanX := mean(x)
+	meanY := mean(y)
+	varXX := 0.0
+	covXY := 0.0
+	for i := range x {
+		dx := x[i] - meanX
+		dy := y[i] - meanY
+		varXX += dx * dx
+		covXY += dx * dy
+	}
+	if varXX == 0 {
+		return 0, 0, false
+	}
+	beta := covXY / varXX
+	alpha := meanY - beta*meanX
+	if math.IsNaN(beta) || math.IsInf(beta, 0) || math.IsNaN(alpha) || math.IsInf(alpha, 0) {
+		return 0, 0, false
+	}
+	return beta, alpha, true
+}
+
+func residualMetrics(residuals []float64) (*float64, *float64, bool) {
+	if len(residuals) < 24 {
+		return nil, nil, false
+	}
+	meanResidual := mean(residuals)
+	stdResidual := stddev(residuals, meanResidual)
+	if stdResidual <= 0 || math.IsNaN(stdResidual) || math.IsInf(stdResidual, 0) {
+		return nil, nil, false
+	}
+	last := residuals[len(residuals)-1]
+	bps := (last - meanResidual) * 10_000
+	z := (last - meanResidual) / stdResidual
+	return roundedFinitePtr(bps, 3), roundedFinitePtr(z, 3), true
+}
+
+func returnsCorrelation(a, b []float64, maxLookback int) *float64 {
+	if len(a) != len(b) || len(a) < 3 {
+		return nil
+	}
+	returnsA := make([]float64, 0, len(a)-1)
+	returnsB := make([]float64, 0, len(b)-1)
+	for i := 1; i < len(a); i++ {
+		returnsA = append(returnsA, a[i]-a[i-1])
+		returnsB = append(returnsB, b[i]-b[i-1])
+	}
+	if maxLookback > 0 && len(returnsA) > maxLookback {
+		returnsA = returnsA[len(returnsA)-maxLookback:]
+		returnsB = returnsB[len(returnsB)-maxLookback:]
+	}
+	corr := correlation(returnsA, returnsB)
+	if corr == nil {
+		return nil
+	}
+	return roundedFinitePtr(*corr, 3)
+}
+
+func halfLifeHours(residuals []float64, barHours float64) *float64 {
+	if len(residuals) < 10 || barHours <= 0 {
+		return nil
+	}
+	lagged := make([]float64, 0, len(residuals)-1)
+	delta := make([]float64, 0, len(residuals)-1)
+	for i := 1; i < len(residuals); i++ {
+		lagged = append(lagged, residuals[i-1])
+		delta = append(delta, residuals[i]-residuals[i-1])
+	}
+	beta, _, ok := olsSlopeIntercept(lagged, delta)
+	if !ok || beta >= 0 {
+		return nil
+	}
+	halfLife := -math.Log(2) / beta * barHours
+	if halfLife <= 0 || math.IsNaN(halfLife) || math.IsInf(halfLife, 0) || halfLife > 24*14 {
+		return nil
+	}
+	return roundedFinitePtr(halfLife, 2)
+}
+
+func pairConfidence(residualZ, corr *float64, observations int, halfLife *float64) *float64 {
+	confidence := 0.0
+	if residualZ != nil {
+		confidence += 0.35 * clampFloat(math.Abs(*residualZ)/3, 0, 1)
+	}
+	if corr != nil {
+		confidence += 0.40 * clampFloat(math.Abs(*corr), 0, 1)
+	}
+	confidence += 0.25 * clampFloat(float64(observations)/72, 0, 1)
+	if halfLife != nil {
+		switch {
+		case *halfLife <= 12:
+			confidence = clampFloat(confidence+0.08, 0, 1)
+		case *halfLife > 48:
+			confidence = clampFloat(confidence-0.10, 0, 1)
+		}
+	}
+	return roundedFinitePtr(confidence, 3)
+}
+
+func pairRoundtripCostBps(ctx *Context, symbol, hedgeSymbol string) *float64 {
+	baseCost := roundtrip100CostBps(ctx, symbol)
+	hedgeCost := roundtrip100CostBps(ctx, hedgeSymbol)
+	if baseCost == nil && hedgeCost == nil {
+		return nil
+	}
+	total := 0.0
+	if baseCost != nil {
+		total += *baseCost
+	}
+	if hedgeCost != nil {
+		total += *hedgeCost
+	}
+	return roundedFinitePtr(total, 3)
+}
+
+func roundtrip100CostBps(ctx *Context, symbol string) *float64 {
+	if ctx == nil || ctx.ExecutionQuality == nil {
+		return nil
+	}
+	exec := buildExecutionQualityPayload(ctx.ExecutionQuality[strings.ToUpper(symbol)])
+	if exec == nil {
+		return nil
+	}
+	fee := buildFeeEdgeSignal(ctx, exec)
+	if fee == nil {
+		return nil
+	}
+	return fee.Roundtrip100USDBps
+}
+
+func residualNetAfterCost(residualBps, costBps *float64) *float64 {
+	if residualBps == nil {
+		return nil
+	}
+	gross := math.Abs(*residualBps)
+	if costBps == nil {
+		return roundedFinitePtr(gross, 3)
+	}
+	return roundedFinitePtr(gross-*costBps, 3)
+}
+
+func pairSignalScore(residualBps, netAfterCost, confidence *float64) float64 {
+	base := 0.0
+	if netAfterCost != nil {
+		base = math.Abs(*netAfterCost)
+	} else if residualBps != nil {
+		base = math.Abs(*residualBps)
+	}
+	conf := 0.5
+	if confidence != nil {
+		conf = clampFloat(*confidence, 0, 1)
+	}
+	return roundTo(base*conf, 3)
+}
+
+func suggestedPairLeg(residualZ *float64) string {
+	if residualZ == nil {
+		return ""
+	}
+	if *residualZ > 0 {
+		return "short_sym_long_hedge"
+	}
+	if *residualZ < 0 {
+		return "long_sym_short_hedge"
+	}
+	return "neutral"
+}
+
+func feeScheduleForExchange(exchange string) *feeSchedulePayload {
+	switch strings.ToLower(strings.TrimSpace(exchange)) {
+	case "bybit":
+		return &feeSchedulePayload{
+			MakerBps: 2.0,
+			TakerBps: 5.5,
+			Source:   "bybit_derivatives_vip0_2026-04-11",
+		}
+	default:
+		return nil
+	}
+}
+
+func normalizeExchange(ctx *Context) string {
+	if ctx == nil {
+		return ""
+	}
+	return strings.ToLower(strings.TrimSpace(ctx.Exchange))
+}
+
+func canonicalPairKey(a, b string) string {
+	a = strings.ToUpper(strings.TrimSpace(a))
+	b = strings.ToUpper(strings.TrimSpace(b))
+	if a > b {
+		a, b = b, a
+	}
+	return a + ":" + b
+}
+
+func mean(values []float64) float64 {
+	if len(values) == 0 {
+		return 0
+	}
+	total := 0.0
+	for _, value := range values {
+		total += value
+	}
+	return total / float64(len(values))
+}
+
+func stddev(values []float64, meanValue float64) float64 {
+	if len(values) < 2 {
+		return 0
+	}
+	total := 0.0
+	for _, value := range values {
+		diff := value - meanValue
+		total += diff * diff
+	}
+	return math.Sqrt(total / float64(len(values)-1))
+}
+
+func correlation(a, b []float64) *float64 {
+	if len(a) != len(b) || len(a) < 2 {
+		return nil
+	}
+	meanA := mean(a)
+	meanB := mean(b)
+	varAB := 0.0
+	varA := 0.0
+	varB := 0.0
+	for i := range a {
+		da := a[i] - meanA
+		db := b[i] - meanB
+		varAB += da * db
+		varA += da * da
+		varB += db * db
+	}
+	if varA == 0 || varB == 0 {
+		return nil
+	}
+	corr := varAB / math.Sqrt(varA*varB)
+	if math.IsNaN(corr) || math.IsInf(corr, 0) {
+		return nil
+	}
+	return &corr
+}
+
+func minInt(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
 }
 
 func buildRecentTradesPayload(trades []RecentTrade) []recentTradePayload {
@@ -908,6 +1688,7 @@ func buildVolumeParticipationPayload(ctx *Context, data *market.Data, requiredTF
 }
 
 func buildFeatureAvailabilityPayload(
+	ctx *Context,
 	data *market.Data,
 	venue *VenueTradabilitySummary,
 	execution *executionQualityPayload,
@@ -917,10 +1698,10 @@ func buildFeatureAvailabilityPayload(
 	requiredTF string,
 ) *featureAvailabilityPayload {
 	return &featureAvailabilityPayload{
-		F4:        featureGateState(data, market.FeatureKeyF4),
-		F5:        featureGateState(data, market.FeatureKeyF5),
-		F6:        featureGateState(data, market.FeatureKeyF6),
-		F7:        featureGateState(data, market.FeatureKeyF7),
+		F4:        featureGateState(data, market.FeatureKeyF4, featureEnabled(ctx, market.FeatureKeyF4)),
+		F5:        featureGateState(data, market.FeatureKeyF5, featureEnabled(ctx, market.FeatureKeyF5)),
+		F6:        featureGateState(data, market.FeatureKeyF6, featureEnabled(ctx, market.FeatureKeyF6)),
+		F7:        featureGateState(data, market.FeatureKeyF7, featureEnabled(ctx, market.FeatureKeyF7)),
 		F10:       executionAvailabilityState(venue, execution),
 		F11:       volumeAvailabilityState(data, volume, requiredTF),
 		F12:       symbolMemoryAvailabilityState(symbolMemory),
@@ -1079,6 +1860,8 @@ func buildTimeframeSummaries(ctx *Context, data *market.Data) []timeframeSummary
 	if data == nil || len(data.TimeframeData) == 0 {
 		return nil
 	}
+	emaFastPeriod, emaSlowPeriod := resolveEMAPair(ctx)
+	rsiPeriod := resolveRSIPeriod(ctx)
 	keys := selectTimeframeKeys(ctx, data)
 	if len(keys) == 0 {
 		return nil
@@ -1094,14 +1877,23 @@ func buildTimeframeSummaries(ctx *Context, data *market.Data) []timeframeSummary
 			continue
 		}
 		summary := timeframeSummaryData{
-			TF:    tf,
-			Close: roundTo(closePx, 6),
-			EMA20: roundedSeriesLastPtr(tfData.EMA20Values, 3),
-			EMA50: roundedSeriesLastPtr(tfData.EMA50Values, 3),
-			MACD:  roundedSeriesLastPtr(tfData.MACDValues, 3),
-			RSI7:  roundedSeriesLastPtr(tfData.RSI7Values, 3),
-			RSI14: roundedSeriesLastPtr(tfData.RSI14Values, 3),
-			ATR14: roundedFinitePtr(tfData.ATR14, 3),
+			TF:            tf,
+			Close:         roundTo(closePx, 6),
+			EMAFastPeriod: emaFastPeriod,
+			EMAFast:       timeframeEMAValue(tfData, emaFastPeriod),
+			EMASlowPeriod: emaSlowPeriod,
+			EMASlow:       timeframeEMAValue(tfData, emaSlowPeriod),
+			EMA20:         timeframeEMAValue(tfData, 20),
+			EMA50:         timeframeEMAValue(tfData, 50),
+			MACD:          roundedSeriesLastPtr(tfData.MACDValues, 3),
+			RSIPeriod:     rsiPeriod,
+			RSI:           timeframeRSIValue(tfData, rsiPeriod),
+			RSI7:          roundedSeriesLastPtr(tfData.RSI7Values, 3),
+			RSI14:         roundedSeriesLastPtr(tfData.RSI14Values, 3),
+			ATR14:         roundedFinitePtr(tfData.ATR14, 3),
+			BOLLUpper:     timeframeBOLLValue(tfData.BOLLUpper),
+			BOLLMiddle:    timeframeBOLLValue(tfData.BOLLMiddle),
+			BOLLLower:     timeframeBOLLValue(tfData.BOLLLower),
 		}
 		if chg := timeframeChangePct(tfData); chg != nil {
 			summary.ChgPct = chg
@@ -1114,10 +1906,15 @@ func buildTimeframeSummaries(ctx *Context, data *market.Data) []timeframeSummary
 	return out
 }
 
-func buildContextBlock(data *market.Data) contextBlock {
-	ctx := contextBlock{
-		TF:     defaultContextTF,
-		PxType: defaultContextPriceType,
+func buildContextBlock(decisionCtx *Context, data *market.Data) contextBlock {
+	emaFastPeriod, emaSlowPeriod := resolveEMAPair(decisionCtx)
+	rsiPeriod := resolveRSIPeriod(decisionCtx)
+	block := contextBlock{
+		TF:            defaultContextTF,
+		PxType:        defaultContextPriceType,
+		EMAFastPeriod: emaFastPeriod,
+		EMASlowPeriod: emaSlowPeriod,
+		RSIPeriod:     rsiPeriod,
 		Source: contextSources{
 			OI:    "unknown",
 			Fund:  "unknown",
@@ -1125,101 +1922,320 @@ func buildContextBlock(data *market.Data) contextBlock {
 		},
 	}
 	if data == nil {
-		return ctx
+		return block
 	}
 
-	ema := roundTo(data.CurrentEMA20, 3)
+	if tf := strings.TrimSpace(strings.ToLower(resolveRequiredTF(decisionCtx))); tf != "" {
+		block.TF = tf
+	}
+	if pxType := resolveContextPriceType(decisionCtx); pxType != "" {
+		block.PxType = pxType
+	}
+
+	if tfData, _ := resolvePrimaryTimeframeData(decisionCtx, data, block.TF); tfData != nil {
+		block.EMAFast = timeframeEMAValue(tfData, emaFastPeriod)
+		block.EMASlow = timeframeEMAValue(tfData, emaSlowPeriod)
+		block.EMA20 = timeframeEMAValue(tfData, 20)
+		block.RSI = timeframeRSIValue(tfData, rsiPeriod)
+		block.RSI7 = timeframeRSIValue(tfData, 7)
+		block.RSI14 = timeframeRSIValue(tfData, 14)
+		block.BOLLUpper = timeframeBOLLValue(tfData.BOLLUpper)
+		block.BOLLMiddle = timeframeBOLLValue(tfData.BOLLMiddle)
+		block.BOLLLower = timeframeBOLLValue(tfData.BOLLLower)
+	}
+	if block.EMAFast == nil && emaFastPeriod == 20 && data.CurrentEMA20 != 0 {
+		ema := roundTo(data.CurrentEMA20, 3)
+		block.EMAFast = &ema
+	}
+	if block.EMA20 == nil && data.CurrentEMA20 != 0 {
+		ema := roundTo(data.CurrentEMA20, 3)
+		block.EMA20 = &ema
+	}
+
 	macd := roundTo(data.CurrentMACD, 3)
-	rsi := roundTo(clampFloat(data.CurrentRSI7, 0, 100), 3)
-	ctx.EMA20 = &ema
-	ctx.MACD = &macd
-	ctx.RSI7 = &rsi
-	ctx.PriceChange1h = roundedFinitePtr(data.PriceChange1h, 3)
-	ctx.PriceChange4h = roundedFinitePtr(data.PriceChange4h, 3)
+	block.MACD = &macd
+	if block.RSI7 == nil && data.CurrentRSI7 != 0 {
+		rsi7 := roundTo(clampFloat(data.CurrentRSI7, 0, 100), 3)
+		block.RSI7 = &rsi7
+	}
+	if block.RSI == nil && rsiPeriod == 7 && block.RSI7 != nil {
+		block.RSI = roundedCopy(block.RSI7, 3)
+	}
+	block.PriceChange1h = roundedFinitePtr(data.PriceChange1h, 3)
+	block.PriceChange4h = roundedFinitePtr(data.PriceChange4h, 3)
 
 	if data.OpenInterest != nil && data.OpenInterest.Latest > 0 {
 		oi := roundTo(data.OpenInterest.Latest, 3)
-		ctx.OI = &oi
+		block.OI = &oi
 	}
 
 	derivs := microDerivs(data)
 	if derivs != nil {
 		if derivs.OIDelta1hPct != nil {
 			v := roundTo(*derivs.OIDelta1hPct*100, 3)
-			ctx.OIDelta1hPct = &v
+			block.OIDelta1hPct = &v
 		}
 		if derivs.OIPriceDiv != nil {
 			s := safeString(derivs.OIPriceDiv)
 			if s != "" {
-				ctx.OIPriceDiv = &s
+				block.OIPriceDiv = &s
 			}
 		}
 		if derivs.OIPriceCorr24h != nil {
 			v := roundTo(*derivs.OIPriceCorr24h, 3)
-			ctx.OIPriceCorr24h = &v
+			block.OIPriceCorr24h = &v
 		}
 		if derivs.OIZ7d != nil {
 			v := roundTo(*derivs.OIZ7d, 3)
-			ctx.OIZ7d = &v
+			block.OIZ7d = &v
 		}
 		if derivs.FundingLatestBps != nil {
 			v := roundTo(*derivs.FundingLatestBps, 3)
-			ctx.FundingBps = &v
+			block.FundingBps = &v
 		} else if data.FundingRate != 0 {
 			v := roundTo(data.FundingRate*10_000, 3)
-			ctx.FundingBps = &v
+			block.FundingBps = &v
 		}
 		if derivs.FundingMedianZ7d != nil {
 			v := roundTo(*derivs.FundingMedianZ7d, 3)
-			ctx.FundingMedianZ7d = &v
+			block.FundingMedianZ7d = &v
 		}
 		if derivs.FundingDispersionBps != nil {
 			v := roundTo(*derivs.FundingDispersionBps, 3)
-			ctx.FundingDispersionBps = &v
+			block.FundingDispersionBps = &v
 		}
 		if derivs.BasisPct != nil {
 			v := roundTo(*derivs.BasisPct*100, 3)
-			ctx.BasisPct = &v
+			block.BasisPct = &v
 		}
 		if derivs.BasisZ14d != nil {
 			v := roundTo(*derivs.BasisZ14d, 3)
-			ctx.BasisZ14d = &v
+			block.BasisZ14d = &v
 		}
 		if status := strings.TrimSpace(derivs.OISourceStatus); status != "" {
-			ctx.Source.OI = status
+			block.Source.OI = status
 		}
 		if status := strings.TrimSpace(derivs.FundingSourceStatus); status != "" {
-			ctx.Source.Fund = status
+			block.Source.Fund = status
 		}
 		if status := strings.TrimSpace(derivs.BasisSourceStatus); status != "" {
-			ctx.Source.Basis = status
+			block.Source.Basis = status
 		}
 	}
-	return ctx
+	return block
 }
 
-func buildFeatureBlock(data *market.Data, diag *payloadDiagnostics, symbol string) featurePayload {
+func normalizeSelectionBucket(bucket string) string {
+	switch strings.ToLower(strings.TrimSpace(bucket)) {
+	case "primary", "adaptive", "fallback_eligible", "fallback_ranked", "exploration":
+		return strings.ToLower(strings.TrimSpace(bucket))
+	default:
+		return ""
+	}
+}
+
+func resolveEMAPair(ctx *Context) (int, int) {
+	periods := normalizeEMAPeriods(nil)
+	if ctx != nil {
+		periods = normalizeEMAPeriods(ctx.EMAPeriods)
+	}
+	fast := periods[0]
+	slow := 0
+	if len(periods) > 1 {
+		slow = periods[1]
+	}
+	return fast, slow
+}
+
+func resolveRSIPeriod(ctx *Context) int {
+	periods := normalizeRSIPeriods(nil)
+	if ctx != nil {
+		periods = normalizeRSIPeriods(ctx.RSIPeriods)
+	}
+	return periods[0]
+}
+
+func normalizeEMAPeriods(periods []int) []int {
+	if len(periods) == 0 {
+		return []int{20, 50}
+	}
+
+	seen := make(map[int]struct{}, len(periods))
+	out := make([]int, 0, 2)
+	for _, period := range periods {
+		if period <= 0 {
+			continue
+		}
+		if _, exists := seen[period]; exists {
+			continue
+		}
+		seen[period] = struct{}{}
+		out = append(out, period)
+		if len(out) == 2 {
+			break
+		}
+	}
+	if len(out) == 0 {
+		return []int{20, 50}
+	}
+	return out
+}
+
+func normalizeRSIPeriods(periods []int) []int {
+	if len(periods) == 0 {
+		return []int{7, 14}
+	}
+	out := make([]int, 0, len(periods))
+	seen := make(map[int]struct{}, len(periods))
+	for _, period := range periods {
+		if period <= 0 {
+			continue
+		}
+		if _, exists := seen[period]; exists {
+			continue
+		}
+		seen[period] = struct{}{}
+		out = append(out, period)
+	}
+	if len(out) == 0 {
+		return []int{7, 14}
+	}
+	return out
+}
+
+func timeframeEMAValue(data *market.TimeframeSeriesData, period int) *float64 {
+	if data == nil || period <= 0 {
+		return nil
+	}
+
+	switch period {
+	case 20:
+		if v := roundedSeriesLastPtr(data.EMA20Values, 3); v != nil {
+			return v
+		}
+	case 50:
+		if v := roundedSeriesLastPtr(data.EMA50Values, 3); v != nil {
+			return v
+		}
+	}
+
+	if len(data.Klines) >= period {
+		klines := make([]market.Kline, 0, len(data.Klines))
+		for _, bar := range data.Klines {
+			klines = append(klines, market.Kline{
+				OpenTime:  bar.Time,
+				Open:      bar.Open,
+				High:      bar.High,
+				Low:       bar.Low,
+				Close:     bar.Close,
+				Volume:    bar.Volume,
+				CloseTime: bar.Time,
+			})
+		}
+		ema := market.ExportCalculateEMA(klines, period)
+		if ema > 0 && !math.IsNaN(ema) && !math.IsInf(ema, 0) {
+			return roundedFinitePtr(ema, 3)
+		}
+	}
+
+	if ema, ok := calculateEMAFromPrices(data.MidPrices, period); ok {
+		return roundedFinitePtr(ema, 3)
+	}
+
+	return nil
+}
+
+func timeframeRSIValue(data *market.TimeframeSeriesData, period int) *float64 {
+	if data == nil || period <= 0 {
+		return nil
+	}
+	switch period {
+	case 7:
+		if v := roundedSeriesLastPtr(data.RSI7Values, 3); v != nil {
+			return v
+		}
+	case 14:
+		if v := roundedSeriesLastPtr(data.RSI14Values, 3); v != nil {
+			return v
+		}
+	}
+
+	if len(data.Klines) >= period+1 {
+		klines := make([]market.Kline, 0, len(data.Klines))
+		for _, bar := range data.Klines {
+			klines = append(klines, market.Kline{
+				OpenTime:  bar.Time,
+				Open:      bar.Open,
+				High:      bar.High,
+				Low:       bar.Low,
+				Close:     bar.Close,
+				Volume:    bar.Volume,
+				CloseTime: bar.Time,
+			})
+		}
+		rsi := market.ExportCalculateRSI(klines, period)
+		if rsi > 0 {
+			return roundedFinitePtr(rsi, 3)
+		}
+	}
+
+	return nil
+}
+
+func timeframeBOLLValue(values []float64) *float64 {
+	return roundedSeriesLastPtr(values, 3)
+}
+
+func calculateEMAFromPrices(prices []float64, period int) (float64, bool) {
+	if len(prices) < period || period <= 0 {
+		return 0, false
+	}
+
+	sum := 0.0
+	for i := 0; i < period; i++ {
+		price := prices[i]
+		if math.IsNaN(price) || math.IsInf(price, 0) {
+			return 0, false
+		}
+		sum += price
+	}
+	ema := sum / float64(period)
+	multiplier := 2.0 / float64(period+1)
+	for i := period; i < len(prices); i++ {
+		price := prices[i]
+		if math.IsNaN(price) || math.IsInf(price, 0) {
+			return 0, false
+		}
+		ema = (price-ema)*multiplier + ema
+	}
+	return ema, true
+}
+
+func buildFeatureBlock(ctx *Context, data *market.Data, diag *payloadDiagnostics, symbol string) featurePayload {
 	derivs := microDerivs(data)
 	if derivs == nil {
 		return featurePayload{}
 	}
 	features := featurePayload{}
-	if f4 := buildOrderflowFeature(data, derivs, diag, symbol); f4 != nil {
+	if f4 := buildOrderflowFeature(ctx, data, derivs, diag, symbol); f4 != nil {
 		features.Orderflow = f4
 	}
-	if f5 := buildRiskFeature(data, derivs, diag, symbol); f5 != nil {
+	if f5 := buildRiskFeature(ctx, data, derivs, diag, symbol); f5 != nil {
 		features.Risk = f5
 	}
-	if f6 := buildLevelsFeature(data, derivs, diag, symbol); f6 != nil {
+	if f6 := buildLevelsFeature(ctx, data, derivs, diag, symbol); f6 != nil {
 		features.Levels = f6
 	}
-	if f7 := buildVolatilityFeature(data, derivs, diag, symbol); f7 != nil {
+	if f7 := buildVolatilityFeature(ctx, data, derivs, diag, symbol); f7 != nil {
 		features.Volatility = f7
 	}
 	return features
 }
 
-func buildOrderflowFeature(data *market.Data, derivs *types.DerivsFeatures, diag *payloadDiagnostics, symbol string) *orderflowPayload {
+func buildOrderflowFeature(ctx *Context, data *market.Data, derivs *types.DerivsFeatures, diag *payloadDiagnostics, symbol string) *orderflowPayload {
+	if !featureEnabled(ctx, market.FeatureKeyF4) {
+		return nil
+	}
 	_, pass := buildQoS(data, market.FeatureKeyF4)
 	if !pass {
 		return nil
@@ -1239,7 +2255,10 @@ func buildOrderflowFeature(data *market.Data, derivs *types.DerivsFeatures, diag
 	}
 }
 
-func buildRiskFeature(data *market.Data, derivs *types.DerivsFeatures, diag *payloadDiagnostics, symbol string) *riskPayload {
+func buildRiskFeature(ctx *Context, data *market.Data, derivs *types.DerivsFeatures, diag *payloadDiagnostics, symbol string) *riskPayload {
+	if !featureEnabled(ctx, market.FeatureKeyF5) {
+		return nil
+	}
 	_, pass := buildQoS(data, market.FeatureKeyF5)
 	if !pass {
 		return nil
@@ -1262,7 +2281,10 @@ func buildRiskFeature(data *market.Data, derivs *types.DerivsFeatures, diag *pay
 	}
 }
 
-func buildLevelsFeature(data *market.Data, derivs *types.DerivsFeatures, diag *payloadDiagnostics, symbol string) *levelsPayload {
+func buildLevelsFeature(ctx *Context, data *market.Data, derivs *types.DerivsFeatures, diag *payloadDiagnostics, symbol string) *levelsPayload {
+	if !featureEnabled(ctx, market.FeatureKeyF6) {
+		return nil
+	}
 	_, pass := buildQoS(data, market.FeatureKeyF6)
 	if !pass {
 		return nil
@@ -1292,7 +2314,10 @@ func buildLevelsFeature(data *market.Data, derivs *types.DerivsFeatures, diag *p
 	return out
 }
 
-func buildVolatilityFeature(data *market.Data, derivs *types.DerivsFeatures, diag *payloadDiagnostics, symbol string) *volatilityPayload {
+func buildVolatilityFeature(ctx *Context, data *market.Data, derivs *types.DerivsFeatures, diag *payloadDiagnostics, symbol string) *volatilityPayload {
+	if !featureEnabled(ctx, market.FeatureKeyF7) {
+		return nil
+	}
 	_, pass := buildQoS(data, market.FeatureKeyF7)
 	if !pass {
 		return nil
@@ -1319,14 +2344,14 @@ func collectMissingFields(ctx *contextBlock) []string {
 		return append([]string(nil), requiredCandidateContextFields...)
 	}
 	missing := make([]string, 0)
-	if ctx.EMA20 == nil {
-		missing = append(missing, "ema20")
+	if ctx.EMAFast == nil {
+		missing = append(missing, "ema_fast")
 	}
 	if ctx.MACD == nil {
 		missing = append(missing, "macd")
 	}
-	if ctx.RSI7 == nil {
-		missing = append(missing, "rsi7")
+	if ctx.RSI == nil {
+		missing = append(missing, "rsi")
 	}
 	if ctx.OI == nil {
 		missing = append(missing, "oi")
@@ -1360,7 +2385,28 @@ func buildSymbolQoS(data *market.Data, updateMs int64, missing []string) symbolQ
 	}
 }
 
-func featureGateState(data *market.Data, key string) string {
+func featureEnabled(ctx *Context, key string) bool {
+	if ctx == nil || !ctx.FeatureFlagsSet {
+		return true
+	}
+	switch key {
+	case market.FeatureKeyF4:
+		return ctx.EnableF4
+	case market.FeatureKeyF5:
+		return ctx.EnableF5
+	case market.FeatureKeyF6:
+		return ctx.EnableF6
+	case market.FeatureKeyF7:
+		return ctx.EnableF7
+	default:
+		return true
+	}
+}
+
+func featureGateState(data *market.Data, key string, enabled bool) string {
+	if !enabled {
+		return "disabled"
+	}
 	if data == nil || microDerivs(data) == nil {
 		return "missing"
 	}
@@ -1966,6 +3012,52 @@ func normalizeMarginUsedRatio(marginUsedPct float64) float64 {
 	return marginUsedPct
 }
 
+func normalizeSizeCap(positionRatio float64) float64 {
+	switch {
+	case math.IsNaN(positionRatio), math.IsInf(positionRatio, 0), positionRatio <= 0:
+		return 0.25
+	case positionRatio > 1:
+		return 1
+	default:
+		return roundTo(positionRatio, 3)
+	}
+}
+
+func normalizeMinPositionSize(minPositionSize float64) float64 {
+	switch {
+	case math.IsNaN(minPositionSize), math.IsInf(minPositionSize, 0), minPositionSize <= 0:
+		return 12
+	default:
+		return roundTo(minPositionSize, 3)
+	}
+}
+
+func computeSizePctMin(equity float64, minPositionSize float64) float64 {
+	if equity <= 0 || minPositionSize <= 0 || math.IsNaN(equity) || math.IsInf(equity, 0) {
+		return 0
+	}
+	return roundTo(clampFloat(minPositionSize/equity, 0, 1), 3)
+}
+
+func normalizePayloadMaxLeverage(btcEthLeverage, altcoinLeverage int) int {
+	maxLeverage := maxInt(btcEthLeverage, altcoinLeverage)
+	if maxLeverage <= 0 {
+		return 5
+	}
+	return maxLeverage
+}
+
+func normalizeMaxNewPositions(maxPositions, currentPositions int) int {
+	remaining := maxPositions - currentPositions
+	if remaining <= 0 {
+		return 0
+	}
+	if remaining > 1 {
+		return 1
+	}
+	return remaining
+}
+
 func microDerivs(data *market.Data) *types.DerivsFeatures {
 	if data == nil || data.Snapshot == nil || data.Snapshot.Features.Derivs == nil {
 		return nil
@@ -2185,8 +3277,20 @@ func validateLivePayload(payload *livePayload) error {
 	if payload.Policy.SizeCap <= 0 || payload.Policy.SizeCap > 1 {
 		return fmt.Errorf("policy size_cap invalid")
 	}
+	if payload.Policy.SizeFloorUSDT < 0 {
+		return fmt.Errorf("policy size_floor_usdt invalid")
+	}
+	if payload.Policy.SizePctMin < 0 || payload.Policy.SizePctMin > payload.Policy.SizeCap {
+		return fmt.Errorf("policy size_pct_min invalid")
+	}
 	if payload.Policy.MinScore < 0 || payload.Policy.MinScore > 1 {
 		return fmt.Errorf("policy min_score invalid")
+	}
+	if payload.OutputContract.Constraints.SizeFloorUSDT < 0 {
+		return fmt.Errorf("output_contract.constraints.size_floor_usdt invalid")
+	}
+	if payload.OutputContract.Constraints.SizePctMin < 0 || payload.OutputContract.Constraints.SizePctMin > payload.OutputContract.Constraints.SizePctMax {
+		return fmt.Errorf("output_contract.constraints.size_pct_min invalid")
 	}
 	if payload.OutputContract.Constraints.DecisionsLenMin < 0 {
 		return fmt.Errorf("output_contract.constraints.decisions_len_min invalid")
@@ -2242,9 +3346,9 @@ func validateContext(ctx contextBlock, requiredTF, symbol, assetType string) err
 	if requiredTF != "" && ctx.TF != requiredTF {
 		return fmt.Errorf("%s %s tf mismatch: got %s want %s", assetType, symbol, ctx.TF, requiredTF)
 	}
-	if ctx.RSI7 != nil {
-		if *ctx.RSI7 < 0 || *ctx.RSI7 > 100 {
-			return fmt.Errorf("%s %s rsi7 out of range", assetType, symbol)
+	if ctx.RSI != nil {
+		if *ctx.RSI < 0 || *ctx.RSI > 100 {
+			return fmt.Errorf("%s %s rsi out of range", assetType, symbol)
 		}
 	}
 	return nil

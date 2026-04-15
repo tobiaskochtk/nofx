@@ -178,6 +178,98 @@ Body: {"show_in_competition":<bool>}`,
 			s.routeWithSchema(protected, "GET", "/traders/:id/grid-risk", "Get grid trading risk info",
 				`:id = trader_id from GET /api/my-traders.`,
 				s.handleGetGridRiskInfo)
+			s.routeWithSchema(protected, "GET", "/traders/:id/ai500-bucket-review", "Get live 24h AI500 bucket review for a trader",
+				`:id = trader_id from GET /api/my-traders.
+Query params:
+  hours=<int, default 24, max 168>
+  cycles=<int, default 20, max 100>
+Returns a live aggregation from persisted decision records, including bucket mix, coverage hours, and recent cycle details.`,
+				s.handleTraderAI500BucketReview)
+			s.routeWithSchema(protected, "GET", "/traders/:id/deal-review/cases", "List deal-centric review cases for a trader",
+				`:id = trader_id from GET /api/my-traders.
+Query params:
+  symbol=<string>
+  side=LONG|SHORT
+  status=OPEN|CLOSED
+  outcome=profit|loss|flat|open
+  from_time=<unix ms>
+  to_time=<unix ms>
+  min_pnl=<number>
+  max_pnl=<number>
+  limit=<int, default 100, max 500>
+  offset=<int, default 0>
+Returns compact open/close rationale entries per deal plus dataset summary.`,
+				s.handleTraderDealReviewCases)
+			s.routeWithSchema(protected, "GET", "/traders/:id/deal-review/cases/:caseId", "Get one deal-review case detail",
+				`:id = trader_id from GET /api/my-traders.
+:caseId = id from GET /api/traders/:id/deal-review/cases.`,
+				s.handleTraderDealReviewCaseDetail)
+			s.routeWithSchema(protected, "PUT", "/traders/:id/deal-review/cases/:caseId/review", "Save analyst labels and note for a deal-review case",
+				`:id = trader_id from GET /api/my-traders.
+:caseId = id from GET /api/traders/:id/deal-review/cases.
+Body: {"labels":["good entry","avoidable loss"],"analyst_note":"<optional free-text note>"}`,
+				s.handleTraderDealReviewCaseReview)
+			s.routeWithSchema(protected, "GET", "/traders/:id/deal-review/anomalies", "Get heuristic anomaly summary for the filtered deal-review dataset",
+				`:id = trader_id from GET /api/my-traders.
+Query params match GET /api/traders/:id/deal-review/cases.`,
+				s.handleTraderDealReviewAnomalies)
+			s.routeWithSchema(protected, "GET", "/traders/:id/deal-review/ai-scans", "List saved AI scans for a trader's deal-review module",
+				`:id = trader_id from GET /api/my-traders.
+Query params:
+  limit=<int, default 10, max 50>`,
+				s.handleTraderDealReviewAIScans)
+			s.routeWithSchema(protected, "GET", "/traders/:id/deal-review/ai-scans/compare", "Compare two saved AI scans side by side",
+				`:id = trader_id from GET /api/my-traders.
+Query params:
+  left_scan_id=<id from GET /api/traders/:id/deal-review/ai-scans>
+  right_scan_id=<id from GET /api/traders/:id/deal-review/ai-scans>`,
+				s.handleTraderDealReviewAIScanCompare)
+			s.routeWithSchema(protected, "POST", "/traders/:id/deal-review/ai-scans", "Run an AI scan over filtered deal-review cases",
+				`:id = trader_id from GET /api/my-traders.
+Body: {"model_id":"<optional configured AI model id from GET /api/models>","override_model_name":"<optional remote model id, e.g. gpt-5.1>","symbol":"<optional>","side":"LONG|SHORT","status":"OPEN|CLOSED","outcome":"profit|loss|flat|open","from_time":<unix ms>,"to_time":<unix ms>,"min_pnl":<number>,"max_pnl":<number>}
+If model_id is omitted, the backend prefers an enabled OpenAI config and otherwise falls back to the first enabled model.`,
+				s.handleTraderDealReviewAIScan)
+			s.routeWithSchema(protected, "POST", "/traders/:id/deal-review/ai-scans/:scanId/validate", "Validate a saved AI scan before apply/challenger launch",
+				`:id = trader_id from GET /api/my-traders.
+:scanId = id from GET /api/traders/:id/deal-review/ai-scans.
+Runs an evidence/config gate over the filtered dataset and persists validation status beside the scan.`,
+				s.handleTraderDealReviewValidateAIScan)
+			s.routeWithSchema(protected, "POST", "/traders/:id/deal-review/ai-scans/:scanId/apply", "Apply the strategy patch produced by a saved AI scan",
+				`:id = trader_id from GET /api/my-traders.
+:scanId = id from GET /api/traders/:id/deal-review/ai-scans.`,
+				s.handleTraderDealReviewApplyAIScan)
+			s.routeWithSchema(protected, "POST", "/traders/:id/deal-review/ai-scans/:scanId/challenger", "Launch a timed incumbent-vs-challenger compare from a validated AI scan",
+				`:id = trader_id from GET /api/my-traders.
+:scanId = id from GET /api/traders/:id/deal-review/ai-scans.
+Body: {"mode":"paper|isolated_live|shared_live","exchange_id":"<wallet from GET /api/exchanges>","window_hours":12|24|36|48|96}`,
+				s.handleTraderDealReviewCreateChallengerCompare)
+			s.routeWithSchema(protected, "GET", "/traders/:id/deal-review/strategy-versions", "List saved strategy versions created from AI apply/rollback actions",
+				`:id = trader_id from GET /api/my-traders.
+Query params:
+  limit=<int, default 10, max 50>`,
+				s.handleTraderDealReviewStrategyVersions)
+			s.routeWithSchema(protected, "GET", "/traders/:id/deal-review/challenger-compares", "List challenger compares for the current trader review module",
+				`:id = trader_id from GET /api/my-traders.
+Query params:
+  limit=<int, default 10, max 50>`,
+				s.handleTraderDealReviewChallengerCompares)
+			s.routeWithSchema(protected, "GET", "/traders/:id/deal-review/challenger-compares/:compareId", "Fetch one challenger compare with protocol details",
+				`:id = trader_id from GET /api/my-traders.
+:compareId = id from GET /api/traders/:id/deal-review/challenger-compares.`,
+				s.handleTraderDealReviewChallengerCompareDetail)
+			s.routeWithSchema(protected, "POST", "/traders/:id/deal-review/challenger-compares/:compareId/stop", "Manually stop a running challenger compare and keep the incumbent trader active",
+				`:id = trader_id from GET /api/my-traders.
+:compareId = id from GET /api/traders/:id/deal-review/challenger-compares.`,
+				s.handleTraderDealReviewStopChallengerCompare)
+			s.routeWithSchema(protected, "POST", "/traders/:id/deal-review/challenger-compares/:compareId/resolve", "Manually resolve a running challenger compare in favor of the incumbent or challenger trader",
+				`:id = trader_id from GET /api/my-traders.
+:compareId = id from GET /api/traders/:id/deal-review/challenger-compares.
+Body: {"winner_trader_id":"<incumbent_trader_id|challenger_trader_id>"}`,
+				s.handleTraderDealReviewResolveChallengerCompare)
+			s.routeWithSchema(protected, "POST", "/traders/:id/deal-review/strategy-versions/:versionId/rollback", "Rollback a trader strategy to the previous config captured in a saved strategy version",
+				`:id = trader_id from GET /api/my-traders.
+:versionId = id from GET /api/traders/:id/deal-review/strategy-versions.`,
+				s.handleTraderDealReviewRollbackStrategyVersion)
 
 			// AI cost tracking
 			s.route(protected, "GET", "/ai-costs", "Get AI call costs for a trader (?trader_id=xxx&period=today)", s.handleGetAICosts)
@@ -188,6 +280,9 @@ Body: {"show_in_competition":<bool>}`,
 				`Returns: [{"id":"<EXACT id — use this as ai_model_id when creating/updating a trader>","name":"<display name>","provider":"<short provider name — NOT a valid id>","enabled":<bool>}]
 CRITICAL: The "id" field (e.g. "abc123_deepseek") is what you must use for ai_model_id. The "provider" field ("deepseek") is NOT valid as an id.`,
 				s.handleGetModelConfigs)
+			s.routeWithSchema(protected, "GET", "/models/:id/available-models", "List remotely available model names for a configured AI account",
+				`:id = configured model id from GET /api/models. OpenAI accounts query the live /models catalog; other providers return the configured/default model names.`,
+				s.handleModelAvailableModels)
 			s.routeWithSchema(protected, "PUT", "/models", "Configure an AI model provider",
 				`Body: {"models":{"<model_id>":{"enabled":<bool>,"api_key":"<string>","custom_api_url":"<string, leave empty to use provider default>","custom_model_name":"<string, leave empty to use provider default>"}}}
 model_id values: "openai","deepseek","qwen","kimi","grok","gemini","claude"
@@ -245,7 +340,10 @@ CRITICAL: Always use the "id" field for strategy_id.`,
 				`Returns the strategy marked is_active=true for this user, or the system default. Use this to find which strategy is currently in use.`,
 				s.handleGetActiveStrategy)
 			s.routeWithSchema(protected, "GET", "/strategies/default-config", "Get default strategy config with all fields and sensible values — use as reference for building configs",
-				`No parameters needed. Returns a complete StrategyConfig object with all fields populated with recommended defaults. Read this before building a custom config.`,
+				`No parameters needed. Returns a complete StrategyConfig object with all fields populated with recommended defaults. Read this before building a custom config.
+Provider contract example returned by modern defaults:
+  "signal_provider": {"type":"nofxos","base_url":"","api_key":""}
+Legacy alias "official_nofxos" is still accepted on read, but canonical saved value is "nofxos".`,
 				s.handleGetDefaultStrategyConfig)
 			s.route(protected, "POST", "/strategies/preview-prompt", "Preview the AI prompt that will be generated from a config", s.handlePreviewPrompt)
 			s.route(protected, "POST", "/strategies/test-run", "Test-run strategy AI analysis", s.handleStrategyTestRun)
@@ -253,6 +351,14 @@ CRITICAL: Always use the "id" field for strategy_id.`,
 			s.routeWithSchema(protected, "POST", "/strategies", "Create a new trading strategy",
 				`Body: {"name":"<string, required>","description":"<string, optional>","lang":"zh|en","config":<StrategyConfig object, OPTIONAL — if omitted the system applies complete working defaults automatically (ai500 top coins, all standard indicators, standard risk control)>}
 IMPORTANT: For most use cases just POST {"name":"<name>"} — the backend fills everything in. Only include "config" when the user explicitly requests custom settings (specific coins, custom leverage, custom timeframes).
+
+Provider examples:
+  Official provider:
+    "signal_provider": {"type":"nofxos","api_key":"<private provider key>"}
+  Self-hosted provider:
+    "signal_provider": {"type":"selfhosted_ai500","base_url":"http://selfhosted-ai500:8081","api_key":"<local token>"}
+  Migration compatibility:
+    omit "signal_provider" and keep "indicators.nofxos_api_key" on older saved strategies; backend still reads it
 
 StrategyConfig fields:
   coin_source.source_type: "static"(fixed coin list) | "ai500"(AI top500 ranking) | "oi_top"(OI increasing, suited for long) | "oi_low"(OI decreasing, suited for short) | "mixed"
@@ -276,7 +382,10 @@ StrategyConfig fields:
   indicators.rsi_periods: [7,14] default
   indicators.atr_periods: [14] default
   indicators.boll_periods: [20] default
-  indicators.nofxos_api_key: ALWAYS "cm_568c67eae410d912c54c"
+  signal_provider.type: "nofxos" | "selfhosted_ai500" (preferred modern contract)
+  signal_provider.base_url: required for "selfhosted_ai500", e.g. "http://selfhosted-ai500:8081"
+  signal_provider.api_key: optional provider token; if omitted, backend falls back to indicators.nofxos_api_key
+  indicators.nofxos_api_key: legacy compatibility field; still read when signal_provider.api_key is omitted
   indicators.enable_quant_data: ALWAYS true
   indicators.enable_quant_oi: ALWAYS true
   indicators.enable_quant_netflow: ALWAYS true
@@ -300,7 +409,11 @@ StrategyConfig fields:
 			s.routeWithSchema(protected, "PUT", "/strategies/:id", "Update an existing strategy — WORKFLOW: 1) GET /api/strategies/:id first to read current config 2) Merge your changes into the full config 3) PUT with complete merged config 4) GET again to verify saved values",
 				`Body: {"name":"<string>","description":"<string>","config":<complete StrategyConfig — same structure as POST /api/strategies>}
 IMPORTANT: config is merged with existing values server-side, but always send the complete section you are modifying.
-After updating, always GET /api/strategies/:id to verify and show the user actual saved values.`,
+After updating, always GET /api/strategies/:id to verify and show the user actual saved values.
+Migration note:
+  - save new configs with "signal_provider.type":"nofxos" or "selfhosted_ai500"
+  - legacy "official_nofxos" is normalized to "nofxos"
+  - legacy-only strategies without "signal_provider" still run through indicators.nofxos_api_key fallback until resaved`,
 				s.handleUpdateStrategy)
 			s.routeWithSchema(protected, "DELETE", "/strategies/:id", "Delete strategy",
 				`:id = EXACT id from GET /api/strategies. Cannot delete a strategy that is currently assigned to a running trader.`,

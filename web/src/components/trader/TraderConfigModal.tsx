@@ -25,6 +25,14 @@ const EXCHANGE_REGISTRATION_LINKS: Record<string, { url: string; hasReferral?: b
 
 import type { TraderConfigData } from '../../types'
 
+function getSignalProviderSummary(strategy?: Strategy, language?: string): string {
+  const providerType = strategy?.config?.signal_provider?.type
+  if (providerType === 'selfhosted_ai500') {
+    return 'Selfhosted AI500'
+  }
+  return language === 'zh' ? 'NOFXOS 官方' : 'NOFXOS'
+}
+
 // 表单内部状态类型
 interface FormState {
   trader_id?: string
@@ -391,6 +399,9 @@ export function TraderConfigModal({
                     </div>
                     <div>
                       {t('marginLimit', language)}: {((selectedStrategy.config.risk_control?.max_margin_usage || 0.9) * 100).toFixed(0)}%
+                    </div>
+                    <div>
+                      {language === 'zh' ? '信号提供方' : 'Signal Provider'}: {getSignalProviderSummary(selectedStrategy, language)}
                     </div>
                   </div>
                 </div>

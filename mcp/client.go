@@ -264,6 +264,9 @@ func (client *Client) ParseMCPResponse(body []byte) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	if strings.TrimSpace(r.Content) == "" && len(r.ToolCalls) == 0 {
+		return "", fmt.Errorf("API returned empty content")
+	}
 	return r.Content, nil
 }
 
@@ -397,10 +400,10 @@ func (c *Client) BaseClient() *Client { return c }
 
 // IsRetryableError determines if error is retryable (network errors, timeouts, etc.)
 func (client *Client) IsRetryableError(err error) bool {
-	errStr := err.Error()
+	errStr := strings.ToLower(err.Error())
 	// Network errors, timeouts, EOF, etc. can be retried
 	for _, retryable := range client.Cfg.RetryableErrors {
-		if strings.Contains(errStr, retryable) {
+		if strings.Contains(errStr, strings.ToLower(retryable)) {
 			return true
 		}
 	}

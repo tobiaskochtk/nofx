@@ -30,7 +30,7 @@ import {
   Upload,
   Globe,
 } from 'lucide-react'
-import type { Strategy, StrategyConfig, AIModel } from '../types'
+import type { Strategy, StrategyConfig, AIModel, SignalProviderConfig } from '../types'
 import { confirmToast, notify } from '../lib/notify'
 import { CoinSourceEditor } from '../components/strategy/CoinSourceEditor'
 import { IndicatorEditor } from '../components/strategy/IndicatorEditor'
@@ -43,6 +43,37 @@ import { DeepVoidBackground } from '../components/common/DeepVoidBackground'
 import { t } from '../i18n/translations'
 
 const API_BASE = import.meta.env.VITE_API_BASE || ''
+
+function normalizeSignalProvider(provider?: SignalProviderConfig): SignalProviderConfig | undefined {
+  if (!provider) return undefined
+  return {
+    ...provider,
+    type: provider.type === 'selfhosted_ai500' ? 'selfhosted_ai500' : 'nofxos',
+    base_url: provider.base_url || '',
+    api_key: provider.api_key || '',
+  }
+}
+
+function normalizeStrategyConfig(config: StrategyConfig): StrategyConfig {
+  return {
+    ...config,
+    indicators: {
+      ...config.indicators,
+      enable_f4: config.indicators.enable_f4 ?? true,
+      enable_f5: config.indicators.enable_f5 ?? true,
+      enable_f6: config.indicators.enable_f6 ?? true,
+      enable_f7: config.indicators.enable_f7 ?? true,
+    },
+    signal_provider: normalizeSignalProvider(config.signal_provider),
+  }
+}
+
+function normalizeStrategy(strategy: Strategy): Strategy {
+  return {
+    ...strategy,
+    config: normalizeStrategyConfig(strategy.config),
+  }
+}
 
 export function StrategyStudioPage() {
   const { token } = useAuth()
@@ -102,6 +133,30 @@ export function StrategyStudioPage() {
     }))
   }
 
+  const requiresSignalProvider = (config: StrategyConfig) => {
+    if (
+      config.coin_source.source_type === 'ai500' ||
+      config.coin_source.source_type === 'oi_top' ||
+      config.coin_source.source_type === 'oi_low'
+    ) {
+      return true
+    }
+
+    if (
+      config.coin_source.source_type === 'mixed' &&
+      (config.coin_source.use_ai500 || config.coin_source.use_oi_top || config.coin_source.use_oi_low)
+    ) {
+      return true
+    }
+
+    return Boolean(
+      config.indicators.enable_quant_data ||
+      config.indicators.enable_oi_ranking ||
+      config.indicators.enable_netflow_ranking ||
+      config.indicators.enable_price_ranking
+    )
+  }
+
   // Fetch AI Models
   const fetchAiModels = useCallback(async () => {
     if (!token) return
@@ -133,16 +188,17 @@ export function StrategyStudioPage() {
       })
       if (!response.ok) throw new Error('Failed to fetch strategies')
       const data = await response.json()
-      setStrategies(data.strategies || [])
+      const normalizedStrategies = (data.strategies || []).map((strategy: Strategy) => normalizeStrategy(strategy))
+      setStrategies(normalizedStrategies)
 
       // Select active or first strategy
-      const active = data.strategies?.find((s: Strategy) => s.is_active)
+      const active = normalizedStrategies.find((s: Strategy) => s.is_active)
       if (active) {
         setSelectedStrategy(active)
         setEditingConfig(active.config)
-      } else if (data.strategies?.length > 0) {
-        setSelectedStrategy(data.strategies[0])
-        setEditingConfig(data.strategies[0].config)
+      } else if (normalizedStrategies.length > 0) {
+        setSelectedStrategy(normalizedStrategies[0])
+        setEditingConfig(normalizedStrategies[0].config)
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unknown error')
@@ -175,7 +231,7 @@ export function StrategyStudioPage() {
           { headers: { Authorization: `Bearer ${token}` } }
         )
         if (!response.ok) return
-        const defaultConfig = await response.json()
+      const defaultConfig = normalizeStrategyConfig(await response.json())
 
         // Update only the prompt sections and language field
         setEditingConfig(prev => {
@@ -204,7 +260,7 @@ export function StrategyStudioPage() {
         { headers: { Authorization: `Bearer ${token}` } }
       )
       if (!configResponse.ok) throw new Error('Failed to fetch default config')
-      const defaultConfig = await configResponse.json()
+      const defaultConfig = normalizeStrategyConfig(await configResponse.json())
 
       const response = await fetch(`${API_BASE}/api/strategies`, {
         method: 'POST',
@@ -369,6 +425,7 @@ export function StrategyStudioPage() {
       if (!importData.config || !importData.name) {
         throw new Error(tr('invalidStrategyFile'))
       }
+      const normalizedImportConfig = normalizeStrategyConfig(importData.config as StrategyConfig)
 
       // Create new strategy with imported config
       const response = await fetch(`${API_BASE}/api/strategies`, {
@@ -380,7 +437,7 @@ export function StrategyStudioPage() {
         body: JSON.stringify({
           name: `${importData.name} (${tr('imported')})`,
           description: importData.description || '',
-          config: importData.config,
+          config: normalizedImportConfig,
         }),
       })
       if (!response.ok) throw new Error('Failed to import strategy')
@@ -407,7 +464,7 @@ export function StrategyStudioPage() {
     try {
       // Always sync the config language with the current interface language
       const configWithLanguage = {
-        ...editingConfig,
+        ...normalizeStrategyConfig(editingConfig),
         language: language as 'zh' | 'en',
       }
       const response = await fetch(
@@ -444,9 +501,12 @@ export function StrategyStudioPage() {
     value: StrategyConfig[K]
   ) => {
     if (!editingConfig) return
+    const nextValue = section === 'signal_provider'
+      ? normalizeSignalProvider(value as SignalProviderConfig)
+      : value
     setEditingConfig({
       ...editingConfig,
-      [section]: value,
+      [section]: nextValue,
     })
     setHasChanges(true)
   }
@@ -569,7 +629,10 @@ export function StrategyStudioPage() {
       content: editingConfig && (
         <IndicatorEditor
           config={editingConfig.indicators}
+          provider={editingConfig.signal_provider}
           onChange={(indicators) => updateConfig('indicators', indicators)}
+          onProviderChange={(provider) => updateConfig('signal_provider', provider)}
+          requiresProvider={requiresSignalProvider(editingConfig)}
           disabled={selectedStrategy?.is_default}
           language={language}
         />

@@ -18,7 +18,8 @@ type CoinData struct {
 	MaxScore        float64 `json:"max_score"`        // Highest score
 	MaxPrice        float64 `json:"max_price"`        // Highest price
 	IncreasePercent float64 `json:"increase_percent"` // Increase percentage (already x100)
-	IsAvailable     bool    `json:"-"`                // Whether tradable (internal use)
+	SelectionBucket string  `json:"selection_bucket,omitempty"`
+	IsAvailable     bool    `json:"-"` // Whether tradable (internal use)
 }
 
 // AI500Response is the API response structure
@@ -86,17 +87,62 @@ func (c *Client) fetchAI500() ([]CoinData, error) {
 	}
 
 	log.Printf("✓ Successfully fetched %d AI500 coins", len(coins))
+	logAI500BucketMix(coins)
 	return coins, nil
 }
 
-// GetTopRatedCoins retrieves top N coins by score (sorted descending)
-func (c *Client) GetTopRatedCoins(limit int) ([]string, error) {
+func logAI500BucketMix(coins []CoinData) {
+	counts := map[string]int{
+		"primary":           0,
+		"adaptive":          0,
+		"fallback_eligible": 0,
+		"exploration":       0,
+	}
+	hasBucketMetadata := false
+	sample := make([]string, 0, minInt(len(coins), 6))
+	for idx, coin := range coins {
+		bucket := strings.TrimSpace(coin.SelectionBucket)
+		if bucket != "" {
+			hasBucketMetadata = true
+			if _, ok := counts[bucket]; ok {
+				counts[bucket]++
+			}
+		}
+		if idx < 6 {
+			if bucket == "" {
+				bucket = "unclassified"
+			}
+			sample = append(sample, fmt.Sprintf("%s[%s:%.2f]", NormalizeSymbol(coin.Pair), bucket, coin.Score))
+		}
+	}
+	if !hasBucketMetadata {
+		return
+	}
+
+	log.Printf(
+		"📦 AI500 bucket mix: primary=%d adaptive=%d fallback_eligible=%d exploration=%d sample=%s",
+		counts["primary"],
+		counts["adaptive"],
+		counts["fallback_eligible"],
+		counts["exploration"],
+		strings.Join(sample, ", "),
+	)
+}
+
+func minInt(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
+}
+
+// GetTopRatedCoinData retrieves top N available AI500 coins including metadata.
+func (c *Client) GetTopRatedCoinData(limit int) ([]CoinData, error) {
 	coins, err := c.GetAI500List()
 	if err != nil {
 		return nil, err
 	}
 
-	// Filter available coins
 	var availableCoins []CoinData
 	for _, coin := range coins {
 		if coin.IsAvailable {
@@ -105,11 +151,9 @@ func (c *Client) GetTopRatedCoins(limit int) ([]string, error) {
 	}
 
 	if len(availableCoins) == 0 {
-		// Empty list is normal - just return empty slice, not an error
-		return []string{}, nil
+		return []CoinData{}, nil
 	}
 
-	// Sort by Score descending (bubble sort)
 	for i := 0; i < len(availableCoins); i++ {
 		for j := i + 1; j < len(availableCoins); j++ {
 			if availableCoins[i].Score < availableCoins[j].Score {
@@ -118,15 +162,28 @@ func (c *Client) GetTopRatedCoins(limit int) ([]string, error) {
 		}
 	}
 
-	// Take top N
 	maxCount := limit
-	if len(availableCoins) < maxCount {
+	if maxCount <= 0 || len(availableCoins) < maxCount {
 		maxCount = len(availableCoins)
 	}
 
+	return append([]CoinData(nil), availableCoins[:maxCount]...), nil
+}
+
+// GetTopRatedCoins retrieves top N coins by score (sorted descending)
+func (c *Client) GetTopRatedCoins(limit int) ([]string, error) {
+	coins, err := c.GetTopRatedCoinData(limit)
+	if err != nil {
+		return nil, err
+	}
+
+	if len(coins) == 0 {
+		return []string{}, nil
+	}
+
 	var symbols []string
-	for i := 0; i < maxCount; i++ {
-		symbol := NormalizeSymbol(availableCoins[i].Pair)
+	for _, coin := range coins {
+		symbol := NormalizeSymbol(coin.Pair)
 		symbols = append(symbols, symbol)
 	}
 

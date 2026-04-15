@@ -28,6 +28,7 @@ type Trader struct {
 	InitialBalance      float64   `gorm:"column:initial_balance;not null" json:"initial_balance"`
 	ScanIntervalMinutes int       `gorm:"column:scan_interval_minutes;default:3" json:"scan_interval_minutes"`
 	IsRunning           bool      `gorm:"column:is_running;default:false" json:"is_running"`
+	InvertSignals       bool      `gorm:"column:invert_signals;default:false" json:"invert_signals,omitempty"`
 	IsCrossMargin       bool      `gorm:"column:is_cross_margin;default:true" json:"is_cross_margin"`
 	ShowInCompetition   bool      `gorm:"column:show_in_competition;default:true" json:"show_in_competition"`
 	CreatedAt           time.Time `gorm:"column:created_at;autoCreateTime" json:"created_at"`
@@ -41,7 +42,7 @@ type Trader struct {
 	UseOITop             bool   `gorm:"column:use_oi_top;default:false" json:"use_oi_top,omitempty"`
 	CustomPrompt         string `gorm:"column:custom_prompt;default:''" json:"custom_prompt,omitempty"`
 	OverrideBasePrompt   bool   `gorm:"column:override_base_prompt;default:false" json:"override_base_prompt,omitempty"`
-	SystemPromptTemplate string `gorm:"column:system_prompt_template;default:default" json:"system_prompt_template,omitempty"`
+	SystemPromptTemplate string `gorm:"column:system_prompt_template;default:v4_2026" json:"system_prompt_template,omitempty"`
 }
 
 // TableName returns the table name for Trader
@@ -110,12 +111,16 @@ func (s *TraderStore) Update(trader *Trader) error {
 		trader.ID, trader.Name, trader.AIModelID, trader.StrategyID)
 
 	updates := map[string]interface{}{
-		"name":           trader.Name,
-		"ai_model_id":    trader.AIModelID,
-		"exchange_id":    trader.ExchangeID,
-		"strategy_id":    trader.StrategyID,
-		"is_cross_margin": trader.IsCrossMargin,
-		"show_in_competition": trader.ShowInCompetition,
+		"name":                   trader.Name,
+		"ai_model_id":            trader.AIModelID,
+		"exchange_id":            trader.ExchangeID,
+		"strategy_id":            trader.StrategyID,
+		"invert_signals":         trader.InvertSignals,
+		"custom_prompt":          trader.CustomPrompt,
+		"override_base_prompt":   trader.OverrideBasePrompt,
+		"system_prompt_template": trader.SystemPromptTemplate,
+		"is_cross_margin":        trader.IsCrossMargin,
+		"show_in_competition":    trader.ShowInCompetition,
 	}
 
 	// Only update these if > 0
@@ -233,6 +238,16 @@ func (s *TraderStore) getActiveOrDefaultStrategy(userID string) (*Strategy, erro
 func (s *TraderStore) GetByID(traderID string) (*Trader, error) {
 	var trader Trader
 	err := s.db.Where("id = ?", traderID).First(&trader).Error
+	if err != nil {
+		return nil, err
+	}
+	return &trader, nil
+}
+
+// Get gets a trader by ID scoped to a user.
+func (s *TraderStore) Get(userID, traderID string) (*Trader, error) {
+	var trader Trader
+	err := s.db.Where("id = ? AND user_id = ?", traderID, userID).First(&trader).Error
 	if err != nil {
 		return nil, err
 	}

@@ -2,7 +2,13 @@ package trader
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
+	"sort"
+	"strings"
+
 	"github.com/ethereum/go-ethereum/crypto"
+	"nofx/decision"
 	"nofx/kernel"
 	"nofx/logger"
 	"nofx/mcp"
@@ -90,16 +96,20 @@ type AutoTraderConfig struct {
 	QwenKey     string
 
 	// Custom AI API configuration
-	CustomAPIURL        string
-	CustomAPIKey        string
-	CustomModelName     string
-	NofxOSDataWalletKey string
+	CustomAPIURL         string
+	CustomAPIKey         string
+	CustomModelName      string
+	NofxOSDataWalletKey  string
+	CustomPrompt         string
+	OverrideBasePrompt   bool
+	SystemPromptTemplate string
 
 	// Scan configuration
 	ScanInterval time.Duration // Scan interval (recommended 3 minutes)
 
 	// Account configuration
 	InitialBalance float64 // Initial balance (for P&L calculation, must be set manually)
+	InvertSignals  bool    // Execute the inverse side of AI decisions
 
 	// Risk control (only as hints, AI can make autonomous decisions)
 	MaxDailyLoss    float64       // Maximum daily loss percentage (hint)
@@ -129,11 +139,13 @@ type AutoTrader struct {
 	mcpClient             mcp.AIClient
 	store                 *store.Store           // Data storage (decision records, etc.)
 	strategyEngine        *kernel.StrategyEngine // Strategy engine (uses strategy configuration)
+	baseStrategyConfig    *store.StrategyConfig  // Immutable base strategy definition from store
 	cycleNumber           int                    // Current cycle number
 	initialBalance        float64
 	dailyPnL              float64
 	customPrompt          string // Custom trading strategy prompt
 	overrideBasePrompt    bool   // Whether to override base prompt
+	systemPromptTemplate  string // Trader-level prompt template overlay
 	lastResetTime         time.Time
 	stopUntil             time.Time
 	isRunning             bool
@@ -334,16 +346,31 @@ func NewAutoTrader(config AutoTraderConfig, st *store.Store, userID string) (*Au
 	if config.StrategyConfig == nil {
 		return nil, fmt.Errorf("[%s] strategy not configured", config.Name)
 	}
-	// Pass claw402 wallet key to strategy engine so nofxos data requests
-	// are routed through claw402 (reuses the same wallet as AI calls)
+	baseStrategyConfig, err := config.StrategyConfig.Clone()
+	if err != nil {
+		return nil, fmt.Errorf("[%s] failed to clone strategy config: %w", config.Name, err)
+	}
+	effectiveStrategyConfig, err := buildEffectiveStrategyConfig(
+		baseStrategyConfig,
+		config.CustomPrompt,
+		config.OverrideBasePrompt,
+		config.SystemPromptTemplate,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("[%s] failed to build effective strategy prompt config: %w", config.Name, err)
+	}
 	var claw402Key string
-	if config.AIModel == "claw402" && config.CustomAPIKey != "" {
-		claw402Key = config.CustomAPIKey
+	provider := effectiveStrategyConfig.ResolveSignalProvider()
+	if effectiveStrategyConfig.RequiresSignalProvider() && provider.Type == store.SignalProviderNofxOS {
+		// Reuse the claw402 wallet only for the official nofxos provider path.
+		if config.AIModel == "claw402" && config.CustomAPIKey != "" {
+			claw402Key = config.CustomAPIKey
+		}
+		if claw402Key == "" && config.NofxOSDataWalletKey != "" {
+			claw402Key = config.NofxOSDataWalletKey
+		}
 	}
-	if claw402Key == "" && config.NofxOSDataWalletKey != "" {
-		claw402Key = config.NofxOSDataWalletKey
-	}
-	strategyEngine := kernel.NewStrategyEngine(config.StrategyConfig, claw402Key)
+	strategyEngine := kernel.NewStrategyEngine(effectiveStrategyConfig, claw402Key)
 	logger.Infof("✓ [%s] Using strategy engine (strategy configuration loaded)", config.Name)
 
 	return &AutoTrader{
@@ -358,8 +385,12 @@ func NewAutoTrader(config AutoTraderConfig, st *store.Store, userID string) (*Au
 		mcpClient:             mcpClient,
 		store:                 st,
 		strategyEngine:        strategyEngine,
+		baseStrategyConfig:    baseStrategyConfig,
 		cycleNumber:           cycleNumber,
 		initialBalance:        config.InitialBalance,
+		customPrompt:          config.CustomPrompt,
+		overrideBasePrompt:    config.OverrideBasePrompt,
+		systemPromptTemplate:  strings.TrimSpace(config.SystemPromptTemplate),
 		lastResetTime:         time.Now(),
 		startTime:             time.Now(),
 		callCount:             0,
@@ -372,6 +403,129 @@ func NewAutoTrader(config AutoTraderConfig, st *store.Store, userID string) (*Au
 		lastBalanceSyncTime:   time.Now(),
 		userID:                userID,
 	}, nil
+}
+
+func buildEffectiveStrategyConfig(base *store.StrategyConfig, customPrompt string, overrideBase bool, templateName string) (*store.StrategyConfig, error) {
+	effective, err := base.Clone()
+	if err != nil {
+		return nil, err
+	}
+	if effective == nil {
+		return nil, nil
+	}
+
+	templateText := strings.TrimSpace(loadPromptTemplateOverlay(templateName))
+	traderPrompt := strings.TrimSpace(customPrompt)
+	if templateText == "" && traderPrompt == "" {
+		return effective, nil
+	}
+
+	if overrideBase {
+		effective.PromptSections = store.PromptSectionsConfig{}
+
+		baseOverride := templateText
+		if baseOverride == "" {
+			baseOverride = traderPrompt
+			traderPrompt = ""
+		}
+		effective.PromptSections.RoleDefinition = baseOverride
+		effective.CustomPrompt = traderPrompt
+		return effective, nil
+	}
+
+	if templateText != "" {
+		if existingRole := strings.TrimSpace(effective.PromptSections.RoleDefinition); existingRole != "" {
+			effective.PromptSections.RoleDefinition = templateText + "\n\n" + existingRole
+		} else {
+			effective.PromptSections.RoleDefinition = templateText
+		}
+	}
+
+	if traderPrompt != "" {
+		if strings.TrimSpace(effective.CustomPrompt) != "" {
+			effective.CustomPrompt = strings.TrimSpace(effective.CustomPrompt) + "\n\n" + traderPrompt
+		} else {
+			effective.CustomPrompt = traderPrompt
+		}
+	}
+
+	return effective, nil
+}
+
+func loadPromptTemplateOverlay(templateName string) string {
+	name := strings.TrimSpace(templateName)
+	switch strings.ToLower(name) {
+	case "", "strategy":
+		return ""
+	}
+
+	if template, err := decision.GetPromptTemplate(name); err == nil && template != nil {
+		return strings.TrimSpace(template.Content)
+	}
+
+	backupPatterns := []string{
+		filepath.Join("prompts", name+".txt.backup_*"),
+		filepath.Join("prompts", name+".txt*"),
+	}
+
+	candidates := make([]string, 0)
+	for _, pattern := range backupPatterns {
+		matches, err := filepath.Glob(pattern)
+		if err != nil {
+			continue
+		}
+		for _, match := range matches {
+			lower := strings.ToLower(match)
+			if strings.HasSuffix(lower, ".txt") || strings.Contains(lower, ".backup_") {
+				if strings.Contains(lower, "corrupted") {
+					continue
+				}
+				candidates = append(candidates, match)
+			}
+		}
+	}
+	if len(candidates) == 0 {
+		logger.Warnf("⚠️ Prompt template overlay %q not found, skipping overlay", name)
+		return ""
+	}
+
+	sort.SliceStable(candidates, func(i, j int) bool {
+		return len(candidates[i]) < len(candidates[j])
+	})
+
+	for _, candidate := range candidates {
+		data, err := os.ReadFile(candidate)
+		if err != nil {
+			continue
+		}
+		text := strings.TrimSpace(string(data))
+		if text == "" {
+			continue
+		}
+		logger.Infof("📄 Using prompt template overlay %q from %s", name, candidate)
+		return text
+	}
+
+	logger.Warnf("⚠️ Prompt template overlay %q resolved to empty content, skipping overlay", name)
+	return ""
+}
+
+func (at *AutoTrader) refreshStrategyPromptOverrides() {
+	if at == nil || at.strategyEngine == nil || at.baseStrategyConfig == nil {
+		return
+	}
+
+	effective, err := buildEffectiveStrategyConfig(
+		at.baseStrategyConfig,
+		at.customPrompt,
+		at.overrideBasePrompt,
+		at.systemPromptTemplate,
+	)
+	if err != nil {
+		logger.Warnf("⚠️ [%s] Failed to refresh trader prompt overrides: %v", at.name, err)
+		return
+	}
+	at.strategyEngine.SetConfig(effective)
 }
 
 // Run runs the automatic trading main loop
@@ -467,6 +621,10 @@ func (at *AutoTrader) Run() error {
 			logger.Infof("🔄 [%s] KuCoin order+position sync enabled (every 30s)", at.name)
 		}
 	}
+
+	// Import exchange-reported realized closes so externally triggered exits and partial closes
+	// appear in history even when the local aggregated position remains open.
+	at.startClosedPnLSync()
 
 	ticker := time.NewTicker(at.config.ScanInterval)
 	defer ticker.Stop()
@@ -575,20 +733,25 @@ func (at *AutoTrader) SetShowInCompetition(show bool) {
 // SetCustomPrompt sets custom trading strategy prompt
 func (at *AutoTrader) SetCustomPrompt(prompt string) {
 	at.customPrompt = prompt
+	at.refreshStrategyPromptOverrides()
 }
 
 // SetOverrideBasePrompt sets whether to override base prompt
 func (at *AutoTrader) SetOverrideBasePrompt(override bool) {
 	at.overrideBasePrompt = override
+	at.refreshStrategyPromptOverrides()
+}
+
+// SetSystemPromptTemplate sets the trader-level prompt template overlay.
+func (at *AutoTrader) SetSystemPromptTemplate(template string) {
+	at.systemPromptTemplate = strings.TrimSpace(template)
+	at.refreshStrategyPromptOverrides()
 }
 
 // GetSystemPromptTemplate gets current system prompt template name (from strategy config)
 func (at *AutoTrader) GetSystemPromptTemplate() string {
-	if at.strategyEngine != nil {
-		config := at.strategyEngine.GetConfig()
-		if config.CustomPrompt != "" {
-			return "custom"
-		}
+	if strings.TrimSpace(at.systemPromptTemplate) != "" {
+		return strings.TrimSpace(at.systemPromptTemplate)
 	}
 	return "strategy"
 }

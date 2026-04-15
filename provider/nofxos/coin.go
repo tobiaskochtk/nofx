@@ -13,7 +13,22 @@ type QuantData struct {
 	Price       float64            `json:"price"`
 	Netflow     *NetflowData       `json:"netflow,omitempty"`
 	OI          map[string]*OIData `json:"oi,omitempty"` // keyed by exchange: "binance", "bybit"
+	AI500       *AI500QuantData    `json:"ai500,omitempty"`
 	PriceChange map[string]float64 `json:"price_change,omitempty"` // keyed by duration: "1h", "4h", etc.
+}
+
+// AI500QuantData contains AI500-specific metadata attached to a coin detail response.
+type AI500QuantData struct {
+	Pair            string   `json:"pair,omitempty"`
+	Rank            int      `json:"rank,omitempty"`
+	Score           float64  `json:"score,omitempty"`
+	StartTime       int64    `json:"start_time,omitempty"`
+	StartPrice      float64  `json:"start_price,omitempty"`
+	LastScore       float64  `json:"last_score,omitempty"`
+	MaxScore        float64  `json:"max_score,omitempty"`
+	MaxPrice        float64  `json:"max_price,omitempty"`
+	IncreasePercent float64  `json:"increase_percent,omitempty"`
+	ReasonCodes     []string `json:"reason_codes,omitempty"`
 }
 
 // NetflowData contains fund flow data
