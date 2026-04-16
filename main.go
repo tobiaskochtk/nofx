@@ -80,6 +80,12 @@ func main() {
 	}
 	defer st.Close()
 
+	if removed, refreshed, err := st.Position().CleanupRedundantClosedPnLPositions(); err != nil {
+		logger.Warnf("⚠️ Failed to clean redundant closed PnL positions: %v", err)
+	} else if removed > 0 || refreshed > 0 {
+		logger.Infof("🧹 Cleaned %d redundant closed PnL positions and refreshed %d canonical positions", removed, refreshed)
+	}
+
 	// Initialize installation ID for experience improvement (anonymous statistics)
 	initInstallationID(st)
 
@@ -142,8 +148,14 @@ func main() {
 	}()
 
 	go server.RunDealReviewChallengerCompareSupervisor()
+	go server.RunAutonomousOptimizerSupervisor()
 
 	go func() {
+		if err := st.DealReview().BackfillExistingPositions(); err != nil {
+			logger.Warnf("⚠️ Background deal review position backfill failed: %v", err)
+			return
+		}
+		logger.Info("✅ Background deal review position backfill completed")
 		if err := st.DealReview().BackfillEventDecisionArtifacts(); err != nil {
 			logger.Warnf("⚠️ Background deal review prompt backfill failed: %v", err)
 			return
@@ -154,6 +166,11 @@ func main() {
 			return
 		}
 		logger.Info("✅ Background deal review price timeline backfill completed")
+		if err := st.DealReview().BackfillQualityMetrics(); err != nil {
+			logger.Warnf("⚠️ Background deal review quality backfill failed: %v", err)
+			return
+		}
+		logger.Info("✅ Background deal review quality backfill completed")
 	}()
 
 	// Start Telegram bot (if TELEGRAM_BOT_TOKEN is configured)

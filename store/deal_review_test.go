@@ -215,6 +215,268 @@ func TestDealReviewBackfillsDecisionContextFromHistoricalRecords(t *testing.T) {
 	}
 }
 
+func TestDealReviewPersistsAndFiltersMarketContextRegimes(t *testing.T) {
+	sqlDB, err := sql.Open("sqlite", filepath.Join(t.TempDir(), "deal-review-regimes.db"))
+	if err != nil {
+		t.Fatalf("sql.Open() error = %v", err)
+	}
+	t.Cleanup(func() { _ = sqlDB.Close() })
+
+	gdb, err := gorm.Open(gormsqlite.Dialector{Conn: sqlDB}, &gorm.Config{
+		Logger: gormlogger.Default.LogMode(gormlogger.Silent),
+		NowFunc: func() time.Time {
+			return time.Now().UTC()
+		},
+	})
+	if err != nil {
+		t.Fatalf("gorm.Open() error = %v", err)
+	}
+
+	root := &Store{gdb: gdb, db: sqlDB}
+	if err := root.initTables(); err != nil {
+		t.Fatalf("initTables() error = %v", err)
+	}
+
+	trader := &Trader{
+		ID:             "trader-regime-1",
+		UserID:         "user-regime-1",
+		Name:           "Regime Review Trader",
+		AIModelID:      "model-regime-1",
+		ExchangeID:     "exchange-regime-1",
+		InitialBalance: 1500,
+	}
+	if err := root.Trader().Create(trader); err != nil {
+		t.Fatalf("Trader().Create() error = %v", err)
+	}
+
+	entryDecisionTime := time.Date(2026, time.April, 15, 2, 15, 0, 0, time.UTC)
+	exitDecisionTime := time.Date(2026, time.April, 15, 14, 20, 0, 0, time.UTC)
+	entryTime := entryDecisionTime.Add(1 * time.Minute).UnixMilli()
+	exitTime := exitDecisionTime.Add(20 * time.Minute).UnixMilli()
+
+	openPromptPayload, _ := json.Marshal(map[string]any{
+		"candidates": []map[string]any{
+			{
+				"sym":     "ETHUSDT",
+				"px_mark": 2500.0,
+				"ctx": map[string]any{
+					"tf":         "15m",
+					"px_type":    "mark",
+					"ema_fast":   2492.0,
+					"macd":       0.08,
+					"rsi":        61.0,
+					"chg_1h":     1.6,
+					"chg_4h":     3.2,
+					"oi_d1h_pct": 6.4,
+					"fund_bps":   5.7,
+					"basis_pct":  0.12,
+				},
+				"execution_quality": map[string]any{
+					"spread_bps":          2.2,
+					"liq_score":           0.86,
+					"slippage_est_25usd":  0.9,
+					"slippage_est_100usd": 3.1,
+				},
+				"venue_tradability": map[string]any{
+					"supported":       true,
+					"book":            "healthy",
+					"price_source":    "mark",
+					"min_notional_ok": true,
+				},
+				"relative_strength": map[string]any{
+					"vs_btc_1h":  1.8,
+					"vs_btc_4h":  1.2,
+					"vs_btc_ctx": 1.4,
+					"state":      "outperform",
+				},
+				"feature_availability": map[string]any{
+					"freshness": "fresh",
+				},
+				"feat": map[string]any{
+					"volatility": map[string]any{
+						"regime": "expansion",
+					},
+				},
+			},
+		},
+	})
+
+	closePromptPayload, _ := json.Marshal(map[string]any{
+		"positions": []map[string]any{
+			{
+				"sym":     "ETHUSDT",
+				"side":    "LONG",
+				"px_mark": 2638.0,
+				"ctx": map[string]any{
+					"tf":         "15m",
+					"px_type":    "mark",
+					"ema_fast":   2645.0,
+					"macd":       -0.03,
+					"rsi":        46.0,
+					"chg_1h":     -0.5,
+					"chg_4h":     0.4,
+					"oi_d1h_pct": -3.8,
+					"fund_bps":   -6.2,
+					"basis_pct":  -0.09,
+				},
+				"execution_quality": map[string]any{
+					"spread_bps":          9.4,
+					"liq_score":           0.48,
+					"slippage_est_25usd":  3.6,
+					"slippage_est_100usd": 8.7,
+				},
+				"venue_tradability": map[string]any{
+					"supported":    true,
+					"book":         "thin",
+					"price_source": "mark",
+				},
+				"relative_strength": map[string]any{
+					"vs_btc_1h":  -1.6,
+					"vs_btc_4h":  -1.1,
+					"vs_btc_ctx": -1.3,
+					"state":      "lagging",
+				},
+				"feature_availability": map[string]any{
+					"freshness": "fresh",
+				},
+				"feat": map[string]any{
+					"volatility": map[string]any{
+						"regime": "compression",
+					},
+				},
+			},
+		},
+	})
+
+	openRecord := &DecisionRecord{
+		TraderID:         trader.ID,
+		CycleNumber:      501,
+		Timestamp:        entryDecisionTime,
+		InputPrompt:      string(openPromptPayload),
+		CandidateMetaVer: DecisionCandidateMetadataVersion,
+		CandidateCoins:   []string{"ETHUSDT"},
+		CandidateDetails: []CandidateDetail{{Symbol: "ETHUSDT", SelectionBucket: "momentum", Sources: []string{"ai500"}}},
+		Decisions: []DecisionAction{{
+			Action:     "open_long",
+			Symbol:     "ETHUSDT",
+			Quantity:   1.5,
+			Leverage:   5,
+			Price:      2500,
+			StopLoss:   2440,
+			TakeProfit: 2680,
+			Confidence: 84,
+			Reasoning:  "Momentum held through Asia session.",
+		}},
+		Success: true,
+	}
+	if err := root.Decision().LogDecision(openRecord); err != nil {
+		t.Fatalf("Decision().LogDecision(open) error = %v", err)
+	}
+
+	closeRecord := &DecisionRecord{
+		TraderID:    trader.ID,
+		CycleNumber: 502,
+		Timestamp:   exitDecisionTime,
+		InputPrompt: string(closePromptPayload),
+		Decisions: []DecisionAction{{
+			Action:     "close_long",
+			Symbol:     "ETHUSDT",
+			Quantity:   1.5,
+			Price:      2638,
+			Confidence: 73,
+			Reasoning:  "Momentum faded into US session.",
+		}},
+		Success: true,
+	}
+	if err := root.Decision().LogDecision(closeRecord); err != nil {
+		t.Fatalf("Decision().LogDecision(close) error = %v", err)
+	}
+
+	position := &TraderPosition{
+		TraderID:      trader.ID,
+		ExchangeID:    trader.ExchangeID,
+		ExchangeType:  "bybit",
+		Symbol:        "ETHUSDT",
+		Side:          "LONG",
+		EntryQuantity: 1.5,
+		Quantity:      1.5,
+		EntryPrice:    2500,
+		EntryOrderID:  "entry-regime-1",
+		EntryTime:     entryTime,
+		Leverage:      5,
+		CreatedAt:     entryTime,
+		UpdatedAt:     entryTime,
+	}
+	if err := root.Position().Create(position); err != nil {
+		t.Fatalf("Position().Create() error = %v", err)
+	}
+
+	if err := root.Position().ClosePositionWithAccurateData(position.ID, 2638, "exit-regime-1", exitTime, 207, 6, "take_profit"); err != nil {
+		t.Fatalf("ClosePositionWithAccurateData() error = %v", err)
+	}
+
+	items, _, total, err := root.DealReview().ListCases(trader.UserID, DealReviewListFilter{TraderID: trader.ID})
+	if err != nil {
+		t.Fatalf("ListCases() error = %v", err)
+	}
+	if total != 1 {
+		t.Fatalf("total = %d, want 1", total)
+	}
+	caseRec := items[0].Case
+	if caseRec.OpenTrendRegime != "uptrend" {
+		t.Fatalf("OpenTrendRegime = %q, want uptrend", caseRec.OpenTrendRegime)
+	}
+	if caseRec.OpenVolatilityRegime != "high_vol" {
+		t.Fatalf("OpenVolatilityRegime = %q, want high_vol", caseRec.OpenVolatilityRegime)
+	}
+	if caseRec.OpenFundingRegime != "extreme_longs" {
+		t.Fatalf("OpenFundingRegime = %q, want extreme_longs", caseRec.OpenFundingRegime)
+	}
+	if caseRec.OpenSessionBucket != "asia" {
+		t.Fatalf("OpenSessionBucket = %q, want asia", caseRec.OpenSessionBucket)
+	}
+	if caseRec.CloseVolatilityRegime != "low_vol" {
+		t.Fatalf("CloseVolatilityRegime = %q, want low_vol", caseRec.CloseVolatilityRegime)
+	}
+	if caseRec.CloseFundingRegime != "extreme_shorts" {
+		t.Fatalf("CloseFundingRegime = %q, want extreme_shorts", caseRec.CloseFundingRegime)
+	}
+	if caseRec.CloseSessionBucket != "us" {
+		t.Fatalf("CloseSessionBucket = %q, want us", caseRec.CloseSessionBucket)
+	}
+
+	filtered, _, totalFiltered, err := root.DealReview().ListCases(trader.UserID, DealReviewListFilter{
+		TraderID:              trader.ID,
+		OpenTrendRegime:       "uptrend",
+		OpenVolatilityRegime:  "high_vol",
+		OpenSessionBucket:     "asia",
+		OpenBTCStrengthRegime: "outperform",
+	})
+	if err != nil {
+		t.Fatalf("ListCases(regime filter) error = %v", err)
+	}
+	if totalFiltered != 1 || len(filtered) != 1 {
+		t.Fatalf("filtered total = %d len = %d, want 1", totalFiltered, len(filtered))
+	}
+
+	detail, err := root.DealReview().GetCaseDetail(trader.UserID, trader.ID, caseRec.ID)
+	if err != nil {
+		t.Fatalf("GetCaseDetail() error = %v", err)
+	}
+	if detail.Open == nil || detail.Open.Snapshot == nil || detail.Open.Snapshot.MarketContext == nil {
+		t.Fatalf("expected open market context snapshot, got %#v", detail.Open)
+	}
+	if detail.Open.Snapshot.MarketContext.TrendRegime != "uptrend" {
+		t.Fatalf("open market context trend = %q, want uptrend", detail.Open.Snapshot.MarketContext.TrendRegime)
+	}
+	if detail.Close == nil || detail.Close.Snapshot == nil || detail.Close.Snapshot.MarketContext == nil {
+		t.Fatalf("expected close market context snapshot, got %#v", detail.Close)
+	}
+	if detail.Close.Snapshot.MarketContext.VenueTier != "thin_book" {
+		t.Fatalf("close venue tier = %q, want thin_book", detail.Close.Snapshot.MarketContext.VenueTier)
+	}
+}
+
 func TestBackfillEventDecisionArtifactsPersistsPromptBundle(t *testing.T) {
 	sqlDB, err := sql.Open("sqlite", filepath.Join(t.TempDir(), "deal-review-event-backfill.db"))
 	if err != nil {
@@ -414,6 +676,28 @@ func TestDealReviewPriceTimelineCaptureAndBackfill(t *testing.T) {
 	if err := root.Decision().LogDecision(recordTwo); err != nil {
 		t.Fatalf("Decision().LogDecision(recordTwo) error = %v", err)
 	}
+	if err := root.DealReview().CaptureLivePositionPricePoints(trader.UserID, trader.ID, []PositionSnapshot{{
+		Symbol:           "RAVEUSDT",
+		Side:             "LONG",
+		PositionAmt:      3,
+		EntryPrice:       4.20,
+		MarkPrice:        4.24,
+		UnrealizedProfit: 0.12,
+		Leverage:         4,
+	}}, cycleOne.Add(2*time.Minute), "platform"); err != nil {
+		t.Fatalf("CaptureLivePositionPricePoints(1) error = %v", err)
+	}
+	if err := root.DealReview().CaptureLivePositionPricePoints(trader.UserID, trader.ID, []PositionSnapshot{{
+		Symbol:           "RAVEUSDT",
+		Side:             "LONG",
+		PositionAmt:      3,
+		EntryPrice:       4.20,
+		MarkPrice:        4.18,
+		UnrealizedProfit: -0.06,
+		Leverage:         4,
+	}}, cycleTwo.Add(2*time.Minute), "platform"); err != nil {
+		t.Fatalf("CaptureLivePositionPricePoints(2) error = %v", err)
+	}
 
 	if err := root.Position().ClosePositionWithAccurateData(position.ID, 4.26, "exit-rave-timeline", exitTime, 0.18, 0.03, "take_profit"); err != nil {
 		t.Fatalf("ClosePositionWithAccurateData() error = %v", err)
@@ -441,6 +725,9 @@ func TestDealReviewPriceTimelineCaptureAndBackfill(t *testing.T) {
 	if detail.PriceTimeline.Summary.CycleSamples != 2 {
 		t.Fatalf("CycleSamples = %d, want 2", detail.PriceTimeline.Summary.CycleSamples)
 	}
+	if detail.PriceTimeline.Summary.PlatformSamples != 2 {
+		t.Fatalf("PlatformSamples = %d, want 2", detail.PriceTimeline.Summary.PlatformSamples)
+	}
 	if !detail.PriceTimeline.Summary.EverInProfit {
 		t.Fatal("expected EverInProfit to be true")
 	}
@@ -450,14 +737,20 @@ func TestDealReviewPriceTimelineCaptureAndBackfill(t *testing.T) {
 	if detail.PriceTimeline.Summary.MinUnrealizedPnL >= 0 {
 		t.Fatalf("MinUnrealizedPnL = %.4f, want < 0", detail.PriceTimeline.Summary.MinUnrealizedPnL)
 	}
-	if len(detail.PriceTimeline.Points) != 4 {
-		t.Fatalf("len(PriceTimeline.Points) = %d, want 4", len(detail.PriceTimeline.Points))
+	if len(detail.PriceTimeline.Points) != 6 {
+		t.Fatalf("len(PriceTimeline.Points) = %d, want 6", len(detail.PriceTimeline.Points))
 	}
 	if detail.PriceTimeline.Points[1].DecisionCycleNumber != 901 {
 		t.Fatalf("first cycle point = %d, want 901", detail.PriceTimeline.Points[1].DecisionCycleNumber)
 	}
-	if detail.PriceTimeline.Points[2].DecisionCycleNumber != 902 {
-		t.Fatalf("second cycle point = %d, want 902", detail.PriceTimeline.Points[2].DecisionCycleNumber)
+	if detail.PriceTimeline.Points[2].Source != "platform" {
+		t.Fatalf("second point source = %q, want platform", detail.PriceTimeline.Points[2].Source)
+	}
+	if detail.PriceTimeline.Points[3].DecisionCycleNumber != 902 {
+		t.Fatalf("second cycle point = %d, want 902", detail.PriceTimeline.Points[3].DecisionCycleNumber)
+	}
+	if detail.PriceTimeline.Points[4].Source != "platform" {
+		t.Fatalf("fifth point source = %q, want platform", detail.PriceTimeline.Points[4].Source)
 	}
 }
 
@@ -608,6 +901,355 @@ func TestDealReviewCaseAnnotationsAndAnomalies(t *testing.T) {
 	}
 }
 
+func TestDealReviewHeuristicClassifierAssistAndFeedback(t *testing.T) {
+	sqlDB, err := sql.Open("sqlite", filepath.Join(t.TempDir(), "deal-review-classifier.db"))
+	if err != nil {
+		t.Fatalf("sql.Open() error = %v", err)
+	}
+	t.Cleanup(func() { _ = sqlDB.Close() })
+
+	gdb, err := gorm.Open(gormsqlite.Dialector{Conn: sqlDB}, &gorm.Config{
+		Logger: gormlogger.Default.LogMode(gormlogger.Silent),
+		NowFunc: func() time.Time {
+			return time.Now().UTC()
+		},
+	})
+	if err != nil {
+		t.Fatalf("gorm.Open() error = %v", err)
+	}
+
+	root := &Store{gdb: gdb, db: sqlDB}
+	if err := root.initTables(); err != nil {
+		t.Fatalf("initTables() error = %v", err)
+	}
+
+	trader := &Trader{
+		ID:             "trader-classifier",
+		UserID:         "user-classifier",
+		Name:           "Classifier Trader",
+		AIModelID:      "model-classifier",
+		ExchangeID:     "exchange-classifier",
+		InitialBalance: 1000,
+	}
+	if err := root.Trader().Create(trader); err != nil {
+		t.Fatalf("Trader().Create() error = %v", err)
+	}
+
+	makeLabels := func(values ...string) string {
+		body, _ := json.Marshal(values)
+		return string(body)
+	}
+
+	now := time.Now().UTC()
+	cases := []DealReviewCase{
+		{
+			ID:                  "case-h1",
+			UserID:              trader.UserID,
+			TraderID:            trader.ID,
+			PositionID:          1,
+			Symbol:              "BTCUSDT",
+			Side:                "LONG",
+			Status:              DealReviewCaseStatusClosed,
+			Outcome:             "loss",
+			EntryTimeMs:         now.Add(-8 * time.Hour).UnixMilli(),
+			ExitTimeMs:          now.Add(-7*time.Hour - 20*time.Minute).UnixMilli(),
+			OpenSelectionBucket: "breakout",
+			CloseReason:         "stop_loss",
+			RealizedPnL:         -25,
+			LabelsJSON:          makeLabels("avoidable loss"),
+		},
+		{
+			ID:                  "case-h2",
+			UserID:              trader.UserID,
+			TraderID:            trader.ID,
+			PositionID:          2,
+			Symbol:              "BTCUSDT",
+			Side:                "LONG",
+			Status:              DealReviewCaseStatusClosed,
+			Outcome:             "loss",
+			EntryTimeMs:         now.Add(-7 * time.Hour).UnixMilli(),
+			ExitTimeMs:          now.Add(-6*time.Hour - 10*time.Minute).UnixMilli(),
+			OpenSelectionBucket: "breakout",
+			CloseReason:         "stop_loss",
+			RealizedPnL:         -18,
+			LabelsJSON:          makeLabels("avoidable loss"),
+		},
+		{
+			ID:                  "case-h3",
+			UserID:              trader.UserID,
+			TraderID:            trader.ID,
+			PositionID:          3,
+			Symbol:              "BTCUSDT",
+			Side:                "LONG",
+			Status:              DealReviewCaseStatusClosed,
+			Outcome:             "loss",
+			EntryTimeMs:         now.Add(-6 * time.Hour).UnixMilli(),
+			ExitTimeMs:          now.Add(-5*time.Hour - 40*time.Minute).UnixMilli(),
+			OpenSelectionBucket: "breakout",
+			CloseReason:         "stop_loss",
+			RealizedPnL:         -22,
+			LabelsJSON:          makeLabels("bad trade"),
+		},
+		{
+			ID:                  "case-h4",
+			UserID:              trader.UserID,
+			TraderID:            trader.ID,
+			PositionID:          4,
+			Symbol:              "BTCUSDT",
+			Side:                "LONG",
+			Status:              DealReviewCaseStatusClosed,
+			Outcome:             "loss",
+			EntryTimeMs:         now.Add(-5 * time.Hour).UnixMilli(),
+			ExitTimeMs:          now.Add(-4*time.Hour - 45*time.Minute).UnixMilli(),
+			OpenSelectionBucket: "breakout",
+			CloseReason:         "stop_loss",
+			RealizedPnL:         -21,
+			LabelsJSON:          makeLabels("bad trade"),
+		},
+		{
+			ID:                  "case-target",
+			UserID:              trader.UserID,
+			TraderID:            trader.ID,
+			PositionID:          5,
+			Symbol:              "BTCUSDT",
+			Side:                "LONG",
+			Status:              DealReviewCaseStatusClosed,
+			Outcome:             "loss",
+			EntryTimeMs:         now.Add(-90 * time.Minute).UnixMilli(),
+			ExitTimeMs:          now.Add(-40 * time.Minute).UnixMilli(),
+			OpenSelectionBucket: "breakout",
+			CloseReason:         "stop_loss",
+			RealizedPnL:         -16,
+		},
+	}
+	for i := range cases {
+		if err := root.gdb.Create(&cases[i]).Error; err != nil {
+			t.Fatalf("Create(case %d) error = %v", i, err)
+		}
+	}
+
+	items, _, _, err := root.DealReview().ListCases(trader.UserID, DealReviewListFilter{TraderID: trader.ID})
+	if err != nil {
+		t.Fatalf("ListCases() error = %v", err)
+	}
+
+	var targetItem *DealReviewCaseListItem
+	for i := range items {
+		if items[i].Case.ID == "case-target" {
+			targetItem = &items[i]
+			break
+		}
+	}
+	if targetItem == nil {
+		t.Fatal("target case not found in list")
+	}
+	if targetItem.ClassifierAssist == nil || len(targetItem.ClassifierAssist.Suggestions) < 2 {
+		t.Fatalf("classifier assist = %#v, want at least 2 suggestions", targetItem.ClassifierAssist)
+	}
+
+	var avoidableLoss *DealReviewClassifierSuggestion
+	var badTrade *DealReviewClassifierSuggestion
+	for i := range targetItem.ClassifierAssist.Suggestions {
+		suggestion := &targetItem.ClassifierAssist.Suggestions[i]
+		switch suggestion.Label {
+		case "avoidable loss":
+			avoidableLoss = suggestion
+		case "bad trade":
+			badTrade = suggestion
+		}
+	}
+	if avoidableLoss == nil || badTrade == nil {
+		t.Fatalf("suggestions = %#v, want avoidable loss and bad trade", targetItem.ClassifierAssist.Suggestions)
+	}
+
+	detail, err := root.DealReview().ApplyClassifierFeedback(
+		trader.UserID,
+		trader.ID,
+		"case-target",
+		DealReviewClassifierHeuristic,
+		avoidableLoss.SuggestionKey,
+		avoidableLoss.Label,
+		avoidableLoss.IssueType,
+		DealReviewClassifierVerdictAccepted,
+		avoidableLoss.Rationale,
+		true,
+	)
+	if err != nil {
+		t.Fatalf("ApplyClassifierFeedback(accept) error = %v", err)
+	}
+	if len(detail.Labels) == 0 || detail.Labels[0] != "avoidable loss" {
+		t.Fatalf("labels after accept = %#v, want avoidable loss applied", detail.Labels)
+	}
+
+	detail, err = root.DealReview().ApplyClassifierFeedback(
+		trader.UserID,
+		trader.ID,
+		"case-target",
+		DealReviewClassifierHeuristic,
+		badTrade.SuggestionKey,
+		badTrade.Label,
+		badTrade.IssueType,
+		DealReviewClassifierVerdictRejected,
+		badTrade.Rationale,
+		false,
+	)
+	if err != nil {
+		t.Fatalf("ApplyClassifierFeedback(reject) error = %v", err)
+	}
+	if detail.ClassifierAssist != nil {
+		for _, suggestion := range detail.ClassifierAssist.Suggestions {
+			if suggestion.Label == "bad trade" {
+				t.Fatalf("bad trade suggestion still present after rejection: %#v", detail.ClassifierAssist.Suggestions)
+			}
+		}
+	}
+}
+
+func TestDealReviewFilterPresetRoundTripAndCaseFilters(t *testing.T) {
+	sqlDB, err := sql.Open("sqlite", filepath.Join(t.TempDir(), "deal-review-presets.db"))
+	if err != nil {
+		t.Fatalf("sql.Open() error = %v", err)
+	}
+	t.Cleanup(func() { _ = sqlDB.Close() })
+
+	gdb, err := gorm.Open(gormsqlite.Dialector{Conn: sqlDB}, &gorm.Config{
+		Logger: gormlogger.Default.LogMode(gormlogger.Silent),
+		NowFunc: func() time.Time {
+			return time.Now().UTC()
+		},
+	})
+	if err != nil {
+		t.Fatalf("gorm.Open() error = %v", err)
+	}
+
+	root := &Store{gdb: gdb, db: sqlDB}
+	if err := root.initTables(); err != nil {
+		t.Fatalf("initTables() error = %v", err)
+	}
+
+	filterBody, _ := json.Marshal(map[string]any{
+		"symbol":                "BTCUSDT",
+		"status":                "CLOSED",
+		"date_range":            "30d",
+		"open_selection_bucket": "momentum",
+		"review_queue":          "unlabeled_losses",
+	})
+	preset := &DealReviewFilterPreset{
+		UserID:     "user-presets",
+		TraderID:   "trader-presets",
+		Name:       "Momentum loss queue",
+		FilterJSON: string(filterBody),
+	}
+	if err := root.DealReview().SaveFilterPreset(preset); err != nil {
+		t.Fatalf("SaveFilterPreset() error = %v", err)
+	}
+
+	presets, err := root.DealReview().ListFilterPresets("user-presets", "trader-presets")
+	if err != nil {
+		t.Fatalf("ListFilterPresets() error = %v", err)
+	}
+	if len(presets) != 1 {
+		t.Fatalf("len(presets) = %d, want 1", len(presets))
+	}
+	if presets[0].Preset.Name != "Momentum loss queue" {
+		t.Fatalf("preset name = %q, want Momentum loss queue", presets[0].Preset.Name)
+	}
+	if presets[0].Filters["open_selection_bucket"] != "momentum" {
+		t.Fatalf("preset filters = %#v, want open_selection_bucket momentum", presets[0].Filters)
+	}
+
+	caseA := DealReviewCase{
+		ID:                  "case-filter-a",
+		UserID:              "user-presets",
+		TraderID:            "trader-presets",
+		PositionID:          11,
+		Symbol:              "BTCUSDT",
+		Side:                "LONG",
+		Status:              DealReviewCaseStatusClosed,
+		Outcome:             "loss",
+		EntryTimeMs:         time.Now().UTC().Add(-2 * time.Hour).UnixMilli(),
+		ExitTimeMs:          time.Now().UTC().Add(-90 * time.Minute).UnixMilli(),
+		EntryPrice:          100,
+		ExitPrice:           98,
+		EntryQuantity:       1,
+		ExitQuantity:        1,
+		OpenSelectionBucket: "momentum",
+		CloseReason:         "trailing_stop",
+		RealizedPnL:         -2,
+		RealizedPnLPct:      -2,
+	}
+	caseB := DealReviewCase{
+		ID:                  "case-filter-b",
+		UserID:              "user-presets",
+		TraderID:            "trader-presets",
+		PositionID:          12,
+		Symbol:              "ETHUSDT",
+		Side:                "SHORT",
+		Status:              DealReviewCaseStatusClosed,
+		Outcome:             "profit",
+		EntryTimeMs:         time.Now().UTC().Add(-70 * time.Minute).UnixMilli(),
+		ExitTimeMs:          time.Now().UTC().Add(-20 * time.Minute).UnixMilli(),
+		EntryPrice:          200,
+		ExitPrice:           190,
+		EntryQuantity:       1,
+		ExitQuantity:        1,
+		OpenSelectionBucket: "mean_revert",
+		CloseReason:         "take_profit",
+		RealizedPnL:         10,
+		RealizedPnLPct:      5,
+	}
+	if err := root.gdb.Create(&caseA).Error; err != nil {
+		t.Fatalf("Create(caseA) error = %v", err)
+	}
+	if err := root.gdb.Create(&caseB).Error; err != nil {
+		t.Fatalf("Create(caseB) error = %v", err)
+	}
+	point := DealReviewCyclePointRecord{
+		UserID:              "user-presets",
+		TraderID:            "trader-presets",
+		DealID:              caseA.ID,
+		PositionID:          caseA.PositionID,
+		Symbol:              caseA.Symbol,
+		Side:                caseA.Side,
+		TimestampMs:         caseA.EntryTimeMs + 30_000,
+		DecisionCycleNumber: 99,
+		MarkPrice:           101,
+		EntryPrice:          100,
+		Quantity:            1,
+		UnrealizedPnL:       1,
+		UnrealizedPnLPct:    1,
+		InProfit:            true,
+	}
+	if err := root.gdb.Create(&point).Error; err != nil {
+		t.Fatalf("Create(point) error = %v", err)
+	}
+
+	items, _, _, err := root.DealReview().ListCases("user-presets", DealReviewListFilter{
+		TraderID:            "trader-presets",
+		OpenSelectionBucket: "momentum",
+	})
+	if err != nil {
+		t.Fatalf("ListCases(bucket) error = %v", err)
+	}
+	if len(items) != 1 || items[0].Case.ID != "case-filter-a" {
+		t.Fatalf("bucket filtered items = %#v, want only case-filter-a", items)
+	}
+	if items[0].PriceTimelineSummary == nil || !items[0].PriceTimelineSummary.EverInProfit {
+		t.Fatalf("timeline summary = %#v, want ever_in_profit true", items[0].PriceTimelineSummary)
+	}
+
+	items, _, _, err = root.DealReview().ListCases("user-presets", DealReviewListFilter{
+		TraderID:    "trader-presets",
+		CloseReason: "take_profit",
+	})
+	if err != nil {
+		t.Fatalf("ListCases(close_reason) error = %v", err)
+	}
+	if len(items) != 1 || items[0].Case.ID != "case-filter-b" {
+		t.Fatalf("close reason filtered items = %#v, want only case-filter-b", items)
+	}
+}
+
 func TestDealReviewStrategyVersionRoundTrip(t *testing.T) {
 	sqlDB, err := sql.Open("sqlite", filepath.Join(t.TempDir(), "deal-review-versions.db"))
 	if err != nil {
@@ -637,6 +1279,12 @@ func TestDealReviewStrategyVersionRoundTrip(t *testing.T) {
 		"execution": map[string]any{"max_positions": 2},
 		"risk":      map[string]any{"stop_loss_pct": 1.5},
 	})
+	targetCohortJSON, _ := json.Marshal(map[string]any{
+		"symbol":    "TONUSDT",
+		"status":    "CLOSED",
+		"outcome":   "loss",
+		"from_time": 123,
+	})
 	version := &DealReviewStrategyVersion{
 		UserID:             "user-versions",
 		TraderID:           "trader-versions",
@@ -644,8 +1292,11 @@ func TestDealReviewStrategyVersionRoundTrip(t *testing.T) {
 		SourceScanID:       "scan-versions",
 		SourceType:         "ai_apply",
 		Summary:            "Tighten exposure after weak bucket scan",
+		ExpectedEffect:     "Reduce losses on TON longs",
+		TargetCohortJSON:   string(targetCohortJSON),
 		PreviousConfigJSON: string(prevJSON),
 		NextConfigJSON:     string(nextJSON),
+		AppliedAt:          time.Now().UTC().Add(-2 * time.Hour),
 	}
 	if err := root.DealReview().SaveStrategyVersion(version); err != nil {
 		t.Fatalf("SaveStrategyVersion() error = %v", err)
@@ -657,6 +1308,15 @@ func TestDealReviewStrategyVersionRoundTrip(t *testing.T) {
 	}
 	if detail.Version.SourceScanID != "scan-versions" {
 		t.Fatalf("SourceScanID = %q, want scan-versions", detail.Version.SourceScanID)
+	}
+	if detail.Version.ExpectedEffect != "Reduce losses on TON longs" {
+		t.Fatalf("ExpectedEffect = %q, want stored expected effect", detail.Version.ExpectedEffect)
+	}
+	if detail.TargetCohort["symbol"] != "TONUSDT" {
+		t.Fatalf("target cohort = %#v, want symbol TONUSDT", detail.TargetCohort)
+	}
+	if _, exists := detail.TargetCohort["status"]; exists {
+		t.Fatalf("target cohort = %#v, did not expect analysis-only status filter to persist", detail.TargetCohort)
 	}
 	execution, ok := detail.NextConfig["execution"].(map[string]any)
 	if !ok || execution["max_positions"].(float64) != 2 {
@@ -673,6 +1333,190 @@ func TestDealReviewStrategyVersionRoundTrip(t *testing.T) {
 	}
 	if len(versions) != 1 {
 		t.Fatalf("len(versions) = %d, want 1", len(versions))
+	}
+}
+
+func TestDealReviewStrategyVersionBuildsAttributionAndWarnings(t *testing.T) {
+	sqlDB, err := sql.Open("sqlite", filepath.Join(t.TempDir(), "version-attribution.db"))
+	if err != nil {
+		t.Fatalf("sql.Open() error = %v", err)
+	}
+	t.Cleanup(func() { _ = sqlDB.Close() })
+
+	gdb, err := gorm.Open(gormsqlite.Dialector{Conn: sqlDB}, &gorm.Config{
+		Logger: gormlogger.Default.LogMode(gormlogger.Silent),
+		NowFunc: func() time.Time {
+			return time.Now().UTC()
+		},
+	})
+	if err != nil {
+		t.Fatalf("gorm.Open() error = %v", err)
+	}
+
+	root := &Store{gdb: gdb, db: sqlDB}
+	if err := root.initTables(); err != nil {
+		t.Fatalf("initTables() error = %v", err)
+	}
+
+	appliedAt := time.Now().UTC().Add(-2 * time.Hour)
+	targetCohortJSON, _ := json.Marshal(map[string]any{"symbol": "TONUSDT"})
+	version := &DealReviewStrategyVersion{
+		UserID:           "user-attr",
+		TraderID:         "trader-attr",
+		StrategyID:       "strategy-attr",
+		SourceType:       "ai_apply",
+		Summary:          "Tighten TON long entries",
+		ExpectedEffect:   "Reduce weak TON long losses",
+		TargetCohortJSON: string(targetCohortJSON),
+		AppliedAt:        appliedAt,
+	}
+	if err := root.DealReview().SaveStrategyVersion(version); err != nil {
+		t.Fatalf("SaveStrategyVersion() error = %v", err)
+	}
+
+	beforeTON := DealReviewCase{
+		ID:          "case-before-ton",
+		UserID:      "user-attr",
+		TraderID:    "trader-attr",
+		PositionID:  1,
+		Symbol:      "TONUSDT",
+		Side:        "LONG",
+		Status:      DealReviewCaseStatusClosed,
+		ExitTimeMs:  appliedAt.Add(-1 * time.Hour).UnixMilli(),
+		RealizedPnL: 1.2,
+	}
+	beforeTONB := DealReviewCase{
+		ID:          "case-before-ton-b",
+		UserID:      "user-attr",
+		TraderID:    "trader-attr",
+		PositionID:  7,
+		Symbol:      "TONUSDT",
+		Side:        "LONG",
+		Status:      DealReviewCaseStatusClosed,
+		ExitTimeMs:  appliedAt.Add(-80 * time.Minute).UnixMilli(),
+		RealizedPnL: 0.8,
+	}
+	beforeTONC := DealReviewCase{
+		ID:          "case-before-ton-c",
+		UserID:      "user-attr",
+		TraderID:    "trader-attr",
+		PositionID:  8,
+		Symbol:      "TONUSDT",
+		Side:        "LONG",
+		Status:      DealReviewCaseStatusClosed,
+		ExitTimeMs:  appliedAt.Add(-20 * time.Minute).UnixMilli(),
+		RealizedPnL: 0.6,
+	}
+	beforeBTC := DealReviewCase{
+		ID:          "case-before-btc",
+		UserID:      "user-attr",
+		TraderID:    "trader-attr",
+		PositionID:  2,
+		Symbol:      "BTCUSDT",
+		Side:        "LONG",
+		Status:      DealReviewCaseStatusClosed,
+		ExitTimeMs:  appliedAt.Add(-30 * time.Minute).UnixMilli(),
+		RealizedPnL: 0.4,
+	}
+	afterTONA := DealReviewCase{
+		ID:          "case-after-ton-a",
+		UserID:      "user-attr",
+		TraderID:    "trader-attr",
+		PositionID:  3,
+		Symbol:      "TONUSDT",
+		Side:        "LONG",
+		Status:      DealReviewCaseStatusClosed,
+		ExitTimeMs:  appliedAt.Add(30 * time.Minute).UnixMilli(),
+		RealizedPnL: -0.9,
+	}
+	afterTONB := DealReviewCase{
+		ID:          "case-after-ton-b",
+		UserID:      "user-attr",
+		TraderID:    "trader-attr",
+		PositionID:  4,
+		Symbol:      "TONUSDT",
+		Side:        "LONG",
+		Status:      DealReviewCaseStatusClosed,
+		ExitTimeMs:  appliedAt.Add(70 * time.Minute).UnixMilli(),
+		RealizedPnL: -0.7,
+	}
+	afterTONC := DealReviewCase{
+		ID:          "case-after-ton-c",
+		UserID:      "user-attr",
+		TraderID:    "trader-attr",
+		PositionID:  9,
+		Symbol:      "TONUSDT",
+		Side:        "LONG",
+		Status:      DealReviewCaseStatusClosed,
+		ExitTimeMs:  appliedAt.Add(100 * time.Minute).UnixMilli(),
+		RealizedPnL: -0.5,
+	}
+	afterBTCA := DealReviewCase{
+		ID:          "case-after-btc-a",
+		UserID:      "user-attr",
+		TraderID:    "trader-attr",
+		PositionID:  5,
+		Symbol:      "BTCUSDT",
+		Side:        "LONG",
+		Status:      DealReviewCaseStatusClosed,
+		ExitTimeMs:  appliedAt.Add(80 * time.Minute).UnixMilli(),
+		RealizedPnL: 0.2,
+	}
+	afterBTCB := DealReviewCase{
+		ID:          "case-after-btc-b",
+		UserID:      "user-attr",
+		TraderID:    "trader-attr",
+		PositionID:  6,
+		Symbol:      "BTCUSDT",
+		Side:        "LONG",
+		Status:      DealReviewCaseStatusClosed,
+		ExitTimeMs:  appliedAt.Add(90 * time.Minute).UnixMilli(),
+		RealizedPnL: 0.1,
+	}
+
+	if err := gdb.Create(&beforeTON).Error; err != nil {
+		t.Fatalf("Create(beforeTON) error = %v", err)
+	}
+	if err := gdb.Create(&beforeTONB).Error; err != nil {
+		t.Fatalf("Create(beforeTONB) error = %v", err)
+	}
+	if err := gdb.Create(&beforeTONC).Error; err != nil {
+		t.Fatalf("Create(beforeTONC) error = %v", err)
+	}
+	if err := gdb.Create(&beforeBTC).Error; err != nil {
+		t.Fatalf("Create(beforeBTC) error = %v", err)
+	}
+	if err := gdb.Create(&afterTONA).Error; err != nil {
+		t.Fatalf("Create(afterTONA) error = %v", err)
+	}
+	if err := gdb.Create(&afterTONB).Error; err != nil {
+		t.Fatalf("Create(afterTONB) error = %v", err)
+	}
+	if err := gdb.Create(&afterTONC).Error; err != nil {
+		t.Fatalf("Create(afterTONC) error = %v", err)
+	}
+	if err := gdb.Create(&afterBTCA).Error; err != nil {
+		t.Fatalf("Create(afterBTCA) error = %v", err)
+	}
+	if err := gdb.Create(&afterBTCB).Error; err != nil {
+		t.Fatalf("Create(afterBTCB) error = %v", err)
+	}
+
+	detail, err := root.DealReview().GetStrategyVersion("user-attr", "trader-attr", version.ID)
+	if err != nil {
+		t.Fatalf("GetStrategyVersion() error = %v", err)
+	}
+	if detail.Attribution == nil {
+		t.Fatalf("Attribution = nil, want populated attribution")
+	}
+	if detail.Attribution.TargetAfterSummary == nil || detail.Attribution.TargetAfterSummary.NetPnL >= detail.Attribution.TargetBeforeSummary.NetPnL {
+		t.Fatalf("target attribution = %#v, want weaker target cohort after apply", detail.Attribution)
+	}
+	if !detail.Attribution.RollbackSuggested {
+		t.Fatalf("RollbackSuggested = false, want rollback suggestion after weaker target cohort")
+	}
+	if len(detail.Attribution.Warnings) == 0 {
+		t.Fatalf("Warnings = %#v, want attribution warning", detail.Attribution.Warnings)
 	}
 }
 
@@ -1839,5 +2683,184 @@ func TestCreateFromClosedPnLInfersAIExitFromMatchedCloseDecision(t *testing.T) {
 	}
 	if detail.Close.Event.Reasoning != "loss_cut, momentum_failure, manage_positions_first" {
 		t.Fatalf("close reasoning = %q", detail.Close.Event.Reasoning)
+	}
+}
+
+func TestDealReviewBackfillQualityMetricsAndAnomalies(t *testing.T) {
+	sqlDB, err := sql.Open("sqlite", filepath.Join(t.TempDir(), "deal-review-quality.db"))
+	if err != nil {
+		t.Fatalf("sql.Open() error = %v", err)
+	}
+	t.Cleanup(func() { _ = sqlDB.Close() })
+
+	gdb, err := gorm.Open(gormsqlite.Dialector{Conn: sqlDB}, &gorm.Config{
+		Logger: gormlogger.Default.LogMode(gormlogger.Silent),
+		NowFunc: func() time.Time {
+			return time.Now().UTC()
+		},
+	})
+	if err != nil {
+		t.Fatalf("gorm.Open() error = %v", err)
+	}
+
+	root := &Store{gdb: gdb, db: sqlDB}
+	if err := root.initTables(); err != nil {
+		t.Fatalf("initTables() error = %v", err)
+	}
+
+	trader := &Trader{
+		ID:             "quality-trader",
+		UserID:         "quality-user",
+		Name:           "Quality Trader",
+		AIModelID:      "model-1",
+		ExchangeID:     "exchange-1",
+		InitialBalance: 1000,
+	}
+	if err := root.Trader().Create(trader); err != nil {
+		t.Fatalf("Trader().Create() error = %v", err)
+	}
+
+	now := time.Now().UTC()
+	makeCase := func(id string, positionID int64, symbol string, realizedPnL float64, leverage int, stopLoss float64, entryOffset time.Duration, hold time.Duration, exitPrice float64, closeReason string) DealReviewCase {
+		entryTime := now.Add(entryOffset).UnixMilli()
+		exitTime := now.Add(entryOffset).Add(hold).UnixMilli()
+		return DealReviewCase{
+			ID:                  id,
+			UserID:              trader.UserID,
+			TraderID:            trader.ID,
+			PositionID:          positionID,
+			ExchangeID:          trader.ExchangeID,
+			ExchangeType:        "bybit",
+			AIModelID:           trader.AIModelID,
+			StrategyID:          "strategy-1",
+			Symbol:              symbol,
+			Side:                "LONG",
+			Status:              DealReviewCaseStatusClosed,
+			Outcome:             classifyDealOutcome(realizedPnL),
+			EntryTimeMs:         entryTime,
+			ExitTimeMs:          exitTime,
+			EntryPrice:          100,
+			ExitPrice:           exitPrice,
+			EntryQuantity:       1,
+			ExitQuantity:        1,
+			Leverage:            leverage,
+			OpenStopLoss:        stopLoss,
+			RealizedPnL:         realizedPnL,
+			RealizedPnLPct:      calculateDealPnLPct(100, 1, leverage, realizedPnL),
+			HoldDurationMs:      exitTime - entryTime,
+			CloseReason:         closeReason,
+			OpenSelectionBucket: "primary",
+		}
+	}
+
+	cases := []DealReviewCase{
+		makeCase("case-1", 1, "ETHUSDT", 1.5, 2, 99, 0, 30*time.Minute, 101.5, "take_profit"),
+		makeCase("case-2", 2, "ETHUSDT", -1, 2, 99, 1*time.Hour, 30*time.Minute, 99, "manual_exit"),
+		makeCase("case-3", 3, "SOLUSDT", 0.5, 1, 95, 2*time.Hour, 30*time.Minute, 100.5, "manual_exit"),
+		makeCase("case-4", 4, "XRPUSDT", -1, 10, 99, 3*time.Hour, 5*time.Minute, 99, "stop_loss"),
+	}
+	for _, caseRec := range cases {
+		if err := root.gdb.Create(&caseRec).Error; err != nil {
+			t.Fatalf("Create(case %s) error = %v", caseRec.ID, err)
+		}
+	}
+
+	entryTimes := map[int64]int64{}
+	for _, caseRec := range cases {
+		entryTimes[caseRec.PositionID] = caseRec.EntryTimeMs
+	}
+	makePoint := func(positionID int64, symbol string, offset time.Duration, markPrice, upnl float64) DealReviewMarketPointRecord {
+		return DealReviewMarketPointRecord{
+			UserID:           trader.UserID,
+			TraderID:         trader.ID,
+			PositionID:       positionID,
+			Symbol:           symbol,
+			Side:             "LONG",
+			Source:           "platform",
+			TimestampMs:      entryTimes[positionID] + offset.Milliseconds(),
+			MarkPrice:        markPrice,
+			EntryPrice:       100,
+			Quantity:         1,
+			UnrealizedPnL:    upnl,
+			UnrealizedPnLPct: markPrice - 100,
+			InProfit:         upnl > 0,
+		}
+	}
+
+	points := []DealReviewMarketPointRecord{
+		makePoint(1, "ETHUSDT", 5*time.Minute, 102, 2),
+		makePoint(1, "ETHUSDT", 20*time.Minute, 101.2, 1.2),
+		makePoint(2, "ETHUSDT", 5*time.Minute, 102, 2),
+		makePoint(2, "ETHUSDT", 20*time.Minute, 99.5, -0.5),
+		makePoint(3, "SOLUSDT", 5*time.Minute, 97, -3),
+		makePoint(3, "SOLUSDT", 20*time.Minute, 100.6, 0.6),
+		makePoint(4, "XRPUSDT", 2*time.Minute, 99.3, -0.7),
+	}
+	for _, point := range points {
+		if err := root.gdb.Create(&point).Error; err != nil {
+			t.Fatalf("Create(point %#v) error = %v", point, err)
+		}
+	}
+
+	if err := root.DealReview().BackfillQualityMetrics(); err != nil {
+		t.Fatalf("BackfillQualityMetrics() error = %v", err)
+	}
+
+	var avoidable DealReviewCase
+	if err := root.gdb.Where("id = ?", "case-2").First(&avoidable).Error; err != nil {
+		t.Fatalf("load case-2 error = %v", err)
+	}
+	if math.Abs(avoidable.MaxFavorableExcursion-2) > 0.0001 {
+		t.Fatalf("case-2 max favorable = %v, want 2", avoidable.MaxFavorableExcursion)
+	}
+	if math.Abs(avoidable.ProfitGivenBack-3) > 0.0001 {
+		t.Fatalf("case-2 profit given back = %v, want 3", avoidable.ProfitGivenBack)
+	}
+	if avoidable.TimeToFirstProfitMs <= 0 {
+		t.Fatalf("case-2 time to first profit = %d, want positive", avoidable.TimeToFirstProfitMs)
+	}
+	if avoidable.ExitEfficiencyScore >= 35 {
+		t.Fatalf("case-2 exit efficiency = %v, want weak exit score", avoidable.ExitEfficiencyScore)
+	}
+
+	_, summary, _, err := root.DealReview().ListCases(trader.UserID, DealReviewListFilter{
+		TraderID: trader.ID,
+		Status:   DealReviewCaseStatusClosed,
+		Limit:    20,
+	})
+	if err != nil {
+		t.Fatalf("ListCases() error = %v", err)
+	}
+	if summary.BadExitDeals == 0 {
+		t.Fatalf("summary.BadExitDeals = %d, want > 0", summary.BadExitDeals)
+	}
+	if summary.AvoidableLossDeals == 0 {
+		t.Fatalf("summary.AvoidableLossDeals = %d, want > 0", summary.AvoidableLossDeals)
+	}
+	if summary.StrongEntryWeakExitDeals == 0 {
+		t.Fatalf("summary.StrongEntryWeakExitDeals = %d, want > 0", summary.StrongEntryWeakExitDeals)
+	}
+	if summary.WeakEntryLuckyExitDeals == 0 {
+		t.Fatalf("summary.WeakEntryLuckyExitDeals = %d, want > 0", summary.WeakEntryLuckyExitDeals)
+	}
+
+	anomalies, err := root.DealReview().GetAnomalySummary(trader.UserID, DealReviewListFilter{
+		TraderID: trader.ID,
+		Status:   DealReviewCaseStatusClosed,
+	})
+	if err != nil {
+		t.Fatalf("GetAnomalySummary() error = %v", err)
+	}
+	if len(anomalies.ProfitGiveBackHotspots) == 0 || anomalies.ProfitGiveBackHotspots[0].Symbol != "ETHUSDT" {
+		t.Fatalf("profit give-back hotspots = %#v, want ETHUSDT hotspot", anomalies.ProfitGiveBackHotspots)
+	}
+	if len(anomalies.EarlyStopOutHotspots) == 0 || anomalies.EarlyStopOutHotspots[0].Symbol != "XRPUSDT" {
+		t.Fatalf("early stop-out hotspots = %#v, want XRPUSDT hotspot", anomalies.EarlyStopOutHotspots)
+	}
+	if len(anomalies.OversizedLossHotspots) == 0 || anomalies.OversizedLossHotspots[0].Symbol != "XRPUSDT" {
+		t.Fatalf("oversized loss hotspots = %#v, want XRPUSDT hotspot", anomalies.OversizedLossHotspots)
+	}
+	if len(anomalies.CloseReasonQuality) == 0 {
+		t.Fatalf("close reason quality = %#v, want entries", anomalies.CloseReasonQuality)
 	}
 }

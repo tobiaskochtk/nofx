@@ -11,6 +11,7 @@ import (
 	"github.com/google/uuid"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
+	"nofx/logger"
 )
 
 const (
@@ -40,6 +41,11 @@ const (
 	DealReviewChallengerStatusCompleted = "completed"
 	DealReviewChallengerStatusStopped   = "stopped"
 	DealReviewChallengerStatusFailed    = "failed"
+
+	DealReviewClassifierHeuristic       = "heuristic_label_memory"
+	DealReviewClassifierAIAssist        = "ai_review_assist"
+	DealReviewClassifierVerdictAccepted = "accepted"
+	DealReviewClassifierVerdictRejected = "rejected"
 )
 
 type DealReviewStore struct {
@@ -77,9 +83,44 @@ type DealReviewCase struct {
 	OpenConfidence           int       `gorm:"column:open_confidence;default:0" json:"open_confidence"`
 	CloseConfidence          int       `gorm:"column:close_confidence;default:0" json:"close_confidence"`
 	OpenSelectionBucket      string    `gorm:"column:open_selection_bucket;default:''" json:"open_selection_bucket"`
+	OpenTrendRegime          string    `gorm:"column:open_trend_regime;default:''" json:"open_trend_regime"`
+	OpenVolatilityRegime     string    `gorm:"column:open_volatility_regime;default:''" json:"open_volatility_regime"`
+	OpenBTCStrengthRegime    string    `gorm:"column:open_btc_strength_regime;default:''" json:"open_btc_strength_regime"`
+	OpenFundingRegime        string    `gorm:"column:open_funding_regime;default:''" json:"open_funding_regime"`
+	OpenOIRegime             string    `gorm:"column:open_oi_regime;default:''" json:"open_oi_regime"`
+	OpenSessionBucket        string    `gorm:"column:open_session_bucket;default:''" json:"open_session_bucket"`
+	OpenWeekdayBucket        string    `gorm:"column:open_weekday_bucket;default:''" json:"open_weekday_bucket"`
+	OpenVenueTier            string    `gorm:"column:open_venue_tier;default:''" json:"open_venue_tier"`
+	OpenLiquidityTier        string    `gorm:"column:open_liquidity_tier;default:''" json:"open_liquidity_tier"`
+	OpenSpreadBucket         string    `gorm:"column:open_spread_bucket;default:''" json:"open_spread_bucket"`
+	OpenSlippageBucket       string    `gorm:"column:open_slippage_bucket;default:''" json:"open_slippage_bucket"`
+	CloseTrendRegime         string    `gorm:"column:close_trend_regime;default:''" json:"close_trend_regime"`
+	CloseVolatilityRegime    string    `gorm:"column:close_volatility_regime;default:''" json:"close_volatility_regime"`
+	CloseBTCStrengthRegime   string    `gorm:"column:close_btc_strength_regime;default:''" json:"close_btc_strength_regime"`
+	CloseFundingRegime       string    `gorm:"column:close_funding_regime;default:''" json:"close_funding_regime"`
+	CloseOIRegime            string    `gorm:"column:close_oi_regime;default:''" json:"close_oi_regime"`
+	CloseSessionBucket       string    `gorm:"column:close_session_bucket;default:''" json:"close_session_bucket"`
+	CloseWeekdayBucket       string    `gorm:"column:close_weekday_bucket;default:''" json:"close_weekday_bucket"`
+	CloseVenueTier           string    `gorm:"column:close_venue_tier;default:''" json:"close_venue_tier"`
+	CloseLiquidityTier       string    `gorm:"column:close_liquidity_tier;default:''" json:"close_liquidity_tier"`
+	CloseSpreadBucket        string    `gorm:"column:close_spread_bucket;default:''" json:"close_spread_bucket"`
+	CloseSlippageBucket      string    `gorm:"column:close_slippage_bucket;default:''" json:"close_slippage_bucket"`
 	OpenCandidateSourcesJSON string    `gorm:"column:open_candidate_sources_json;type:text;default:'[]'" json:"-"`
 	LabelsJSON               string    `gorm:"column:labels_json;type:text;default:'[]'" json:"-"`
 	AnalystNote              string    `gorm:"column:analyst_note;type:text;default:''" json:"analyst_note"`
+	MaxFavorableExcursion    float64   `gorm:"column:max_favorable_excursion;default:0" json:"max_favorable_excursion"`
+	MaxFavorableExcursionPct float64   `gorm:"column:max_favorable_excursion_pct;default:0" json:"max_favorable_excursion_pct"`
+	MaxAdverseExcursion      float64   `gorm:"column:max_adverse_excursion;default:0" json:"max_adverse_excursion"`
+	MaxAdverseExcursionPct   float64   `gorm:"column:max_adverse_excursion_pct;default:0" json:"max_adverse_excursion_pct"`
+	MFECapturedPct           float64   `gorm:"column:mfe_captured_pct;default:0" json:"mfe_captured_pct"`
+	ProfitGivenBack          float64   `gorm:"column:profit_given_back;default:0" json:"profit_given_back"`
+	ProfitGivenBackPct       float64   `gorm:"column:profit_given_back_pct;default:0" json:"profit_given_back_pct"`
+	TimeToFirstProfitMs      int64     `gorm:"column:time_to_first_profit_ms;default:0" json:"time_to_first_profit_ms"`
+	TimeToMaxDrawdownMs      int64     `gorm:"column:time_to_max_drawdown_ms;default:0" json:"time_to_max_drawdown_ms"`
+	PlannedRiskPct           float64   `gorm:"column:planned_risk_pct;default:0" json:"planned_risk_pct"`
+	ExitEfficiencyScore      float64   `gorm:"column:exit_efficiency_score;default:0" json:"exit_efficiency_score"`
+	EntryTimingScore         float64   `gorm:"column:entry_timing_score;default:0" json:"entry_timing_score"`
+	RiskSizingScore          float64   `gorm:"column:risk_sizing_score;default:0" json:"risk_sizing_score"`
 	RealizedPnL              float64   `gorm:"column:realized_pnl;default:0" json:"realized_pnl"`
 	RealizedPnLPct           float64   `gorm:"column:realized_pnl_pct;default:0" json:"realized_pnl_pct"`
 	Fee                      float64   `gorm:"column:fee;default:0" json:"fee"`
@@ -162,8 +203,11 @@ type DealReviewStrategyVersion struct {
 	SourceCompareID    string    `gorm:"column:source_compare_id;default:'';index:idx_deal_review_strategy_versions_compare" json:"source_compare_id"`
 	SourceType         string    `gorm:"column:source_type;default:'ai_apply'" json:"source_type"`
 	Summary            string    `gorm:"column:summary;type:text;default:''" json:"summary"`
+	ExpectedEffect     string    `gorm:"column:expected_effect;type:text;default:''" json:"expected_effect"`
+	TargetCohortJSON   string    `gorm:"column:target_cohort_json;type:text;default:'{}'" json:"-"`
 	PreviousConfigJSON string    `gorm:"column:previous_config_json;type:text;default:'{}'" json:"-"`
 	NextConfigJSON     string    `gorm:"column:next_config_json;type:text;default:'{}'" json:"-"`
+	AppliedAt          time.Time `gorm:"column:applied_at;index:idx_deal_review_strategy_versions_applied" json:"applied_at"`
 	CreatedAt          time.Time `json:"created_at"`
 	UpdatedAt          time.Time `json:"updated_at"`
 }
@@ -223,18 +267,82 @@ type DealReviewCyclePointRecord struct {
 
 func (DealReviewCyclePointRecord) TableName() string { return "deal_review_cycle_points" }
 
+type DealReviewMarketPointRecord struct {
+	ID               int64     `gorm:"primaryKey;autoIncrement" json:"id"`
+	UserID           string    `gorm:"column:user_id;not null;index:idx_deal_review_market_points_user_time" json:"user_id"`
+	TraderID         string    `gorm:"column:trader_id;not null;index:idx_deal_review_market_points_trader_time" json:"trader_id"`
+	DealID           string    `gorm:"column:deal_id;default:'';index:idx_deal_review_market_points_deal" json:"deal_id"`
+	PositionID       int64     `gorm:"column:position_id;not null;index:idx_deal_review_market_points_position;uniqueIndex:idx_deal_review_market_points_position_source_time" json:"position_id"`
+	Symbol           string    `gorm:"column:symbol;not null;index:idx_deal_review_market_points_symbol" json:"symbol"`
+	Side             string    `gorm:"column:side;not null" json:"side"`
+	Source           string    `gorm:"column:source;not null;default:platform;index:idx_deal_review_market_points_source;uniqueIndex:idx_deal_review_market_points_position_source_time" json:"source"`
+	TimestampMs      int64     `gorm:"column:timestamp_ms;not null;index:idx_deal_review_market_points_time;uniqueIndex:idx_deal_review_market_points_position_source_time" json:"timestamp_ms"`
+	MarkPrice        float64   `gorm:"column:mark_price;default:0" json:"mark_price"`
+	EntryPrice       float64   `gorm:"column:entry_price;default:0" json:"entry_price"`
+	Quantity         float64   `gorm:"column:quantity;default:0" json:"quantity"`
+	UnrealizedPnL    float64   `gorm:"column:unrealized_pnl;default:0" json:"unrealized_pnl"`
+	UnrealizedPnLPct float64   `gorm:"column:unrealized_pnl_pct;default:0" json:"unrealized_pnl_pct"`
+	InProfit         bool      `gorm:"column:in_profit;default:false" json:"in_profit"`
+	CreatedAt        time.Time `json:"created_at"`
+	UpdatedAt        time.Time `json:"updated_at"`
+}
+
+func (DealReviewMarketPointRecord) TableName() string { return "deal_review_market_points" }
+
+type DealReviewClassifierFeedback struct {
+	ID            string    `gorm:"primaryKey" json:"id"`
+	UserID        string    `gorm:"column:user_id;not null;index:idx_deal_review_classifier_feedback_user_case" json:"user_id"`
+	TraderID      string    `gorm:"column:trader_id;not null;index:idx_deal_review_classifier_feedback_trader_case" json:"trader_id"`
+	CaseID        string    `gorm:"column:case_id;not null;index:idx_deal_review_classifier_feedback_user_case;uniqueIndex:idx_deal_review_classifier_feedback_case_suggestion" json:"case_id"`
+	ClassifierID  string    `gorm:"column:classifier_id;not null;index:idx_deal_review_classifier_feedback_case_suggestion" json:"classifier_id"`
+	SuggestionKey string    `gorm:"column:suggestion_key;not null;index:idx_deal_review_classifier_feedback_case_suggestion" json:"suggestion_key"`
+	Label         string    `gorm:"column:label;not null;index:idx_deal_review_classifier_feedback_label" json:"label"`
+	IssueType     string    `gorm:"column:issue_type;default:'';index:idx_deal_review_classifier_feedback_issue" json:"issue_type"`
+	Verdict       string    `gorm:"column:verdict;not null;index:idx_deal_review_classifier_feedback_verdict" json:"verdict"`
+	Rationale     string    `gorm:"column:rationale;type:text;default:''" json:"rationale"`
+	CreatedAt     time.Time `json:"created_at"`
+	UpdatedAt     time.Time `json:"updated_at"`
+}
+
+func (DealReviewClassifierFeedback) TableName() string {
+	return "deal_review_classifier_feedback"
+}
+
+type DealReviewClassifierSuggestion struct {
+	ClassifierID    string  `json:"classifier_id"`
+	SuggestionKey   string  `json:"suggestion_key"`
+	Label           string  `json:"label"`
+	IssueType       string  `json:"issue_type,omitempty"`
+	Score           float64 `json:"score"`
+	HighlightLevel  string  `json:"highlight_level,omitempty"`
+	EvidenceCount   int     `json:"evidence_count"`
+	AcceptedCount   int     `json:"accepted_count"`
+	RejectedCount   int     `json:"rejected_count"`
+	FeedbackVerdict string  `json:"feedback_verdict,omitempty"`
+	Rationale       string  `json:"rationale,omitempty"`
+}
+
+type DealReviewClassifierAssist struct {
+	Source         string                           `json:"source"`
+	Summary        string                           `json:"summary"`
+	HighlightScore float64                          `json:"highlight_score"`
+	HighlightLevel string                           `json:"highlight_level,omitempty"`
+	Suggestions    []DealReviewClassifierSuggestion `json:"suggestions,omitempty"`
+}
+
 type DealReviewEventSnapshot struct {
-	AccountState     AccountSnapshot    `json:"account_state"`
-	Positions        []PositionSnapshot `json:"positions,omitempty"`
-	CandidateCoins   []string           `json:"candidate_coins,omitempty"`
-	CandidateDetails []CandidateDetail  `json:"candidate_details,omitempty"`
-	ExecutionLog     []string           `json:"execution_log,omitempty"`
-	SystemPrompt     string             `json:"system_prompt,omitempty"`
-	UserPrompt       string             `json:"user_prompt,omitempty"`
-	DecisionJSON     string             `json:"decision_json,omitempty"`
-	RawResponse      string             `json:"raw_response,omitempty"`
-	CoTTrace         string             `json:"cot_trace,omitempty"`
-	AIRequestMs      int64              `json:"ai_request_duration_ms,omitempty"`
+	AccountState     AccountSnapshot                  `json:"account_state"`
+	Positions        []PositionSnapshot               `json:"positions,omitempty"`
+	CandidateCoins   []string                         `json:"candidate_coins,omitempty"`
+	CandidateDetails []CandidateDetail                `json:"candidate_details,omitempty"`
+	MarketContext    *DealReviewMarketContextSnapshot `json:"market_context,omitempty"`
+	ExecutionLog     []string                         `json:"execution_log,omitempty"`
+	SystemPrompt     string                           `json:"system_prompt,omitempty"`
+	UserPrompt       string                           `json:"user_prompt,omitempty"`
+	DecisionJSON     string                           `json:"decision_json,omitempty"`
+	RawResponse      string                           `json:"raw_response,omitempty"`
+	CoTTrace         string                           `json:"cot_trace,omitempty"`
+	AIRequestMs      int64                            `json:"ai_request_duration_ms,omitempty"`
 }
 
 type DealReviewDecisionEventInput struct {
@@ -274,48 +382,101 @@ type dealReviewExitExecutionContext struct {
 }
 
 type DealReviewListFilter struct {
-	TraderID string
-	Symbol   string
-	Side     string
-	Status   string
-	Outcome  string
-	FromTime int64
-	ToTime   int64
-	MinPnL   *float64
-	MaxPnL   *float64
-	Limit    int
-	Offset   int
+	TraderID               string
+	Symbol                 string
+	Side                   string
+	Status                 string
+	Outcome                string
+	OpenSelectionBucket    string
+	CloseReason            string
+	OpenTrendRegime        string
+	OpenVolatilityRegime   string
+	OpenBTCStrengthRegime  string
+	OpenFundingRegime      string
+	OpenOIRegime           string
+	OpenSessionBucket      string
+	OpenWeekdayBucket      string
+	OpenVenueTier          string
+	OpenLiquidityTier      string
+	OpenSpreadBucket       string
+	OpenSlippageBucket     string
+	CloseTrendRegime       string
+	CloseVolatilityRegime  string
+	CloseBTCStrengthRegime string
+	CloseFundingRegime     string
+	CloseOIRegime          string
+	CloseSessionBucket     string
+	CloseWeekdayBucket     string
+	CloseVenueTier         string
+	CloseLiquidityTier     string
+	CloseSpreadBucket      string
+	CloseSlippageBucket    string
+	FromTime               int64
+	ToTime                 int64
+	MinPnL                 *float64
+	MaxPnL                 *float64
+	Limit                  int
+	Offset                 int
 }
 
 type DealReviewCaseListItem struct {
-	Case                 DealReviewCase `json:"case"`
-	TraderName           string         `json:"trader_name"`
-	StrategyName         string         `json:"strategy_name"`
-	OpenReasoning        string         `json:"open_reasoning"`
-	CloseReasoning       string         `json:"close_reasoning"`
-	Labels               []string       `json:"labels,omitempty"`
-	OpenCandidateSources []string       `json:"open_candidate_sources,omitempty"`
+	Case                 DealReviewCase                  `json:"case"`
+	TraderName           string                          `json:"trader_name"`
+	StrategyName         string                          `json:"strategy_name"`
+	OpenReasoning        string                          `json:"open_reasoning"`
+	CloseReasoning       string                          `json:"close_reasoning"`
+	Labels               []string                        `json:"labels,omitempty"`
+	OpenCandidateSources []string                        `json:"open_candidate_sources,omitempty"`
+	PriceTimelineSummary *DealReviewPriceTimelineSummary `json:"price_timeline_summary,omitempty"`
+	ClassifierAssist     *DealReviewClassifierAssist     `json:"classifier_assist,omitempty"`
+}
+
+type DealReviewFilterPreset struct {
+	ID         string    `gorm:"primaryKey" json:"id"`
+	UserID     string    `gorm:"column:user_id;not null;index:idx_deal_review_filter_presets_user_trader" json:"user_id"`
+	TraderID   string    `gorm:"column:trader_id;not null;index:idx_deal_review_filter_presets_user_trader" json:"trader_id"`
+	Name       string    `gorm:"column:name;not null;index:idx_deal_review_filter_presets_name" json:"name"`
+	FilterJSON string    `gorm:"column:filter_json;type:text;default:'{}'" json:"-"`
+	CreatedAt  time.Time `json:"created_at"`
+	UpdatedAt  time.Time `json:"updated_at"`
+}
+
+func (DealReviewFilterPreset) TableName() string { return "deal_review_filter_presets" }
+
+type DealReviewFilterPresetDetail struct {
+	Preset  DealReviewFilterPreset `json:"preset"`
+	Filters map[string]any         `json:"filters,omitempty"`
 }
 
 type DealReviewDatasetSummary struct {
-	TotalDeals   int64   `json:"total_deals"`
-	OpenDeals    int64   `json:"open_deals"`
-	ClosedDeals  int64   `json:"closed_deals"`
-	WinningDeals int64   `json:"winning_deals"`
-	LosingDeals  int64   `json:"losing_deals"`
-	FlatDeals    int64   `json:"flat_deals"`
-	WinRate      float64 `json:"win_rate"`
-	NetPnL       float64 `json:"net_pnl"`
-	AvgPnL       float64 `json:"avg_pnl"`
-	Expectancy   float64 `json:"expectancy"`
-	AvgPnLPct    float64 `json:"avg_pnl_pct"`
-	AvgHoldMs    int64   `json:"avg_hold_ms"`
-	ProfitFactor float64 `json:"profit_factor"`
-	MaxDrawdown  float64 `json:"max_drawdown_pct"`
-	LongDeals    int64   `json:"long_deals"`
-	ShortDeals   int64   `json:"short_deals"`
-	LongNetPnL   float64 `json:"long_net_pnl"`
-	ShortNetPnL  float64 `json:"short_net_pnl"`
+	TotalDeals               int64   `json:"total_deals"`
+	OpenDeals                int64   `json:"open_deals"`
+	ClosedDeals              int64   `json:"closed_deals"`
+	WinningDeals             int64   `json:"winning_deals"`
+	LosingDeals              int64   `json:"losing_deals"`
+	FlatDeals                int64   `json:"flat_deals"`
+	WinRate                  float64 `json:"win_rate"`
+	NetPnL                   float64 `json:"net_pnl"`
+	AvgPnL                   float64 `json:"avg_pnl"`
+	Expectancy               float64 `json:"expectancy"`
+	AvgPnLPct                float64 `json:"avg_pnl_pct"`
+	AvgHoldMs                int64   `json:"avg_hold_ms"`
+	ProfitFactor             float64 `json:"profit_factor"`
+	MaxDrawdown              float64 `json:"max_drawdown_pct"`
+	LongDeals                int64   `json:"long_deals"`
+	ShortDeals               int64   `json:"short_deals"`
+	LongNetPnL               float64 `json:"long_net_pnl"`
+	ShortNetPnL              float64 `json:"short_net_pnl"`
+	AvgMFECapturedPct        float64 `json:"avg_mfe_captured_pct"`
+	AvgProfitGivenBackPct    float64 `json:"avg_profit_given_back_pct"`
+	AvgExitEfficiencyScore   float64 `json:"avg_exit_efficiency_score"`
+	AvgEntryTimingScore      float64 `json:"avg_entry_timing_score"`
+	AvgRiskSizingScore       float64 `json:"avg_risk_sizing_score"`
+	BadEntryDeals            int64   `json:"bad_entry_deals"`
+	BadExitDeals             int64   `json:"bad_exit_deals"`
+	AvoidableLossDeals       int64   `json:"avoidable_loss_deals"`
+	StrongEntryWeakExitDeals int64   `json:"strong_entry_weak_exit_deals"`
+	WeakEntryLuckyExitDeals  int64   `json:"weak_entry_lucky_exit_deals"`
 }
 
 type DealReviewEventDetail struct {
@@ -326,14 +487,16 @@ type DealReviewEventDetail struct {
 }
 
 type DealReviewCaseDetail struct {
-	Case                 DealReviewCase           `json:"case"`
-	TraderName           string                   `json:"trader_name"`
-	StrategyName         string                   `json:"strategy_name"`
-	Labels               []string                 `json:"labels,omitempty"`
-	OpenCandidateSources []string                 `json:"open_candidate_sources,omitempty"`
-	Open                 *DealReviewEventDetail   `json:"open,omitempty"`
-	Close                *DealReviewEventDetail   `json:"close,omitempty"`
-	PriceTimeline        *DealReviewPriceTimeline `json:"price_timeline,omitempty"`
+	Case                 DealReviewCase              `json:"case"`
+	TraderName           string                      `json:"trader_name"`
+	StrategyName         string                      `json:"strategy_name"`
+	Labels               []string                    `json:"labels,omitempty"`
+	OpenCandidateSources []string                    `json:"open_candidate_sources,omitempty"`
+	Open                 *DealReviewEventDetail      `json:"open,omitempty"`
+	Close                *DealReviewEventDetail      `json:"close,omitempty"`
+	PriceTimeline        *DealReviewPriceTimeline    `json:"price_timeline,omitempty"`
+	ClassifierAssist     *DealReviewClassifierAssist `json:"classifier_assist,omitempty"`
+	AIClassifierAssist   *DealReviewClassifierAssist `json:"ai_classifier_assist,omitempty"`
 }
 
 type DealReviewPriceTimelinePoint struct {
@@ -350,6 +513,7 @@ type DealReviewPriceTimelinePoint struct {
 
 type DealReviewPriceTimelineSummary struct {
 	CycleSamples        int     `json:"cycle_samples"`
+	PlatformSamples     int     `json:"platform_samples"`
 	PointCount          int     `json:"point_count"`
 	EverInProfit        bool    `json:"ever_in_profit"`
 	MaxUnrealizedPnL    float64 `json:"max_unrealized_pnl"`
@@ -450,9 +614,30 @@ type DealReviewAIScanDetail struct {
 }
 
 type DealReviewStrategyVersionDetail struct {
-	Version        DealReviewStrategyVersion `json:"version"`
-	PreviousConfig map[string]any            `json:"previous_config,omitempty"`
-	NextConfig     map[string]any            `json:"next_config,omitempty"`
+	Version           DealReviewStrategyVersion             `json:"version"`
+	PreviousConfig    map[string]any                        `json:"previous_config,omitempty"`
+	NextConfig        map[string]any                        `json:"next_config,omitempty"`
+	TargetCohort      map[string]any                        `json:"target_cohort,omitempty"`
+	SourceScanSummary string                                `json:"source_scan_summary,omitempty"`
+	CompareSummary    string                                `json:"compare_summary,omitempty"`
+	Attribution       *DealReviewStrategyVersionAttribution `json:"attribution,omitempty"`
+}
+
+type DealReviewStrategyVersionAttribution struct {
+	ObservationReady       bool                      `json:"observation_ready"`
+	BeforeStart            time.Time                 `json:"before_start"`
+	BeforeEnd              time.Time                 `json:"before_end"`
+	AfterStart             time.Time                 `json:"after_start"`
+	AfterEnd               time.Time                 `json:"after_end"`
+	FullBeforeSummary      *DealReviewDatasetSummary `json:"full_before_summary,omitempty"`
+	FullAfterSummary       *DealReviewDatasetSummary `json:"full_after_summary,omitempty"`
+	TargetBeforeSummary    *DealReviewDatasetSummary `json:"target_before_summary,omitempty"`
+	TargetAfterSummary     *DealReviewDatasetSummary `json:"target_after_summary,omitempty"`
+	NonTargetBeforeSummary *DealReviewDatasetSummary `json:"non_target_before_summary,omitempty"`
+	NonTargetAfterSummary  *DealReviewDatasetSummary `json:"non_target_after_summary,omitempty"`
+	Warnings               []string                  `json:"warnings,omitempty"`
+	RollbackSuggested      bool                      `json:"rollback_suggested"`
+	Note                   string                    `json:"note,omitempty"`
 }
 
 type DealReviewChallengerMetrics struct {
@@ -511,13 +696,50 @@ type DealReviewAnomalyCloseReason struct {
 	AvgPnL float64 `json:"avg_pnl"`
 }
 
+type DealReviewAnomalyGiveBack struct {
+	Symbol            string  `json:"symbol"`
+	Deals             int64   `json:"deals"`
+	NetPnL            float64 `json:"net_pnl"`
+	AvgGiveBackPct    float64 `json:"avg_give_back_pct"`
+	AvgMFECapturedPct float64 `json:"avg_mfe_captured_pct"`
+}
+
+type DealReviewAnomalyStopOut struct {
+	Symbol    string  `json:"symbol"`
+	Deals     int64   `json:"deals"`
+	NetPnL    float64 `json:"net_pnl"`
+	AvgHoldMs int64   `json:"avg_hold_ms"`
+	AvgMAEPct float64 `json:"avg_mae_pct"`
+}
+
+type DealReviewAnomalySizing struct {
+	Symbol             string  `json:"symbol"`
+	Deals              int64   `json:"deals"`
+	NetPnL             float64 `json:"net_pnl"`
+	AvgRiskSizingScore float64 `json:"avg_risk_sizing_score"`
+	AvgPlannedRiskPct  float64 `json:"avg_planned_risk_pct"`
+}
+
+type DealReviewAnomalyCloseReasonQuality struct {
+	Reason                 string  `json:"reason"`
+	Deals                  int64   `json:"deals"`
+	NetPnL                 float64 `json:"net_pnl"`
+	AvgExitEfficiencyScore float64 `json:"avg_exit_efficiency_score"`
+	AvgMFECapturedPct      float64 `json:"avg_mfe_captured_pct"`
+	AvgGiveBackPct         float64 `json:"avg_give_back_pct"`
+}
+
 type DealReviewAnomalySummary struct {
-	ClosedDeals       int64                          `json:"closed_deals"`
-	WorstSymbols      []DealReviewAnomalySymbol      `json:"worst_symbols,omitempty"`
-	OvertradedSymbols []DealReviewAnomalySymbol      `json:"overtraded_symbols,omitempty"`
-	WeakBuckets       []DealReviewAnomalyBucket      `json:"weak_buckets,omitempty"`
-	WeakCloseReasons  []DealReviewAnomalyCloseReason `json:"weak_close_reasons,omitempty"`
-	Notes             []string                       `json:"notes,omitempty"`
+	ClosedDeals            int64                                 `json:"closed_deals"`
+	WorstSymbols           []DealReviewAnomalySymbol             `json:"worst_symbols,omitempty"`
+	OvertradedSymbols      []DealReviewAnomalySymbol             `json:"overtraded_symbols,omitempty"`
+	WeakBuckets            []DealReviewAnomalyBucket             `json:"weak_buckets,omitempty"`
+	WeakCloseReasons       []DealReviewAnomalyCloseReason        `json:"weak_close_reasons,omitempty"`
+	ProfitGiveBackHotspots []DealReviewAnomalyGiveBack           `json:"profit_give_back_hotspots,omitempty"`
+	EarlyStopOutHotspots   []DealReviewAnomalyStopOut            `json:"early_stop_out_hotspots,omitempty"`
+	OversizedLossHotspots  []DealReviewAnomalySizing             `json:"oversized_loss_hotspots,omitempty"`
+	CloseReasonQuality     []DealReviewAnomalyCloseReasonQuality `json:"close_reason_quality,omitempty"`
+	Notes                  []string                              `json:"notes,omitempty"`
 }
 
 func NewDealReviewStore(db *gorm.DB) *DealReviewStore {
@@ -525,11 +747,8 @@ func NewDealReviewStore(db *gorm.DB) *DealReviewStore {
 }
 
 func (s *DealReviewStore) initTables() error {
-	if err := s.db.AutoMigrate(&DealReviewCase{}, &DealReviewEvent{}, &DealReviewAIScan{}, &DealReviewStrategyVersion{}, &DealReviewChallengerCompare{}, &DealReviewCyclePointRecord{}); err != nil {
+	if err := s.db.AutoMigrate(&DealReviewCase{}, &DealReviewEvent{}, &DealReviewAIScan{}, &DealReviewStrategyVersion{}, &DealReviewChallengerCompare{}, &DealReviewCyclePointRecord{}, &DealReviewMarketPointRecord{}, &DealReviewClassifierFeedback{}, &DealReviewFilterPreset{}); err != nil {
 		return fmt.Errorf("failed to migrate deal review tables: %w", err)
-	}
-	if err := s.backfillExistingPositions(); err != nil {
-		return fmt.Errorf("failed to backfill deal review positions: %w", err)
 	}
 	return nil
 }
@@ -661,7 +880,10 @@ func (s *DealReviewStore) SyncClosedPosition(position *TraderPosition) error {
 		if err != nil {
 			return err
 		}
-		return s.linkEventForPositionTx(tx, DealReviewStageClose, position.ExitOrderID, caseRec, position)
+		if err := s.linkEventForPositionTx(tx, DealReviewStageClose, position.ExitOrderID, caseRec, position); err != nil {
+			return err
+		}
+		return s.refreshCaseQualityMetricsTx(tx, caseRec)
 	})
 }
 
@@ -670,8 +892,16 @@ func (s *DealReviewStore) SyncPosition(position *TraderPosition) error {
 		return nil
 	}
 	return s.db.Transaction(func(tx *gorm.DB) error {
-		return s.syncPositionTx(tx, position)
+		return s.syncPositionTx(tx, position, true)
 	})
+}
+
+func (s *DealReviewStore) BackfillExistingPositions() error {
+	return s.backfillExistingPositions()
+}
+
+func (s *DealReviewStore) BackfillQualityMetrics() error {
+	return s.backfillQualityMetrics()
 }
 
 func (s *DealReviewStore) backfillExistingPositions() error {
@@ -681,7 +911,7 @@ func (s *DealReviewStore) backfillExistingPositions() error {
 		Order("id ASC").
 		FindInBatches(&positions, 200, func(tx *gorm.DB, _ int) error {
 			for i := range positions {
-				if err := s.syncPositionTx(tx, &positions[i]); err != nil {
+				if err := s.syncPositionTx(tx, &positions[i], false); err != nil {
 					return err
 				}
 			}
@@ -689,7 +919,7 @@ func (s *DealReviewStore) backfillExistingPositions() error {
 		}).Error
 }
 
-func (s *DealReviewStore) syncPositionTx(tx *gorm.DB, position *TraderPosition) error {
+func (s *DealReviewStore) syncPositionTx(tx *gorm.DB, position *TraderPosition, includeTimelineBackfill bool) error {
 	if position == nil || position.ID == 0 {
 		return nil
 	}
@@ -704,7 +934,12 @@ func (s *DealReviewStore) syncPositionTx(tx *gorm.DB, position *TraderPosition) 
 		if err := s.linkEventForPositionTx(tx, DealReviewStageClose, position.ExitOrderID, caseRec, position); err != nil {
 			return err
 		}
-		if err := s.backfillCaseDecisionCyclePricePointsTx(tx, caseRec, position, time.Now().UTC().UnixMilli(), true); err != nil {
+		if includeTimelineBackfill {
+			if err := s.backfillCaseDecisionCyclePricePointsTx(tx, caseRec, position, time.Now().UTC().UnixMilli(), true); err != nil {
+				return err
+			}
+		}
+		if err := s.refreshCaseQualityMetricsTx(tx, caseRec); err != nil {
 			return err
 		}
 	}
@@ -779,7 +1014,33 @@ func (s *DealReviewStore) GetCaseDetail(userID, traderID, caseID string) (*DealR
 	if timeline, err := s.buildCasePriceTimeline(&caseRec); err == nil && timeline != nil {
 		detail.PriceTimeline = timeline
 	}
+	if assist, err := s.BuildHeuristicClassifierAssist(userID, traderID, &caseRec); err == nil {
+		detail.ClassifierAssist = assist
+	}
 	return detail, nil
+}
+
+// GetLatestOpenCaseBySymbol returns the latest open deal-review case for a symbol/side pair.
+func (s *DealReviewStore) GetLatestOpenCaseBySymbol(userID, traderID, symbol, side string) (*DealReviewCase, error) {
+	var caseRec DealReviewCase
+	err := s.db.
+		Where(
+			"user_id = ? AND trader_id = ? AND symbol = ? AND side = ? AND status = ?",
+			userID,
+			traderID,
+			strings.ToUpper(strings.TrimSpace(symbol)),
+			strings.ToUpper(strings.TrimSpace(side)),
+			DealReviewCaseStatusOpen,
+		).
+		Order("entry_time_ms DESC, created_at DESC").
+		First(&caseRec).Error
+	if err != nil {
+		if err == gorm.ErrRecordNotFound {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return &caseRec, nil
 }
 
 func (s *DealReviewStore) ListAnalysisCases(userID string, filter DealReviewListFilter, limit int) ([]DealReviewCaseDetail, *DealReviewDatasetSummary, error) {
@@ -823,6 +1084,12 @@ func (s *DealReviewStore) SaveStrategyVersion(version *DealReviewStrategyVersion
 	if strings.TrimSpace(version.ID) == "" {
 		version.ID = uuid.NewString()
 	}
+	if version.AppliedAt.IsZero() {
+		version.AppliedAt = time.Now().UTC()
+	}
+	if strings.TrimSpace(version.TargetCohortJSON) == "" {
+		version.TargetCohortJSON = "{}"
+	}
 	return s.db.Save(version).Error
 }
 
@@ -842,6 +1109,398 @@ func (s *DealReviewStore) SaveChallengerCompare(compare *DealReviewChallengerCom
 	return s.db.Save(compare).Error
 }
 
+func (s *DealReviewStore) SaveFilterPreset(preset *DealReviewFilterPreset) error {
+	if preset == nil {
+		return fmt.Errorf("filter preset cannot be nil")
+	}
+	if strings.TrimSpace(preset.ID) == "" {
+		preset.ID = uuid.NewString()
+	}
+	preset.Name = strings.TrimSpace(preset.Name)
+	if preset.Name == "" {
+		return fmt.Errorf("filter preset name cannot be empty")
+	}
+	if strings.TrimSpace(preset.FilterJSON) == "" {
+		preset.FilterJSON = "{}"
+	}
+	return s.db.Save(preset).Error
+}
+
+func (s *DealReviewStore) ListFilterPresets(userID, traderID string) ([]DealReviewFilterPresetDetail, error) {
+	var presets []DealReviewFilterPreset
+	if err := s.db.
+		Where("user_id = ? AND trader_id = ?", userID, traderID).
+		Order("updated_at DESC, created_at DESC").
+		Find(&presets).Error; err != nil {
+		return nil, err
+	}
+	result := make([]DealReviewFilterPresetDetail, 0, len(presets))
+	for _, preset := range presets {
+		result = append(result, buildDealReviewFilterPresetDetail(preset))
+	}
+	return result, nil
+}
+
+func (s *DealReviewStore) DeleteFilterPreset(userID, traderID, presetID string) error {
+	return s.db.
+		Where("id = ? AND user_id = ? AND trader_id = ?", presetID, userID, traderID).
+		Delete(&DealReviewFilterPreset{}).Error
+}
+
+func buildDealReviewFilterPresetDetail(preset DealReviewFilterPreset) DealReviewFilterPresetDetail {
+	detail := DealReviewFilterPresetDetail{
+		Preset:  preset,
+		Filters: map[string]any{},
+	}
+	if strings.TrimSpace(preset.FilterJSON) != "" && strings.TrimSpace(preset.FilterJSON) != "{}" {
+		_ = json.Unmarshal([]byte(preset.FilterJSON), &detail.Filters)
+	}
+	return detail
+}
+
+func effectiveDealReviewStrategyVersionTime(version DealReviewStrategyVersion) time.Time {
+	if !version.AppliedAt.IsZero() {
+		return version.AppliedAt.UTC()
+	}
+	return version.CreatedAt.UTC()
+}
+
+func sanitizeDealReviewTargetCohortMap(raw map[string]any) map[string]any {
+	if len(raw) == 0 {
+		return nil
+	}
+	result := map[string]any{}
+	for key, value := range raw {
+		normalizedKey := strings.TrimSpace(strings.ToLower(key))
+		switch normalizedKey {
+		case "", "from_time", "to_time", "min_pnl", "max_pnl", "outcome", "status", "limit", "offset", "trader_id":
+			continue
+		}
+		switch typed := value.(type) {
+		case string:
+			trimmed := strings.TrimSpace(typed)
+			if trimmed == "" {
+				continue
+			}
+			result[normalizedKey] = trimmed
+		default:
+			result[normalizedKey] = value
+		}
+	}
+	if len(result) == 0 {
+		return nil
+	}
+	return result
+}
+
+func (s *DealReviewStore) getStrategyVersionNeighbors(version *DealReviewStrategyVersion) (*DealReviewStrategyVersion, *DealReviewStrategyVersion, error) {
+	if version == nil {
+		return nil, nil, nil
+	}
+	var previous DealReviewStrategyVersion
+	prevErr := s.db.
+		Where("user_id = ? AND trader_id = ? AND created_at < ?", version.UserID, version.TraderID, version.CreatedAt).
+		Order("created_at DESC").
+		First(&previous).Error
+	if prevErr != nil && prevErr != gorm.ErrRecordNotFound {
+		return nil, nil, prevErr
+	}
+
+	var next DealReviewStrategyVersion
+	nextErr := s.db.
+		Where("user_id = ? AND trader_id = ? AND created_at > ?", version.UserID, version.TraderID, version.CreatedAt).
+		Order("created_at ASC").
+		First(&next).Error
+	if nextErr != nil && nextErr != gorm.ErrRecordNotFound {
+		return nil, nil, nextErr
+	}
+
+	var prevPtr *DealReviewStrategyVersion
+	if prevErr == nil {
+		prevCopy := previous
+		prevPtr = &prevCopy
+	}
+	var nextPtr *DealReviewStrategyVersion
+	if nextErr == nil {
+		nextCopy := next
+		nextPtr = &nextCopy
+	}
+	return prevPtr, nextPtr, nil
+}
+
+func summarizeDealReviewClosedCaseRows(cases []DealReviewCase) *DealReviewDatasetSummary {
+	summary := &DealReviewDatasetSummary{}
+	var grossProfit float64
+	var grossLoss float64
+	pnlPctSeries := make([]float64, 0, len(cases))
+
+	for _, caseRec := range cases {
+		if caseRec.Status != DealReviewCaseStatusClosed {
+			continue
+		}
+		summary.TotalDeals++
+		summary.ClosedDeals++
+		summary.NetPnL += caseRec.RealizedPnL
+		summary.AvgPnLPct += caseRec.RealizedPnLPct
+		summary.AvgHoldMs += caseRec.HoldDurationMs
+		pnlPctSeries = append(pnlPctSeries, caseRec.RealizedPnLPct)
+		if caseRec.Side == "LONG" {
+			summary.LongDeals++
+			summary.LongNetPnL += caseRec.RealizedPnL
+		} else if caseRec.Side == "SHORT" {
+			summary.ShortDeals++
+			summary.ShortNetPnL += caseRec.RealizedPnL
+		}
+		switch {
+		case caseRec.RealizedPnL > 0:
+			summary.WinningDeals++
+			grossProfit += caseRec.RealizedPnL
+		case caseRec.RealizedPnL < 0:
+			summary.LosingDeals++
+			grossLoss += math.Abs(caseRec.RealizedPnL)
+		default:
+			summary.FlatDeals++
+		}
+	}
+
+	if summary.ClosedDeals > 0 {
+		summary.AvgPnL = summary.NetPnL / float64(summary.ClosedDeals)
+		summary.Expectancy = summary.AvgPnL
+		summary.AvgPnLPct = summary.AvgPnLPct / float64(summary.ClosedDeals)
+		summary.AvgHoldMs = int64(float64(summary.AvgHoldMs) / float64(summary.ClosedDeals))
+		summary.WinRate = (float64(summary.WinningDeals) / float64(summary.ClosedDeals)) * 100
+	}
+	if grossLoss > 0 {
+		summary.ProfitFactor = grossProfit / grossLoss
+	} else if grossProfit > 0 {
+		summary.ProfitFactor = grossProfit
+	}
+	summary.MaxDrawdown = calculateDealReviewCaseMaxDrawdownPct(pnlPctSeries)
+	return summary
+}
+
+func calculateDealReviewCaseMaxDrawdownPct(pnls []float64) float64 {
+	if len(pnls) == 0 {
+		return 0
+	}
+	const startingEquity = 100.0
+	equity := startingEquity
+	peak := startingEquity
+	var maxDrawdown float64
+	for _, pnl := range pnls {
+		equity += pnl
+		if equity > peak {
+			peak = equity
+		}
+		if peak <= 0 {
+			continue
+		}
+		drawdown := (peak - equity) / peak * 100
+		if drawdown > maxDrawdown {
+			maxDrawdown = drawdown
+		}
+	}
+	return maxDrawdown
+}
+
+func (s *DealReviewStore) listClosedCasesForVersionWindow(userID, traderID string, start, end time.Time, targetCohort map[string]any) ([]DealReviewCase, error) {
+	query := s.db.
+		Model(&DealReviewCase{}).
+		Where("user_id = ? AND trader_id = ? AND status = ?", userID, traderID, DealReviewCaseStatusClosed)
+
+	if !start.IsZero() {
+		query = query.Where("exit_time_ms >= ?", start.UTC().UnixMilli())
+	}
+	if !end.IsZero() {
+		query = query.Where("exit_time_ms < ?", end.UTC().UnixMilli())
+	}
+	if symbol, ok := targetCohort["symbol"].(string); ok && strings.TrimSpace(symbol) != "" {
+		query = query.Where("symbol = ?", strings.ToUpper(strings.TrimSpace(symbol)))
+	}
+	if side, ok := targetCohort["side"].(string); ok && strings.TrimSpace(side) != "" {
+		query = query.Where("side = ?", strings.ToUpper(strings.TrimSpace(side)))
+	}
+
+	var cases []DealReviewCase
+	if err := query.Order("exit_time_ms ASC").Find(&cases).Error; err != nil {
+		return nil, err
+	}
+	return cases, nil
+}
+
+func excludeDealReviewCasesByID(allCases []DealReviewCase, excluded []DealReviewCase) []DealReviewCase {
+	if len(allCases) == 0 {
+		return nil
+	}
+	excludedIDs := make(map[string]struct{}, len(excluded))
+	for _, item := range excluded {
+		if strings.TrimSpace(item.ID) == "" {
+			continue
+		}
+		excludedIDs[item.ID] = struct{}{}
+	}
+	if len(excludedIDs) == 0 {
+		return append([]DealReviewCase(nil), allCases...)
+	}
+	result := make([]DealReviewCase, 0, len(allCases))
+	for _, item := range allCases {
+		if _, skip := excludedIDs[item.ID]; skip {
+			continue
+		}
+		result = append(result, item)
+	}
+	return result
+}
+
+func buildDealReviewAttributionWarnings(
+	attribution *DealReviewStrategyVersionAttribution,
+) (warnings []string, rollbackSuggested bool) {
+	if attribution == nil {
+		return nil, false
+	}
+
+	fullUnderperforming := false
+	targetUnderperforming := false
+
+	if attribution.FullBeforeSummary != nil && attribution.FullAfterSummary != nil &&
+		attribution.FullBeforeSummary.ClosedDeals >= 3 && attribution.FullAfterSummary.ClosedDeals >= 3 &&
+		attribution.FullAfterSummary.NetPnL < attribution.FullBeforeSummary.NetPnL-0.01 {
+		fullUnderperforming = true
+		warnings = append(warnings,
+			fmt.Sprintf("Full strategy performance is weaker after the change (%+.2f before vs %+.2f after).",
+				attribution.FullBeforeSummary.NetPnL,
+				attribution.FullAfterSummary.NetPnL,
+			),
+		)
+	}
+
+	if attribution.TargetBeforeSummary != nil && attribution.TargetAfterSummary != nil &&
+		attribution.TargetBeforeSummary.ClosedDeals >= 3 && attribution.TargetAfterSummary.ClosedDeals >= 3 &&
+		attribution.TargetAfterSummary.NetPnL < attribution.TargetBeforeSummary.NetPnL-0.01 {
+		targetUnderperforming = true
+		warnings = append(warnings,
+			fmt.Sprintf("Target cohort is underperforming after the change (%+.2f before vs %+.2f after).",
+				attribution.TargetBeforeSummary.NetPnL,
+				attribution.TargetAfterSummary.NetPnL,
+			),
+		)
+	}
+
+	if attribution.NonTargetBeforeSummary != nil && attribution.NonTargetAfterSummary != nil &&
+		attribution.NonTargetBeforeSummary.ClosedDeals >= 3 && attribution.NonTargetAfterSummary.ClosedDeals >= 3 &&
+		attribution.NonTargetAfterSummary.NetPnL < attribution.NonTargetBeforeSummary.NetPnL-0.01 {
+		warnings = append(warnings,
+			fmt.Sprintf("Non-target cohort regressed after the change (%+.2f before vs %+.2f after).",
+				attribution.NonTargetBeforeSummary.NetPnL,
+				attribution.NonTargetAfterSummary.NetPnL,
+			),
+		)
+	}
+
+	rollbackSuggested = targetUnderperforming || (attribution.TargetBeforeSummary == nil && fullUnderperforming) || (fullUnderperforming && targetUnderperforming)
+	return warnings, rollbackSuggested
+}
+
+func (s *DealReviewStore) buildStrategyVersionAttribution(version *DealReviewStrategyVersion, targetCohort map[string]any, compareSummary string) (*DealReviewStrategyVersionAttribution, error) {
+	if version == nil {
+		return nil, nil
+	}
+
+	appliedAt := effectiveDealReviewStrategyVersionTime(*version)
+	if appliedAt.IsZero() {
+		return nil, nil
+	}
+
+	if strings.TrimSpace(version.SourceType) == "ai_challenger_candidate" && strings.TrimSpace(version.SourceCompareID) != "" {
+		note := strings.TrimSpace(compareSummary)
+		if note == "" {
+			note = "This challenger candidate is evaluated through the linked challenger comparison rather than an in-place strategy apply."
+		}
+		return &DealReviewStrategyVersionAttribution{
+			ObservationReady:  false,
+			BeforeEnd:         appliedAt,
+			AfterStart:        appliedAt,
+			Note:              note,
+			RollbackSuggested: false,
+		}, nil
+	}
+
+	previous, next, err := s.getStrategyVersionNeighbors(version)
+	if err != nil {
+		return nil, err
+	}
+
+	afterStart := appliedAt
+	afterEnd := time.Now().UTC()
+	if next != nil {
+		nextAt := effectiveDealReviewStrategyVersionTime(*next)
+		if !nextAt.IsZero() {
+			afterEnd = nextAt
+		}
+	}
+	if !afterEnd.After(afterStart) {
+		afterEnd = time.Now().UTC()
+	}
+
+	beforeEnd := appliedAt
+	var beforeStart time.Time
+	if previous != nil {
+		beforeStart = effectiveDealReviewStrategyVersionTime(*previous)
+	}
+	if beforeStart.IsZero() || !beforeStart.Before(beforeEnd) {
+		if afterEnd.After(afterStart) {
+			beforeStart = beforeEnd.Add(-afterEnd.Sub(afterStart))
+		} else {
+			beforeStart = beforeEnd.Add(-7 * 24 * time.Hour)
+		}
+	}
+	if !beforeStart.Before(beforeEnd) {
+		beforeStart = beforeEnd.Add(-7 * 24 * time.Hour)
+	}
+
+	fullBeforeCases, err := s.listClosedCasesForVersionWindow(version.UserID, version.TraderID, beforeStart, beforeEnd, nil)
+	if err != nil {
+		return nil, err
+	}
+	fullAfterCases, err := s.listClosedCasesForVersionWindow(version.UserID, version.TraderID, afterStart, afterEnd, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	attribution := &DealReviewStrategyVersionAttribution{
+		ObservationReady:  len(fullAfterCases) > 0,
+		BeforeStart:       beforeStart,
+		BeforeEnd:         beforeEnd,
+		AfterStart:        afterStart,
+		AfterEnd:          afterEnd,
+		FullBeforeSummary: summarizeDealReviewClosedCaseRows(fullBeforeCases),
+		FullAfterSummary:  summarizeDealReviewClosedCaseRows(fullAfterCases),
+	}
+
+	if len(targetCohort) > 0 {
+		targetBeforeCases, err := s.listClosedCasesForVersionWindow(version.UserID, version.TraderID, beforeStart, beforeEnd, targetCohort)
+		if err != nil {
+			return nil, err
+		}
+		targetAfterCases, err := s.listClosedCasesForVersionWindow(version.UserID, version.TraderID, afterStart, afterEnd, targetCohort)
+		if err != nil {
+			return nil, err
+		}
+		attribution.TargetBeforeSummary = summarizeDealReviewClosedCaseRows(targetBeforeCases)
+		attribution.TargetAfterSummary = summarizeDealReviewClosedCaseRows(targetAfterCases)
+		attribution.NonTargetBeforeSummary = summarizeDealReviewClosedCaseRows(excludeDealReviewCasesByID(fullBeforeCases, targetBeforeCases))
+		attribution.NonTargetAfterSummary = summarizeDealReviewClosedCaseRows(excludeDealReviewCasesByID(fullAfterCases, targetAfterCases))
+	}
+
+	if attribution.FullAfterSummary != nil && attribution.FullAfterSummary.ClosedDeals == 0 {
+		attribution.ObservationReady = false
+		attribution.Note = "No closed deals have been observed yet since this version was applied."
+	}
+
+	attribution.Warnings, attribution.RollbackSuggested = buildDealReviewAttributionWarnings(attribution)
+	return attribution, nil
+}
+
 func (s *DealReviewStore) GetStrategyVersion(userID, traderID, versionID string) (*DealReviewStrategyVersionDetail, error) {
 	var version DealReviewStrategyVersion
 	if err := s.db.Where("id = ? AND user_id = ? AND trader_id = ?", versionID, userID, traderID).First(&version).Error; err != nil {
@@ -851,6 +1510,7 @@ func (s *DealReviewStore) GetStrategyVersion(userID, traderID, versionID string)
 		Version:        version,
 		PreviousConfig: map[string]any{},
 		NextConfig:     map[string]any{},
+		TargetCohort:   map[string]any{},
 	}
 	if strings.TrimSpace(version.PreviousConfigJSON) != "" {
 		_ = json.Unmarshal([]byte(version.PreviousConfigJSON), &detail.PreviousConfig)
@@ -858,6 +1518,27 @@ func (s *DealReviewStore) GetStrategyVersion(userID, traderID, versionID string)
 	if strings.TrimSpace(version.NextConfigJSON) != "" {
 		_ = json.Unmarshal([]byte(version.NextConfigJSON), &detail.NextConfig)
 	}
+	if strings.TrimSpace(version.TargetCohortJSON) != "" && strings.TrimSpace(version.TargetCohortJSON) != "{}" {
+		_ = json.Unmarshal([]byte(version.TargetCohortJSON), &detail.TargetCohort)
+		detail.TargetCohort = sanitizeDealReviewTargetCohortMap(detail.TargetCohort)
+	}
+	if version.SourceScanID != "" {
+		var scan DealReviewAIScan
+		if err := s.db.Select("id", "summary").Where("id = ?", version.SourceScanID).First(&scan).Error; err == nil {
+			detail.SourceScanSummary = strings.TrimSpace(scan.Summary)
+		}
+	}
+	if version.SourceCompareID != "" {
+		var compare DealReviewChallengerCompare
+		if err := s.db.Select("id", "summary").Where("id = ?", version.SourceCompareID).First(&compare).Error; err == nil {
+			detail.CompareSummary = strings.TrimSpace(compare.Summary)
+		}
+	}
+	attribution, err := s.buildStrategyVersionAttribution(&version, detail.TargetCohort, detail.CompareSummary)
+	if err != nil {
+		return nil, err
+	}
+	detail.Attribution = attribution
 	return detail, nil
 }
 
@@ -888,6 +1569,35 @@ func (s *DealReviewStore) CaptureDecisionCyclePricePoints(userID string, record 
 	})
 }
 
+func (s *DealReviewStore) CaptureLivePositionPricePoints(userID, traderID string, positions []PositionSnapshot, capturedAt time.Time, source string) error {
+	if strings.TrimSpace(userID) == "" || strings.TrimSpace(traderID) == "" || len(positions) == 0 {
+		return nil
+	}
+
+	timestampMs := capturedAt.UTC().UnixMilli()
+	if timestampMs <= 0 {
+		timestampMs = time.Now().UTC().UnixMilli()
+	}
+	timestampMs = normalizeDealReviewLivePointTimestampMs(timestampMs)
+	source = normalizeDealReviewLivePointSource(source)
+
+	return s.db.Transaction(func(tx *gorm.DB) error {
+		for _, snapshot := range positions {
+			position, err := s.findPositionForTimelineSnapshotTx(tx, traderID, snapshot, timestampMs)
+			if err != nil {
+				return err
+			}
+			if position == nil {
+				continue
+			}
+			if err := s.upsertMarketPointTx(tx, userID, traderID, position, snapshot, timestampMs, source); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+}
+
 func (s *DealReviewStore) BackfillDecisionCyclePricePoints() error {
 	const batchSize = 40
 	nowMs := time.Now().UTC().UnixMilli()
@@ -909,6 +1619,48 @@ func (s *DealReviewStore) BackfillDecisionCyclePricePoints() error {
 			if err := s.backfillCaseDecisionCyclePricePoints(&cases[i], nowMs); err != nil {
 				return err
 			}
+		}
+	}
+}
+
+func (s *DealReviewStore) backfillQualityMetrics() error {
+	const batchSize = 80
+
+	for offset := 0; ; offset += batchSize {
+		var cases []DealReviewCase
+		if err := s.db.
+			Where("status = ?", DealReviewCaseStatusClosed).
+			Order("CASE WHEN exit_time_ms > 0 THEN exit_time_ms ELSE entry_time_ms END DESC").
+			Offset(offset).
+			Limit(batchSize).
+			Find(&cases).Error; err != nil {
+			return err
+		}
+		if len(cases) == 0 {
+			return nil
+		}
+
+		positionIDs := make([]int64, 0, len(cases))
+		for _, caseRec := range cases {
+			if caseRec.PositionID > 0 {
+				positionIDs = append(positionIDs, caseRec.PositionID)
+			}
+		}
+		pointsByPosition, err := s.loadTimelinePointsByPositionIDs(positionIDs)
+		if err != nil {
+			return err
+		}
+
+		if err := s.db.Transaction(func(tx *gorm.DB) error {
+			for i := range cases {
+				quality := computeDealReviewCaseQuality(&cases[i], buildDealReviewTimelinePoints(&cases[i], pointsByPosition[cases[i].PositionID]))
+				if err := applyDealReviewCaseQualityTx(tx, &cases[i], quality); err != nil {
+					return err
+				}
+			}
+			return nil
+		}); err != nil {
+			return err
 		}
 	}
 }
@@ -947,6 +1699,496 @@ func (s *DealReviewStore) UpdateCaseReview(userID, traderID, caseID string, labe
 		return nil, err
 	}
 	return s.GetCaseDetail(userID, traderID, caseID)
+}
+
+type dealReviewHeuristicClassifierExample struct {
+	Case             DealReviewCase
+	Labels           []string
+	CandidateSources []string
+}
+
+type dealReviewClassifierFeedbackCounts struct {
+	Accepted int
+	Rejected int
+}
+
+type dealReviewHeuristicClassifierModel struct {
+	Examples       []dealReviewHeuristicClassifierExample
+	FeedbackByCase map[string]map[string]string
+	GlobalFeedback map[string]dealReviewClassifierFeedbackCounts
+}
+
+func (s *DealReviewStore) ApplyClassifierFeedback(userID, traderID, caseID, classifierID, suggestionKey, label, issueType, verdict, rationale string, applyLabel bool) (*DealReviewCaseDetail, error) {
+	classifierID = strings.TrimSpace(classifierID)
+	label = strings.TrimSpace(label)
+	issueType = normalizeDealReviewClassifierIssueType(issueType)
+	verdict = normalizeDealReviewClassifierVerdict(verdict)
+	if classifierID == "" {
+		return nil, fmt.Errorf("classifier_id cannot be empty")
+	}
+	if verdict == "" {
+		return nil, fmt.Errorf("classifier verdict cannot be empty")
+	}
+	if suggestionKey = strings.TrimSpace(suggestionKey); suggestionKey == "" {
+		suggestionKey = buildDealReviewClassifierSuggestionKey(classifierID, label, issueType)
+	}
+
+	if err := s.db.Transaction(func(tx *gorm.DB) error {
+		var caseRec DealReviewCase
+		if err := tx.Where("id = ? AND user_id = ? AND trader_id = ?", caseID, userID, traderID).First(&caseRec).Error; err != nil {
+			return err
+		}
+
+		feedback := &DealReviewClassifierFeedback{
+			ID:            uuid.NewString(),
+			UserID:        userID,
+			TraderID:      traderID,
+			CaseID:        caseID,
+			ClassifierID:  classifierID,
+			SuggestionKey: suggestionKey,
+			Label:         label,
+			IssueType:     issueType,
+			Verdict:       verdict,
+			Rationale:     strings.TrimSpace(rationale),
+		}
+		if err := tx.Clauses(clause.OnConflict{
+			Columns: []clause.Column{
+				{Name: "case_id"},
+				{Name: "classifier_id"},
+				{Name: "suggestion_key"},
+			},
+			DoUpdates: clause.Assignments(map[string]any{
+				"label":      feedback.Label,
+				"issue_type": feedback.IssueType,
+				"verdict":    feedback.Verdict,
+				"rationale":  feedback.Rationale,
+				"updated_at": time.Now().UTC(),
+			}),
+		}).Create(feedback).Error; err != nil {
+			return err
+		}
+
+		if applyLabel && verdict == DealReviewClassifierVerdictAccepted && label != "" {
+			nextLabels := normalizeDealReviewLabels(append(parseJSONStringSlice(caseRec.LabelsJSON), label))
+			labelsJSON, _ := json.Marshal(nextLabels)
+			if err := tx.Model(&DealReviewCase{}).
+				Where("id = ?", caseRec.ID).
+				Updates(map[string]any{
+					"labels_json": string(labelsJSON),
+					"updated_at":  time.Now().UTC(),
+				}).Error; err != nil {
+				return err
+			}
+		}
+		return nil
+	}); err != nil {
+		return nil, err
+	}
+
+	return s.GetCaseDetail(userID, traderID, caseID)
+}
+
+func (s *DealReviewStore) BuildHeuristicClassifierAssist(userID, traderID string, caseRec *DealReviewCase) (*DealReviewClassifierAssist, error) {
+	if caseRec == nil {
+		return nil, nil
+	}
+	model, err := s.buildHeuristicClassifierModel(userID, traderID)
+	if err != nil {
+		return nil, err
+	}
+	return model.EvaluateCase(caseRec), nil
+}
+
+func (s *DealReviewStore) ListCaseClassifierFeedback(userID, traderID, caseID, classifierID string) ([]DealReviewClassifierFeedback, error) {
+	var rows []DealReviewClassifierFeedback
+	query := s.db.Where("user_id = ? AND trader_id = ? AND case_id = ?", userID, traderID, caseID)
+	if trimmed := strings.TrimSpace(classifierID); trimmed != "" {
+		query = query.Where("classifier_id = ?", trimmed)
+	}
+	if err := query.Find(&rows).Error; err != nil {
+		return nil, err
+	}
+	return rows, nil
+}
+
+func (s *DealReviewStore) buildHeuristicClassifierModel(userID, traderID string) (*dealReviewHeuristicClassifierModel, error) {
+	model := &dealReviewHeuristicClassifierModel{
+		FeedbackByCase: map[string]map[string]string{},
+		GlobalFeedback: map[string]dealReviewClassifierFeedbackCounts{},
+	}
+
+	var labeledCases []DealReviewCase
+	if err := s.db.
+		Where("user_id = ? AND trader_id = ? AND labels_json IS NOT NULL AND labels_json != '' AND labels_json != '[]'",
+			userID, traderID).
+		Find(&labeledCases).Error; err != nil {
+		return nil, err
+	}
+	model.Examples = make([]dealReviewHeuristicClassifierExample, 0, len(labeledCases))
+	for _, item := range labeledCases {
+		labels := normalizeDealReviewLabels(parseJSONStringSlice(item.LabelsJSON))
+		if len(labels) == 0 {
+			continue
+		}
+		filteredLabels := make([]string, 0, len(labels))
+		for _, label := range labels {
+			if issueType := inferDealReviewClassifierIssueTypeFromLabel(label); issueType != "" || isDealReviewProblemLabel(label) {
+				filteredLabels = append(filteredLabels, label)
+			}
+		}
+		if len(filteredLabels) == 0 {
+			continue
+		}
+		model.Examples = append(model.Examples, dealReviewHeuristicClassifierExample{
+			Case:             item,
+			Labels:           filteredLabels,
+			CandidateSources: parseJSONStringSlice(item.OpenCandidateSourcesJSON),
+		})
+	}
+
+	var feedbackRows []DealReviewClassifierFeedback
+	if err := s.db.
+		Where("user_id = ? AND trader_id = ? AND classifier_id = ?", userID, traderID, DealReviewClassifierHeuristic).
+		Find(&feedbackRows).Error; err != nil {
+		return nil, err
+	}
+	for _, row := range feedbackRows {
+		perCase := model.FeedbackByCase[row.CaseID]
+		if perCase == nil {
+			perCase = map[string]string{}
+			model.FeedbackByCase[row.CaseID] = perCase
+		}
+		perCase[row.SuggestionKey] = normalizeDealReviewClassifierVerdict(row.Verdict)
+
+		counts := model.GlobalFeedback[row.SuggestionKey]
+		switch normalizeDealReviewClassifierVerdict(row.Verdict) {
+		case DealReviewClassifierVerdictAccepted:
+			counts.Accepted++
+		case DealReviewClassifierVerdictRejected:
+			counts.Rejected++
+		}
+		model.GlobalFeedback[row.SuggestionKey] = counts
+	}
+
+	return model, nil
+}
+
+func (m *dealReviewHeuristicClassifierModel) EvaluateCase(caseRec *DealReviewCase) *DealReviewClassifierAssist {
+	if caseRec == nil || len(m.Examples) == 0 {
+		return nil
+	}
+
+	type aggregate struct {
+		Label         string
+		IssueType     string
+		SuggestionKey string
+		Score         float64
+		EvidenceCount int
+		Rationale     string
+	}
+
+	currentLabels := map[string]struct{}{}
+	for _, label := range normalizeDealReviewLabels(parseJSONStringSlice(caseRec.LabelsJSON)) {
+		currentLabels[label] = struct{}{}
+	}
+	currentSources := parseJSONStringSlice(caseRec.OpenCandidateSourcesJSON)
+	caseFeedback := m.FeedbackByCase[caseRec.ID]
+
+	aggregates := map[string]*aggregate{}
+	for _, example := range m.Examples {
+		if example.Case.ID == caseRec.ID {
+			continue
+		}
+		matchScore := scoreDealReviewClassifierCaseMatch(caseRec, currentSources, &example.Case, example.CandidateSources)
+		if matchScore < 4 {
+			continue
+		}
+		for _, label := range example.Labels {
+			if _, exists := currentLabels[label]; exists {
+				continue
+			}
+			issueType := inferDealReviewClassifierIssueTypeFromLabel(label)
+			if issueType == "" && !isDealReviewProblemLabel(label) {
+				continue
+			}
+			suggestionKey := buildDealReviewClassifierSuggestionKey(DealReviewClassifierHeuristic, label, issueType)
+			if caseFeedback != nil && caseFeedback[suggestionKey] == DealReviewClassifierVerdictRejected {
+				continue
+			}
+			entry := aggregates[suggestionKey]
+			if entry == nil {
+				entry = &aggregate{
+					Label:         label,
+					IssueType:     issueType,
+					SuggestionKey: suggestionKey,
+				}
+				aggregates[suggestionKey] = entry
+			}
+			entry.Score += matchScore
+			entry.EvidenceCount++
+			entry.Rationale = buildDealReviewClassifierRationale(caseRec, entry.EvidenceCount)
+		}
+	}
+
+	suggestions := make([]DealReviewClassifierSuggestion, 0, len(aggregates))
+	for _, entry := range aggregates {
+		if entry.EvidenceCount < 2 && entry.Score < 8 {
+			continue
+		}
+		counts := m.GlobalFeedback[entry.SuggestionKey]
+		finalScore := entry.Score + float64(counts.Accepted)*0.75 - float64(counts.Rejected)*0.45
+		suggestions = append(suggestions, DealReviewClassifierSuggestion{
+			ClassifierID:    DealReviewClassifierHeuristic,
+			SuggestionKey:   entry.SuggestionKey,
+			Label:           entry.Label,
+			IssueType:       entry.IssueType,
+			Score:           finalScore,
+			HighlightLevel:  dealReviewClassifierHighlightLevel(finalScore),
+			EvidenceCount:   entry.EvidenceCount,
+			AcceptedCount:   counts.Accepted,
+			RejectedCount:   counts.Rejected,
+			FeedbackVerdict: caseFeedback[entry.SuggestionKey],
+			Rationale:       entry.Rationale,
+		})
+	}
+
+	if len(suggestions) == 0 {
+		return nil
+	}
+	sort.SliceStable(suggestions, func(i, j int) bool {
+		if math.Abs(suggestions[i].Score-suggestions[j].Score) > 1e-9 {
+			return suggestions[i].Score > suggestions[j].Score
+		}
+		if suggestions[i].EvidenceCount != suggestions[j].EvidenceCount {
+			return suggestions[i].EvidenceCount > suggestions[j].EvidenceCount
+		}
+		return suggestions[i].Label < suggestions[j].Label
+	})
+	if len(suggestions) > 4 {
+		suggestions = suggestions[:4]
+	}
+
+	top := suggestions[0]
+	return &DealReviewClassifierAssist{
+		Source:         DealReviewClassifierHeuristic,
+		Summary:        buildDealReviewClassifierAssistSummary(top, len(suggestions)),
+		HighlightScore: top.Score,
+		HighlightLevel: top.HighlightLevel,
+		Suggestions:    suggestions,
+	}
+}
+
+func buildDealReviewClassifierAssistSummary(top DealReviewClassifierSuggestion, suggestionCount int) string {
+	if suggestionCount <= 1 {
+		return fmt.Sprintf("Learned review assist suggests %q from %d matched labeled deals.", top.Label, top.EvidenceCount)
+	}
+	return fmt.Sprintf("Learned review assist found %d candidate labels; strongest signal is %q from %d matched labeled deals.", suggestionCount, top.Label, top.EvidenceCount)
+}
+
+func buildDealReviewClassifierRationale(caseRec *DealReviewCase, evidenceCount int) string {
+	if caseRec == nil {
+		return ""
+	}
+	parts := make([]string, 0, 4)
+	if symbol := strings.TrimSpace(caseRec.Symbol); symbol != "" {
+		parts = append(parts, "symbol "+symbol)
+	}
+	if bucket := strings.TrimSpace(caseRec.OpenSelectionBucket); bucket != "" {
+		parts = append(parts, "bucket "+bucket)
+	}
+	if reason := strings.TrimSpace(caseRec.CloseReason); reason != "" {
+		parts = append(parts, "close reason "+reason)
+	}
+	if side := strings.TrimSpace(caseRec.Side); side != "" {
+		parts = append(parts, "side "+side)
+	}
+	if len(parts) > 3 {
+		parts = parts[:3]
+	}
+	if len(parts) == 0 {
+		return fmt.Sprintf("Matched %d labeled historical deals with a similar trade profile.", evidenceCount)
+	}
+	return fmt.Sprintf("Matched %d labeled historical deals sharing %s.", evidenceCount, strings.Join(parts, ", "))
+}
+
+func dealReviewClassifierHighlightLevel(score float64) string {
+	switch {
+	case score >= 18:
+		return "high"
+	case score >= 10:
+		return "medium"
+	default:
+		return "low"
+	}
+}
+
+func scoreDealReviewClassifierCaseMatch(current *DealReviewCase, currentSources []string, example *DealReviewCase, exampleSources []string) float64 {
+	if current == nil || example == nil {
+		return 0
+	}
+	score := 0.0
+	if strings.EqualFold(strings.TrimSpace(current.Symbol), strings.TrimSpace(example.Symbol)) {
+		score += 4
+	}
+	if strings.EqualFold(strings.TrimSpace(current.Side), strings.TrimSpace(example.Side)) {
+		score += 1.5
+	}
+	if strings.TrimSpace(current.OpenSelectionBucket) != "" &&
+		strings.EqualFold(strings.TrimSpace(current.OpenSelectionBucket), strings.TrimSpace(example.OpenSelectionBucket)) {
+		score += 3
+	}
+	if strings.TrimSpace(current.CloseReason) != "" &&
+		strings.EqualFold(strings.TrimSpace(current.CloseReason), strings.TrimSpace(example.CloseReason)) {
+		score += 3
+	}
+	if strings.TrimSpace(current.Outcome) != "" &&
+		strings.EqualFold(strings.TrimSpace(current.Outcome), strings.TrimSpace(example.Outcome)) {
+		score += 1
+	}
+	overlap := countDealReviewClassifierSourceOverlap(currentSources, exampleSources)
+	if overlap > 0 {
+		score += math.Min(2, float64(overlap))
+	}
+	return score
+}
+
+func countDealReviewClassifierSourceOverlap(left, right []string) int {
+	if len(left) == 0 || len(right) == 0 {
+		return 0
+	}
+	seen := map[string]struct{}{}
+	for _, item := range left {
+		token := normalizeDealReviewClassifierToken(item)
+		if token == "" {
+			continue
+		}
+		seen[token] = struct{}{}
+	}
+	count := 0
+	for _, item := range right {
+		token := normalizeDealReviewClassifierToken(item)
+		if token == "" {
+			continue
+		}
+		if _, ok := seen[token]; ok {
+			count++
+		}
+	}
+	return count
+}
+
+func inferDealReviewClassifierIssueTypeFromLabel(label string) string {
+	normalized := strings.ToLower(strings.TrimSpace(label))
+	switch {
+	case normalized == "":
+		return ""
+	case strings.Contains(normalized, "avoidable loss"),
+		strings.Contains(normalized, "should skip"),
+		strings.Contains(normalized, "skip trade"):
+		return "likely_avoidable_loss"
+	case strings.Contains(normalized, "regime mismatch"),
+		strings.Contains(normalized, "wrong regime"),
+		strings.Contains(normalized, "chop regime"):
+		return "likely_regime_mismatch"
+	case strings.Contains(normalized, "bad exit"),
+		strings.Contains(normalized, "poor exit"),
+		strings.Contains(normalized, "late exit"),
+		strings.Contains(normalized, "give back"),
+		strings.Contains(normalized, "gave back"):
+		return "likely_bad_exit"
+	case strings.Contains(normalized, "bad trade"),
+		strings.Contains(normalized, "bad entry"),
+		strings.Contains(normalized, "poor trade"),
+		strings.Contains(normalized, "poor entry"),
+		strings.Contains(normalized, "weak setup"),
+		strings.Contains(normalized, "fomo"),
+		strings.Contains(normalized, "overtrade"),
+		strings.Contains(normalized, "revenge"),
+		strings.Contains(normalized, "chase"):
+		return "likely_bad_trade"
+	default:
+		return ""
+	}
+}
+
+func isDealReviewProblemLabel(label string) bool {
+	normalized := strings.ToLower(strings.TrimSpace(label))
+	if normalized == "" {
+		return false
+	}
+	if inferDealReviewClassifierIssueTypeFromLabel(normalized) != "" {
+		return true
+	}
+	for _, token := range []string{"loss", "bad", "weak", "late", "mistake", "wrong", "avoid", "skip"} {
+		if strings.Contains(normalized, token) {
+			return true
+		}
+	}
+	for _, token := range []string{"good entry", "good exit", "good trade", "valid trade"} {
+		if strings.Contains(normalized, token) {
+			return false
+		}
+	}
+	return false
+}
+
+func normalizeDealReviewClassifierIssueType(issueType string) string {
+	switch strings.TrimSpace(strings.ToLower(issueType)) {
+	case "likely_bad_trade":
+		return "likely_bad_trade"
+	case "likely_bad_exit":
+		return "likely_bad_exit"
+	case "likely_avoidable_loss":
+		return "likely_avoidable_loss"
+	case "likely_regime_mismatch":
+		return "likely_regime_mismatch"
+	case "other_review_signal":
+		return "other_review_signal"
+	default:
+		return ""
+	}
+}
+
+func normalizeDealReviewClassifierVerdict(verdict string) string {
+	switch strings.TrimSpace(strings.ToLower(verdict)) {
+	case DealReviewClassifierVerdictAccepted:
+		return DealReviewClassifierVerdictAccepted
+	case DealReviewClassifierVerdictRejected:
+		return DealReviewClassifierVerdictRejected
+	default:
+		return ""
+	}
+}
+
+func buildDealReviewClassifierSuggestionKey(classifierID, label, issueType string) string {
+	parts := []string{
+		normalizeDealReviewClassifierToken(classifierID),
+		normalizeDealReviewClassifierToken(label),
+		normalizeDealReviewClassifierToken(issueType),
+	}
+	return strings.Trim(strings.Join(parts, ":"), ":")
+}
+
+func normalizeDealReviewClassifierToken(value string) string {
+	trimmed := strings.ToLower(strings.TrimSpace(value))
+	if trimmed == "" {
+		return ""
+	}
+	var builder strings.Builder
+	lastUnderscore := false
+	for _, r := range trimmed {
+		isAlphaNum := (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9')
+		if isAlphaNum {
+			builder.WriteRune(r)
+			lastUnderscore = false
+			continue
+		}
+		if !lastUnderscore {
+			builder.WriteByte('_')
+			lastUnderscore = true
+		}
+	}
+	return strings.Trim(builder.String(), "_")
 }
 
 func cloneDealReviewChallengerMetrics(metrics *DealReviewChallengerMetrics) *DealReviewChallengerMetrics {
@@ -1280,10 +2522,39 @@ func (s *DealReviewStore) GetAnomalySummary(userID string, filter DealReviewList
 		Deals  int64
 		NetPnL float64
 	}
+	type giveBackAgg struct {
+		Deals             int64
+		NetPnL            float64
+		GiveBackPctSum    float64
+		MFECapturedPctSum float64
+	}
+	type stopOutAgg struct {
+		Deals     int64
+		NetPnL    float64
+		HoldMs    int64
+		MAEPctSum float64
+	}
+	type sizingAgg struct {
+		Deals              int64
+		NetPnL             float64
+		RiskSizingScoreSum float64
+		PlannedRiskPctSum  float64
+	}
+	type closeReasonQualityAgg struct {
+		Deals                  int64
+		NetPnL                 float64
+		ExitEfficiencyScoreSum float64
+		MFECapturedPctSum      float64
+		GiveBackPctSum         float64
+	}
 
 	symbols := map[string]*symbolAgg{}
 	buckets := map[string]*bucketAgg{}
 	closeReasons := map[string]*reasonAgg{}
+	giveBackSymbols := map[string]*giveBackAgg{}
+	stopOutSymbols := map[string]*stopOutAgg{}
+	sizingSymbols := map[string]*sizingAgg{}
+	closeReasonQuality := map[string]*closeReasonQualityAgg{}
 
 	for _, c := range cases {
 		symbol := strings.TrimSpace(strings.ToUpper(c.Symbol))
@@ -1331,6 +2602,53 @@ func (s *DealReviewStore) GetAnomalySummary(userID string, filter DealReviewList
 		}
 		rs.Deals++
 		rs.NetPnL += c.RealizedPnL
+
+		qr := closeReasonQuality[reason]
+		if qr == nil {
+			qr = &closeReasonQualityAgg{}
+			closeReasonQuality[reason] = qr
+		}
+		qr.Deals++
+		qr.NetPnL += c.RealizedPnL
+		qr.ExitEfficiencyScoreSum += c.ExitEfficiencyScore
+		qr.MFECapturedPctSum += c.MFECapturedPct
+		qr.GiveBackPctSum += c.ProfitGivenBackPct
+
+		if isDealReviewProfitGiveBackHotspot(c) {
+			gb := giveBackSymbols[symbol]
+			if gb == nil {
+				gb = &giveBackAgg{}
+				giveBackSymbols[symbol] = gb
+			}
+			gb.Deals++
+			gb.NetPnL += c.RealizedPnL
+			gb.GiveBackPctSum += c.ProfitGivenBackPct
+			gb.MFECapturedPctSum += c.MFECapturedPct
+		}
+
+		if isDealReviewEarlyStopOut(c) {
+			stop := stopOutSymbols[symbol]
+			if stop == nil {
+				stop = &stopOutAgg{}
+				stopOutSymbols[symbol] = stop
+			}
+			stop.Deals++
+			stop.NetPnL += c.RealizedPnL
+			stop.HoldMs += c.HoldDurationMs
+			stop.MAEPctSum += math.Abs(c.MaxAdverseExcursionPct)
+		}
+
+		if isDealReviewOversizedLoss(c) {
+			size := sizingSymbols[symbol]
+			if size == nil {
+				size = &sizingAgg{}
+				sizingSymbols[symbol] = size
+			}
+			size.Deals++
+			size.NetPnL += c.RealizedPnL
+			size.RiskSizingScoreSum += c.RiskSizingScore
+			size.PlannedRiskPctSum += c.PlannedRiskPct
+		}
 	}
 
 	worstSymbols := make([]DealReviewAnomalySymbol, 0, len(symbols))
@@ -1403,10 +2721,95 @@ func (s *DealReviewStore) GetAnomalySummary(userID string, filter DealReviewList
 		return weakReasons[i].NetPnL < weakReasons[j].NetPnL
 	})
 
+	giveBackHotspots := make([]DealReviewAnomalyGiveBack, 0, len(giveBackSymbols))
+	for symbol, agg := range giveBackSymbols {
+		item := DealReviewAnomalyGiveBack{
+			Symbol: symbol,
+			Deals:  agg.Deals,
+			NetPnL: agg.NetPnL,
+		}
+		if agg.Deals > 0 {
+			item.AvgGiveBackPct = agg.GiveBackPctSum / float64(agg.Deals)
+			item.AvgMFECapturedPct = agg.MFECapturedPctSum / float64(agg.Deals)
+		}
+		giveBackHotspots = append(giveBackHotspots, item)
+	}
+	sort.Slice(giveBackHotspots, func(i, j int) bool {
+		if giveBackHotspots[i].AvgGiveBackPct == giveBackHotspots[j].AvgGiveBackPct {
+			return giveBackHotspots[i].Deals > giveBackHotspots[j].Deals
+		}
+		return giveBackHotspots[i].AvgGiveBackPct > giveBackHotspots[j].AvgGiveBackPct
+	})
+
+	stopOutHotspots := make([]DealReviewAnomalyStopOut, 0, len(stopOutSymbols))
+	for symbol, agg := range stopOutSymbols {
+		item := DealReviewAnomalyStopOut{
+			Symbol: symbol,
+			Deals:  agg.Deals,
+			NetPnL: agg.NetPnL,
+		}
+		if agg.Deals > 0 {
+			item.AvgHoldMs = agg.HoldMs / agg.Deals
+			item.AvgMAEPct = agg.MAEPctSum / float64(agg.Deals)
+		}
+		stopOutHotspots = append(stopOutHotspots, item)
+	}
+	sort.Slice(stopOutHotspots, func(i, j int) bool {
+		if stopOutHotspots[i].Deals == stopOutHotspots[j].Deals {
+			return stopOutHotspots[i].AvgHoldMs < stopOutHotspots[j].AvgHoldMs
+		}
+		return stopOutHotspots[i].Deals > stopOutHotspots[j].Deals
+	})
+
+	oversizedLossHotspots := make([]DealReviewAnomalySizing, 0, len(sizingSymbols))
+	for symbol, agg := range sizingSymbols {
+		item := DealReviewAnomalySizing{
+			Symbol: symbol,
+			Deals:  agg.Deals,
+			NetPnL: agg.NetPnL,
+		}
+		if agg.Deals > 0 {
+			item.AvgRiskSizingScore = agg.RiskSizingScoreSum / float64(agg.Deals)
+			item.AvgPlannedRiskPct = agg.PlannedRiskPctSum / float64(agg.Deals)
+		}
+		oversizedLossHotspots = append(oversizedLossHotspots, item)
+	}
+	sort.Slice(oversizedLossHotspots, func(i, j int) bool {
+		if oversizedLossHotspots[i].AvgRiskSizingScore == oversizedLossHotspots[j].AvgRiskSizingScore {
+			return oversizedLossHotspots[i].Deals > oversizedLossHotspots[j].Deals
+		}
+		return oversizedLossHotspots[i].AvgRiskSizingScore < oversizedLossHotspots[j].AvgRiskSizingScore
+	})
+
+	closeReasonQualityItems := make([]DealReviewAnomalyCloseReasonQuality, 0, len(closeReasonQuality))
+	for reason, agg := range closeReasonQuality {
+		item := DealReviewAnomalyCloseReasonQuality{
+			Reason: reason,
+			Deals:  agg.Deals,
+			NetPnL: agg.NetPnL,
+		}
+		if agg.Deals > 0 {
+			item.AvgExitEfficiencyScore = agg.ExitEfficiencyScoreSum / float64(agg.Deals)
+			item.AvgMFECapturedPct = agg.MFECapturedPctSum / float64(agg.Deals)
+			item.AvgGiveBackPct = agg.GiveBackPctSum / float64(agg.Deals)
+		}
+		closeReasonQualityItems = append(closeReasonQualityItems, item)
+	}
+	sort.Slice(closeReasonQualityItems, func(i, j int) bool {
+		if closeReasonQualityItems[i].AvgExitEfficiencyScore == closeReasonQualityItems[j].AvgExitEfficiencyScore {
+			return closeReasonQualityItems[i].Deals > closeReasonQualityItems[j].Deals
+		}
+		return closeReasonQualityItems[i].AvgExitEfficiencyScore < closeReasonQualityItems[j].AvgExitEfficiencyScore
+	})
+
 	summary.WorstSymbols = truncateAnomalySymbols(worstSymbols, 5)
 	summary.OvertradedSymbols = truncateAnomalySymbols(overtraded, 5)
 	summary.WeakBuckets = truncateAnomalyBuckets(weakBuckets, 5)
 	summary.WeakCloseReasons = truncateAnomalyReasons(weakReasons, 5)
+	summary.ProfitGiveBackHotspots = truncateAnomalyGiveBacks(giveBackHotspots, 5)
+	summary.EarlyStopOutHotspots = truncateAnomalyStopOuts(stopOutHotspots, 5)
+	summary.OversizedLossHotspots = truncateAnomalySizings(oversizedLossHotspots, 5)
+	summary.CloseReasonQuality = truncateAnomalyCloseReasonQualities(closeReasonQualityItems, 5)
 	summary.Notes = buildAnomalyNotes(summary)
 	return summary, nil
 }
@@ -1427,6 +2830,41 @@ func (s *DealReviewStore) buildCaseFilterQuery(userID string, filter DealReviewL
 	}
 	if outcome := strings.TrimSpace(strings.ToLower(filter.Outcome)); outcome != "" {
 		query = query.Where("outcome = ?", outcome)
+	}
+	if bucket := strings.TrimSpace(filter.OpenSelectionBucket); bucket != "" {
+		query = query.Where("open_selection_bucket = ?", bucket)
+	}
+	if closeReason := strings.TrimSpace(filter.CloseReason); closeReason != "" {
+		query = query.Where("close_reason = ?", closeReason)
+	}
+	stringFilters := map[string]string{
+		"open_trend_regime":         filter.OpenTrendRegime,
+		"open_volatility_regime":    filter.OpenVolatilityRegime,
+		"open_btc_strength_regime":  filter.OpenBTCStrengthRegime,
+		"open_funding_regime":       filter.OpenFundingRegime,
+		"open_oi_regime":            filter.OpenOIRegime,
+		"open_session_bucket":       filter.OpenSessionBucket,
+		"open_weekday_bucket":       filter.OpenWeekdayBucket,
+		"open_venue_tier":           filter.OpenVenueTier,
+		"open_liquidity_tier":       filter.OpenLiquidityTier,
+		"open_spread_bucket":        filter.OpenSpreadBucket,
+		"open_slippage_bucket":      filter.OpenSlippageBucket,
+		"close_trend_regime":        filter.CloseTrendRegime,
+		"close_volatility_regime":   filter.CloseVolatilityRegime,
+		"close_btc_strength_regime": filter.CloseBTCStrengthRegime,
+		"close_funding_regime":      filter.CloseFundingRegime,
+		"close_oi_regime":           filter.CloseOIRegime,
+		"close_session_bucket":      filter.CloseSessionBucket,
+		"close_weekday_bucket":      filter.CloseWeekdayBucket,
+		"close_venue_tier":          filter.CloseVenueTier,
+		"close_liquidity_tier":      filter.CloseLiquidityTier,
+		"close_spread_bucket":       filter.CloseSpreadBucket,
+		"close_slippage_bucket":     filter.CloseSlippageBucket,
+	}
+	for column, value := range stringFilters {
+		if trimmed := strings.TrimSpace(value); trimmed != "" {
+			query = query.Where(column+" = ?", trimmed)
+		}
 	}
 	if filter.FromTime > 0 {
 		query = query.Where("(entry_time_ms >= ? OR exit_time_ms >= ?)", filter.FromTime, filter.FromTime)
@@ -1491,10 +2929,24 @@ func (s *DealReviewStore) enrichCaseList(cases []DealReviewCase) ([]DealReviewCa
 	if len(eventIDs) > 0 {
 		var events []DealReviewEvent
 		if err := s.db.Where("id IN ?", eventIDs).Find(&events).Error; err != nil {
-			return nil, err
+			if isDealReviewSQLiteCorruptionError(err) {
+				logger.Warnf("⚠️ Deal-review event enrichment skipped due to SQLite corruption: %v", err)
+			} else {
+				return nil, err
+			}
+		} else {
+			for _, event := range events {
+				eventMap[event.ID] = event
+			}
 		}
-		for _, event := range events {
-			eventMap[event.ID] = event
+	}
+	timelineSummaries, err := s.buildCaseListPriceTimelineSummaries(cases)
+	if err != nil {
+		if isDealReviewSQLiteCorruptionError(err) {
+			logger.Warnf("⚠️ Deal-review timeline summaries skipped due to SQLite corruption: %v", err)
+			timelineSummaries = map[int64]*DealReviewPriceTimelineSummary{}
+		} else {
+			return nil, err
 		}
 	}
 
@@ -1506,6 +2958,7 @@ func (s *DealReviewStore) enrichCaseList(cases []DealReviewCase) ([]DealReviewCa
 			StrategyName:         strategyNames[c.StrategyID],
 			Labels:               parseJSONStringSlice(c.LabelsJSON),
 			OpenCandidateSources: parseJSONStringSlice(c.OpenCandidateSourcesJSON),
+			PriceTimelineSummary: timelineSummaries[c.PositionID],
 		}
 		if event, ok := eventMap[c.OpenEventID]; ok {
 			item.OpenReasoning = event.Reasoning
@@ -1514,6 +2967,55 @@ func (s *DealReviewStore) enrichCaseList(cases []DealReviewCase) ([]DealReviewCa
 			item.CloseReasoning = event.Reasoning
 		}
 		result = append(result, item)
+	}
+
+	if len(cases) > 0 {
+		model, err := s.buildHeuristicClassifierModel(cases[0].UserID, cases[0].TraderID)
+		if err != nil {
+			if isDealReviewSQLiteCorruptionError(err) {
+				logger.Warnf("⚠️ Deal-review classifier assist skipped due to SQLite corruption: %v", err)
+			} else {
+				return nil, err
+			}
+		} else {
+			for i := range result {
+				result[i].ClassifierAssist = model.EvaluateCase(&result[i].Case)
+			}
+		}
+	}
+	return result, nil
+}
+
+func (s *DealReviewStore) buildCaseListPriceTimelineSummaries(cases []DealReviewCase) (map[int64]*DealReviewPriceTimelineSummary, error) {
+	if len(cases) == 0 {
+		return map[int64]*DealReviewPriceTimelineSummary{}, nil
+	}
+	positionIDs := make([]int64, 0, len(cases))
+	casesByPosition := make(map[int64]DealReviewCase, len(cases))
+	for _, caseRec := range cases {
+		if caseRec.PositionID <= 0 {
+			continue
+		}
+		positionIDs = append(positionIDs, caseRec.PositionID)
+		casesByPosition[caseRec.PositionID] = caseRec
+	}
+	if len(positionIDs) == 0 {
+		return map[int64]*DealReviewPriceTimelineSummary{}, nil
+	}
+
+	pointsByPosition, err := s.loadTimelinePointsByPositionIDs(positionIDs)
+	if err != nil {
+		return nil, err
+	}
+
+	result := make(map[int64]*DealReviewPriceTimelineSummary, len(positionIDs))
+	for positionID, caseRec := range casesByPosition {
+		points := buildDealReviewTimelinePoints(&caseRec, pointsByPosition[positionID])
+		if len(points) == 0 {
+			continue
+		}
+		summary := computeDealReviewPriceTimelineSummary(points)
+		result[positionID] = &summary
 	}
 	return result, nil
 }
@@ -1555,6 +3057,28 @@ func (s *DealReviewStore) computeDatasetSummary(userID string, filter DealReview
 		summary.AvgPnL += c.RealizedPnL
 		summary.AvgPnLPct += c.RealizedPnLPct
 		summary.AvgHoldMs += c.HoldDurationMs
+		if strings.EqualFold(c.Status, DealReviewCaseStatusClosed) {
+			summary.AvgMFECapturedPct += c.MFECapturedPct
+			summary.AvgProfitGivenBackPct += c.ProfitGivenBackPct
+			summary.AvgExitEfficiencyScore += c.ExitEfficiencyScore
+			summary.AvgEntryTimingScore += c.EntryTimingScore
+			summary.AvgRiskSizingScore += c.RiskSizingScore
+			if isDealReviewBadEntry(c) {
+				summary.BadEntryDeals++
+			}
+			if isDealReviewBadExit(c) {
+				summary.BadExitDeals++
+			}
+			if isDealReviewAvoidableLoss(c) {
+				summary.AvoidableLossDeals++
+			}
+			if isDealReviewStrongEntryWeakExit(c) {
+				summary.StrongEntryWeakExitDeals++
+			}
+			if isDealReviewWeakEntryLuckyExit(c) {
+				summary.WeakEntryLuckyExitDeals++
+			}
+		}
 	}
 	if summary.TotalDeals > 0 {
 		summary.AvgPnL /= float64(summary.TotalDeals)
@@ -1563,6 +3087,11 @@ func (s *DealReviewStore) computeDatasetSummary(userID string, filter DealReview
 	}
 	if summary.ClosedDeals > 0 {
 		summary.WinRate = float64(summary.WinningDeals) / float64(summary.ClosedDeals) * 100
+		summary.AvgMFECapturedPct /= float64(summary.ClosedDeals)
+		summary.AvgProfitGivenBackPct /= float64(summary.ClosedDeals)
+		summary.AvgExitEfficiencyScore /= float64(summary.ClosedDeals)
+		summary.AvgEntryTimingScore /= float64(summary.ClosedDeals)
+		summary.AvgRiskSizingScore /= float64(summary.ClosedDeals)
 	}
 	if grossLoss > 0 {
 		summary.ProfitFactor = grossProfit / grossLoss
@@ -1723,6 +3252,8 @@ func (s *DealReviewStore) linkEventForPositionTx(tx *gorm.DB, stage, orderID str
 	if err := tx.Save(event).Error; err != nil {
 		return err
 	}
+	eventSnapshot := parseDealReviewEventSnapshot(event.SnapshotJSON)
+	_ = applyDealReviewMarketContextToCase(caseRec, stage, eventSnapshot.MarketContext)
 
 	if stage == DealReviewStageOpen {
 		caseRec.OpenEventID = event.ID
@@ -2110,19 +3641,94 @@ func (s *DealReviewStore) buildEventDetail(traderID, eventID string) (*DealRevie
 	return detail, nil
 }
 
-func (s *DealReviewStore) buildCasePriceTimeline(caseRec *DealReviewCase) (*DealReviewPriceTimeline, error) {
-	if caseRec == nil || caseRec.PositionID <= 0 {
-		return nil, nil
+func buildDealReviewTimelinePointFromCycleRecord(record DealReviewCyclePointRecord) DealReviewPriceTimelinePoint {
+	return DealReviewPriceTimelinePoint{
+		Source:              "cycle",
+		TimestampMs:         record.TimestampMs,
+		DecisionCycleNumber: record.DecisionCycleNumber,
+		MarkPrice:           record.MarkPrice,
+		EntryPrice:          record.EntryPrice,
+		Quantity:            record.Quantity,
+		UnrealizedPnL:       record.UnrealizedPnL,
+		UnrealizedPnLPct:    record.UnrealizedPnLPct,
+		InProfit:            record.InProfit,
+	}
+}
+
+func buildDealReviewTimelinePointFromMarketRecord(record DealReviewMarketPointRecord) DealReviewPriceTimelinePoint {
+	return DealReviewPriceTimelinePoint{
+		Source:           normalizeDealReviewLivePointSource(record.Source),
+		TimestampMs:      record.TimestampMs,
+		MarkPrice:        record.MarkPrice,
+		EntryPrice:       record.EntryPrice,
+		Quantity:         record.Quantity,
+		UnrealizedPnL:    record.UnrealizedPnL,
+		UnrealizedPnLPct: record.UnrealizedPnLPct,
+		InProfit:         record.InProfit,
+	}
+}
+
+func (s *DealReviewStore) loadTimelinePointsByPositionIDs(positionIDs []int64) (map[int64][]DealReviewPriceTimelinePoint, error) {
+	return s.loadTimelinePointsByPositionIDsWithDB(s.db, positionIDs)
+}
+
+func (s *DealReviewStore) loadTimelinePointsByPositionIDsWithDB(db *gorm.DB, positionIDs []int64) (map[int64][]DealReviewPriceTimelinePoint, error) {
+	if len(positionIDs) == 0 {
+		return map[int64][]DealReviewPriceTimelinePoint{}, nil
 	}
 
-	var records []DealReviewCyclePointRecord
-	if err := s.db.Where("position_id = ?", caseRec.PositionID).
+	pointsByPosition := make(map[int64][]DealReviewPriceTimelinePoint, len(positionIDs))
+
+	var cycleRecords []DealReviewCyclePointRecord
+	if err := db.
+		Where("position_id IN ?", positionIDs).
 		Order("timestamp_ms ASC, decision_cycle_number ASC").
-		Find(&records).Error; err != nil {
-		return nil, err
+		Find(&cycleRecords).Error; err != nil {
+		if isDealReviewSQLiteCorruptionError(err) {
+			logger.Warnf("⚠️ Deal-review cycle timeline points skipped due to SQLite corruption: %v", err)
+		} else {
+			return nil, err
+		}
+	} else {
+		for _, record := range cycleRecords {
+			pointsByPosition[record.PositionID] = append(pointsByPosition[record.PositionID], buildDealReviewTimelinePointFromCycleRecord(record))
+		}
 	}
 
-	points := make([]DealReviewPriceTimelinePoint, 0, len(records)+2)
+	var marketRecords []DealReviewMarketPointRecord
+	if err := db.
+		Where("position_id IN ?", positionIDs).
+		Order("timestamp_ms ASC, source ASC").
+		Find(&marketRecords).Error; err != nil {
+		if isDealReviewSQLiteCorruptionError(err) {
+			logger.Warnf("⚠️ Deal-review market timeline points skipped due to SQLite corruption: %v", err)
+		} else {
+			return nil, err
+		}
+	} else {
+		for _, record := range marketRecords {
+			pointsByPosition[record.PositionID] = append(pointsByPosition[record.PositionID], buildDealReviewTimelinePointFromMarketRecord(record))
+		}
+	}
+
+	return pointsByPosition, nil
+}
+
+func isDealReviewSQLiteCorruptionError(err error) bool {
+	if err == nil {
+		return false
+	}
+	lower := strings.ToLower(err.Error())
+	return strings.Contains(lower, "database disk image is malformed") ||
+		strings.Contains(lower, "sqlite_corrupt") ||
+		strings.Contains(lower, "corrupt")
+}
+
+func buildDealReviewTimelinePoints(caseRec *DealReviewCase, timelinePoints []DealReviewPriceTimelinePoint) []DealReviewPriceTimelinePoint {
+	if caseRec == nil {
+		return nil
+	}
+	points := make([]DealReviewPriceTimelinePoint, 0, len(timelinePoints)+2)
 	if caseRec.EntryTimeMs > 0 && caseRec.EntryPrice > 0 {
 		points = append(points, DealReviewPriceTimelinePoint{
 			Source:           "entry",
@@ -2135,19 +3741,7 @@ func (s *DealReviewStore) buildCasePriceTimeline(caseRec *DealReviewCase) (*Deal
 			InProfit:         false,
 		})
 	}
-	for _, record := range records {
-		points = append(points, DealReviewPriceTimelinePoint{
-			Source:              "cycle",
-			TimestampMs:         record.TimestampMs,
-			DecisionCycleNumber: record.DecisionCycleNumber,
-			MarkPrice:           record.MarkPrice,
-			EntryPrice:          record.EntryPrice,
-			Quantity:            record.Quantity,
-			UnrealizedPnL:       record.UnrealizedPnL,
-			UnrealizedPnLPct:    record.UnrealizedPnLPct,
-			InProfit:            record.InProfit,
-		})
-	}
+	points = append(points, timelinePoints...)
 	if caseRec.ExitTimeMs > 0 && caseRec.ExitPrice > 0 {
 		points = append(points, DealReviewPriceTimelinePoint{
 			Source:           "exit",
@@ -2156,22 +3750,255 @@ func (s *DealReviewStore) buildCasePriceTimeline(caseRec *DealReviewCase) (*Deal
 			EntryPrice:       caseRec.EntryPrice,
 			Quantity:         caseRec.ExitQuantity,
 			UnrealizedPnL:    caseRec.RealizedPnL,
-			UnrealizedPnLPct: caseRec.RealizedPnLPct,
+			UnrealizedPnLPct: calcDealReviewSignedPriceMovePct(caseRec.Side, caseRec.EntryPrice, caseRec.ExitPrice),
 			InProfit:         caseRec.RealizedPnL > 0,
 		})
 	}
-
 	sort.SliceStable(points, func(i, j int) bool {
 		if points[i].TimestampMs == points[j].TimestampMs {
 			return dealReviewTimelineSourceRank(points[i].Source) < dealReviewTimelineSourceRank(points[j].Source)
 		}
 		return points[i].TimestampMs < points[j].TimestampMs
 	})
+	return points
+}
+
+func (s *DealReviewStore) buildCasePriceTimeline(caseRec *DealReviewCase) (*DealReviewPriceTimeline, error) {
+	if caseRec == nil || caseRec.PositionID <= 0 {
+		return nil, nil
+	}
+
+	pointsByPosition, err := s.loadTimelinePointsByPositionIDs([]int64{caseRec.PositionID})
+	if err != nil {
+		return nil, err
+	}
+
+	points := buildDealReviewTimelinePoints(caseRec, pointsByPosition[caseRec.PositionID])
 
 	return &DealReviewPriceTimeline{
 		Points:  points,
 		Summary: computeDealReviewPriceTimelineSummary(points),
 	}, nil
+}
+
+type dealReviewCaseQuality struct {
+	MaxFavorableExcursion    float64
+	MaxFavorableExcursionPct float64
+	MaxAdverseExcursion      float64
+	MaxAdverseExcursionPct   float64
+	MFECapturedPct           float64
+	ProfitGivenBack          float64
+	ProfitGivenBackPct       float64
+	TimeToFirstProfitMs      int64
+	TimeToMaxDrawdownMs      int64
+	PlannedRiskPct           float64
+	ExitEfficiencyScore      float64
+	EntryTimingScore         float64
+	RiskSizingScore          float64
+}
+
+func (s *DealReviewStore) refreshCaseQualityMetricsTx(tx *gorm.DB, caseRec *DealReviewCase) error {
+	if tx == nil || caseRec == nil || !strings.EqualFold(caseRec.Status, DealReviewCaseStatusClosed) {
+		return nil
+	}
+	pointsByPosition, err := s.loadTimelinePointsByPositionIDsWithDB(tx, []int64{caseRec.PositionID})
+	if err != nil {
+		return err
+	}
+	quality := computeDealReviewCaseQuality(caseRec, buildDealReviewTimelinePoints(caseRec, pointsByPosition[caseRec.PositionID]))
+	return applyDealReviewCaseQualityTx(tx, caseRec, quality)
+}
+
+func applyDealReviewCaseQualityTx(tx *gorm.DB, caseRec *DealReviewCase, quality dealReviewCaseQuality) error {
+	if tx == nil || caseRec == nil {
+		return nil
+	}
+	caseRec.MaxFavorableExcursion = quality.MaxFavorableExcursion
+	caseRec.MaxFavorableExcursionPct = quality.MaxFavorableExcursionPct
+	caseRec.MaxAdverseExcursion = quality.MaxAdverseExcursion
+	caseRec.MaxAdverseExcursionPct = quality.MaxAdverseExcursionPct
+	caseRec.MFECapturedPct = quality.MFECapturedPct
+	caseRec.ProfitGivenBack = quality.ProfitGivenBack
+	caseRec.ProfitGivenBackPct = quality.ProfitGivenBackPct
+	caseRec.TimeToFirstProfitMs = quality.TimeToFirstProfitMs
+	caseRec.TimeToMaxDrawdownMs = quality.TimeToMaxDrawdownMs
+	caseRec.PlannedRiskPct = quality.PlannedRiskPct
+	caseRec.ExitEfficiencyScore = quality.ExitEfficiencyScore
+	caseRec.EntryTimingScore = quality.EntryTimingScore
+	caseRec.RiskSizingScore = quality.RiskSizingScore
+	return tx.Save(caseRec).Error
+}
+
+func computeDealReviewCaseQuality(caseRec *DealReviewCase, points []DealReviewPriceTimelinePoint) dealReviewCaseQuality {
+	quality := dealReviewCaseQuality{}
+	if caseRec == nil {
+		return quality
+	}
+
+	if len(points) == 0 {
+		return quality
+	}
+
+	entryTimeMs := caseRec.EntryTimeMs
+	minPointTimestamp := entryTimeMs
+	firstProfitFound := false
+
+	for _, point := range points {
+		if point.UnrealizedPnL > quality.MaxFavorableExcursion {
+			quality.MaxFavorableExcursion = point.UnrealizedPnL
+		}
+		if point.UnrealizedPnLPct > quality.MaxFavorableExcursionPct {
+			quality.MaxFavorableExcursionPct = point.UnrealizedPnLPct
+		}
+		if point.UnrealizedPnL < quality.MaxAdverseExcursion {
+			quality.MaxAdverseExcursion = point.UnrealizedPnL
+		}
+		if point.UnrealizedPnLPct < quality.MaxAdverseExcursionPct {
+			quality.MaxAdverseExcursionPct = point.UnrealizedPnLPct
+		}
+		if !firstProfitFound && point.UnrealizedPnL > 0 {
+			firstProfitFound = true
+			if entryTimeMs > 0 && point.TimestampMs > entryTimeMs {
+				quality.TimeToFirstProfitMs = point.TimestampMs - entryTimeMs
+			}
+		}
+		if point.UnrealizedPnL == quality.MaxAdverseExcursion && point.TimestampMs >= entryTimeMs {
+			minPointTimestamp = point.TimestampMs
+		}
+	}
+
+	if quality.MaxAdverseExcursion < 0 && entryTimeMs > 0 && minPointTimestamp > entryTimeMs {
+		quality.TimeToMaxDrawdownMs = minPointTimestamp - entryTimeMs
+	}
+
+	if quality.MaxFavorableExcursion > 0 {
+		quality.MFECapturedPct = clampDealReviewScore((caseRec.RealizedPnL / quality.MaxFavorableExcursion) * 100)
+		quality.ProfitGivenBack = math.Max(0, quality.MaxFavorableExcursion-caseRec.RealizedPnL)
+		quality.ProfitGivenBackPct = math.Max(0, (quality.ProfitGivenBack/quality.MaxFavorableExcursion)*100)
+	}
+
+	quality.PlannedRiskPct = calcDealReviewPlannedRiskPct(caseRec)
+	quality.ExitEfficiencyScore = calculateDealReviewExitEfficiencyScore(caseRec, quality)
+	quality.EntryTimingScore = calculateDealReviewEntryTimingScore(caseRec, quality)
+	quality.RiskSizingScore = calculateDealReviewRiskSizingScore(caseRec, quality)
+
+	return quality
+}
+
+func calcDealReviewSignedPriceMovePct(side string, entryPrice, markPrice float64) float64 {
+	if entryPrice <= 0 || markPrice <= 0 {
+		return 0
+	}
+	if normalizeDealReviewSide(side) == "SHORT" {
+		return ((entryPrice - markPrice) / entryPrice) * 100
+	}
+	return ((markPrice - entryPrice) / entryPrice) * 100
+}
+
+func calcDealReviewPlannedRiskPct(caseRec *DealReviewCase) float64 {
+	if caseRec == nil || caseRec.EntryPrice <= 0 || caseRec.OpenStopLoss <= 0 {
+		return 0
+	}
+	stopDistancePct := math.Abs(caseRec.EntryPrice-caseRec.OpenStopLoss) / caseRec.EntryPrice * 100
+	leverage := math.Max(float64(caseRec.Leverage), 1)
+	return stopDistancePct * leverage
+}
+
+func calculateDealReviewExitEfficiencyScore(caseRec *DealReviewCase, quality dealReviewCaseQuality) float64 {
+	if caseRec == nil {
+		return 0
+	}
+	if quality.MaxFavorableExcursion <= 0 {
+		if caseRec.RealizedPnL >= 0 {
+			return 100
+		}
+		return 0
+	}
+	score := quality.MFECapturedPct
+	if quality.ProfitGivenBackPct > 100 {
+		score -= math.Min(quality.ProfitGivenBackPct-100, 25)
+	}
+	return clampDealReviewScore(score)
+}
+
+func calculateDealReviewEntryTimingScore(caseRec *DealReviewCase, quality dealReviewCaseQuality) float64 {
+	if caseRec == nil {
+		return 0
+	}
+
+	maxFavPct := math.Max(0, quality.MaxFavorableExcursionPct)
+	maxAdvAbsPct := math.Abs(math.Min(0, quality.MaxAdverseExcursionPct))
+	holdMs := caseRec.HoldDurationMs
+	if holdMs <= 0 && caseRec.ExitTimeMs > caseRec.EntryTimeMs {
+		holdMs = caseRec.ExitTimeMs - caseRec.EntryTimeMs
+	}
+	if holdMs <= 0 {
+		holdMs = 1
+	}
+
+	favorableScale := clampDealReviewUnit(maxFavPct / 2.0)
+	rewardToPain := 0.0
+	switch {
+	case maxFavPct > 0 && maxAdvAbsPct <= 0.0001:
+		rewardToPain = 1
+	case maxFavPct > 0:
+		rewardToPain = clampDealReviewUnit((maxFavPct / (maxAdvAbsPct + 0.05)) / 2)
+	}
+
+	profitSpeed := 0.0
+	if quality.TimeToFirstProfitMs > 0 {
+		profitSpeed = clampDealReviewUnit(1 - float64(quality.TimeToFirstProfitMs)/float64(holdMs))
+	}
+
+	score := 25*favorableScale + 35*rewardToPain + 25*profitSpeed
+	if maxFavPct > 0 {
+		score += 15
+	}
+	if caseRec.RealizedPnL > 0 {
+		score += 10
+	}
+	if maxFavPct <= 0 && caseRec.RealizedPnL < 0 {
+		score -= 20
+	}
+	if maxAdvAbsPct > maxFavPct*1.5 && maxAdvAbsPct > 0.25 {
+		score -= 20
+	}
+	return clampDealReviewScore(score)
+}
+
+func calculateDealReviewRiskSizingScore(caseRec *DealReviewCase, quality dealReviewCaseQuality) float64 {
+	if caseRec == nil {
+		return 0
+	}
+
+	effectiveRiskPct := quality.PlannedRiskPct
+	if effectiveRiskPct <= 0 {
+		effectiveRiskPct = math.Abs(quality.MaxAdverseExcursionPct) * math.Max(float64(caseRec.Leverage), 1)
+	}
+	switch {
+	case effectiveRiskPct <= 0.5:
+		return 95
+	case effectiveRiskPct <= 1:
+		return 90
+	case effectiveRiskPct <= 2:
+		return 80
+	case effectiveRiskPct <= 3:
+		return 65
+	case effectiveRiskPct <= 5:
+		return 45
+	case effectiveRiskPct <= 8:
+		return 25
+	default:
+		return 10
+	}
+}
+
+func clampDealReviewUnit(value float64) float64 {
+	return math.Max(0, math.Min(value, 1))
+}
+
+func clampDealReviewScore(value float64) float64 {
+	return math.Max(0, math.Min(value, 100))
 }
 
 func (s *DealReviewStore) backfillCaseDecisionCyclePricePoints(caseRec *DealReviewCase, nowMs int64) error {
@@ -2228,6 +4055,52 @@ func (s *DealReviewStore) upsertCyclePointRecord(caseRec *DealReviewCase, record
 		UnrealizedPnL:       snapshot.UnrealizedProfit,
 		UnrealizedPnLPct:    unrealizedPnLPct,
 		InProfit:            snapshot.UnrealizedProfit > 0,
+	}).Error
+}
+
+func (s *DealReviewStore) upsertMarketPointTx(tx *gorm.DB, userID, traderID string, position *TraderPosition, snapshot PositionSnapshot, timestampMs int64, source string) error {
+	if tx == nil || position == nil {
+		return nil
+	}
+
+	caseID := ""
+	var caseRec DealReviewCase
+	if err := tx.Select("id").Where("position_id = ?", position.ID).First(&caseRec).Error; err == nil {
+		caseID = caseRec.ID
+	}
+
+	unrealizedPnLPct := calcDealReviewUnrealizedPnLPct(position.Side, snapshot.EntryPrice, snapshot.MarkPrice, snapshot.PositionAmt, snapshot.UnrealizedProfit)
+	return tx.Clauses(clause.OnConflict{
+		Columns: []clause.Column{{Name: "position_id"}, {Name: "source"}, {Name: "timestamp_ms"}},
+		DoUpdates: clause.Assignments(map[string]any{
+			"deal_id":            caseID,
+			"user_id":            userID,
+			"trader_id":          traderID,
+			"symbol":             position.Symbol,
+			"side":               position.Side,
+			"mark_price":         snapshot.MarkPrice,
+			"entry_price":        snapshot.EntryPrice,
+			"quantity":           math.Abs(snapshot.PositionAmt),
+			"unrealized_pnl":     snapshot.UnrealizedProfit,
+			"unrealized_pnl_pct": unrealizedPnLPct,
+			"in_profit":          snapshot.UnrealizedProfit > 0,
+			"updated_at":         time.Now().UTC(),
+		}),
+	}).Create(&DealReviewMarketPointRecord{
+		UserID:           userID,
+		TraderID:         traderID,
+		DealID:           caseID,
+		PositionID:       position.ID,
+		Symbol:           position.Symbol,
+		Side:             position.Side,
+		Source:           source,
+		TimestampMs:      timestampMs,
+		MarkPrice:        snapshot.MarkPrice,
+		EntryPrice:       snapshot.EntryPrice,
+		Quantity:         math.Abs(snapshot.PositionAmt),
+		UnrealizedPnL:    snapshot.UnrealizedProfit,
+		UnrealizedPnLPct: unrealizedPnLPct,
+		InProfit:         snapshot.UnrealizedProfit > 0,
 	}).Error
 }
 
@@ -2492,6 +4365,8 @@ func computeDealReviewPriceTimelineSummary(points []DealReviewPriceTimelinePoint
 	for _, point := range points {
 		if point.Source == "cycle" {
 			summary.CycleSamples++
+		} else if point.Source == "platform" {
+			summary.PlatformSamples++
 		}
 		if point.UnrealizedPnL > 0 {
 			summary.EverInProfit = true
@@ -2518,16 +4393,34 @@ func computeDealReviewPriceTimelineSummary(points []DealReviewPriceTimelinePoint
 	return summary
 }
 
+func normalizeDealReviewLivePointSource(source string) string {
+	switch strings.ToLower(strings.TrimSpace(source)) {
+	case "", "platform", "exchange", "monitor":
+		return "platform"
+	default:
+		return strings.ToLower(strings.TrimSpace(source))
+	}
+}
+
+func normalizeDealReviewLivePointTimestampMs(timestampMs int64) int64 {
+	if timestampMs <= 0 {
+		return 0
+	}
+	return (timestampMs / 1000) * 1000
+}
+
 func dealReviewTimelineSourceRank(source string) int {
 	switch strings.ToLower(strings.TrimSpace(source)) {
 	case "entry":
 		return 0
 	case "cycle":
 		return 1
-	case "exit":
+	case "platform":
 		return 2
-	default:
+	case "exit":
 		return 3
+	default:
+		return 4
 	}
 }
 
@@ -2552,12 +4445,14 @@ func (s *DealReviewStore) BackfillEventDecisionArtifacts() error {
 				before := strings.TrimSpace(events[i].SnapshotJSON)
 				s.enrichEventSnapshotFromDecisionRecordTx(tx, &events[i])
 				after := strings.TrimSpace(events[i].SnapshotJSON)
-				if before == after {
-					continue
+				if before != after {
+					if err := tx.Model(&DealReviewEvent{}).
+						Where("id = ?", events[i].ID).
+						Update("snapshot_json", after).Error; err != nil {
+						return err
+					}
 				}
-				if err := tx.Model(&DealReviewEvent{}).
-					Where("id = ?", events[i].ID).
-					Update("snapshot_json", after).Error; err != nil {
+				if err := s.syncCaseMarketContextFromEventTx(tx, &events[i]); err != nil {
 					return err
 				}
 			}
@@ -2618,6 +4513,34 @@ func truncateAnomalyReasons(items []DealReviewAnomalyCloseReason, n int) []DealR
 	return items[:n]
 }
 
+func truncateAnomalyGiveBacks(items []DealReviewAnomalyGiveBack, n int) []DealReviewAnomalyGiveBack {
+	if len(items) <= n {
+		return items
+	}
+	return items[:n]
+}
+
+func truncateAnomalyStopOuts(items []DealReviewAnomalyStopOut, n int) []DealReviewAnomalyStopOut {
+	if len(items) <= n {
+		return items
+	}
+	return items[:n]
+}
+
+func truncateAnomalySizings(items []DealReviewAnomalySizing, n int) []DealReviewAnomalySizing {
+	if len(items) <= n {
+		return items
+	}
+	return items[:n]
+}
+
+func truncateAnomalyCloseReasonQualities(items []DealReviewAnomalyCloseReasonQuality, n int) []DealReviewAnomalyCloseReasonQuality {
+	if len(items) <= n {
+		return items
+	}
+	return items[:n]
+}
+
 func buildAnomalyNotes(summary *DealReviewAnomalySummary) []string {
 	notes := []string{}
 	if summary == nil {
@@ -2639,7 +4562,71 @@ func buildAnomalyNotes(summary *DealReviewAnomalySummary) []string {
 		notes = append(notes, fmt.Sprintf("Most expensive close reason: %s (%.2f net PnL across %d closes).",
 			summary.WeakCloseReasons[0].Reason, summary.WeakCloseReasons[0].NetPnL, summary.WeakCloseReasons[0].Deals))
 	}
+	if len(summary.ProfitGiveBackHotspots) > 0 {
+		notes = append(notes, fmt.Sprintf("Largest profit give-back hotspot: %s gave back %.1f%% of available MFE on average.",
+			summary.ProfitGiveBackHotspots[0].Symbol,
+			summary.ProfitGiveBackHotspots[0].AvgGiveBackPct))
+	}
+	if len(summary.EarlyStopOutHotspots) > 0 {
+		notes = append(notes, fmt.Sprintf("Repeated early stop-out cluster: %s with %d fast stop-outs (avg hold %s).",
+			summary.EarlyStopOutHotspots[0].Symbol,
+			summary.EarlyStopOutHotspots[0].Deals,
+			formatDurationForNote(summary.EarlyStopOutHotspots[0].AvgHoldMs)))
+	}
+	if len(summary.OversizedLossHotspots) > 0 {
+		notes = append(notes, fmt.Sprintf("Sizing risk hotspot: %s averages %.1f sizing score and %.1f%% planned risk.",
+			summary.OversizedLossHotspots[0].Symbol,
+			summary.OversizedLossHotspots[0].AvgRiskSizingScore,
+			summary.OversizedLossHotspots[0].AvgPlannedRiskPct))
+	}
+	if len(summary.CloseReasonQuality) > 0 {
+		notes = append(notes, fmt.Sprintf("Weakest close-quality cohort: %s exits average %.1f exit-efficiency score.",
+			summary.CloseReasonQuality[0].Reason,
+			summary.CloseReasonQuality[0].AvgExitEfficiencyScore))
+	}
 	return notes
+}
+
+func formatDurationForNote(durationMs int64) string {
+	if durationMs <= 0 {
+		return "0m"
+	}
+	return (time.Duration(durationMs) * time.Millisecond).Round(time.Minute).String()
+}
+
+func isDealReviewBadEntry(caseRec DealReviewCase) bool {
+	return caseRec.EntryTimingScore < 35
+}
+
+func isDealReviewBadExit(caseRec DealReviewCase) bool {
+	return caseRec.MaxFavorableExcursion > 0.05 && caseRec.ExitEfficiencyScore < 35
+}
+
+func isDealReviewAvoidableLoss(caseRec DealReviewCase) bool {
+	return caseRec.RealizedPnL < 0 && (caseRec.ProfitGivenBack > 0.05 || caseRec.MaxFavorableExcursion > 0.05)
+}
+
+func isDealReviewStrongEntryWeakExit(caseRec DealReviewCase) bool {
+	return caseRec.EntryTimingScore >= 70 && caseRec.MaxFavorableExcursion > 0.05 && caseRec.ExitEfficiencyScore < 40
+}
+
+func isDealReviewWeakEntryLuckyExit(caseRec DealReviewCase) bool {
+	return caseRec.RealizedPnL > 0 && caseRec.EntryTimingScore < 35
+}
+
+func isDealReviewProfitGiveBackHotspot(caseRec DealReviewCase) bool {
+	return caseRec.MaxFavorableExcursion > 0.05 && (caseRec.ProfitGivenBackPct >= 40 || caseRec.MFECapturedPct <= 45)
+}
+
+func isDealReviewEarlyStopOut(caseRec DealReviewCase) bool {
+	if caseRec.RealizedPnL >= 0 || caseRec.TimeToFirstProfitMs > 0 {
+		return false
+	}
+	return strings.Contains(caseRec.CloseReason, "stop") || (caseRec.HoldDurationMs > 0 && caseRec.HoldDurationMs <= int64(20*time.Minute/time.Millisecond))
+}
+
+func isDealReviewOversizedLoss(caseRec DealReviewCase) bool {
+	return caseRec.RealizedPnL < 0 && (caseRec.RiskSizingScore > 0 && caseRec.RiskSizingScore <= 35 || caseRec.PlannedRiskPct >= 5)
 }
 
 func normalizeDealReviewSide(side string) string {
@@ -2685,12 +4672,39 @@ func (s *DealReviewStore) enrichEventSnapshotFromDecisionRecordTx(tx *gorm.DB, e
 	}
 
 	snapshot := parseDealReviewEventSnapshot(event.SnapshotJSON)
-	if !mergeDealReviewSnapshotDecisionArtifacts(&snapshot, record) {
+	changed := mergeDealReviewSnapshotDecisionArtifacts(&snapshot, record)
+	if snapshot.MarketContext == nil {
+		if marketContext := buildDealReviewMarketContextFromDecisionRecord(record, event.Stage, event.Symbol, event.Side, event.DecisionTimestamp); marketContext != nil {
+			snapshot.MarketContext = marketContext
+			changed = true
+		}
+	}
+	if !changed {
 		return
 	}
 	if raw, err := json.Marshal(snapshot); err == nil {
 		event.SnapshotJSON = string(raw)
 	}
+}
+
+func (s *DealReviewStore) syncCaseMarketContextFromEventTx(tx *gorm.DB, event *DealReviewEvent) error {
+	if tx == nil || event == nil || strings.TrimSpace(event.DealID) == "" {
+		return nil
+	}
+
+	var caseRec DealReviewCase
+	if err := tx.Where("id = ?", event.DealID).First(&caseRec).Error; err != nil {
+		if err == gorm.ErrRecordNotFound {
+			return nil
+		}
+		return err
+	}
+
+	snapshot := parseDealReviewEventSnapshot(event.SnapshotJSON)
+	if !applyDealReviewMarketContextToCase(&caseRec, event.Stage, snapshot.MarketContext) {
+		return nil
+	}
+	return tx.Save(&caseRec).Error
 }
 
 func parseDealReviewEventSnapshot(raw string) DealReviewEventSnapshot {

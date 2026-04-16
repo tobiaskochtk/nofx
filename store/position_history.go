@@ -190,6 +190,14 @@ type ClosedPnLRecord struct {
 	ExchangeID  string
 }
 
+type closedPnLMatchKind int
+
+const (
+	closedPnLMatchNone closedPnLMatchKind = iota
+	closedPnLMatchExact
+	closedPnLMatchContained
+)
+
 // CreateFromClosedPnL creates a closed position record from exchange data
 func (s *PositionStore) CreateFromClosedPnL(traderID, exchangeID, exchangeType string, record *ClosedPnLRecord) (bool, error) {
 	if record.Symbol == "" {
@@ -221,9 +229,14 @@ func (s *PositionStore) CreateFromClosedPnL(traderID, exchangeID, exchangeType s
 	if exists {
 		return false, nil
 	}
-	if matched, err := s.findMatchingClosedPnLPosition(traderID, exchangeID, side, record); err != nil {
+	if matched, matchKind, err := s.findMatchingClosedPnLPosition(traderID, exchangeID, side, record, 0); err != nil {
 		return false, err
 	} else if matched != nil {
+		if matchKind == closedPnLMatchExact {
+			if err := s.applyClosedPnLToPosition(matched.ID, record); err != nil {
+				return false, err
+			}
+		}
 		return false, nil
 	}
 
@@ -279,34 +292,40 @@ func (s *PositionStore) CreateFromClosedPnL(traderID, exchangeID, exchangeType s
 	return true, nil
 }
 
-func (s *PositionStore) findMatchingClosedPnLPosition(traderID, exchangeID, side string, record *ClosedPnLRecord) (*TraderPosition, error) {
+func (s *PositionStore) findMatchingClosedPnLPosition(traderID, exchangeID, side string, record *ClosedPnLRecord, excludePositionID int64) (*TraderPosition, closedPnLMatchKind, error) {
 	if record == nil {
-		return nil, nil
+		return nil, closedPnLMatchNone, nil
 	}
 
 	exitTimeMs := record.ExitTime
 	if exitTimeMs == 0 {
-		return nil, nil
+		return nil, closedPnLMatchNone, nil
+	}
+	entryTimeMs := record.EntryTime
+	if entryTimeMs == 0 || entryTimeMs > exitTimeMs {
+		entryTimeMs = exitTimeMs
 	}
 
 	const (
 		timeToleranceMs   = int64(2 * 60 * 1000)
 		priceTolerance    = 0.000001
+		entryTolerance    = 0.000005
 		quantityTolerance = 0.0001
 	)
 
 	var candidates []TraderPosition
 	if err := s.db.Where(
-		"trader_id = ? AND exchange_id = ? AND status = ? AND symbol = ? AND side = ? AND exit_time BETWEEN ? AND ?",
+		"trader_id = ? AND exchange_id = ? AND status = ? AND symbol = ? AND side = ? AND id != ? AND entry_time <= ? AND exit_time >= ?",
 		traderID,
 		exchangeID,
 		"CLOSED",
 		record.Symbol,
 		side,
-		exitTimeMs-timeToleranceMs,
+		excludePositionID,
 		exitTimeMs+timeToleranceMs,
+		entryTimeMs-timeToleranceMs,
 	).Find(&candidates).Error; err != nil {
-		return nil, fmt.Errorf("failed to query matching closed positions: %w", err)
+		return nil, closedPnLMatchNone, fmt.Errorf("failed to query matching closed positions: %w", err)
 	}
 
 	for i := range candidates {
@@ -318,13 +337,200 @@ func (s *PositionStore) findMatchingClosedPnLPosition(traderID, exchangeID, side
 		if math.Abs(qty-record.Quantity) > quantityTolerance {
 			continue
 		}
+		if record.EntryPrice > 0 && candidate.EntryPrice > 0 && math.Abs(candidate.EntryPrice-record.EntryPrice) > priceTolerance*math.Max(1, record.EntryPrice) {
+			continue
+		}
+		if absInt64(candidate.ExitTime-exitTimeMs) > timeToleranceMs {
+			continue
+		}
 		if record.ExitPrice > 0 && math.Abs(candidate.ExitPrice-record.ExitPrice) > priceTolerance*math.Max(1, record.ExitPrice) {
 			continue
 		}
-		return candidate, nil
+		return candidate, closedPnLMatchExact, nil
 	}
 
-	return nil, nil
+	for i := range candidates {
+		candidate := &candidates[i]
+		if strings.EqualFold(candidate.Source, "closed_pnl_sync") {
+			continue
+		}
+		qty := candidate.EntryQuantity
+		if qty == 0 {
+			qty = candidate.Quantity
+		}
+		if qty+quantityTolerance < record.Quantity {
+			continue
+		}
+		if record.EntryPrice > 0 && candidate.EntryPrice > 0 && math.Abs(candidate.EntryPrice-record.EntryPrice) > entryTolerance*math.Max(1, record.EntryPrice) {
+			continue
+		}
+
+		candidateEntryTimeMs := candidate.EntryTime
+		if candidateEntryTimeMs == 0 || candidateEntryTimeMs > candidate.ExitTime {
+			candidateEntryTimeMs = candidate.ExitTime
+		}
+		if candidateEntryTimeMs == 0 || candidate.ExitTime == 0 {
+			continue
+		}
+		if entryTimeMs < candidateEntryTimeMs-timeToleranceMs {
+			continue
+		}
+		if exitTimeMs > candidate.ExitTime+timeToleranceMs {
+			continue
+		}
+
+		return candidate, closedPnLMatchContained, nil
+	}
+
+	return nil, closedPnLMatchNone, nil
+}
+
+func (s *PositionStore) applyClosedPnLToPosition(positionID int64, record *ClosedPnLRecord) error {
+	if positionID == 0 || record == nil {
+		return nil
+	}
+
+	position, err := s.GetByID(positionID)
+	if err != nil {
+		return fmt.Errorf("failed to load matching position %d: %w", positionID, err)
+	}
+
+	updates := map[string]any{
+		"realized_pnl": record.RealizedPnL,
+		"fee":          record.Fee,
+		"updated_at":   time.Now().UTC().UnixMilli(),
+	}
+
+	if record.ExitPrice > 0 {
+		updates["exit_price"] = record.ExitPrice
+	}
+	if record.ExitTime > 0 {
+		updates["exit_time"] = record.ExitTime
+	}
+	if record.Leverage > 0 && position.Leverage != record.Leverage {
+		updates["leverage"] = record.Leverage
+	}
+	if orderID := strings.TrimSpace(record.OrderID); orderID != "" && position.ExitOrderID != orderID {
+		updates["exit_order_id"] = orderID
+	}
+	if record.EntryTime > 0 && record.EntryTime < record.ExitTime &&
+		(position.EntryTime == 0 || position.EntryTime == position.ExitTime || position.EntryTime > record.EntryTime) {
+		updates["entry_time"] = record.EntryTime
+	}
+	if record.EntryPrice > 0 && position.EntryPrice <= 0 {
+		updates["entry_price"] = record.EntryPrice
+	}
+	if shouldReplaceCloseReason(position.CloseReason, record.CloseType) {
+		updates["close_reason"] = record.CloseType
+	}
+
+	if err := s.db.Model(&TraderPosition{}).Where("id = ?", positionID).Updates(updates).Error; err != nil {
+		return fmt.Errorf("failed to update matching position %d with closed PnL data: %w", positionID, err)
+	}
+	s.syncDealReviewClosedByID(positionID)
+	return nil
+}
+
+// CleanupRedundantClosedPnLPositions removes stale closed_pnl_sync rows that are already represented
+// by reconstructed sync positions. Exact matches refresh the canonical position before deleting the duplicate.
+func (s *PositionStore) CleanupRedundantClosedPnLPositions() (int, int, error) {
+	var closedPnLPositions []TraderPosition
+	if err := s.db.
+		Where("status = ? AND source = ?", "CLOSED", "closed_pnl_sync").
+		Order("id ASC").
+		Find(&closedPnLPositions).Error; err != nil {
+		return 0, 0, fmt.Errorf("failed to load closed PnL positions for cleanup: %w", err)
+	}
+
+	removed := 0
+	refreshed := 0
+	for i := range closedPnLPositions {
+		position := &closedPnLPositions[i]
+		record := &ClosedPnLRecord{
+			Symbol:      position.Symbol,
+			Side:        position.Side,
+			EntryPrice:  position.EntryPrice,
+			ExitPrice:   position.ExitPrice,
+			Quantity:    position.EntryQuantity,
+			RealizedPnL: position.RealizedPnL,
+			Fee:         position.Fee,
+			Leverage:    position.Leverage,
+			EntryTime:   position.EntryTime,
+			ExitTime:    position.ExitTime,
+			OrderID:     position.ExitOrderID,
+			CloseType:   position.CloseReason,
+			ExchangeID:  position.ExchangePositionID,
+		}
+		if record.Quantity == 0 {
+			record.Quantity = position.Quantity
+		}
+
+		matched, matchKind, err := s.findMatchingClosedPnLPosition(position.TraderID, position.ExchangeID, position.Side, record, position.ID)
+		if err != nil {
+			return removed, refreshed, err
+		}
+		if matched == nil {
+			continue
+		}
+		if matchKind == closedPnLMatchExact {
+			if err := s.applyClosedPnLToPosition(matched.ID, record); err != nil {
+				return removed, refreshed, err
+			}
+			refreshed++
+		}
+		if err := s.deletePositionWithReviewArtifacts(position.ID); err != nil {
+			return removed, refreshed, err
+		}
+		removed++
+	}
+
+	return removed, refreshed, nil
+}
+
+func (s *PositionStore) deletePositionWithReviewArtifacts(positionID int64) error {
+	if positionID == 0 {
+		return nil
+	}
+
+	return s.db.Transaction(func(tx *gorm.DB) error {
+		var caseRec DealReviewCase
+		err := tx.Select("id").Where("position_id = ?", positionID).First(&caseRec).Error
+		if err != nil && err != gorm.ErrRecordNotFound {
+			return fmt.Errorf("failed to load deal review case for redundant position %d: %w", positionID, err)
+		}
+
+		if err := tx.Where("position_id = ?", positionID).Delete(&DealReviewCyclePointRecord{}).Error; err != nil {
+			return fmt.Errorf("failed to delete deal review cycle points for redundant position %d: %w", positionID, err)
+		}
+		if err := tx.Where("position_id = ?", positionID).Delete(&DealReviewMarketPointRecord{}).Error; err != nil {
+			return fmt.Errorf("failed to delete deal review market points for redundant position %d: %w", positionID, err)
+		}
+		if err := tx.Where("position_id = ?", positionID).Delete(&DealReviewEvent{}).Error; err != nil {
+			return fmt.Errorf("failed to delete deal review events for redundant position %d: %w", positionID, err)
+		}
+		if caseRec.ID != "" {
+			if err := tx.Where("deal_id = ?", caseRec.ID).Delete(&DealReviewEvent{}).Error; err != nil {
+				return fmt.Errorf("failed to delete deal review events for redundant case %s: %w", caseRec.ID, err)
+			}
+			if err := tx.Where("case_id = ?", caseRec.ID).Delete(&DealReviewClassifierFeedback{}).Error; err != nil {
+				return fmt.Errorf("failed to delete classifier feedback for redundant case %s: %w", caseRec.ID, err)
+			}
+		}
+		if err := tx.Where("position_id = ?", positionID).Delete(&DealReviewCase{}).Error; err != nil {
+			return fmt.Errorf("failed to delete deal review case for redundant position %d: %w", positionID, err)
+		}
+		if err := tx.Delete(&TraderPosition{}, positionID).Error; err != nil {
+			return fmt.Errorf("failed to delete redundant position %d: %w", positionID, err)
+		}
+		return nil
+	})
+}
+
+func absInt64(value int64) int64 {
+	if value < 0 {
+		return -value
+	}
+	return value
 }
 
 // GetLastClosedPositionTime gets the most recent exit time (Unix ms)

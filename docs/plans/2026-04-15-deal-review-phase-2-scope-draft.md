@@ -54,7 +54,7 @@ After this phase, a trader owner should be able to answer:
 - Manual labels and analyst notes
 - Anomaly heuristics
 - Close-reason attribution from trigger-order sync
-- Deal timeline points from decision-cycle position snapshots
+- Deal timeline points from decision-cycle position snapshots plus synced platform price updates between cycles
 
 These are not part of this draft scope because they already exist.
 
@@ -92,9 +92,9 @@ Persist enough market-context metadata per deal so the review UI can filter by r
 
 ### Draft Scope
 
-- [ ] Persist open-side regime snapshot on each deal case.
-- [ ] Persist close-side regime snapshot on each deal case.
-- [ ] Add deal-level regime fields for:
+- [x] Persist open-side regime snapshot on each deal case.
+- [x] Persist close-side regime snapshot on each deal case.
+- [x] Add deal-level regime fields for:
   - trend regime
   - volatility regime
   - BTC-relative-strength regime
@@ -104,19 +104,23 @@ Persist enough market-context metadata per deal so the review UI can filter by r
   - weekday bucket
   - venue / tradability / liquidity tier
   - spread / slippage bucket where data is available
-- [ ] Add backend filters for regime fields.
-- [ ] Add UI filters for regime fields on `/deal-review`.
-- [ ] Add quick cohort chips such as:
+- [x] Add backend filters for regime fields.
+- [x] Add UI filters for regime fields on `/deal-review`.
+- [x] Add quick cohort chips such as:
   - trend + high vol
   - low vol chop
   - BTC-leading alt weakness
   - funding extreme longs
   - Asia / EU / US session
 
+Current implementation note:
+- The main review page now exposes open-side regime filters directly because those are the primary cohort-design controls.
+- Close-side regime snapshots are also persisted, shown in the per-deal detail view, included in AI scan payloads, and available through backend filtering.
+
 ### Acceptance
 
-- [ ] A user can isolate deals like "Aggressive Altcoin Hunter losses during low-vol chop on altcoins in Asia session".
-- [ ] AI scans can run on those regime-filtered cohorts directly.
+- [x] A user can isolate deals like "Aggressive Altcoin Hunter losses during low-vol chop on altcoins in Asia session".
+- [x] AI scans can run on those regime-filtered cohorts directly.
 
 ## B. Entry / Exit / Risk Quality Layer
 
@@ -126,7 +130,7 @@ Separate "good idea, bad management" from "bad idea from the start".
 
 ### Draft Scope
 
-- [ ] Persist derived trade-quality metrics per deal:
+- [x] Persist derived trade-quality metrics per deal:
   - max favorable excursion
   - max adverse excursion
   - MFE captured %
@@ -136,23 +140,28 @@ Separate "good idea, bad management" from "bad idea from the start".
   - exit efficiency score
   - entry timing score
   - risk sizing score
-- [ ] Add summary cards for:
+- [x] Add summary cards for:
   - bad entries
   - bad exits
   - avoidable losses
   - strong entries with weak exits
   - weak entries with lucky exits
-- [ ] Add per-deal quality badges in the list and detail view.
-- [ ] Add new anomaly panels for:
+- [x] Add per-deal quality badges in the list and detail view.
+- [x] Add new anomaly panels for:
   - frequent profit give-back
   - repeated early stop-outs
   - outsized losses from leverage / sizing
   - close-reason quality by cohort
 
+Current implementation note:
+- Deal review cases now persist derived quality metrics from the recorded entry, exit, decision-cycle path, and synced platform price-path samples.
+- The review UI exposes quality badges in both list and detail views, narrative explanations per deal, dataset summary cards, and new anomaly panels centered on give-back, early stop-outs, sizing losses, and close-reason quality.
+- AI scan payloads and single-case review-assist payloads now include these quality metrics as structured inputs.
+
 ### Acceptance
 
-- [ ] The UI can surface "entry was valid but exit captured only 18% of available MFE".
-- [ ] The AI scan payload includes these quality metrics as structured inputs.
+- [x] The UI can surface "entry was valid but exit captured only 18% of available MFE".
+- [x] The AI scan payload includes these quality metrics as structured inputs.
 
 ## C. Structured Analyst Review System
 
@@ -267,9 +276,9 @@ No strategy patch should be directly promoted over the incumbent trader without 
   - evidence gate + training/holdout split are live
   - recent live-like validation now also runs on the freshest subset of holdout deals
   - supported risk/cohort patch fields also run through a historical replay check
-  - replay coverage now also includes restrictive symbol filters and conservative leverage-cap downscaling
+  - replay coverage now also includes restrictive symbol filters, candidate-source restrictions, max-position / max-margin entry gates, and conservative leverage-cap downscaling
   - replay-backed metric gates now enforce sample-size checks plus projected profit-factor, drawdown, win-rate-delta, expectancy-delta, and holdout degradation floors
-  - challenger compares now have history, detail view, protocol timeline, auto winner resolution, tie extension, and manual stop / manual resolve controls
+  - challenger compares now have history, detail view, protocol timeline, explicit workflow states, auto winner resolution, tie extension, and manual stop / manual resolve controls
   - broader replay coverage and the full backtest engine are still pending
 - [x] Define pass/fail gates for:
   - minimum sample size
@@ -324,7 +333,7 @@ No strategy patch should be directly promoted over the incumbent trader without 
   - if PnL is tied when the timer ends, extend the comparison by another 12 hours
   - repeat the 12-hour extension rule until a winner exists or the user stops the comparison manually
 - [x] Add a comparison note and link in strategy history so each promoted or rejected patch can be traced back to its challenger result.
-- [ ] Add a UI state for:
+- [x] Add a UI state for:
   - validation passed but challenger not started
   - challenger running
   - challenger finished
@@ -347,17 +356,17 @@ Measure whether a deployed patch or challenger winner actually improved what it 
 
 ### Draft Scope
 
-- [ ] Link each applied strategy version to:
+- [x] Link each applied strategy version to:
   - source scan
   - target cohort
   - expected effect
   - applied timestamp
   - challenger comparison id where applicable
-- [ ] Compare before/after performance for:
+- [x] Compare before/after performance for:
   - full strategy
   - target cohort
   - non-target cohort
-- [ ] Add a strategy-version detail view with:
+- [x] Add a strategy-version detail view with:
   - intended change
   - real outcome
   - regression warnings
@@ -368,11 +377,18 @@ Measure whether a deployed patch or challenger winner actually improved what it 
   - winner rationale
   - loser deactivation timestamp
   - link back to the source AI scan
-- [ ] Add automatic "patch underperforming its target cohort" warning.
+- [x] Add automatic "patch underperforming its target cohort" warning.
+
+### Progress Notes
+
+- [x] Applied strategy versions now persist expected effect, target cohort, applied timestamp, and linked challenger comparison id where available.
+- [x] Strategy-version detail now exposes before/after observation windows plus full-strategy, target-cohort, and non-target summaries.
+- [x] Regression heuristics now surface rollback suggestions and cohort underperformance warnings directly in strategy history/detail.
+- [x] Challenger candidates link back to their comparison outcome; live challenger resolution remains the primary measured-outcome view for challenger winners.
 
 ### Acceptance
 
-- [ ] Every applied patch or challenger winner can be reviewed as a hypothesis with measured outcome.
+- [x] Every applied patch or challenger winner can be reviewed as a hypothesis with measured outcome.
 
 ## H. Learned Review Classifiers
 
@@ -382,18 +398,25 @@ Use analyst labels and historical trade outcomes to pre-score bad or suspicious 
 
 ### Draft Scope
 
-- [ ] Add heuristic classifier trained from structured labels.
-- [ ] Add AI-assisted classifier for:
+- [x] Add heuristic classifier trained from structured labels.
+- [x] Add AI-assisted classifier for:
   - likely bad trade
   - likely bad exit
   - likely avoidable loss
   - likely regime mismatch
-- [ ] Show classifier suggestions as review assists, not silent auto-labels by default.
-- [ ] Allow analyst acceptance / rejection to improve future classifier quality.
+- [x] Show classifier suggestions as review assists, not silent auto-labels by default.
+- [x] Allow analyst acceptance / rejection to improve future classifier quality.
+
+### Progress Notes
+
+- [x] Filtered deal lists now highlight learned review signals before manual inspection.
+- [x] Deal detail now shows a label-memory heuristic assist based on prior analyst-reviewed deals for the same trader.
+- [x] Deal detail now supports optional single-case AI review assistance using the existing model selection flow.
+- [x] Accepting a suggestion can immediately apply the suggested label; rejecting it persists case-level feedback and suppresses it on reruns.
 
 ### Acceptance
 
-- [ ] The review list can highlight likely-problematic deals before manual inspection.
+- [x] The review list can highlight likely-problematic deals before manual inspection.
 
 ## I. Cross-Model Disagreement Analysis
 
@@ -403,24 +426,24 @@ Use multiple models to identify fragile recommendations and robust consensus.
 
 ### Draft Scope
 
-- [ ] Add scan compare metrics for:
+- [x] Add scan compare metrics for:
   - recommendation overlap
   - conflict score
   - shared evidence
   - conflicting target cohorts
-- [ ] Add leaderboard of model usefulness by cohort:
+- [x] Add leaderboard of model usefulness by cohort:
   - trend regime
   - chop regime
   - high-vol regime
   - certain symbols / buckets
-- [ ] Add UI flags for:
+- [x] Add UI flags for:
   - strong consensus
   - mixed recommendation
   - low-confidence disagreement
 
 ### Acceptance
 
-- [ ] The user can tell not only what two models suggested, but whether their disagreement matters.
+- [x] The user can tell not only what two models suggested, but whether their disagreement matters.
 
 ## J. UI / Workflow Improvements
 
@@ -430,22 +453,23 @@ Reduce friction so the module can actually be used as a daily research tool.
 
 ### Draft Scope
 
-- [ ] Add cohort preset save/load.
-- [ ] Add one-click anomaly-to-filter drill-down.
-- [ ] Add one-click "scan this cohort" from anomaly cards.
-- [ ] Add side-by-side deal compare for two selected deals.
-- [ ] Add keyboard-friendly review workflow for next/previous deal.
-- [ ] Add export for filtered dataset and scan outputs.
+- [x] Add cohort preset save/load.
+- [x] Add one-click anomaly-to-filter drill-down.
+- [x] Add one-click "scan this cohort" from anomaly cards.
+- [x] Add side-by-side deal compare for two selected deals.
+- [x] Add keyboard-friendly review workflow for next/previous deal.
+- [x] Add export for filtered dataset and scan outputs.
+- [x] Enrich deal price path with inter-cycle platform price updates from synced exchange position snapshots.
 - [x] Add challenger compare launch flow from validated scans.
 - [x] Add challenger compare history with status, timer, winner, and loser.
 - [x] Show challenger execution mode and selected wallet in compare history and detail views.
 - [x] Add compare protocol timeline and manual stop / resolve controls in the challenger detail view.
 - [x] Add strategy-history note links that open the comparison detail directly.
-- [ ] Add "review queue" mode:
+- [x] Add "review queue" mode:
   - unlabeled losses
   - biggest give-back exits
   - regime mismatch candidates
-- [ ] Add "what changed after last patch?" home card for the module.
+- [x] Add "what changed after last patch?" home card for the module.
 
 ## Out of Scope For First Implementation Pass
 
@@ -474,9 +498,9 @@ Reduce friction so the module can actually be used as a daily research tool.
 
 If we want the highest value with the lowest risk, the first live implementation slice should be:
 
-- [ ] Regime metadata persistence
-- [ ] Regime filters in UI and APIs
-- [ ] Entry/exit quality metrics
+- [x] Regime metadata persistence
+- [x] Regime filters in UI and APIs
+- [x] Entry/exit quality metrics
 - [x] Hard validation gate before patch promotion
 - [x] Challenger trader compare workflow with timed winner/loser resolution
 

@@ -9,12 +9,16 @@ import type {
   AIModel,
   DealReviewAIScanCompareResponse,
   DealReviewAIScanDetail,
+  DealReviewClassifierAssist,
+  DealReviewClassifierSuggestion,
   DealReviewChallengerCompareDetail,
   DealReviewChallengerProtocolEvent,
   DealReviewAnomalySummary,
+  DealReviewCase,
   DealReviewCaseDetail,
   DealReviewEventDetail,
   DealReviewEventSnapshot,
+  DealReviewFilterPresetDetail,
   DealReviewCaseListItem,
   DealReviewDatasetSummary,
   DealReviewStrategyVersionDetail,
@@ -76,6 +80,48 @@ function formatValidationCheckSummary(check: DealReviewValidationCheck): string 
   return `actual ${formatValidationMetricValue(check.metric, check.actual)} | floor ${formatValidationMetricValue(check.metric, check.threshold)}`
 }
 
+function formatVersionCohort(targetCohort?: Record<string, unknown>): string {
+  if (!targetCohort || Object.keys(targetCohort).length === 0) {
+    return 'No explicit target cohort stored'
+  }
+  return Object.entries(targetCohort)
+    .map(([key, value]) => `${key}: ${String(value)}`)
+    .join(' | ')
+}
+
+function formatDatasetMini(summary?: DealReviewDatasetSummary): string {
+  if (!summary) return 'No closed deals'
+  return `${summary.closed_deals} deals | ${formatMoney(summary.net_pnl)} | ${summary.win_rate.toFixed(1)}% win | PF ${summary.profit_factor.toFixed(2)}`
+}
+
+function formatClassifierIssueType(issueType?: string): string {
+  switch (issueType) {
+    case 'likely_bad_trade':
+      return 'Likely bad trade'
+    case 'likely_bad_exit':
+      return 'Likely bad exit'
+    case 'likely_avoidable_loss':
+      return 'Likely avoidable loss'
+    case 'likely_regime_mismatch':
+      return 'Likely regime mismatch'
+    case 'other_review_signal':
+      return 'Other review signal'
+    default:
+      return 'Review signal'
+  }
+}
+
+function classifierToneClasses(level?: string): string {
+  switch (level) {
+    case 'high':
+      return 'bg-rose-500/15 text-rose-300 border-rose-400/20'
+    case 'medium':
+      return 'bg-amber-500/15 text-amber-200 border-amber-400/20'
+    default:
+      return 'bg-sky-500/15 text-sky-200 border-sky-400/20'
+  }
+}
+
 function formatDate(ms: number): string {
   if (!ms) return '-'
   return new Date(ms).toLocaleString()
@@ -91,6 +137,96 @@ function formatHold(ms: number): string {
   const days = Math.floor(hours / 24)
   const remHours = hours % 24
   return remHours === 0 ? `${days}d` : `${days}d ${remHours}h`
+}
+
+function formatScore(value: number): string {
+  return `${Math.round(value || 0)}/100`
+}
+
+function qualityBadgeClasses(tone: 'good' | 'warn' | 'bad'): string {
+  switch (tone) {
+    case 'good':
+      return 'bg-emerald-500/15 text-emerald-300 border-emerald-400/20'
+    case 'warn':
+      return 'bg-amber-500/15 text-amber-200 border-amber-400/20'
+    default:
+      return 'bg-rose-500/15 text-rose-300 border-rose-400/20'
+  }
+}
+
+function getDealGiveBackPct(caseRec: DealReviewCase): number {
+  return Math.max(caseRec.profit_given_back_pct || 0, 0)
+}
+
+function getDealGiveBackMoney(caseRec: DealReviewCase): number {
+  return Math.max(caseRec.profit_given_back || 0, 0)
+}
+
+function buildQualityNarrative(caseRec: DealReviewCase): string {
+  if (
+    caseRec.entry_timing_score >= 70 &&
+    caseRec.max_favorable_excursion > 0.05 &&
+    caseRec.exit_efficiency_score < 40
+  ) {
+    return `Entry was valid, but exit captured only ${Math.round(caseRec.mfe_captured_pct || 0)}% of available MFE.`
+  }
+  if (caseRec.realized_pnl < 0 && caseRec.profit_given_back > 0.05) {
+    return `This loss was avoidable: the trade gave back ${formatMoney(caseRec.profit_given_back)} after being in profit.`
+  }
+  if (
+    caseRec.realized_pnl > 0 &&
+    caseRec.entry_timing_score < 35
+  ) {
+    return 'Weak entry recovered into profit. Treat this as a lucky exit, not a clean edge.'
+  }
+  if (caseRec.risk_sizing_score > 0 && caseRec.risk_sizing_score < 35) {
+    return `Risk sizing was aggressive for this path: planned risk was ${formatPct(caseRec.planned_risk_pct || 0)}.`
+  }
+  return ''
+}
+
+function buildQualityBadges(caseRec: DealReviewCase): Array<{
+  label: string
+  tone: 'good' | 'warn' | 'bad'
+}> {
+  const badges: Array<{ label: string; tone: 'good' | 'warn' | 'bad' }> = []
+
+  if (
+    caseRec.entry_timing_score >= 70 &&
+    caseRec.max_favorable_excursion > 0.05 &&
+    caseRec.exit_efficiency_score < 40
+  ) {
+    badges.push({ label: 'Strong entry / weak exit', tone: 'warn' })
+  } else if (caseRec.entry_timing_score >= 70) {
+    badges.push({ label: 'Strong entry', tone: 'good' })
+  } else if (caseRec.entry_timing_score < 35) {
+    badges.push({ label: 'Weak entry', tone: 'bad' })
+  }
+
+  if (caseRec.max_favorable_excursion > 0.05) {
+    if (caseRec.exit_efficiency_score >= 75) {
+      badges.push({ label: 'Strong exit', tone: 'good' })
+    } else if (caseRec.exit_efficiency_score < 35) {
+      badges.push({ label: 'Weak exit', tone: 'bad' })
+    }
+  }
+
+  if (caseRec.realized_pnl < 0 && caseRec.profit_given_back > 0.05) {
+    badges.push({ label: 'Avoidable loss', tone: 'warn' })
+  }
+
+  if (
+    caseRec.realized_pnl > 0 &&
+    caseRec.entry_timing_score < 35
+  ) {
+    badges.push({ label: 'Weak entry / lucky exit', tone: 'warn' })
+  }
+
+  if (caseRec.risk_sizing_score > 0 && caseRec.risk_sizing_score < 35) {
+    badges.push({ label: 'Oversized risk', tone: 'bad' })
+  }
+
+  return badges.slice(0, 4)
 }
 
 function formatCompareMode(value: string): string {
@@ -109,6 +245,41 @@ function formatCompareMode(value: string): string {
 function formatCompareStatus(value: string): string {
   if (!value) return '-'
   return value.replace(/_/g, ' ')
+}
+
+function compareFlagClasses(tone?: string): string {
+  switch (tone) {
+    case 'good':
+      return 'bg-emerald-500/15 text-emerald-300 border-emerald-400/20'
+    case 'warn':
+      return 'bg-amber-500/15 text-amber-200 border-amber-400/20'
+    default:
+      return 'bg-white/5 text-nofx-text-muted border-white/10'
+  }
+}
+
+function compareLevelClasses(level?: string): string {
+  switch (level) {
+    case 'high':
+      return 'text-rose-300'
+    case 'medium':
+      return 'text-amber-200'
+    default:
+      return 'text-emerald-300'
+  }
+}
+
+function formatCompareFlagTitle(code?: string, fallback?: string): string {
+  switch (code) {
+    case 'strong_consensus':
+      return 'Strong consensus'
+    case 'mixed_recommendation':
+      return 'Mixed recommendation'
+    case 'low_confidence_disagreement':
+      return 'Low-confidence disagreement'
+    default:
+      return fallback || 'Compare signal'
+  }
 }
 
 function isActiveCompareStatus(value: string): boolean {
@@ -141,6 +312,350 @@ function buildCompareProtocolMetricSummary(
   return `Incumbent ${formatMoney(metrics.incumbent_pnl)} (${metrics.incumbent_trade_count} trades) | Challenger ${formatMoney(metrics.challenger_pnl)} (${metrics.challenger_trade_count} trades)`
 }
 
+function isKeyboardTypingTarget(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement)) return false
+  const tag = target.tagName.toLowerCase()
+  return (
+    target.isContentEditable ||
+    tag === 'input' ||
+    tag === 'textarea' ||
+    tag === 'select' ||
+    Boolean(target.closest('[contenteditable="true"]'))
+  )
+}
+
+function getVersionSummaryDelta(
+  before?: DealReviewDatasetSummary,
+  after?: DealReviewDatasetSummary
+): number | null {
+  if (!before || !after) return null
+  return after.net_pnl - before.net_pnl
+}
+
+function getPatchOutcomeTone(delta: number | null, rollbackSuggested?: boolean): string {
+  if (rollbackSuggested) return 'text-rose-300'
+  if (typeof delta === 'number' && delta < -0.01) return 'text-rose-300'
+  if (typeof delta === 'number' && delta > 0.01) return 'text-emerald-300'
+  return 'text-amber-200'
+}
+
+function getPatchOutcomeLabel(delta: number | null, rollbackSuggested?: boolean): string {
+  if (rollbackSuggested) return 'Regression risk'
+  if (typeof delta === 'number' && delta < -0.01) return 'Weaker'
+  if (typeof delta === 'number' && delta > 0.01) return 'Improved'
+  return 'Mixed / flat'
+}
+
+function normalizePresetText(value: unknown): string {
+  return typeof value === 'string' ? value : ''
+}
+
+function buildQueueLabel(queueMode: string): string {
+  switch (queueMode) {
+    case 'unlabeled_losses':
+      return 'Unlabeled losses'
+    case 'biggest_giveback':
+      return 'Biggest give-back exits'
+    case 'regime_mismatch':
+      return 'Regime mismatch candidates'
+    default:
+      return 'All filtered deals'
+  }
+}
+
+function buildReviewQueueItems(
+  items: DealReviewCaseListItem[],
+  queueMode: string
+): DealReviewCaseListItem[] {
+  if (!queueMode) return items
+
+  const labelsContain = (labels: string[] | undefined, needle: string) =>
+    (labels || []).some((item) =>
+      item.toLowerCase().includes(needle.toLowerCase())
+    )
+  const hasRegimeSignal = (item: DealReviewCaseListItem) =>
+    labelsContain(item.labels, 'regime mismatch') ||
+    (item.classifier_assist?.suggestions || []).some(
+      (entry) => entry.issue_type === 'likely_regime_mismatch'
+    )
+
+  if (queueMode === 'unlabeled_losses') {
+    return items.filter(
+      (item) =>
+        item.case.status === 'CLOSED' &&
+        item.case.outcome === 'loss' &&
+        (!item.labels || item.labels.length === 0)
+    )
+  }
+
+  if (queueMode === 'biggest_giveback') {
+    return [...items]
+      .filter((item) => {
+        return (
+          item.case.status === 'CLOSED' &&
+          (getDealGiveBackPct(item.case) > 25 ||
+            getDealGiveBackMoney(item.case) > 0.05)
+        )
+      })
+      .sort((left, right) => {
+        const leftGiveBack = getDealGiveBackPct(left.case)
+        const rightGiveBack = getDealGiveBackPct(right.case)
+        return rightGiveBack - leftGiveBack
+      })
+  }
+
+  if (queueMode === 'regime_mismatch') {
+    return items.filter((item) => hasRegimeSignal(item))
+  }
+
+  return items
+}
+
+function formatDealReasonPreview(value?: string): string {
+  const text = (value || '').trim()
+  if (!text) return 'No linked rationale snapshot.'
+  return text.length > 140 ? `${text.slice(0, 137)}...` : text
+}
+
+function escapeCSVValue(value: unknown): string {
+  const text =
+    value === null || value === undefined
+      ? ''
+      : typeof value === 'string'
+        ? value
+        : String(value)
+  const escaped = text.replace(/"/g, '""')
+  return /[",\n]/.test(escaped) ? `"${escaped}"` : escaped
+}
+
+function downloadTextFile(filename: string, content: string, mimeType: string): void {
+  const blob = new Blob([content], { type: mimeType })
+  const url = URL.createObjectURL(blob)
+  const anchor = document.createElement('a')
+  anchor.href = url
+  anchor.download = filename
+  anchor.click()
+  URL.revokeObjectURL(url)
+}
+
+function buildDealReviewCasesCSV(items: DealReviewCaseListItem[]): string {
+  const headers = [
+    'case_id',
+    'symbol',
+    'side',
+    'status',
+    'outcome',
+    'entry_time_ms',
+    'exit_time_ms',
+    'entry_price',
+    'exit_price',
+    'entry_quantity',
+    'exit_quantity',
+    'realized_pnl',
+    'realized_pnl_pct',
+    'hold_duration_ms',
+    'open_selection_bucket',
+    'open_trend_regime',
+    'open_volatility_regime',
+    'open_btc_strength_regime',
+    'open_funding_regime',
+    'open_oi_regime',
+    'open_session_bucket',
+    'open_weekday_bucket',
+    'open_venue_tier',
+    'open_liquidity_tier',
+    'open_spread_bucket',
+    'open_slippage_bucket',
+    'close_reason',
+    'max_favorable_excursion',
+    'max_favorable_excursion_pct',
+    'max_adverse_excursion',
+    'max_adverse_excursion_pct',
+    'mfe_captured_pct',
+    'profit_given_back',
+    'profit_given_back_pct',
+    'time_to_first_profit_ms',
+    'time_to_max_drawdown_ms',
+    'planned_risk_pct',
+    'exit_efficiency_score',
+    'entry_timing_score',
+    'risk_sizing_score',
+    'labels',
+    'open_reasoning',
+    'close_reasoning',
+    'cycle_samples',
+    'platform_samples',
+    'ever_in_profit',
+    'max_unrealized_pnl',
+    'max_unrealized_pnl_pct',
+    'min_unrealized_pnl',
+    'min_unrealized_pnl_pct',
+  ]
+  const rows = items.map((item) => [
+    item.case.id,
+    item.case.symbol,
+    item.case.side,
+    item.case.status,
+    item.case.outcome,
+    item.case.entry_time_ms,
+    item.case.exit_time_ms,
+    item.case.entry_price,
+    item.case.exit_price,
+    item.case.entry_quantity,
+    item.case.exit_quantity,
+    item.case.realized_pnl,
+    item.case.realized_pnl_pct,
+    item.case.hold_duration_ms,
+    item.case.open_selection_bucket,
+    item.case.open_trend_regime,
+    item.case.open_volatility_regime,
+    item.case.open_btc_strength_regime,
+    item.case.open_funding_regime,
+    item.case.open_oi_regime,
+    item.case.open_session_bucket,
+    item.case.open_weekday_bucket,
+    item.case.open_venue_tier,
+    item.case.open_liquidity_tier,
+    item.case.open_spread_bucket,
+    item.case.open_slippage_bucket,
+    item.case.close_reason,
+    item.case.max_favorable_excursion,
+    item.case.max_favorable_excursion_pct,
+    item.case.max_adverse_excursion,
+    item.case.max_adverse_excursion_pct,
+    item.case.mfe_captured_pct,
+    item.case.profit_given_back,
+    item.case.profit_given_back_pct,
+    item.case.time_to_first_profit_ms,
+    item.case.time_to_max_drawdown_ms,
+    item.case.planned_risk_pct,
+    item.case.exit_efficiency_score,
+    item.case.entry_timing_score,
+    item.case.risk_sizing_score,
+    (item.labels || []).join(' | '),
+    item.open_reasoning,
+    item.close_reasoning,
+    item.price_timeline_summary?.cycle_samples || 0,
+    item.price_timeline_summary?.platform_samples || 0,
+    item.price_timeline_summary?.ever_in_profit ? 'true' : 'false',
+    item.price_timeline_summary?.max_unrealized_pnl || 0,
+    item.price_timeline_summary?.max_unrealized_pnl_pct || 0,
+    item.price_timeline_summary?.min_unrealized_pnl || 0,
+    item.price_timeline_summary?.min_unrealized_pnl_pct || 0,
+  ])
+
+  return [headers, ...rows]
+    .map((row) => row.map((value) => escapeCSVValue(value)).join(','))
+    .join('\n')
+}
+
+function getLatestCompareForScan(
+  scanId: string,
+  compares: DealReviewChallengerCompareDetail[]
+): DealReviewChallengerCompareDetail | undefined {
+  return compares.find((item) => item.compare.source_scan_id === scanId)
+}
+
+function getScanPromotionState(
+  scan: DealReviewAIScanDetail,
+  relatedCompare?: DealReviewChallengerCompareDetail
+): { label: string; tone: string; detail: string } {
+  const validationStatus =
+    scan.validation?.status || scan.scan.validation_status || 'pending'
+  if (validationStatus !== 'passed') {
+    return {
+      label:
+        validationStatus === 'failed'
+          ? 'Blocked by validation'
+          : 'Validation pending',
+      tone: validationStatus === 'failed' ? 'rose' : 'amber',
+      detail:
+        validationStatus === 'failed'
+          ? 'This scan cannot be promoted until the blocking validation checks pass.'
+          : 'Validation has not completed yet.',
+    }
+  }
+
+  if (!relatedCompare) {
+    return {
+      label: 'Validated, challenger not started',
+      tone: 'amber',
+      detail:
+        'Validation passed. The patch is ready for direct apply or for a challenger launch.',
+    }
+  }
+
+  switch (relatedCompare.compare.status) {
+    case 'starting':
+    case 'running':
+      return {
+        label: 'Challenger running',
+        tone: 'sky',
+        detail:
+          relatedCompare.compare.summary ||
+          'Incumbent and challenger are currently in the comparison window.',
+      }
+    case 'completed':
+      if (
+        relatedCompare.compare.winner_trader_id &&
+        relatedCompare.compare.winner_trader_id ===
+          relatedCompare.compare.challenger_trader_id
+      ) {
+        return {
+          label: 'Winner promoted',
+          tone: 'emerald',
+          detail:
+            relatedCompare.compare.summary ||
+            'The challenger won on realized PnL and the incumbent was deactivated automatically.',
+        }
+      }
+      if (
+        relatedCompare.compare.winner_trader_id &&
+        relatedCompare.compare.winner_trader_id ===
+          relatedCompare.compare.incumbent_trader_id
+      ) {
+        return {
+          label: 'Challenger rejected',
+          tone: 'rose',
+          detail:
+            relatedCompare.compare.summary ||
+            'The incumbent stayed ahead on realized PnL and the challenger was deactivated automatically.',
+        }
+      }
+      return {
+        label: 'Challenger finished',
+        tone: 'emerald',
+        detail:
+          relatedCompare.compare.summary ||
+          'The challenger comparison finished.',
+      }
+    case 'stopped':
+      return {
+        label: 'Challenger finished',
+        tone: 'amber',
+        detail:
+          relatedCompare.compare.summary ||
+          'The challenger comparison was stopped manually before auto resolution.',
+      }
+    case 'failed':
+      return {
+        label: 'Challenger finished',
+        tone: 'rose',
+        detail:
+          relatedCompare.compare.summary ||
+          relatedCompare.compare.error_message ||
+          'The challenger workflow failed before completion.',
+      }
+    default:
+      return {
+        label: 'Validated, challenger not started',
+        tone: 'amber',
+        detail:
+          'Validation passed. The patch is ready for direct apply or for a challenger launch.',
+      }
+  }
+}
+
 function formatRequestDuration(ms?: number): string {
   if (!ms) return '-'
   if (ms < 1000) return `${ms} ms`
@@ -160,6 +675,36 @@ function formatJsonBlock(value: unknown): string {
   } catch {
     return String(value ?? '')
   }
+}
+
+function formatMarketContextToken(value?: string): string {
+  const token = (value || '').trim()
+  if (!token) return '-'
+  return token
+    .replace(/_/g, ' ')
+    .replace(/\b\w/g, (char) => char.toUpperCase())
+}
+
+function formatMarketContextValue(
+  value: number | undefined,
+  mode: 'plain' | 'pct' | 'bps' = 'plain'
+): string {
+  if (typeof value !== 'number' || Number.isNaN(value)) return '-'
+  if (mode === 'pct') return `${value >= 0 ? '+' : ''}${value.toFixed(2)}%`
+  if (mode === 'bps') return `${value >= 0 ? '+' : ''}${value.toFixed(2)} bps`
+  return value.toFixed(3)
+}
+
+function buildOpenRegimeBadges(detail: DealReviewCaseDetail | DealReviewCaseListItem | null) {
+  if (!detail) return []
+  const dealCase = detail.case
+  return [
+    dealCase.open_trend_regime,
+    dealCase.open_volatility_regime,
+    dealCase.open_btc_strength_regime,
+    dealCase.open_funding_regime,
+    dealCase.open_session_bucket,
+  ].filter(Boolean)
 }
 
 function getEventSystemPrompt(detail?: DealReviewEventDetail | null): string {
@@ -204,7 +749,8 @@ function hasStructuredSnapshot(snapshot?: DealReviewEventSnapshot): boolean {
     snapshot.account_state ||
       (snapshot.positions && snapshot.positions.length > 0) ||
       (snapshot.candidate_coins && snapshot.candidate_coins.length > 0) ||
-      (snapshot.candidate_details && snapshot.candidate_details.length > 0)
+      (snapshot.candidate_details && snapshot.candidate_details.length > 0) ||
+      snapshot.market_context
   )
 }
 
@@ -237,6 +783,99 @@ const rangeOptions = [
   { value: '30d', label: 'Last 30d' },
   { value: '90d', label: 'Last 90d' },
   { value: 'all', label: 'All time' },
+]
+
+const trendRegimeOptions = [
+  { value: '', label: 'All trend regimes' },
+  { value: 'uptrend', label: 'Uptrend' },
+  { value: 'downtrend', label: 'Downtrend' },
+  { value: 'chop', label: 'Chop' },
+  { value: 'mixed', label: 'Mixed' },
+]
+
+const volatilityRegimeOptions = [
+  { value: '', label: 'All vol regimes' },
+  { value: 'high_vol', label: 'High vol' },
+  { value: 'low_vol', label: 'Low vol' },
+  { value: 'normal', label: 'Normal' },
+]
+
+const btcStrengthOptions = [
+  { value: '', label: 'All BTC-relative states' },
+  { value: 'outperform', label: 'Outperforming BTC' },
+  { value: 'lagging', label: 'Lagging BTC' },
+  { value: 'neutral', label: 'Neutral vs BTC' },
+]
+
+const fundingRegimeOptions = [
+  { value: '', label: 'All funding states' },
+  { value: 'extreme_longs', label: 'Extreme longs' },
+  { value: 'longs_pay', label: 'Longs pay' },
+  { value: 'neutral', label: 'Neutral funding' },
+  { value: 'shorts_pay', label: 'Shorts pay' },
+  { value: 'extreme_shorts', label: 'Extreme shorts' },
+]
+
+const oiRegimeOptions = [
+  { value: '', label: 'All OI states' },
+  { value: 'oi_surge', label: 'OI surge' },
+  { value: 'oi_rising', label: 'OI rising' },
+  { value: 'oi_flat', label: 'OI flat' },
+  { value: 'oi_falling', label: 'OI falling' },
+  { value: 'oi_flush', label: 'OI flush' },
+]
+
+const sessionOptions = [
+  { value: '', label: 'All sessions' },
+  { value: 'asia', label: 'Asia' },
+  { value: 'eu', label: 'EU' },
+  { value: 'us', label: 'US' },
+  { value: 'off_hours', label: 'Off hours' },
+]
+
+const weekdayOptions = [
+  { value: '', label: 'All weekdays' },
+  { value: 'monday', label: 'Monday' },
+  { value: 'tuesday', label: 'Tuesday' },
+  { value: 'wednesday', label: 'Wednesday' },
+  { value: 'thursday', label: 'Thursday' },
+  { value: 'friday', label: 'Friday' },
+  { value: 'saturday', label: 'Saturday' },
+  { value: 'sunday', label: 'Sunday' },
+]
+
+const venueTierOptions = [
+  { value: '', label: 'All venue states' },
+  { value: 'tradable', label: 'Tradable' },
+  { value: 'thin_book', label: 'Thin book' },
+  { value: 'restricted', label: 'Restricted' },
+  { value: 'unsupported', label: 'Unsupported' },
+  { value: 'unknown', label: 'Unknown' },
+]
+
+const liquidityTierOptions = [
+  { value: '', label: 'All liquidity tiers' },
+  { value: 'high', label: 'High liquidity' },
+  { value: 'medium', label: 'Medium liquidity' },
+  { value: 'low', label: 'Low liquidity' },
+]
+
+const executionBucketOptions = [
+  { value: '', label: 'All execution buckets' },
+  { value: 'tight', label: 'Tight' },
+  { value: 'normal', label: 'Normal' },
+  { value: 'wide', label: 'Wide' },
+  { value: 'extreme', label: 'Extreme' },
+]
+
+const reviewQueueOptions = [
+  { value: '', label: 'All filtered deals' },
+  { value: 'unlabeled_losses', label: 'Review queue: unlabeled losses' },
+  { value: 'biggest_giveback', label: 'Review queue: biggest give-back exits' },
+  {
+    value: 'regime_mismatch',
+    label: 'Review queue: regime mismatch candidates',
+  },
 ]
 
 const challengerModeOptions = [
@@ -279,9 +918,28 @@ export function DealReviewPage({
   const [side, setSide] = useState('')
   const [status, setStatus] = useState('CLOSED')
   const [outcome, setOutcome] = useState('')
+  const [openSelectionBucket, setOpenSelectionBucket] = useState('')
+  const [closeReason, setCloseReason] = useState('')
+  const [openTrendRegime, setOpenTrendRegime] = useState('')
+  const [openVolatilityRegime, setOpenVolatilityRegime] = useState('')
+  const [openBTCStrengthRegime, setOpenBTCStrengthRegime] = useState('')
+  const [openFundingRegime, setOpenFundingRegime] = useState('')
+  const [openOIRegime, setOpenOIRegime] = useState('')
+  const [openSessionBucket, setOpenSessionBucket] = useState('')
+  const [openWeekdayBucket, setOpenWeekdayBucket] = useState('')
+  const [openVenueTier, setOpenVenueTier] = useState('')
+  const [openLiquidityTier, setOpenLiquidityTier] = useState('')
+  const [openSpreadBucket, setOpenSpreadBucket] = useState('')
+  const [openSlippageBucket, setOpenSlippageBucket] = useState('')
   const [dateRange, setDateRange] = useState('30d')
   const [minPnl, setMinPnl] = useState('')
   const [maxPnl, setMaxPnl] = useState('')
+  const [reviewQueueMode, setReviewQueueMode] = useState('')
+  const [filterPresets, setFilterPresets] = useState<DealReviewFilterPresetDetail[]>([])
+  const [selectedPresetId, setSelectedPresetId] = useState('')
+  const [presetName, setPresetName] = useState('')
+  const [savingPreset, setSavingPreset] = useState(false)
+  const [deletingPresetId, setDeletingPresetId] = useState<string | null>(null)
 
   const [items, setItems] = useState<DealReviewCaseListItem[]>([])
   const [summary, setSummary] = useState<DealReviewDatasetSummary | null>(null)
@@ -291,6 +949,16 @@ export function DealReviewPage({
   const [selectedCaseId, setSelectedCaseId] = useState<string | null>(null)
   const [detail, setDetail] = useState<DealReviewCaseDetail | null>(null)
   const [detailLoading, setDetailLoading] = useState(false)
+  const [comparePeerCaseId, setComparePeerCaseId] = useState('')
+  const [comparePeerDetail, setComparePeerDetail] =
+    useState<DealReviewCaseDetail | null>(null)
+  const [comparePeerLoading, setComparePeerLoading] = useState(false)
+  const [aiClassifierAssist, setAIClassifierAssist] =
+    useState<DealReviewClassifierAssist | null>(null)
+  const [runningCaseAIAssist, setRunningCaseAIAssist] = useState(false)
+  const [classifierActionKey, setClassifierActionKey] = useState<string | null>(
+    null
+  )
 
   const [models, setModels] = useState<AIModel[]>([])
   const [scans, setScans] = useState<DealReviewAIScanDetail[]>([])
@@ -310,6 +978,7 @@ export function DealReviewPage({
   const [versions, setVersions] = useState<DealReviewStrategyVersionDetail[]>(
     []
   )
+  const [selectedVersionId, setSelectedVersionId] = useState<string | null>(null)
   const [exchanges, setExchanges] = useState<Exchange[]>([])
   const [challengerCompares, setChallengerCompares] = useState<
     DealReviewChallengerCompareDetail[]
@@ -336,17 +1005,50 @@ export function DealReviewPage({
     useState<DealReviewAIScanCompareResponse | null>(null)
   const [compareLoading, setCompareLoading] = useState(false)
   const compareDetailRef = useRef<HTMLDivElement | null>(null)
+  const versionDetailRef = useRef<HTMLDivElement | null>(null)
 
   const selectedTrader = traders?.find(
     (item) => item.trader_id === selectedTraderId
   )
+  const selectedPreset =
+    filterPresets.find((item) => item.preset.id === selectedPresetId) || null
+  const selectedVersion =
+    versions.find((item) => item.version.id === selectedVersionId) || null
+  const latestVersion = versions[0] || null
+  const latestFullDelta = getVersionSummaryDelta(
+    latestVersion?.attribution?.full_before_summary,
+    latestVersion?.attribution?.full_after_summary
+  )
+  const latestTargetDelta = getVersionSummaryDelta(
+    latestVersion?.attribution?.target_before_summary,
+    latestVersion?.attribution?.target_after_summary
+  )
+  const displayedItems = buildReviewQueueItems(items, reviewQueueMode)
+  const selectedCaseIndex = displayedItems.findIndex(
+    (item) => item.case.id === selectedCaseId
+  )
 
-  const buildFilterPayload = () => {
+  const buildFilterPayload = (
+    overrides?: Record<string, string | number | undefined>
+  ) => {
     const filter: Record<string, string | number | undefined> = {
       symbol: symbol.trim().toUpperCase() || undefined,
       side: side || undefined,
       status: status || undefined,
       outcome: outcome || undefined,
+      open_selection_bucket: openSelectionBucket.trim() || undefined,
+      close_reason: closeReason.trim() || undefined,
+      open_trend_regime: openTrendRegime || undefined,
+      open_volatility_regime: openVolatilityRegime || undefined,
+      open_btc_strength_regime: openBTCStrengthRegime || undefined,
+      open_funding_regime: openFundingRegime || undefined,
+      open_oi_regime: openOIRegime || undefined,
+      open_session_bucket: openSessionBucket || undefined,
+      open_weekday_bucket: openWeekdayBucket || undefined,
+      open_venue_tier: openVenueTier || undefined,
+      open_liquidity_tier: openLiquidityTier || undefined,
+      open_spread_bucket: openSpreadBucket || undefined,
+      open_slippage_bucket: openSlippageBucket || undefined,
       limit: 150,
     }
     const rangeStart = getDateRangeStart(dateRange)
@@ -361,7 +1063,125 @@ export function DealReviewPage({
       const parsed = Number(maxPnl.trim())
       filter.max_pnl = Number.isFinite(parsed) ? parsed : undefined
     }
+    if (overrides) {
+      Object.entries(overrides).forEach(([key, value]) => {
+        filter[key] = value
+      })
+    }
     return filter
+  }
+
+  const buildPresetFilters = () => ({
+    symbol: symbol.trim().toUpperCase(),
+    side,
+    status,
+    outcome,
+    open_selection_bucket: openSelectionBucket.trim(),
+    close_reason: closeReason.trim(),
+    open_trend_regime: openTrendRegime,
+    open_volatility_regime: openVolatilityRegime,
+    open_btc_strength_regime: openBTCStrengthRegime,
+    open_funding_regime: openFundingRegime,
+    open_oi_regime: openOIRegime,
+    open_session_bucket: openSessionBucket,
+    open_weekday_bucket: openWeekdayBucket,
+    open_venue_tier: openVenueTier,
+    open_liquidity_tier: openLiquidityTier,
+    open_spread_bucket: openSpreadBucket,
+    open_slippage_bucket: openSlippageBucket,
+    date_range: dateRange,
+    min_pnl_text: minPnl.trim(),
+    max_pnl_text: maxPnl.trim(),
+    review_queue: reviewQueueMode,
+  })
+
+  const applyPresetFilters = (filters?: Record<string, unknown>) => {
+    const hasStatus = Boolean(
+      filters && Object.prototype.hasOwnProperty.call(filters, 'status')
+    )
+    setSymbol(normalizePresetText(filters?.symbol).toUpperCase())
+    setSide(normalizePresetText(filters?.side))
+    setStatus(hasStatus ? normalizePresetText(filters?.status) : 'CLOSED')
+    setOutcome(normalizePresetText(filters?.outcome))
+    setOpenSelectionBucket(normalizePresetText(filters?.open_selection_bucket))
+    setCloseReason(normalizePresetText(filters?.close_reason))
+    setOpenTrendRegime(normalizePresetText(filters?.open_trend_regime))
+    setOpenVolatilityRegime(normalizePresetText(filters?.open_volatility_regime))
+    setOpenBTCStrengthRegime(normalizePresetText(filters?.open_btc_strength_regime))
+    setOpenFundingRegime(normalizePresetText(filters?.open_funding_regime))
+    setOpenOIRegime(normalizePresetText(filters?.open_oi_regime))
+    setOpenSessionBucket(normalizePresetText(filters?.open_session_bucket))
+    setOpenWeekdayBucket(normalizePresetText(filters?.open_weekday_bucket))
+    setOpenVenueTier(normalizePresetText(filters?.open_venue_tier))
+    setOpenLiquidityTier(normalizePresetText(filters?.open_liquidity_tier))
+    setOpenSpreadBucket(normalizePresetText(filters?.open_spread_bucket))
+    setOpenSlippageBucket(normalizePresetText(filters?.open_slippage_bucket))
+    setDateRange(normalizePresetText(filters?.date_range) || '30d')
+    setMinPnl(normalizePresetText(filters?.min_pnl_text))
+    setMaxPnl(normalizePresetText(filters?.max_pnl_text))
+    setReviewQueueMode(normalizePresetText(filters?.review_queue))
+  }
+
+  const applyDrilldownFilters = (
+    patch: Record<string, string | number | undefined>,
+    note?: string
+  ) => {
+    setSelectedPresetId('')
+    if (typeof patch.symbol === 'string') {
+      setSymbol(patch.symbol)
+    }
+    if (typeof patch.side === 'string') {
+      setSide(patch.side)
+    }
+    if (typeof patch.status === 'string') {
+      setStatus(patch.status)
+    }
+    if (typeof patch.outcome === 'string') {
+      setOutcome(patch.outcome)
+    }
+    if (typeof patch.open_selection_bucket === 'string') {
+      setOpenSelectionBucket(patch.open_selection_bucket)
+    }
+    if (typeof patch.close_reason === 'string') {
+      setCloseReason(patch.close_reason)
+    }
+    if (typeof patch.open_trend_regime === 'string') {
+      setOpenTrendRegime(patch.open_trend_regime)
+    }
+    if (typeof patch.open_volatility_regime === 'string') {
+      setOpenVolatilityRegime(patch.open_volatility_regime)
+    }
+    if (typeof patch.open_btc_strength_regime === 'string') {
+      setOpenBTCStrengthRegime(patch.open_btc_strength_regime)
+    }
+    if (typeof patch.open_funding_regime === 'string') {
+      setOpenFundingRegime(patch.open_funding_regime)
+    }
+    if (typeof patch.open_oi_regime === 'string') {
+      setOpenOIRegime(patch.open_oi_regime)
+    }
+    if (typeof patch.open_session_bucket === 'string') {
+      setOpenSessionBucket(patch.open_session_bucket)
+    }
+    if (typeof patch.open_weekday_bucket === 'string') {
+      setOpenWeekdayBucket(patch.open_weekday_bucket)
+    }
+    if (typeof patch.open_venue_tier === 'string') {
+      setOpenVenueTier(patch.open_venue_tier)
+    }
+    if (typeof patch.open_liquidity_tier === 'string') {
+      setOpenLiquidityTier(patch.open_liquidity_tier)
+    }
+    if (typeof patch.open_spread_bucket === 'string') {
+      setOpenSpreadBucket(patch.open_spread_bucket)
+    }
+    if (typeof patch.open_slippage_bucket === 'string') {
+      setOpenSlippageBucket(patch.open_slippage_bucket)
+    }
+    setReviewQueueMode('')
+    if (note) {
+      notify.success(note)
+    }
   }
 
   const loadCases = async () => {
@@ -416,6 +1236,75 @@ export function DealReviewPage({
     }
   }
 
+  const exportFilteredDealsJSON = () => {
+    if (!selectedTraderId || displayedItems.length === 0) return
+    downloadTextFile(
+      `deal-review-${selectedTraderId}-${Date.now()}.json`,
+      JSON.stringify(
+        {
+          trader_id: selectedTraderId,
+          trader_name: selectedTrader?.trader_name || '',
+          filters: buildFilterPayload(),
+          review_queue: reviewQueueMode || 'all_filtered_deals',
+          summary,
+          items: displayedItems,
+        },
+        null,
+        2
+      ),
+      'application/json;charset=utf-8'
+    )
+    notify.success('Filtered deal dataset exported as JSON')
+  }
+
+  const exportFilteredDealsCSV = () => {
+    if (!selectedTraderId || displayedItems.length === 0) return
+    downloadTextFile(
+      `deal-review-${selectedTraderId}-${Date.now()}.csv`,
+      buildDealReviewCasesCSV(displayedItems),
+      'text/csv;charset=utf-8'
+    )
+    notify.success('Filtered deal dataset exported as CSV')
+  }
+
+  const exportScansJSON = () => {
+    if (!selectedTraderId || scans.length === 0) return
+    downloadTextFile(
+      `deal-review-scans-${selectedTraderId}-${Date.now()}.json`,
+      JSON.stringify(
+        {
+          trader_id: selectedTraderId,
+          trader_name: selectedTrader?.trader_name || '',
+          filters: buildFilterPayload(),
+          scans,
+        },
+        null,
+        2
+      ),
+      'application/json;charset=utf-8'
+    )
+    notify.success('Saved scan outputs exported as JSON')
+  }
+
+  const exportScanCompareJSON = () => {
+    if (!selectedTraderId || !compareResult) return
+    downloadTextFile(
+      `deal-review-scan-compare-${selectedTraderId}-${Date.now()}.json`,
+      JSON.stringify(
+        {
+          trader_id: selectedTraderId,
+          left_scan_id: compareLeftScanId,
+          right_scan_id: compareRightScanId,
+          compare: compareResult,
+        },
+        null,
+        2
+      ),
+      'application/json;charset=utf-8'
+    )
+    notify.success('Scan compare exported as JSON')
+  }
+
   const loadScanHistory = async () => {
     if (!selectedTraderId) return
     try {
@@ -439,6 +1328,18 @@ export function DealReviewPage({
     } catch (err) {
       notify.error(
         err instanceof Error ? err.message : 'Failed to fetch anomalies'
+      )
+    }
+  }
+
+  const loadFilterPresets = async () => {
+    if (!selectedTraderId) return
+    try {
+      const result = await api.getDealReviewFilterPresets(selectedTraderId)
+      setFilterPresets(result)
+    } catch (err) {
+      notify.error(
+        err instanceof Error ? err.message : 'Failed to fetch review presets'
       )
     }
   }
@@ -538,6 +1439,8 @@ export function DealReviewPage({
     side,
     status,
     outcome,
+    openSelectionBucket,
+    closeReason,
     dateRange,
     minPnl,
     maxPnl,
@@ -546,6 +1449,58 @@ export function DealReviewPage({
   useEffect(() => {
     void loadDetail()
   }, [selectedTraderId, selectedCaseId])
+
+  useEffect(() => {
+    if (!selectedCaseId || !comparePeerCaseId) return
+    if (selectedCaseId === comparePeerCaseId) {
+      setComparePeerCaseId('')
+      setComparePeerDetail(null)
+    }
+  }, [selectedCaseId, comparePeerCaseId])
+
+  useEffect(() => {
+    if (!selectedTraderId || !comparePeerCaseId) {
+      setComparePeerDetail(null)
+      setComparePeerLoading(false)
+      return
+    }
+    if (comparePeerCaseId === selectedCaseId) {
+      setComparePeerDetail(null)
+      setComparePeerLoading(false)
+      return
+    }
+
+    let active = true
+    setComparePeerLoading(true)
+    void (async () => {
+      try {
+        if (detail?.case.id === comparePeerCaseId) {
+          if (active) setComparePeerDetail(detail)
+          return
+        }
+        const result = await api.getDealReviewCaseDetail(
+          selectedTraderId,
+          comparePeerCaseId
+        )
+        if (active) setComparePeerDetail(result)
+      } catch (err) {
+        if (active) {
+          setComparePeerDetail(null)
+          notify.error(
+            err instanceof Error
+              ? err.message
+              : 'Failed to load compare deal detail'
+          )
+        }
+      } finally {
+        if (active) setComparePeerLoading(false)
+      }
+    })()
+
+    return () => {
+      active = false
+    }
+  }, [selectedTraderId, selectedCaseId, comparePeerCaseId, detail])
 
   useEffect(() => {
     void loadScanHistory()
@@ -559,10 +1514,22 @@ export function DealReviewPage({
     side,
     status,
     outcome,
+    openSelectionBucket,
+    closeReason,
     dateRange,
     minPnl,
     maxPnl,
   ])
+
+  useEffect(() => {
+    if (!selectedTraderId) {
+      setFilterPresets([])
+      setSelectedPresetId('')
+      setPresetName('')
+      return
+    }
+    void loadFilterPresets()
+  }, [selectedTraderId])
 
   useEffect(() => {
     void loadVersions()
@@ -591,6 +1558,62 @@ export function DealReviewPage({
   }, [selectedTraderId, selectedCompareId])
 
   useEffect(() => {
+    if (versions.length === 0) {
+      setSelectedVersionId(null)
+      return
+    }
+    if (
+      !selectedVersionId ||
+      !versions.some((item) => item.version.id === selectedVersionId)
+    ) {
+      setSelectedVersionId(versions[0].version.id)
+    }
+  }, [versions, selectedVersionId])
+
+  useEffect(() => {
+    if (!selectedPreset) {
+      return
+    }
+    setPresetName(selectedPreset.preset.name)
+  }, [selectedPreset])
+
+  useEffect(() => {
+    const queueItems = buildReviewQueueItems(items, reviewQueueMode)
+    if (queueItems.length === 0) {
+      if (reviewQueueMode) {
+        setSelectedCaseId(null)
+        setDetail(null)
+      }
+      return
+    }
+    if (!selectedCaseId || !queueItems.some((item) => item.case.id === selectedCaseId)) {
+      setSelectedCaseId(queueItems[0].case.id)
+    }
+  }, [items, reviewQueueMode, selectedCaseId])
+
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.defaultPrevented) return
+      if (event.metaKey || event.ctrlKey || event.altKey) return
+      if (isKeyboardTypingTarget(event.target)) return
+      if (displayedItems.length === 0) return
+
+      if (event.key === 'ArrowDown' || event.key === 'j' || event.key === 'J') {
+        event.preventDefault()
+        goToReviewCase(1)
+        return
+      }
+      if (event.key === 'ArrowUp' || event.key === 'k' || event.key === 'K') {
+        event.preventDefault()
+        goToReviewCase(-1)
+      }
+    }
+
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [displayedItems, selectedCaseId, selectedCaseIndex])
+
+  useEffect(() => {
     if (selectedTrader?.exchange_id) {
       setLaunchExchangeId(selectedTrader.exchange_id)
       return
@@ -604,6 +1627,10 @@ export function DealReviewPage({
     setReviewLabelsText(detail?.labels?.join(', ') || '')
     setReviewNote(detail?.case.analyst_note || '')
   }, [detail])
+
+  useEffect(() => {
+    setAIClassifierAssist(null)
+  }, [selectedCaseId])
 
   useEffect(() => {
     if (!selectedModelId) {
@@ -666,14 +1693,17 @@ export function DealReviewPage({
       .finally(() => setCompareLoading(false))
   }, [selectedTraderId, compareLeftScanId, compareRightScanId])
 
-  const runAIScan = async () => {
+  const runAIScan = async (
+    overrides?: Record<string, string | number | undefined>,
+    successMessage: string = 'AI scan completed'
+  ) => {
     if (!selectedTraderId) return
     setRunningScan(true)
     try {
       const result = await api.runDealReviewAIScan(selectedTraderId, {
         model_id: selectedModelId || undefined,
         override_model_name: selectedRemoteModel || undefined,
-        ...buildFilterPayload(),
+        ...buildFilterPayload(overrides),
       })
       setScans((current) =>
         [
@@ -681,12 +1711,81 @@ export function DealReviewPage({
           ...current.filter((item) => item.scan.id !== result.scan.id),
         ].slice(0, 8)
       )
-      notify.success('AI scan completed')
+      notify.success(successMessage)
       await mutate(`status-${selectedTraderId}`)
     } catch (err) {
       notify.error(err instanceof Error ? err.message : 'AI scan failed')
     } finally {
       setRunningScan(false)
+    }
+  }
+
+  const saveFilterPreset = async () => {
+    if (!selectedTraderId) return
+    const trimmedName = presetName.trim()
+    if (!trimmedName) {
+      notify.error('Preset name is required')
+      return
+    }
+    setSavingPreset(true)
+    try {
+      const nextItems = await api.saveDealReviewFilterPreset(selectedTraderId, {
+        id:
+          selectedPreset &&
+          selectedPreset.preset.name.trim().toLowerCase() ===
+            trimmedName.toLowerCase()
+            ? selectedPreset.preset.id
+            : undefined,
+        name: trimmedName,
+        filters: buildPresetFilters(),
+      })
+      setFilterPresets(nextItems)
+      const savedPreset =
+        nextItems.find(
+          (item) => item.preset.name.trim().toLowerCase() === trimmedName.toLowerCase()
+        ) || null
+      setSelectedPresetId(savedPreset?.preset.id || '')
+      notify.success(
+        savedPreset && selectedPreset?.preset.id === savedPreset.preset.id
+          ? 'Review preset updated'
+          : 'Review preset saved'
+      )
+    } catch (err) {
+      notify.error(
+        err instanceof Error ? err.message : 'Failed to save review preset'
+      )
+    } finally {
+      setSavingPreset(false)
+    }
+  }
+
+  const deleteFilterPreset = async () => {
+    if (!selectedTraderId || !selectedPreset) return
+    const confirmed = await confirmToast(
+      `Delete the preset "${selectedPreset.preset.name}"?`,
+      {
+        title: 'Delete Preset',
+        okText: 'Delete',
+        cancelText: 'Cancel',
+      }
+    )
+    if (!confirmed) return
+
+    setDeletingPresetId(selectedPreset.preset.id)
+    try {
+      await api.deleteDealReviewFilterPreset(selectedTraderId, selectedPreset.preset.id)
+      setFilterPresets((current) =>
+        current.filter((item) => item.preset.id !== selectedPreset.preset.id)
+      )
+      setSelectedPresetId('')
+      setPresetName('')
+      notify.success('Review preset deleted')
+    } catch (err) {
+      notify.error(
+        err instanceof Error ? err.message : 'Failed to delete review preset'
+      )
+    } finally {
+      setDeletingPresetId(null)
     }
   }
 
@@ -916,6 +2015,7 @@ export function DealReviewPage({
           item.case.id === selectedCaseId ? { ...item, labels } : item
         )
       )
+      await loadCases()
       notify.success('Deal review notes saved')
     } catch (err) {
       notify.error(
@@ -923,6 +2023,87 @@ export function DealReviewPage({
       )
     } finally {
       setSavingReview(false)
+    }
+  }
+
+  const runCaseAIAssist = async () => {
+    if (!selectedTraderId || !selectedCaseId) return
+    setRunningCaseAIAssist(true)
+    try {
+      const result = await api.runDealReviewCaseAIAssist(
+        selectedTraderId,
+        selectedCaseId,
+        {
+          model_id: selectedModelId || undefined,
+          override_model_name: selectedRemoteModel || undefined,
+        }
+      )
+      setAIClassifierAssist(result)
+      notify.success('AI review assist updated')
+    } catch (err) {
+      notify.error(
+        err instanceof Error ? err.message : 'Failed to run AI review assist'
+      )
+    } finally {
+      setRunningCaseAIAssist(false)
+    }
+  }
+
+  const applyClassifierFeedback = async (
+    suggestion: DealReviewClassifierSuggestion,
+    verdict: 'accepted' | 'rejected',
+    source: 'heuristic' | 'ai'
+  ) => {
+    if (!selectedTraderId || !selectedCaseId) return
+    const actionKey = `${source}:${verdict}:${suggestion.suggestion_key}`
+    setClassifierActionKey(actionKey)
+    try {
+      const result = await api.applyDealReviewClassifierFeedback(
+        selectedTraderId,
+        selectedCaseId,
+        {
+          classifier_id: suggestion.classifier_id,
+          suggestion_key: suggestion.suggestion_key,
+          label: suggestion.label,
+          issue_type: suggestion.issue_type,
+          verdict,
+          rationale: suggestion.rationale,
+          apply_label: verdict === 'accepted',
+        }
+      )
+      setDetail(result)
+      await loadCases()
+      if (source === 'ai') {
+        setAIClassifierAssist((current) => {
+          if (!current?.suggestions) return current
+          const nextSuggestions = current.suggestions.filter(
+            (item) => item.suggestion_key !== suggestion.suggestion_key
+          )
+          return {
+            ...current,
+            suggestions: nextSuggestions,
+            summary:
+              nextSuggestions.length > 0
+                ? current.summary
+                : verdict === 'accepted'
+                  ? 'AI review assist suggestion accepted and applied to the deal labels.'
+                  : 'AI review assist suggestion rejected for this deal.',
+          }
+        })
+      }
+      notify.success(
+        verdict === 'accepted'
+          ? `Accepted "${suggestion.label}"`
+          : `Rejected "${suggestion.label}"`
+      )
+    } catch (err) {
+      notify.error(
+        err instanceof Error
+          ? err.message
+          : 'Failed to apply classifier feedback'
+      )
+    } finally {
+      setClassifierActionKey(null)
     }
   }
 
@@ -952,6 +2133,30 @@ export function DealReviewPage({
       )
     } finally {
       setRollingBackVersionId(null)
+    }
+  }
+
+  const openVersionDetail = (versionId: string) => {
+    setSelectedVersionId(versionId)
+    window.setTimeout(() => {
+      versionDetailRef.current?.scrollIntoView({
+        behavior: 'smooth',
+        block: 'start',
+      })
+    }, 50)
+  }
+
+  const goToReviewCase = (direction: -1 | 1) => {
+    if (displayedItems.length === 0) return
+    const currentIndex =
+      selectedCaseIndex >= 0 ? selectedCaseIndex : direction > 0 ? -1 : 1
+    const nextIndex = Math.min(
+      displayedItems.length - 1,
+      Math.max(0, currentIndex + direction)
+    )
+    const nextCase = displayedItems[nextIndex]
+    if (nextCase && nextCase.case.id !== selectedCaseId) {
+      setSelectedCaseId(nextCase.case.id)
     }
   }
 
@@ -1001,7 +2206,120 @@ export function DealReviewPage({
         <div className="grid grid-cols-1 xl:grid-cols-[1.2fr_0.8fr] gap-6">
           <div className="space-y-6">
             <div className="nofx-glass rounded-xl p-5">
-              <div className="grid grid-cols-1 md:grid-cols-3 xl:grid-cols-6 gap-3">
+              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3">
+                <div className="h-11 rounded-lg border border-white/10 px-3 flex items-center bg-black/20">
+                  <NofxSelect
+                    value={selectedPresetId}
+                    onChange={(value) => {
+                      setSelectedPresetId(value)
+                      if (!value) {
+                        setPresetName('')
+                        return
+                      }
+                      const preset =
+                        filterPresets.find((item) => item.preset.id === value) ||
+                        null
+                      if (preset) {
+                        applyPresetFilters(preset.filters)
+                        setPresetName(preset.preset.name)
+                      }
+                    }}
+                    options={[
+                      { value: '', label: 'Load saved cohort preset' },
+                      ...filterPresets.map((item) => ({
+                        value: item.preset.id,
+                        label: item.preset.name,
+                      })),
+                    ]}
+                  />
+                </div>
+                <input
+                  value={presetName}
+                  onChange={(event) => setPresetName(event.target.value)}
+                  placeholder="Preset name"
+                  className="h-11 rounded-lg border border-white/10 bg-black/20 px-3 text-sm"
+                />
+                <button
+                  onClick={saveFilterPreset}
+                  disabled={!selectedTraderId || savingPreset}
+                  className="h-11 rounded-lg border border-nofx-gold/30 bg-nofx-gold/10 text-nofx-gold font-semibold disabled:opacity-50"
+                >
+                  {savingPreset
+                    ? 'Saving…'
+                    : selectedPreset &&
+                        selectedPreset.preset.name.trim().toLowerCase() ===
+                          presetName.trim().toLowerCase()
+                      ? 'Update preset'
+                      : 'Save preset'}
+                </button>
+                <button
+                  onClick={deleteFilterPreset}
+                  disabled={!selectedPreset || deletingPresetId === selectedPreset?.preset.id}
+                  className="h-11 rounded-lg border border-white/10 bg-black/20 font-semibold disabled:opacity-50"
+                >
+                  {deletingPresetId === selectedPreset?.preset.id
+                    ? 'Deleting…'
+                    : 'Delete preset'}
+                </button>
+              </div>
+
+              <div className="flex flex-wrap gap-2 mt-3">
+                {[
+                  {
+                    label: 'Trend + high vol',
+                    patch: {
+                      open_trend_regime: 'uptrend',
+                      open_volatility_regime: 'high_vol',
+                    },
+                  },
+                  {
+                    label: 'Low-vol chop',
+                    patch: {
+                      open_trend_regime: 'chop',
+                      open_volatility_regime: 'low_vol',
+                    },
+                  },
+                  {
+                    label: 'BTC-leading alt weakness',
+                    patch: { open_btc_strength_regime: 'lagging' },
+                  },
+                  {
+                    label: 'Funding extreme longs',
+                    patch: { open_funding_regime: 'extreme_longs' },
+                  },
+                  { label: 'Asia session', patch: { open_session_bucket: 'asia' } },
+                  { label: 'EU session', patch: { open_session_bucket: 'eu' } },
+                  { label: 'US session', patch: { open_session_bucket: 'us' } },
+                ].map((chip) => (
+                  <button
+                    key={chip.label}
+                    onClick={() => applyDrilldownFilters(chip.patch)}
+                    className="h-8 px-3 rounded-full border border-white/10 bg-black/20 text-xs"
+                  >
+                    {chip.label}
+                  </button>
+                ))}
+                <button
+                  onClick={() => {
+                    setOpenTrendRegime('')
+                    setOpenVolatilityRegime('')
+                    setOpenBTCStrengthRegime('')
+                    setOpenFundingRegime('')
+                    setOpenOIRegime('')
+                    setOpenSessionBucket('')
+                    setOpenWeekdayBucket('')
+                    setOpenVenueTier('')
+                    setOpenLiquidityTier('')
+                    setOpenSpreadBucket('')
+                    setOpenSlippageBucket('')
+                  }}
+                  className="h-8 px-3 rounded-full border border-white/10 bg-black/20 text-xs text-nofx-text-muted"
+                >
+                  Reset regime filters
+                </button>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-3 xl:grid-cols-8 gap-3 mt-3">
                 <input
                   value={symbol}
                   onChange={(event) => setSymbol(event.target.value)}
@@ -1036,14 +2354,112 @@ export function DealReviewPage({
                     options={rangeOptions}
                   />
                 </div>
+                <input
+                  value={openSelectionBucket}
+                  onChange={(event) =>
+                    setOpenSelectionBucket(event.target.value)
+                  }
+                  placeholder="Selection bucket"
+                  className="h-11 rounded-lg border border-white/10 bg-black/20 px-3 text-sm"
+                />
+                <input
+                  value={closeReason}
+                  onChange={(event) => setCloseReason(event.target.value)}
+                  placeholder="Close reason"
+                  className="h-11 rounded-lg border border-white/10 bg-black/20 px-3 text-sm"
+                />
                 <button
-                  onClick={loadCases}
+                  onClick={() => {
+                    void loadCases()
+                    void loadAnomalies()
+                  }}
                   className="h-11 rounded-lg bg-nofx-gold text-black font-semibold hover:opacity-90 transition"
                 >
                   Refresh
                 </button>
               </div>
-              <div className="grid grid-cols-2 gap-3 mt-3">
+              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-6 gap-3 mt-3">
+                <div className="h-11 rounded-lg border border-white/10 px-3 flex items-center bg-black/20">
+                  <NofxSelect
+                    value={openTrendRegime}
+                    onChange={setOpenTrendRegime}
+                    options={trendRegimeOptions}
+                  />
+                </div>
+                <div className="h-11 rounded-lg border border-white/10 px-3 flex items-center bg-black/20">
+                  <NofxSelect
+                    value={openVolatilityRegime}
+                    onChange={setOpenVolatilityRegime}
+                    options={volatilityRegimeOptions}
+                  />
+                </div>
+                <div className="h-11 rounded-lg border border-white/10 px-3 flex items-center bg-black/20">
+                  <NofxSelect
+                    value={openBTCStrengthRegime}
+                    onChange={setOpenBTCStrengthRegime}
+                    options={btcStrengthOptions}
+                  />
+                </div>
+                <div className="h-11 rounded-lg border border-white/10 px-3 flex items-center bg-black/20">
+                  <NofxSelect
+                    value={openFundingRegime}
+                    onChange={setOpenFundingRegime}
+                    options={fundingRegimeOptions}
+                  />
+                </div>
+                <div className="h-11 rounded-lg border border-white/10 px-3 flex items-center bg-black/20">
+                  <NofxSelect
+                    value={openOIRegime}
+                    onChange={setOpenOIRegime}
+                    options={oiRegimeOptions}
+                  />
+                </div>
+                <div className="h-11 rounded-lg border border-white/10 px-3 flex items-center bg-black/20">
+                  <NofxSelect
+                    value={openSessionBucket}
+                    onChange={setOpenSessionBucket}
+                    options={sessionOptions}
+                  />
+                </div>
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-5 gap-3 mt-3">
+                <div className="h-11 rounded-lg border border-white/10 px-3 flex items-center bg-black/20">
+                  <NofxSelect
+                    value={openWeekdayBucket}
+                    onChange={setOpenWeekdayBucket}
+                    options={weekdayOptions}
+                  />
+                </div>
+                <div className="h-11 rounded-lg border border-white/10 px-3 flex items-center bg-black/20">
+                  <NofxSelect
+                    value={openVenueTier}
+                    onChange={setOpenVenueTier}
+                    options={venueTierOptions}
+                  />
+                </div>
+                <div className="h-11 rounded-lg border border-white/10 px-3 flex items-center bg-black/20">
+                  <NofxSelect
+                    value={openLiquidityTier}
+                    onChange={setOpenLiquidityTier}
+                    options={liquidityTierOptions}
+                  />
+                </div>
+                <div className="h-11 rounded-lg border border-white/10 px-3 flex items-center bg-black/20">
+                  <NofxSelect
+                    value={openSpreadBucket}
+                    onChange={setOpenSpreadBucket}
+                    options={executionBucketOptions}
+                  />
+                </div>
+                <div className="h-11 rounded-lg border border-white/10 px-3 flex items-center bg-black/20">
+                  <NofxSelect
+                    value={openSlippageBucket}
+                    onChange={setOpenSlippageBucket}
+                    options={executionBucketOptions}
+                  />
+                </div>
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mt-3">
                 <input
                   value={minPnl}
                   onChange={(event) => setMinPnl(event.target.value)}
@@ -1056,6 +2472,13 @@ export function DealReviewPage({
                   placeholder="Max PnL"
                   className="h-11 rounded-lg border border-white/10 bg-black/20 px-3 text-sm"
                 />
+                <div className="h-11 rounded-lg border border-white/10 px-3 flex items-center bg-black/20">
+                  <NofxSelect
+                    value={reviewQueueMode}
+                    onChange={setReviewQueueMode}
+                    options={reviewQueueOptions}
+                  />
+                </div>
               </div>
             </div>
 
@@ -1088,6 +2511,211 @@ export function DealReviewPage({
               </div>
             </div>
 
+            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-5 gap-3">
+              <div className="nofx-glass rounded-xl p-4">
+                <div className="text-xs text-nofx-text-muted">Bad entries</div>
+                <div className="text-2xl font-semibold mt-1">
+                  {summary?.bad_entry_deals || 0}
+                </div>
+                <div className="text-xs text-nofx-text-muted mt-2">
+                  Avg entry score {summary ? formatScore(summary.avg_entry_timing_score) : '-'}
+                </div>
+              </div>
+              <div className="nofx-glass rounded-xl p-4">
+                <div className="text-xs text-nofx-text-muted">Bad exits</div>
+                <div className="text-2xl font-semibold mt-1">
+                  {summary?.bad_exit_deals || 0}
+                </div>
+                <div className="text-xs text-nofx-text-muted mt-2">
+                  Avg exit score {summary ? formatScore(summary.avg_exit_efficiency_score) : '-'}
+                </div>
+              </div>
+              <div className="nofx-glass rounded-xl p-4">
+                <div className="text-xs text-nofx-text-muted">Avoidable losses</div>
+                <div className="text-2xl font-semibold mt-1">
+                  {summary?.avoidable_loss_deals || 0}
+                </div>
+                <div className="text-xs text-nofx-text-muted mt-2">
+                  Avg give-back {summary ? formatPct(summary.avg_profit_given_back_pct) : '-'}
+                </div>
+              </div>
+              <div className="nofx-glass rounded-xl p-4">
+                <div className="text-xs text-nofx-text-muted">Strong entry / weak exit</div>
+                <div className="text-2xl font-semibold mt-1">
+                  {summary?.strong_entry_weak_exit_deals || 0}
+                </div>
+                <div className="text-xs text-nofx-text-muted mt-2">
+                  Avg MFE capture {summary ? formatPct(summary.avg_mfe_captured_pct) : '-'}
+                </div>
+              </div>
+              <div className="nofx-glass rounded-xl p-4">
+                <div className="text-xs text-nofx-text-muted">Weak entry / lucky exit</div>
+                <div className="text-2xl font-semibold mt-1">
+                  {summary?.weak_entry_lucky_exit_deals || 0}
+                </div>
+                <div className="text-xs text-nofx-text-muted mt-2">
+                  Avg sizing score {summary ? formatScore(summary.avg_risk_sizing_score) : '-'}
+                </div>
+              </div>
+            </div>
+
+            <div className="nofx-glass rounded-xl p-5">
+              <div className="flex items-center justify-between gap-4">
+                <div>
+                  <h2 className="font-semibold text-lg">
+                    What changed after last patch?
+                  </h2>
+                  <p className="text-xs text-nofx-text-muted mt-1">
+                    Fast readout from the most recent strategy version and its
+                    observed attribution window.
+                  </p>
+                </div>
+                {latestVersion && (
+                  <button
+                    onClick={() => openVersionDetail(latestVersion.version.id)}
+                    className="h-10 px-4 rounded-lg border border-nofx-gold/30 text-nofx-gold font-semibold"
+                  >
+                    Open patch detail
+                  </button>
+                )}
+              </div>
+
+              {!latestVersion ? (
+                <div className="text-sm text-nofx-text-muted mt-4">
+                  No strategy patch has been applied yet for this trader.
+                </div>
+              ) : (
+                <div className="space-y-4 mt-4">
+                  <div className="rounded-xl border border-white/10 bg-black/20 p-4">
+                    <div className="text-xs uppercase tracking-[0.2em] text-nofx-gold">
+                      {formatStrategyVersionSourceType(
+                        latestVersion.version.source_type
+                      )}
+                    </div>
+                    <div className="font-semibold mt-2">
+                      {latestVersion.version.summary || 'Strategy change'}
+                    </div>
+                    <div className="text-xs text-nofx-text-muted mt-2">
+                      Applied{' '}
+                      {new Date(
+                        latestVersion.version.applied_at ||
+                          latestVersion.version.created_at
+                      ).toLocaleString()}
+                    </div>
+                    {latestVersion.version.expected_effect && (
+                      <div className="text-sm text-nofx-text-muted mt-3">
+                        Intended effect: {latestVersion.version.expected_effect}
+                      </div>
+                    )}
+                    {latestVersion.attribution?.note && (
+                      <div className="text-sm text-nofx-text-muted mt-3">
+                        {latestVersion.attribution.note}
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3">
+                    <div className="rounded-xl border border-white/10 bg-black/20 p-4">
+                      <div className="text-xs text-nofx-text-muted">Status</div>
+                      <div
+                        className={`text-lg font-semibold mt-1 ${getPatchOutcomeTone(
+                          latestFullDelta,
+                          latestVersion.attribution?.rollback_suggested
+                        )}`}
+                      >
+                        {getPatchOutcomeLabel(
+                          latestFullDelta,
+                          latestVersion.attribution?.rollback_suggested
+                        )}
+                      </div>
+                    </div>
+                    <div className="rounded-xl border border-white/10 bg-black/20 p-4">
+                      <div className="text-xs text-nofx-text-muted">
+                        Full-strategy delta
+                      </div>
+                      <div
+                        className={`text-lg font-semibold mt-1 ${getPatchOutcomeTone(
+                          latestFullDelta
+                        )}`}
+                      >
+                        {latestFullDelta === null
+                          ? 'No observation yet'
+                          : formatMoney(latestFullDelta)}
+                      </div>
+                    </div>
+                    <div className="rounded-xl border border-white/10 bg-black/20 p-4">
+                      <div className="text-xs text-nofx-text-muted">
+                        Target-cohort delta
+                      </div>
+                      <div
+                        className={`text-lg font-semibold mt-1 ${getPatchOutcomeTone(
+                          latestTargetDelta
+                        )}`}
+                      >
+                        {latestTargetDelta === null
+                          ? 'Not cohort-scoped'
+                          : formatMoney(latestTargetDelta)}
+                      </div>
+                    </div>
+                    <div className="rounded-xl border border-white/10 bg-black/20 p-4">
+                      <div className="text-xs text-nofx-text-muted">
+                        Rollback suggestion
+                      </div>
+                      <div
+                        className={`text-lg font-semibold mt-1 ${
+                          latestVersion.attribution?.rollback_suggested
+                            ? 'text-rose-300'
+                            : 'text-emerald-300'
+                        }`}
+                      >
+                        {latestVersion.attribution?.rollback_suggested
+                          ? 'Suggested'
+                          : 'Not suggested'}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                    <div className="rounded-xl border border-white/10 bg-black/20 p-4">
+                      <div className="text-xs text-nofx-text-muted">
+                        Full before
+                      </div>
+                      <div className="text-sm text-nofx-text-muted mt-1">
+                        {formatDatasetMini(
+                          latestVersion.attribution?.full_before_summary
+                        )}
+                      </div>
+                    </div>
+                    <div className="rounded-xl border border-white/10 bg-black/20 p-4">
+                      <div className="text-xs text-nofx-text-muted">
+                        Full after
+                      </div>
+                      <div className="text-sm text-nofx-text-muted mt-1">
+                        {formatDatasetMini(
+                          latestVersion.attribution?.full_after_summary
+                        )}
+                      </div>
+                    </div>
+                    <div className="rounded-xl border border-white/10 bg-black/20 p-4">
+                      <div className="text-xs text-nofx-text-muted">
+                        Target cohort
+                      </div>
+                      <div className="text-sm text-nofx-text-muted mt-1">
+                        {formatVersionCohort(latestVersion.target_cohort)}
+                      </div>
+                    </div>
+                  </div>
+
+                  {latestVersion.attribution?.warnings &&
+                    latestVersion.attribution.warnings.length > 0 && (
+                      <div className="rounded-xl border border-rose-400/20 bg-rose-500/10 p-4 text-sm text-rose-200">
+                        {latestVersion.attribution.warnings[0]}
+                      </div>
+                    )}
+                </div>
+              )}
+            </div>
+
             <div className="nofx-glass rounded-xl overflow-hidden">
               <div className="px-5 py-4 border-b border-white/10 flex items-center justify-between">
                 <div>
@@ -1097,81 +2725,175 @@ export function DealReviewPage({
                       ? `Trader: ${selectedTrader.trader_name}`
                       : 'Select a trader'}
                   </p>
+                  <p className="text-xs text-nofx-text-muted mt-1">
+                    Queue: {buildQueueLabel(reviewQueueMode)} · {displayedItems.length}{' '}
+                    visible / {items.length} loaded
+                  </p>
                 </div>
-                {loading && (
-                  <div className="text-xs text-nofx-text-muted">Loading…</div>
-                )}
+                <div className="text-right">
+                  <div className="flex items-center justify-end gap-2 mb-2">
+                    <button
+                      onClick={exportFilteredDealsJSON}
+                      disabled={displayedItems.length === 0}
+                      className="h-8 px-3 rounded-lg border border-white/10 bg-black/20 text-xs disabled:opacity-40"
+                    >
+                      Export JSON
+                    </button>
+                    <button
+                      onClick={exportFilteredDealsCSV}
+                      disabled={displayedItems.length === 0}
+                      className="h-8 px-3 rounded-lg border border-white/10 bg-black/20 text-xs disabled:opacity-40"
+                    >
+                      Export CSV
+                    </button>
+                  </div>
+                  <div className="text-xs text-nofx-text-muted">
+                    Hotkeys: `J` / `K` or `↑` / `↓`
+                  </div>
+                  {loading && (
+                    <div className="text-xs text-nofx-text-muted mt-1">Loading…</div>
+                  )}
+                </div>
               </div>
               {error ? (
                 <div className="p-5 text-rose-400">{error}</div>
-              ) : items.length === 0 ? (
+              ) : displayedItems.length === 0 ? (
                 <div className="p-5 text-nofx-text-muted">
-                  No deals matched the current filters.
+                  {reviewQueueMode
+                    ? 'No deals matched the current review queue.'
+                    : 'No deals matched the current filters.'}
                 </div>
               ) : (
                 <div className="divide-y divide-white/5">
-                  {items.map((item) => (
-                    <button
-                      key={item.case.id}
-                      onClick={() => setSelectedCaseId(item.case.id)}
-                      className={`w-full text-left px-5 py-4 transition hover:bg-white/5 ${selectedCaseId === item.case.id ? 'bg-white/5' : ''}`}
-                    >
-                      <div className="flex items-start justify-between gap-4">
-                        <div>
-                          <div className="flex items-center gap-2">
-                            <span className="font-semibold">
-                              {item.case.symbol}
-                            </span>
-                            <span
-                              className={`text-xs px-2 py-0.5 rounded-full ${item.case.side === 'LONG' ? 'bg-emerald-500/15 text-emerald-300' : 'bg-rose-500/15 text-rose-300'}`}
-                            >
-                              {item.case.side}
-                            </span>
-                            <span className="text-xs text-nofx-text-muted">
-                              {item.case.outcome}
-                            </span>
-                          </div>
-                          <div className="text-xs text-nofx-text-muted mt-2">
-                            Open: {formatDate(item.case.entry_time_ms)} | Close:{' '}
-                            {formatDate(item.case.exit_time_ms)}
-                          </div>
-                          <div className="text-sm text-nofx-text-muted mt-2 line-clamp-2">
-                            {item.open_reasoning ||
-                              'No open reasoning snapshot linked yet.'}
-                          </div>
-                          {item.labels && item.labels.length > 0 && (
-                            <div className="flex flex-wrap gap-2 mt-3">
-                              {item.labels.slice(0, 3).map((label) => (
-                                <span
-                                  key={`${item.case.id}-${label}`}
-                                  className="px-2 py-1 rounded-full text-[11px] bg-nofx-gold/10 border border-nofx-gold/20 text-nofx-gold"
-                                >
-                                  {label}
-                                </span>
-                              ))}
+                  {displayedItems.map((item) => {
+                    const topSuggestion = item.classifier_assist?.suggestions?.[0]
+                    const assistClasses = classifierToneClasses(
+                      item.classifier_assist?.highlight_level
+                    )
+                    const giveBackPct = getDealGiveBackPct(item.case)
+                    const qualityBadges = buildQualityBadges(item.case)
+                    return (
+                      <button
+                        key={item.case.id}
+                        onClick={() => setSelectedCaseId(item.case.id)}
+                        className={`w-full text-left px-5 py-4 transition hover:bg-white/5 ${
+                          selectedCaseId === item.case.id ? 'bg-white/5' : ''
+                        } ${
+                          item.classifier_assist?.suggestions?.length
+                            ? 'border-l-2 border-l-amber-400/40'
+                            : ''
+                        }`}
+                      >
+                        <div className="flex items-start justify-between gap-4">
+                          <div>
+                            <div className="flex items-center gap-2">
+                              <span className="font-semibold">
+                                {item.case.symbol}
+                              </span>
+                              <span
+                                className={`text-xs px-2 py-0.5 rounded-full ${item.case.side === 'LONG' ? 'bg-emerald-500/15 text-emerald-300' : 'bg-rose-500/15 text-rose-300'}`}
+                              >
+                                {item.case.side}
+                              </span>
+                              <span className="text-xs text-nofx-text-muted">
+                                {item.case.outcome}
+                              </span>
                             </div>
-                          )}
+                            <div className="text-xs text-nofx-text-muted mt-2">
+                              Open: {formatDate(item.case.entry_time_ms)} | Close:{' '}
+                              {formatDate(item.case.exit_time_ms)}
+                            </div>
+                            <div className="text-sm text-nofx-text-muted mt-2 line-clamp-2">
+                              {item.open_reasoning ||
+                                'No open reasoning snapshot linked yet.'}
+                            </div>
+                            {buildOpenRegimeBadges(item).length > 0 && (
+                              <div className="flex flex-wrap gap-2 mt-3">
+                                {buildOpenRegimeBadges(item).slice(0, 5).map((badge) => (
+                                  <span
+                                    key={`${item.case.id}-regime-${badge}`}
+                                    className="px-2 py-1 rounded-full text-[11px] bg-sky-500/10 border border-sky-400/20 text-sky-200"
+                                  >
+                                    {formatMarketContextToken(badge)}
+                                  </span>
+                                ))}
+                              </div>
+                            )}
+                            {topSuggestion && (
+                              <div className="mt-3 flex flex-wrap items-center gap-2">
+                                <span
+                                  className={`px-2 py-1 rounded-full text-[11px] border ${assistClasses}`}
+                                >
+                                  Review assist
+                                </span>
+                                <span className="text-xs text-amber-200">
+                                  {topSuggestion.label}
+                                </span>
+                                <span className="text-xs text-nofx-text-muted">
+                                  {formatClassifierIssueType(
+                                    topSuggestion.issue_type
+                                  )}
+                                </span>
+                              </div>
+                            )}
+                            {qualityBadges.length > 0 && (
+                              <div className="flex flex-wrap gap-2 mt-3">
+                                {qualityBadges.map((badge) => (
+                                  <span
+                                    key={`${item.case.id}-quality-${badge.label}`}
+                                    className={`px-2 py-1 rounded-full text-[11px] border ${qualityBadgeClasses(
+                                      badge.tone
+                                    )}`}
+                                  >
+                                    {badge.label}
+                                  </span>
+                                ))}
+                              </div>
+                            )}
+                            {item.labels && item.labels.length > 0 && (
+                              <div className="flex flex-wrap gap-2 mt-3">
+                                {item.labels.slice(0, 3).map((label) => (
+                                  <span
+                                    key={`${item.case.id}-${label}`}
+                                    className="px-2 py-1 rounded-full text-[11px] bg-nofx-gold/10 border border-nofx-gold/20 text-nofx-gold"
+                                  >
+                                    {label}
+                                  </span>
+                                ))}
+                              </div>
+                            )}
+                            {reviewQueueMode === 'biggest_giveback' &&
+                              giveBackPct > 0 && (
+                                <div className="mt-2 text-xs text-amber-300">
+                                  Give-back {formatPct(giveBackPct)}
+                                  {' · '}Peak{' '}
+                                  {formatPct(
+                                    item.case.max_favorable_excursion_pct || 0
+                                  )}
+                                </div>
+                              )}
+                          </div>
+                          <div className="text-right">
+                            <div
+                              className={
+                                item.case.realized_pnl >= 0
+                                  ? 'text-emerald-400 font-semibold'
+                                  : 'text-rose-400 font-semibold'
+                              }
+                            >
+                              {formatMoney(item.case.realized_pnl)}
+                            </div>
+                            <div className="text-xs text-nofx-text-muted mt-1">
+                              {formatPct(item.case.realized_pnl_pct)}
+                            </div>
+                            <div className="text-xs text-nofx-text-muted mt-2">
+                              {formatHold(item.case.hold_duration_ms)}
+                            </div>
+                          </div>
                         </div>
-                        <div className="text-right">
-                          <div
-                            className={
-                              item.case.realized_pnl >= 0
-                                ? 'text-emerald-400 font-semibold'
-                                : 'text-rose-400 font-semibold'
-                            }
-                          >
-                            {formatMoney(item.case.realized_pnl)}
-                          </div>
-                          <div className="text-xs text-nofx-text-muted mt-1">
-                            {formatPct(item.case.realized_pnl_pct)}
-                          </div>
-                          <div className="text-xs text-nofx-text-muted mt-2">
-                            {formatHold(item.case.hold_duration_ms)}
-                          </div>
-                        </div>
-                      </div>
-                    </button>
-                  ))}
+                      </button>
+                    )
+                  })}
                 </div>
               )}
             </div>
@@ -1180,13 +2902,34 @@ export function DealReviewPage({
           <div className="space-y-6">
             <div className="nofx-glass rounded-xl p-5">
               <div className="flex items-center justify-between gap-4 mb-4">
-                <h2 className="font-semibold text-lg">Deal detail</h2>
-                {detail?.case && (
-                  <div className="text-xs text-nofx-text-muted">
-                    {detail.trader_name}{' '}
-                    {detail.strategy_name ? `| ${detail.strategy_name}` : ''}
-                  </div>
-                )}
+                <div>
+                  <h2 className="font-semibold text-lg">Deal detail</h2>
+                  {detail?.case && (
+                    <div className="text-xs text-nofx-text-muted mt-1">
+                      {detail.trader_name}{' '}
+                      {detail.strategy_name ? `| ${detail.strategy_name}` : ''}
+                    </div>
+                  )}
+                </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => goToReviewCase(-1)}
+                    disabled={selectedCaseIndex <= 0}
+                    className="h-9 px-3 rounded-lg border border-white/10 bg-black/20 text-sm disabled:opacity-40"
+                  >
+                    Previous
+                  </button>
+                  <button
+                    onClick={() => goToReviewCase(1)}
+                    disabled={
+                      selectedCaseIndex < 0 ||
+                      selectedCaseIndex >= displayedItems.length - 1
+                    }
+                    className="h-9 px-3 rounded-lg border border-white/10 bg-black/20 text-sm disabled:opacity-40"
+                  >
+                    Next
+                  </button>
+                </div>
               </div>
               {detailLoading ? (
                 <div className="text-nofx-text-muted">Loading detail…</div>
@@ -1251,6 +2994,34 @@ export function DealReviewPage({
                     </div>
                   </div>
 
+                  {buildOpenRegimeBadges(detail).length > 0 && (
+                    <div className="flex flex-wrap gap-2">
+                      {buildOpenRegimeBadges(detail).map((badge) => (
+                        <span
+                          key={`${detail.case.id}-detail-regime-${badge}`}
+                          className="px-2 py-1 rounded-full text-xs bg-sky-500/10 border border-sky-400/20 text-sky-200"
+                        >
+                          {formatMarketContextToken(badge)}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+
+                  {buildQualityBadges(detail.case).length > 0 && (
+                    <div className="flex flex-wrap gap-2">
+                      {buildQualityBadges(detail.case).map((badge) => (
+                        <span
+                          key={`${detail.case.id}-detail-quality-${badge.label}`}
+                          className={`px-2 py-1 rounded-full text-xs border ${qualityBadgeClasses(
+                            badge.tone
+                          )}`}
+                        >
+                          {badge.label}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+
                   <DealReviewTimelineChart
                     timeline={detail.price_timeline}
                     entryPrice={detail.case.entry_price}
@@ -1258,6 +3029,288 @@ export function DealReviewPage({
                     stopLoss={detail.case.open_stop_loss}
                     takeProfit={detail.case.open_take_profit}
                   />
+
+                  <div className="rounded-xl border border-white/10 bg-black/20 p-4 space-y-4">
+                    <div className="flex items-start justify-between gap-4">
+                      <div>
+                        <div className="font-semibold">Quality readout</div>
+                        <div className="text-xs text-nofx-text-muted mt-1">
+                          Entry, exit, and sizing quality derived from the full
+                          deal path.
+                        </div>
+                      </div>
+                      <div className="text-right text-xs text-nofx-text-muted">
+                        MFE capture {formatPct(detail.case.mfe_captured_pct || 0)}
+                      </div>
+                    </div>
+
+                    {buildQualityNarrative(detail.case) && (
+                      <div className="rounded-lg border border-amber-400/20 bg-amber-500/10 px-3 py-2 text-sm text-amber-100">
+                        {buildQualityNarrative(detail.case)}
+                      </div>
+                    )}
+
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                      <div className="rounded-lg border border-white/10 bg-black/20 p-3">
+                        <div className="text-xs text-nofx-text-muted">Entry timing score</div>
+                        <div className="text-lg font-semibold mt-1">
+                          {formatScore(detail.case.entry_timing_score)}
+                        </div>
+                        <div className="text-xs text-nofx-text-muted mt-2">
+                          First profit {formatHold(detail.case.time_to_first_profit_ms)}
+                        </div>
+                      </div>
+                      <div className="rounded-lg border border-white/10 bg-black/20 p-3">
+                        <div className="text-xs text-nofx-text-muted">Exit efficiency score</div>
+                        <div className="text-lg font-semibold mt-1">
+                          {formatScore(detail.case.exit_efficiency_score)}
+                        </div>
+                        <div className="text-xs text-nofx-text-muted mt-2">
+                          Give-back {formatMoney(detail.case.profit_given_back)} /{' '}
+                          {formatPct(detail.case.profit_given_back_pct)}
+                        </div>
+                      </div>
+                      <div className="rounded-lg border border-white/10 bg-black/20 p-3">
+                        <div className="text-xs text-nofx-text-muted">Risk sizing score</div>
+                        <div className="text-lg font-semibold mt-1">
+                          {formatScore(detail.case.risk_sizing_score)}
+                        </div>
+                        <div className="text-xs text-nofx-text-muted mt-2">
+                          Planned risk {formatPct(detail.case.planned_risk_pct)}
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-2 xl:grid-cols-4 gap-3 text-sm">
+                      <div>
+                        <div className="text-xs text-nofx-text-muted">Max favorable excursion</div>
+                        <div className="font-semibold mt-1">
+                          {formatMoney(detail.case.max_favorable_excursion)} /{' '}
+                          {formatPct(detail.case.max_favorable_excursion_pct)}
+                        </div>
+                      </div>
+                      <div>
+                        <div className="text-xs text-nofx-text-muted">Max adverse excursion</div>
+                        <div className="font-semibold mt-1 text-rose-300">
+                          {formatMoney(detail.case.max_adverse_excursion)} /{' '}
+                          {formatPct(detail.case.max_adverse_excursion_pct)}
+                        </div>
+                      </div>
+                      <div>
+                        <div className="text-xs text-nofx-text-muted">Time to first profit</div>
+                        <div className="font-semibold mt-1">
+                          {detail.case.time_to_first_profit_ms
+                            ? formatHold(detail.case.time_to_first_profit_ms)
+                            : 'Never'}
+                        </div>
+                      </div>
+                      <div>
+                        <div className="text-xs text-nofx-text-muted">Time to max drawdown</div>
+                        <div className="font-semibold mt-1">
+                          {detail.case.time_to_max_drawdown_ms
+                            ? formatHold(detail.case.time_to_max_drawdown_ms)
+                            : '-'}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="rounded-xl border border-white/10 bg-black/20 p-4 space-y-4">
+                    <div className="flex items-start justify-between gap-4">
+                      <div>
+                        <div className="font-semibold">Deal compare</div>
+                        <div className="text-xs text-nofx-text-muted mt-1">
+                          Compare the current deal against another loaded case
+                          side by side.
+                        </div>
+                      </div>
+                      <div className="w-full max-w-xs h-10 rounded-lg border border-white/10 px-3 flex items-center bg-black/20">
+                        <NofxSelect
+                          value={comparePeerCaseId}
+                          onChange={setComparePeerCaseId}
+                          options={[
+                            { value: '', label: 'Select compare deal' },
+                            ...displayedItems
+                              .filter((item) => item.case.id !== detail.case.id)
+                              .map((item) => ({
+                                value: item.case.id,
+                                label: `${item.case.symbol} · ${item.case.side} · ${formatMoney(item.case.realized_pnl)}`,
+                              })),
+                          ]}
+                        />
+                      </div>
+                    </div>
+
+                    {!comparePeerCaseId ? (
+                      <div className="text-sm text-nofx-text-muted">
+                        Choose another visible deal to compare it against the
+                        currently selected one.
+                      </div>
+                    ) : comparePeerLoading ? (
+                      <div className="text-sm text-nofx-text-muted">
+                        Loading compare deal…
+                      </div>
+                    ) : !comparePeerDetail ? (
+                      <div className="text-sm text-nofx-text-muted">
+                        No compare deal loaded yet.
+                      </div>
+                    ) : (
+                      <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+                        {[detail, comparePeerDetail].map((entry, index) => {
+                          const maxGiveBackPct = getDealGiveBackPct(entry.case)
+                          const tone =
+                            entry.case.realized_pnl >= 0
+                              ? 'text-emerald-400'
+                              : 'text-rose-400'
+                          return (
+                            <div
+                              key={`${entry.case.id}-${index}`}
+                              className="rounded-xl border border-white/10 bg-black/20 p-4 space-y-3"
+                            >
+                              <div className="flex items-start justify-between gap-3">
+                                <div>
+                                  <div className="text-xs text-nofx-text-muted">
+                                    {index === 0 ? 'Current deal' : 'Compare deal'}
+                                  </div>
+                                  <div className="font-semibold mt-1">
+                                    {entry.case.symbol} · {entry.case.side}
+                                  </div>
+                                  <div className="text-xs text-nofx-text-muted mt-1">
+                                    {entry.trader_name}
+                                  </div>
+                                </div>
+                                {index === 1 && (
+                                  <button
+                                    onClick={() => setSelectedCaseId(entry.case.id)}
+                                    className="h-8 px-3 rounded-lg border border-white/10 bg-black/20 text-xs"
+                                  >
+                                    Focus deal
+                                  </button>
+                                )}
+                              </div>
+
+                              <div className="grid grid-cols-2 gap-3 text-xs">
+                                <div>
+                                  Outcome:{' '}
+                                  <span className="text-white">
+                                    {entry.case.outcome}
+                                  </span>
+                                </div>
+                                <div>
+                                  Hold:{' '}
+                                  <span className="text-white">
+                                    {formatHold(entry.case.hold_duration_ms)}
+                                  </span>
+                                </div>
+                                <div>
+                                  PnL:{' '}
+                                  <span className={tone}>
+                                    {formatMoney(entry.case.realized_pnl)} /{' '}
+                                    {formatPct(entry.case.realized_pnl_pct)}
+                                  </span>
+                                </div>
+                                <div>
+                                  Close reason:{' '}
+                                  <span className="text-white">
+                                    {entry.case.close_reason || '-'}
+                                  </span>
+                                </div>
+                                <div>
+                                  Entry:{' '}
+                                  <span className="text-white">
+                                    {formatMoney(entry.case.entry_price)}
+                                  </span>
+                                </div>
+                                <div>
+                                  Exit:{' '}
+                                  <span className="text-white">
+                                    {entry.case.exit_price
+                                      ? formatMoney(entry.case.exit_price)
+                                      : '-'}
+                                  </span>
+                                </div>
+                                <div>
+                                  Peak MFE:{' '}
+                                  <span className="text-emerald-300">
+                                    {formatPct(entry.case.max_favorable_excursion_pct || 0)}
+                                  </span>
+                                </div>
+                                <div>
+                                  Max adverse:{' '}
+                                  <span className="text-rose-300">
+                                    {formatPct(entry.case.max_adverse_excursion_pct || 0)}
+                                  </span>
+                                </div>
+                                <div>
+                                  Give-back:{' '}
+                                  <span className="text-amber-300">
+                                    {formatPct(maxGiveBackPct)}
+                                  </span>
+                                </div>
+                                <div>
+                                  Exit efficiency:{' '}
+                                  <span className="text-white">
+                                    {formatScore(entry.case.exit_efficiency_score)}
+                                  </span>
+                                </div>
+                                <div>
+                                  Entry timing:{' '}
+                                  <span className="text-white">
+                                    {formatScore(entry.case.entry_timing_score)}
+                                  </span>
+                                </div>
+                                <div>
+                                  Risk sizing:{' '}
+                                  <span className="text-white">
+                                    {formatScore(entry.case.risk_sizing_score)}
+                                  </span>
+                                </div>
+                                <div>
+                                  Path points:{' '}
+                                  <span className="text-white">
+                                    {entry.price_timeline?.summary.point_count || 0}
+                                  </span>
+                                </div>
+                                <div>
+                                  Cycle / platform:{' '}
+                                  <span className="text-white">
+                                    {entry.price_timeline?.summary.cycle_samples || 0} /{' '}
+                                    {entry.price_timeline?.summary.platform_samples || 0}
+                                  </span>
+                                </div>
+                                <div>
+                                  Labels:{' '}
+                                  <span className="text-white">
+                                    {(entry.labels || []).length
+                                      ? entry.labels?.join(', ')
+                                      : '-'}
+                                  </span>
+                                </div>
+                              </div>
+
+                              <div className="rounded-lg border border-white/10 bg-black/20 p-3">
+                                <div className="text-xs uppercase tracking-[0.2em] text-nofx-text-muted">
+                                  Open rationale
+                                </div>
+                                <div className="text-sm text-nofx-text-muted mt-2">
+                                  {formatDealReasonPreview(entry.open?.event.reasoning)}
+                                </div>
+                              </div>
+
+                              <div className="rounded-lg border border-white/10 bg-black/20 p-3">
+                                <div className="text-xs uppercase tracking-[0.2em] text-nofx-text-muted">
+                                  Close rationale
+                                </div>
+                                <div className="text-sm text-nofx-text-muted mt-2">
+                                  {formatDealReasonPreview(entry.close?.event.reasoning)}
+                                </div>
+                              </div>
+                            </div>
+                          )
+                        })}
+                      </div>
+                    )}
+                  </div>
 
                   {detail.open_candidate_sources &&
                     detail.open_candidate_sources.length > 0 && (
@@ -1277,6 +3330,218 @@ export function DealReviewPage({
                         </div>
                       </div>
                     )}
+
+                  <div className="rounded-xl border border-white/10 bg-black/20 p-4 space-y-4">
+                    <div className="flex items-start justify-between gap-4">
+                      <div>
+                        <div className="font-semibold">Learned review assist</div>
+                        <div className="text-xs text-nofx-text-muted mt-1">
+                          Label-memory heuristic trained from previously reviewed
+                          deals for this trader.
+                        </div>
+                      </div>
+                      {detail.classifier_assist?.highlight_level && (
+                        <span
+                          className={`px-2 py-1 rounded-full text-[11px] border ${classifierToneClasses(
+                            detail.classifier_assist.highlight_level
+                          )}`}
+                        >
+                          {detail.classifier_assist.highlight_level} signal
+                        </span>
+                      )}
+                    </div>
+
+                    <div className="text-sm text-nofx-text-muted">
+                      {detail.classifier_assist?.summary ||
+                        'No learned review signal yet. Add more labels to give the heuristic model better examples.'}
+                    </div>
+
+                    {detail.classifier_assist?.suggestions &&
+                      detail.classifier_assist.suggestions.length > 0 && (
+                        <div className="space-y-3">
+                          {detail.classifier_assist.suggestions.map(
+                            (suggestion) => {
+                              const actionKeyAccept = `heuristic:accepted:${suggestion.suggestion_key}`
+                              const actionKeyReject = `heuristic:rejected:${suggestion.suggestion_key}`
+                              return (
+                                <div
+                                  key={suggestion.suggestion_key}
+                                  className="rounded-lg border border-white/10 bg-black/20 p-3"
+                                >
+                                  <div className="flex flex-wrap items-center gap-2">
+                                    <span className="px-2 py-1 rounded-full text-xs bg-white/5 border border-white/10 text-white">
+                                      {suggestion.label}
+                                    </span>
+                                    <span className="text-xs text-nofx-text-muted">
+                                      {formatClassifierIssueType(
+                                        suggestion.issue_type
+                                      )}
+                                    </span>
+                                    <span
+                                      className={`px-2 py-1 rounded-full text-[11px] border ${classifierToneClasses(
+                                        suggestion.highlight_level
+                                      )}`}
+                                    >
+                                      {suggestion.highlight_level || 'low'}
+                                    </span>
+                                    <span className="text-xs text-nofx-text-muted">
+                                      {suggestion.evidence_count} matches
+                                    </span>
+                                  </div>
+                                  {suggestion.rationale && (
+                                    <div className="text-sm text-nofx-text-muted mt-2">
+                                      {suggestion.rationale}
+                                    </div>
+                                  )}
+                                  <div className="flex flex-wrap items-center gap-2 mt-3">
+                                    <button
+                                      onClick={() =>
+                                        void applyClassifierFeedback(
+                                          suggestion,
+                                          'accepted',
+                                          'heuristic'
+                                        )
+                                      }
+                                      disabled={
+                                        classifierActionKey === actionKeyAccept
+                                      }
+                                      className="h-8 px-3 rounded-lg border border-emerald-400/25 text-emerald-300 disabled:opacity-50"
+                                    >
+                                      {classifierActionKey === actionKeyAccept
+                                        ? 'Applying…'
+                                        : 'Accept + label'}
+                                    </button>
+                                    <button
+                                      onClick={() =>
+                                        void applyClassifierFeedback(
+                                          suggestion,
+                                          'rejected',
+                                          'heuristic'
+                                        )
+                                      }
+                                      disabled={
+                                        classifierActionKey === actionKeyReject
+                                      }
+                                      className="h-8 px-3 rounded-lg border border-white/15 text-white disabled:opacity-50"
+                                    >
+                                      {classifierActionKey === actionKeyReject
+                                        ? 'Saving…'
+                                        : 'Reject'}
+                                    </button>
+                                    {(suggestion.accepted_count > 0 ||
+                                      suggestion.rejected_count > 0) && (
+                                      <span className="text-xs text-nofx-text-muted">
+                                        Accepted {suggestion.accepted_count} ·
+                                        Rejected {suggestion.rejected_count}
+                                      </span>
+                                    )}
+                                  </div>
+                                </div>
+                              )
+                            }
+                          )}
+                        </div>
+                      )}
+                  </div>
+
+                  <div className="rounded-xl border border-white/10 bg-black/20 p-4 space-y-4">
+                    <div className="flex items-start justify-between gap-4">
+                      <div>
+                        <div className="font-semibold">AI review assist</div>
+                        <div className="text-xs text-nofx-text-muted mt-1">
+                          Optional single-deal review using the current AI model
+                          selection from the scan controls.
+                        </div>
+                      </div>
+                      <button
+                        onClick={runCaseAIAssist}
+                        disabled={runningCaseAIAssist}
+                        className="h-9 px-3 rounded-lg border border-sky-400/30 text-sky-300 disabled:opacity-50"
+                      >
+                        {runningCaseAIAssist ? 'Running…' : 'Run AI assist'}
+                      </button>
+                    </div>
+
+                    <div className="text-sm text-nofx-text-muted">
+                      {aiClassifierAssist?.summary ||
+                        'Run AI assist to get case-level review suggestions such as bad trade, bad exit, avoidable loss, or regime mismatch.'}
+                    </div>
+
+                    {aiClassifierAssist?.suggestions &&
+                      aiClassifierAssist.suggestions.length > 0 && (
+                        <div className="space-y-3">
+                          {aiClassifierAssist.suggestions.map((suggestion) => {
+                            const actionKeyAccept = `ai:accepted:${suggestion.suggestion_key}`
+                            const actionKeyReject = `ai:rejected:${suggestion.suggestion_key}`
+                            return (
+                              <div
+                                key={suggestion.suggestion_key}
+                                className="rounded-lg border border-white/10 bg-black/20 p-3"
+                              >
+                                <div className="flex flex-wrap items-center gap-2">
+                                  <span className="px-2 py-1 rounded-full text-xs bg-white/5 border border-white/10 text-white">
+                                    {suggestion.label}
+                                  </span>
+                                  <span className="text-xs text-nofx-text-muted">
+                                    {formatClassifierIssueType(
+                                      suggestion.issue_type
+                                    )}
+                                  </span>
+                                  <span
+                                    className={`px-2 py-1 rounded-full text-[11px] border ${classifierToneClasses(
+                                      suggestion.highlight_level
+                                    )}`}
+                                  >
+                                    {suggestion.highlight_level || 'low'}
+                                  </span>
+                                </div>
+                                {suggestion.rationale && (
+                                  <div className="text-sm text-nofx-text-muted mt-2">
+                                    {suggestion.rationale}
+                                  </div>
+                                )}
+                                <div className="flex flex-wrap items-center gap-2 mt-3">
+                                  <button
+                                    onClick={() =>
+                                      void applyClassifierFeedback(
+                                        suggestion,
+                                        'accepted',
+                                        'ai'
+                                      )
+                                    }
+                                    disabled={
+                                      classifierActionKey === actionKeyAccept
+                                    }
+                                    className="h-8 px-3 rounded-lg border border-emerald-400/25 text-emerald-300 disabled:opacity-50"
+                                  >
+                                    {classifierActionKey === actionKeyAccept
+                                      ? 'Applying…'
+                                      : 'Accept + label'}
+                                  </button>
+                                  <button
+                                    onClick={() =>
+                                      void applyClassifierFeedback(
+                                        suggestion,
+                                        'rejected',
+                                        'ai'
+                                      )
+                                    }
+                                    disabled={
+                                      classifierActionKey === actionKeyReject
+                                    }
+                                    className="h-8 px-3 rounded-lg border border-white/15 text-white disabled:opacity-50"
+                                  >
+                                    {classifierActionKey === actionKeyReject
+                                      ? 'Saving…'
+                                      : 'Reject'}
+                                  </button>
+                                </div>
+                              </div>
+                            )
+                          })}
+                        </div>
+                      )}
+                  </div>
 
                   <div className="rounded-xl border border-white/10 bg-black/20 p-4 space-y-3">
                     <div className="flex items-center justify-between gap-4">
@@ -1447,6 +3712,106 @@ export function DealReviewPage({
                             </div>
                           </div>
                         )}
+
+                      {section.data?.snapshot?.market_context && (
+                        <div className="rounded-lg border border-white/10 bg-black/30 p-3 space-y-3">
+                          <div className="text-xs uppercase tracking-[0.2em] text-nofx-text-muted">
+                            Market context
+                          </div>
+                          <div className="flex flex-wrap gap-2">
+                            {[
+                              section.data.snapshot.market_context.trend_regime,
+                              section.data.snapshot.market_context.volatility_regime,
+                              section.data.snapshot.market_context.btc_strength_regime,
+                              section.data.snapshot.market_context.funding_regime,
+                              section.data.snapshot.market_context.oi_regime,
+                              section.data.snapshot.market_context.session_bucket,
+                              section.data.snapshot.market_context.weekday_bucket,
+                              section.data.snapshot.market_context.venue_tier,
+                              section.data.snapshot.market_context.liquidity_tier,
+                              section.data.snapshot.market_context.spread_bucket,
+                              section.data.snapshot.market_context.slippage_bucket,
+                            ]
+                              .filter(Boolean)
+                              .map((badge) => (
+                                <span
+                                  key={`${section.label}-ctx-${badge}`}
+                                  className="px-2 py-1 rounded-full text-[11px] bg-sky-500/10 border border-sky-400/20 text-sky-200"
+                                >
+                                  {formatMarketContextToken(badge)}
+                                </span>
+                              ))}
+                          </div>
+                          <div className="grid grid-cols-2 gap-3 text-xs">
+                            <div>
+                              Timeframe:{' '}
+                              <span className="text-white">
+                                {section.data.snapshot.market_context.timeframe || '-'}
+                              </span>
+                            </div>
+                            <div>
+                              Price type:{' '}
+                              <span className="text-white">
+                                {section.data.snapshot.market_context.price_type || '-'}
+                              </span>
+                            </div>
+                            <div>
+                              1h change:{' '}
+                              <span className="text-white">
+                                {formatMarketContextValue(
+                                  section.data.snapshot.market_context.price_change_1h,
+                                  'pct'
+                                )}
+                              </span>
+                            </div>
+                            <div>
+                              4h change:{' '}
+                              <span className="text-white">
+                                {formatMarketContextValue(
+                                  section.data.snapshot.market_context.price_change_4h,
+                                  'pct'
+                                )}
+                              </span>
+                            </div>
+                            <div>
+                              Funding:{' '}
+                              <span className="text-white">
+                                {formatMarketContextValue(
+                                  section.data.snapshot.market_context.funding_bps,
+                                  'bps'
+                                )}
+                              </span>
+                            </div>
+                            <div>
+                              OI delta 1h:{' '}
+                              <span className="text-white">
+                                {formatMarketContextValue(
+                                  section.data.snapshot.market_context.oi_delta_1h_pct,
+                                  'pct'
+                                )}
+                              </span>
+                            </div>
+                            <div>
+                              Spread:{' '}
+                              <span className="text-white">
+                                {formatMarketContextValue(
+                                  section.data.snapshot.market_context.spread_bps,
+                                  'bps'
+                                )}
+                              </span>
+                            </div>
+                            <div>
+                              Slippage 100 USD:{' '}
+                              <span className="text-white">
+                                {formatMarketContextValue(
+                                  section.data.snapshot.market_context.slippage_est_100usd,
+                                  'bps'
+                                )}
+                              </span>
+                            </div>
+                          </div>
+                        </div>
+                      )}
 
                       {section.data?.snapshot?.execution_log &&
                         section.data.snapshot.execution_log.length > 0 && (
@@ -1684,6 +4049,12 @@ export function DealReviewPage({
                         primary: item.symbol,
                         secondary: `${item.deals} deals | ${item.win_rate.toFixed(1)}% win rate`,
                         value: formatMoney(item.net_pnl),
+                        filterPatch: {
+                          symbol: item.symbol,
+                          status: 'CLOSED',
+                        },
+                        filterNote: `Filtered deals to symbol ${item.symbol}.`,
+                        scanNote: `AI scan started for symbol cohort ${item.symbol}.`,
                       })),
                     },
                     {
@@ -1693,6 +4064,12 @@ export function DealReviewPage({
                         primary: item.symbol,
                         secondary: `${item.deals} deals | avg hold ${formatHold(item.avg_hold_ms)}`,
                         value: formatMoney(item.net_pnl),
+                        filterPatch: {
+                          symbol: item.symbol,
+                          status: 'CLOSED',
+                        },
+                        filterNote: `Filtered deals to overtraded symbol ${item.symbol}.`,
+                        scanNote: `AI scan started for overtraded symbol ${item.symbol}.`,
                       })),
                     },
                     {
@@ -1702,6 +4079,12 @@ export function DealReviewPage({
                         primary: item.bucket,
                         secondary: `${item.deals} deals | ${item.win_rate.toFixed(1)}% win rate`,
                         value: formatMoney(item.net_pnl),
+                        filterPatch: {
+                          open_selection_bucket: item.bucket,
+                          status: 'CLOSED',
+                        },
+                        filterNote: `Filtered deals to bucket ${item.bucket}.`,
+                        scanNote: `AI scan started for bucket ${item.bucket}.`,
                       })),
                     },
                     {
@@ -1711,6 +4094,72 @@ export function DealReviewPage({
                         primary: item.reason,
                         secondary: `${item.deals} closes | avg ${formatMoney(item.avg_pnl)}`,
                         value: formatMoney(item.net_pnl),
+                        filterPatch: {
+                          close_reason: item.reason,
+                          status: 'CLOSED',
+                        },
+                        filterNote: `Filtered deals to close reason ${item.reason}.`,
+                        scanNote: `AI scan started for close reason ${item.reason}.`,
+                      })),
+                    },
+                    {
+                      title: 'Frequent profit give-back',
+                      items: anomalies.profit_give_back_hotspots?.map((item) => ({
+                        key: item.symbol,
+                        primary: item.symbol,
+                        secondary: `${item.deals} deals | avg give-back ${formatPct(item.avg_give_back_pct)}`,
+                        value: `${formatPct(item.avg_mfe_captured_pct)} kept`,
+                        filterPatch: {
+                          symbol: item.symbol,
+                          status: 'CLOSED',
+                        },
+                        filterNote: `Filtered deals to profit give-back hotspot ${item.symbol}.`,
+                        scanNote: `AI scan started for give-back hotspot ${item.symbol}.`,
+                      })),
+                    },
+                    {
+                      title: 'Repeated early stop-outs',
+                      items: anomalies.early_stop_out_hotspots?.map((item) => ({
+                        key: item.symbol,
+                        primary: item.symbol,
+                        secondary: `${item.deals} stop-outs | avg hold ${formatHold(item.avg_hold_ms)}`,
+                        value: `${formatPct(item.avg_mae_pct)} MAE`,
+                        filterPatch: {
+                          symbol: item.symbol,
+                          status: 'CLOSED',
+                        },
+                        filterNote: `Filtered deals to early stop-out hotspot ${item.symbol}.`,
+                        scanNote: `AI scan started for early stop-out hotspot ${item.symbol}.`,
+                      })),
+                    },
+                    {
+                      title: 'Outsized leverage / sizing losses',
+                      items: anomalies.oversized_loss_hotspots?.map((item) => ({
+                        key: item.symbol,
+                        primary: item.symbol,
+                        secondary: `${item.deals} losses | planned risk ${formatPct(item.avg_planned_risk_pct)}`,
+                        value: `${formatScore(item.avg_risk_sizing_score)} sizing`,
+                        filterPatch: {
+                          symbol: item.symbol,
+                          status: 'CLOSED',
+                        },
+                        filterNote: `Filtered deals to oversized-loss hotspot ${item.symbol}.`,
+                        scanNote: `AI scan started for oversized-loss hotspot ${item.symbol}.`,
+                      })),
+                    },
+                    {
+                      title: 'Close-reason quality',
+                      items: anomalies.close_reason_quality?.map((item) => ({
+                        key: item.reason,
+                        primary: item.reason,
+                        secondary: `${item.deals} closes | give-back ${formatPct(item.avg_give_back_pct)}`,
+                        value: `${formatScore(item.avg_exit_efficiency_score)} exit`,
+                        filterPatch: {
+                          close_reason: item.reason,
+                          status: 'CLOSED',
+                        },
+                        filterNote: `Filtered deals to close-reason quality slice ${item.reason}.`,
+                        scanNote: `AI scan started for close-reason quality slice ${item.reason}.`,
                       })),
                     },
                   ].map((section) => (
@@ -1736,6 +4185,31 @@ export function DealReviewPage({
                                 <div className="text-xs text-nofx-text-muted mt-1">
                                   {item.secondary}
                                 </div>
+                                <div className="flex flex-wrap gap-2 mt-3">
+                                  <button
+                                    onClick={() =>
+                                      applyDrilldownFilters(
+                                        item.filterPatch,
+                                        item.filterNote
+                                      )
+                                    }
+                                    className="px-2.5 py-1 rounded-lg border border-white/10 bg-white/5 text-xs font-medium"
+                                  >
+                                    Filter
+                                  </button>
+                                  <button
+                                    onClick={() =>
+                                      void runAIScan(
+                                        item.filterPatch,
+                                        item.scanNote
+                                      )
+                                    }
+                                    disabled={!selectedTraderId || runningScan}
+                                    className="px-2.5 py-1 rounded-lg border border-nofx-gold/30 bg-nofx-gold/10 text-nofx-gold text-xs font-medium disabled:opacity-50"
+                                  >
+                                    Scan this cohort
+                                  </button>
+                                </div>
                               </div>
                               <div className="text-sm font-semibold text-rose-400">
                                 {item.value}
@@ -1760,13 +4234,22 @@ export function DealReviewPage({
                     timed challenger compare.
                   </p>
                 </div>
-                <button
-                  onClick={runAIScan}
-                  disabled={!selectedTraderId || runningScan}
-                  className="h-10 px-4 rounded-lg bg-nofx-gold text-black font-semibold disabled:opacity-50"
-                >
-                  {runningScan ? 'Running…' : 'Run scan'}
-                </button>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={exportScansJSON}
+                    disabled={!selectedTraderId || scans.length === 0}
+                    className="h-10 px-4 rounded-lg border border-white/10 bg-black/20 text-sm disabled:opacity-40"
+                  >
+                    Export scans
+                  </button>
+                  <button
+                    onClick={() => void runAIScan()}
+                    disabled={!selectedTraderId || runningScan}
+                    className="h-10 px-4 rounded-lg bg-nofx-gold text-black font-semibold disabled:opacity-50"
+                  >
+                    {runningScan ? 'Running…' : 'Run scan'}
+                  </button>
+                </div>
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mt-4">
@@ -1848,6 +4331,14 @@ export function DealReviewPage({
                     const validationStatus =
                       validation?.status || scan.scan.validation_status || 'pending'
                     const validationPassed = validationStatus === 'passed'
+                    const relatedCompare = getLatestCompareForScan(
+                      scan.scan.id,
+                      challengerCompares
+                    )
+                    const promotionState = getScanPromotionState(
+                      scan,
+                      relatedCompare
+                    )
                     const hasPatch =
                       !!scan.strategy_patch &&
                       Object.keys(scan.strategy_patch).length > 0
@@ -1883,6 +4374,24 @@ export function DealReviewPage({
                               <span className="text-xs text-nofx-text-muted">
                                 {scan.scan.validation_summary ||
                                   'Validation required before apply or challenger launch.'}
+                              </span>
+                            </div>
+                            <div className="flex flex-wrap items-center gap-2 mt-2">
+                              <span
+                                className={`px-2 py-1 rounded-full text-[11px] uppercase tracking-[0.18em] ${
+                                  promotionState.tone === 'emerald'
+                                    ? 'bg-emerald-500/15 text-emerald-300'
+                                    : promotionState.tone === 'rose'
+                                      ? 'bg-rose-500/15 text-rose-300'
+                                      : promotionState.tone === 'sky'
+                                        ? 'bg-sky-500/15 text-sky-300'
+                                        : 'bg-amber-500/15 text-amber-200'
+                                }`}
+                              >
+                                {promotionState.label}
+                              </span>
+                              <span className="text-xs text-nofx-text-muted">
+                                {promotionState.detail}
                               </span>
                             </div>
                           </div>
@@ -2164,9 +4673,18 @@ export function DealReviewPage({
                       deltas.
                     </div>
                   </div>
-                  {compareLoading && (
-                    <div className="text-xs text-nofx-text-muted">Loading…</div>
-                  )}
+                  <div className="flex items-center gap-2">
+                    {compareLoading && (
+                      <div className="text-xs text-nofx-text-muted">Loading…</div>
+                    )}
+                    <button
+                      onClick={exportScanCompareJSON}
+                      disabled={!compareResult}
+                      className="h-8 px-3 rounded-lg border border-white/10 bg-black/20 text-xs disabled:opacity-40"
+                    >
+                      Export compare
+                    </button>
+                  </div>
                 </div>
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mt-4">
@@ -2217,31 +4735,254 @@ export function DealReviewPage({
                       </div>
                     </div>
 
-                    <div className="text-sm">
-                      <span className="text-nofx-text-muted">Filters:</span>{' '}
-                      <span
-                        className={
-                          compareResult.same_filters
-                            ? 'text-emerald-400'
-                            : 'text-amber-300'
-                        }
-                      >
-                        {compareResult.same_filters
-                          ? 'Same dataset'
-                          : 'Different dataset filters'}
-                      </span>
+                    <div className="rounded-xl border border-white/10 bg-black/30 p-4">
+                      <div className="flex flex-wrap items-start justify-between gap-3">
+                        <div>
+                          <div className="text-xs uppercase tracking-[0.2em] text-nofx-text-muted">
+                            Disagreement score
+                          </div>
+                          <div
+                            className={`mt-2 text-2xl font-semibold ${compareLevelClasses(compareResult.disagreement_level)}`}
+                          >
+                            {compareResult.conflict_score.toFixed(0)} / 100
+                          </div>
+                          <div className="text-sm text-nofx-text-muted mt-2 max-w-2xl">
+                            {compareResult.disagreement_summary ||
+                              'No disagreement summary available.'}
+                          </div>
+                        </div>
+                        <div className="text-sm">
+                          <span className="text-nofx-text-muted">Filters:</span>{' '}
+                          <span
+                            className={
+                              compareResult.same_filters
+                                ? 'text-emerald-400'
+                                : 'text-amber-300'
+                            }
+                          >
+                            {compareResult.same_filters
+                              ? 'Same dataset'
+                              : 'Different dataset filters'}
+                          </span>
+                        </div>
+                      </div>
+
+                      {compareResult.flags && compareResult.flags.length > 0 && (
+                        <div className="flex flex-wrap gap-2 mt-4">
+                          {compareResult.flags.map((flag) => (
+                            <span
+                              key={flag.code}
+                              className={`px-2 py-1 rounded-full text-xs border ${compareFlagClasses(flag.tone)}`}
+                              title={flag.note}
+                            >
+                              {formatCompareFlagTitle(flag.code, flag.title)}
+                            </span>
+                          ))}
+                        </div>
+                      )}
                     </div>
 
-                    {compareResult.strength_overlap &&
-                      compareResult.strength_overlap.length > 0 && (
+                    <div className="grid grid-cols-1 xl:grid-cols-3 gap-4">
+                      <div className="rounded-xl border border-white/10 bg-black/20 p-4">
+                        <div className="text-xs uppercase tracking-[0.2em] text-nofx-text-muted mb-2">
+                          Recommendation overlap
+                        </div>
+                        {!compareResult.recommendation_overlap ? (
+                          <div className="text-sm text-nofx-text-muted">
+                            No actionable recommendations recorded in either
+                            scan.
+                          </div>
+                        ) : (
+                          <div className="space-y-3">
+                            <div className="text-2xl font-semibold text-white">
+                              {compareResult.recommendation_overlap.overlap_score.toFixed(
+                                0
+                              )}
+                              %
+                            </div>
+                            <div className="space-y-2 text-sm">
+                              <div>
+                                <div className="text-nofx-text-muted mb-1">
+                                  Shared
+                                </div>
+                                <div className="space-y-1">
+                                  {(compareResult.recommendation_overlap.shared ||
+                                    []
+                                  )
+                                    .slice(0, 4)
+                                    .map((item) => (
+                                      <div key={item} className="text-white">
+                                        {item}
+                                      </div>
+                                    ))}
+                                  {(!compareResult.recommendation_overlap
+                                    .shared ||
+                                    compareResult.recommendation_overlap.shared
+                                      .length === 0) && (
+                                    <div className="text-nofx-text-muted">
+                                      No shared recommendation.
+                                    </div>
+                                  )}
+                                </div>
+                              </div>
+                              <div className="grid grid-cols-2 gap-3 text-xs text-nofx-text-muted">
+                                <div>
+                                  Left-only:{' '}
+                                  {(
+                                    compareResult.recommendation_overlap
+                                      .left_only || []
+                                  ).length}
+                                </div>
+                                <div>
+                                  Right-only:{' '}
+                                  {(
+                                    compareResult.recommendation_overlap
+                                      .right_only || []
+                                  ).length}
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+
+                      <div className="rounded-xl border border-white/10 bg-black/20 p-4">
+                        <div className="text-xs uppercase tracking-[0.2em] text-nofx-text-muted mb-2">
+                          Shared evidence
+                        </div>
+                        {!compareResult.shared_evidence ? (
+                          <div className="text-sm text-nofx-text-muted">
+                            No strong shared evidence in strengths, weaknesses,
+                            or patterns.
+                          </div>
+                        ) : (
+                          <div className="space-y-3">
+                            <div className="text-2xl font-semibold text-white">
+                              {compareResult.shared_evidence.total_shared}
+                            </div>
+                            <div className="space-y-2 text-sm text-nofx-text-muted">
+                              {(compareResult.shared_evidence.shared_strengths ||
+                                []
+                              )
+                                .slice(0, 2)
+                                .map((item) => (
+                                  <div key={`strength-${item}`}>
+                                    Strength: <span className="text-white">{item}</span>
+                                  </div>
+                                ))}
+                              {(compareResult.shared_evidence.shared_weaknesses ||
+                                []
+                              )
+                                .slice(0, 2)
+                                .map((item) => (
+                                  <div key={`weakness-${item}`}>
+                                    Weakness: <span className="text-white">{item}</span>
+                                  </div>
+                                ))}
+                              {(compareResult.shared_evidence.shared_patterns ||
+                                []
+                              )
+                                .slice(0, 2)
+                                .map((item) => (
+                                  <div key={`pattern-${item}`}>
+                                    Pattern: <span className="text-white">{item}</span>
+                                  </div>
+                                ))}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+
+                      <div className="rounded-xl border border-white/10 bg-black/20 p-4">
+                        <div className="text-xs uppercase tracking-[0.2em] text-nofx-text-muted mb-2">
+                          Target cohorts
+                        </div>
+                        {!compareResult.target_cohorts ? (
+                          <div className="text-sm text-nofx-text-muted">
+                            No explicit cohort tags detected yet.
+                          </div>
+                        ) : (
+                          <div className="space-y-3 text-sm">
+                            <div>
+                              <div className="text-nofx-text-muted mb-1">
+                                Shared tags
+                              </div>
+                              <div className="flex flex-wrap gap-2">
+                                {(compareResult.target_cohorts.shared_tags || [])
+                                  .slice(0, 4)
+                                  .map((item) => (
+                                    <span
+                                      key={`shared-${item}`}
+                                      className="px-2 py-1 rounded-full border border-emerald-400/20 bg-emerald-500/10 text-emerald-300 text-xs"
+                                    >
+                                      {item}
+                                    </span>
+                                  ))}
+                                {(!compareResult.target_cohorts.shared_tags ||
+                                  compareResult.target_cohorts.shared_tags
+                                    .length === 0) && (
+                                  <span className="text-nofx-text-muted text-xs">
+                                    No shared cohort tags.
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                            <div>
+                              <div className="text-nofx-text-muted mb-1">
+                                Conflicts
+                              </div>
+                              <div className="flex flex-wrap gap-2">
+                                {(
+                                  compareResult.target_cohorts
+                                    .conflicting_dimensions || []
+                                ).map((item) => (
+                                  <span
+                                    key={`conflict-${item}`}
+                                    className="px-2 py-1 rounded-full border border-rose-400/20 bg-rose-500/10 text-rose-300 text-xs"
+                                  >
+                                    {item}
+                                  </span>
+                                ))}
+                                {(!compareResult.target_cohorts
+                                  .conflicting_dimensions ||
+                                  compareResult.target_cohorts
+                                    .conflicting_dimensions.length === 0) && (
+                                  <span className="text-nofx-text-muted text-xs">
+                                    No conflicting cohort dimension detected.
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+
+                    {compareResult.filter_differences &&
+                      compareResult.filter_differences.length > 0 && (
                         <div>
                           <div className="text-xs uppercase tracking-[0.2em] text-nofx-text-muted mb-2">
-                            Shared strengths
+                            Filter differences
                           </div>
-                          <div className="space-y-2 text-sm text-nofx-text-muted">
-                            {compareResult.strength_overlap.map((item) => (
-                              <div key={item}>• {item}</div>
-                            ))}
+                          <div className="grid grid-cols-1 xl:grid-cols-2 gap-2">
+                            {compareResult.filter_differences
+                              .slice(0, 6)
+                              .map((item) => (
+                                <div
+                                  key={`filter-${item.path}`}
+                                  className="rounded-lg border border-white/10 bg-black/30 px-3 py-2 text-xs"
+                                >
+                                  <div className="text-nofx-gold">
+                                    {item.path}
+                                  </div>
+                                  <div className="text-nofx-text-muted mt-1">
+                                    Left: {item.left}
+                                  </div>
+                                  <div className="text-nofx-text-muted">
+                                    Right: {item.right}
+                                  </div>
+                                </div>
+                              ))}
                           </div>
                         </div>
                       )}
@@ -2252,9 +4993,9 @@ export function DealReviewPage({
                           <div className="text-xs uppercase tracking-[0.2em] text-nofx-text-muted mb-2">
                             Patch differences
                           </div>
-                          <div className="space-y-2">
+                          <div className="grid grid-cols-1 xl:grid-cols-2 gap-2">
                             {compareResult.patch_differences
-                              .slice(0, 6)
+                              .slice(0, 8)
                               .map((item) => (
                                 <div
                                   key={item.path}
@@ -2264,13 +5005,80 @@ export function DealReviewPage({
                                     {item.path}
                                   </div>
                                   <div className="text-nofx-text-muted mt-1">
-                                    A: {item.left}
+                                    Left: {item.left}
                                   </div>
                                   <div className="text-nofx-text-muted">
-                                    B: {item.right}
+                                    Right: {item.right}
                                   </div>
                                 </div>
                               ))}
+                          </div>
+                        </div>
+                      )}
+
+                    {compareResult.model_leaderboards &&
+                      compareResult.model_leaderboards.length > 0 && (
+                        <div className="rounded-xl border border-white/10 bg-black/20 p-4">
+                          <div className="font-semibold">Model usefulness by cohort</div>
+                          <div className="text-xs text-nofx-text-muted mt-1">
+                            Aggregated from saved scans plus observed apply /
+                            challenger outcomes.
+                          </div>
+                          <div className="space-y-4 mt-4">
+                            {compareResult.model_leaderboards.map((group) => (
+                              <div key={group.cohort_key}>
+                                <div className="flex items-center gap-2 mb-2">
+                                  <div className="text-sm font-medium">
+                                    {group.cohort_label}
+                                  </div>
+                                  {group.relevant && (
+                                    <span className="px-2 py-1 rounded-full border border-nofx-gold/30 bg-nofx-gold/10 text-[11px] text-nofx-gold">
+                                      Relevant to this compare
+                                    </span>
+                                  )}
+                                </div>
+                                <div className="space-y-2">
+                                  {(group.entries || []).map((entry) => (
+                                    <div
+                                      key={`${group.cohort_key}-${entry.model_key}`}
+                                      className="rounded-lg border border-white/10 bg-black/30 px-3 py-3 flex items-start justify-between gap-4"
+                                    >
+                                      <div>
+                                        <div className="font-medium">
+                                          {entry.model_label}
+                                        </div>
+                                        <div className="text-xs text-nofx-text-muted mt-1">
+                                          {entry.scan_count} scans |{' '}
+                                          {entry.promotion_ready_count} ready |{' '}
+                                          {entry.applied_count} applied | W/L{' '}
+                                          {entry.challenger_win_count}/
+                                          {entry.challenger_loss_count}
+                                        </div>
+                                      </div>
+                                      <div className="text-right">
+                                        <div className="text-sm font-semibold text-white">
+                                          Score{' '}
+                                          {entry.usefulness_score >= 0 ? '+' : ''}
+                                          {entry.usefulness_score.toFixed(2)}
+                                        </div>
+                                        <div className="text-xs text-nofx-text-muted mt-1">
+                                          Avg delta{' '}
+                                          <span
+                                            className={
+                                              entry.avg_net_pnl_delta >= 0
+                                                ? 'text-emerald-300'
+                                                : 'text-rose-300'
+                                            }
+                                          >
+                                            {formatMoney(entry.avg_net_pnl_delta)}
+                                          </span>
+                                        </div>
+                                      </div>
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+                            ))}
                           </div>
                         </div>
                       )}
@@ -2666,7 +5474,12 @@ export function DealReviewPage({
                     return (
                       <div
                         key={version.version.id}
-                        className="rounded-xl border border-white/10 bg-black/20 p-4"
+                        className={`rounded-xl border p-4 cursor-pointer transition-colors ${
+                          selectedVersionId === version.version.id
+                            ? 'border-nofx-gold/40 bg-nofx-gold/10'
+                            : 'border-white/10 bg-black/20 hover:border-white/20'
+                        }`}
+                        onClick={() => setSelectedVersionId(version.version.id)}
                       >
                         <div className="flex items-start justify-between gap-4">
                           <div>
@@ -2679,20 +5492,45 @@ export function DealReviewPage({
                               {version.version.summary || 'Strategy change'}
                             </div>
                             <div className="text-xs text-nofx-text-muted mt-2">
+                              Applied{' '}
                               {new Date(
-                                version.version.created_at
+                                version.version.applied_at ||
+                                  version.version.created_at
                               ).toLocaleString()}
                             </div>
+                            {version.version.expected_effect && (
+                              <div className="text-xs text-nofx-text-muted mt-2">
+                                Intended effect: {version.version.expected_effect}
+                              </div>
+                            )}
                             {hasCompareLink && (
                               <div className="text-xs text-sky-300 mt-2">
                                 Compare note: {compareNote}
                               </div>
                             )}
+                            {version.attribution?.warnings &&
+                              version.attribution.warnings.length > 0 && (
+                                <div className="text-xs text-rose-300 mt-2">
+                                  {version.attribution.warnings[0]}
+                                </div>
+                              )}
                           </div>
                           <div className="flex flex-wrap justify-end gap-2">
+                            <button
+                              onClick={(event) => {
+                                event.stopPropagation()
+                                openVersionDetail(version.version.id)
+                              }}
+                              className="h-9 px-3 rounded-lg border border-nofx-gold/30 text-nofx-gold"
+                            >
+                              Open detail
+                            </button>
                             {hasCompareLink && (
                               <button
-                                onClick={() => openVersionCompare(version)}
+                                onClick={(event) => {
+                                  event.stopPropagation()
+                                  void openVersionCompare(version)
+                                }}
                                 disabled={
                                   openingCompareId ===
                                   version.version.source_compare_id
@@ -2706,7 +5544,10 @@ export function DealReviewPage({
                               </button>
                             )}
                             <button
-                              onClick={() => rollbackVersion(version)}
+                              onClick={(event) => {
+                                event.stopPropagation()
+                                void rollbackVersion(version)
+                              }}
                               disabled={rollingBackVersionId === version.version.id}
                               className="h-9 px-3 rounded-lg border border-white/15 text-white disabled:opacity-50"
                             >
@@ -2721,6 +5562,216 @@ export function DealReviewPage({
                   })
                 )}
               </div>
+
+              {selectedVersion && (
+                <div
+                  ref={versionDetailRef}
+                  className="rounded-xl border border-white/10 bg-black/20 p-5 mt-5"
+                >
+                  <div className="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-4">
+                    <div>
+                      <div className="text-xs uppercase tracking-[0.2em] text-nofx-gold">
+                        Strategy version detail
+                      </div>
+                      <h3 className="font-semibold text-lg mt-1">
+                        {selectedVersion.version.summary || 'Strategy change'}
+                      </h3>
+                      <div className="text-sm text-nofx-text-muted mt-2">
+                        {formatStrategyVersionSourceType(
+                          selectedVersion.version.source_type
+                        )}{' '}
+                        · applied{' '}
+                        {new Date(
+                          selectedVersion.version.applied_at ||
+                            selectedVersion.version.created_at
+                        ).toLocaleString()}
+                      </div>
+                      {selectedVersion.version.expected_effect && (
+                        <div className="text-sm text-nofx-text-muted mt-2">
+                          Intended effect:{' '}
+                          {selectedVersion.version.expected_effect}
+                        </div>
+                      )}
+                      {selectedVersion.source_scan_summary && (
+                        <div className="text-sm text-nofx-text-muted mt-2">
+                          Source scan: {selectedVersion.source_scan_summary}
+                        </div>
+                      )}
+                      {selectedVersion.compare_summary && (
+                        <div className="text-sm text-sky-300 mt-2">
+                          Linked compare: {selectedVersion.compare_summary}
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="flex flex-wrap gap-2">
+                      {selectedVersion.version.source_compare_id?.trim() && (
+                        <button
+                          onClick={() => openVersionCompare(selectedVersion)}
+                          disabled={
+                            openingCompareId ===
+                            selectedVersion.version.source_compare_id
+                          }
+                          className="h-9 px-3 rounded-lg border border-sky-400/30 text-sky-300 disabled:opacity-50"
+                        >
+                          {openingCompareId ===
+                          selectedVersion.version.source_compare_id
+                            ? 'Opening…'
+                            : 'Open compare'}
+                        </button>
+                      )}
+                      <button
+                        onClick={() => rollbackVersion(selectedVersion)}
+                        disabled={
+                          rollingBackVersionId === selectedVersion.version.id
+                        }
+                        className="h-9 px-3 rounded-lg border border-white/15 text-white disabled:opacity-50"
+                      >
+                        {rollingBackVersionId === selectedVersion.version.id
+                          ? 'Rolling back…'
+                          : 'Rollback'}
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3 mt-5 text-sm">
+                    <div className="rounded-lg border border-white/10 bg-black/20 p-3">
+                      <div className="text-xs text-nofx-text-muted">
+                        Target cohort
+                      </div>
+                      <div className="text-sm mt-1 text-nofx-text-muted">
+                        {formatVersionCohort(selectedVersion.target_cohort)}
+                      </div>
+                    </div>
+                    <div className="rounded-lg border border-white/10 bg-black/20 p-3">
+                      <div className="text-xs text-nofx-text-muted">
+                        Full before
+                      </div>
+                      <div className="text-sm mt-1 text-nofx-text-muted">
+                        {formatDatasetMini(
+                          selectedVersion.attribution?.full_before_summary
+                        )}
+                      </div>
+                    </div>
+                    <div className="rounded-lg border border-white/10 bg-black/20 p-3">
+                      <div className="text-xs text-nofx-text-muted">
+                        Full after
+                      </div>
+                      <div className="text-sm mt-1 text-nofx-text-muted">
+                        {formatDatasetMini(
+                          selectedVersion.attribution?.full_after_summary
+                        )}
+                      </div>
+                    </div>
+                    <div className="rounded-lg border border-white/10 bg-black/20 p-3">
+                      <div className="text-xs text-nofx-text-muted">
+                        Rollback suggestion
+                      </div>
+                      <div
+                        className={`font-semibold mt-1 ${
+                          selectedVersion.attribution?.rollback_suggested
+                            ? 'text-rose-300'
+                            : 'text-emerald-300'
+                        }`}
+                      >
+                        {selectedVersion.attribution?.rollback_suggested
+                          ? 'Suggested'
+                          : 'Not suggested'}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3 mt-4 text-sm">
+                    <div className="rounded-lg border border-white/10 bg-black/20 p-3">
+                      <div className="text-xs text-nofx-text-muted">
+                        Target before
+                      </div>
+                      <div className="text-sm mt-1 text-nofx-text-muted">
+                        {formatDatasetMini(
+                          selectedVersion.attribution?.target_before_summary
+                        )}
+                      </div>
+                    </div>
+                    <div className="rounded-lg border border-white/10 bg-black/20 p-3">
+                      <div className="text-xs text-nofx-text-muted">
+                        Target after
+                      </div>
+                      <div className="text-sm mt-1 text-nofx-text-muted">
+                        {formatDatasetMini(
+                          selectedVersion.attribution?.target_after_summary
+                        )}
+                      </div>
+                    </div>
+                    <div className="rounded-lg border border-white/10 bg-black/20 p-3">
+                      <div className="text-xs text-nofx-text-muted">
+                        Non-target after
+                      </div>
+                      <div className="text-sm mt-1 text-nofx-text-muted">
+                        {formatDatasetMini(
+                          selectedVersion.attribution?.non_target_after_summary
+                        )}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="rounded-lg border border-white/10 bg-black/20 p-4 mt-4">
+                    <div className="text-xs uppercase tracking-[0.2em] text-nofx-text-muted mb-2">
+                      Observation window
+                    </div>
+                    <div className="text-sm text-nofx-text-muted">
+                      Before:{' '}
+                      {selectedVersion.attribution?.before_start
+                        ? new Date(
+                            selectedVersion.attribution.before_start
+                          ).toLocaleString()
+                        : '-'}{' '}
+                      to{' '}
+                      {selectedVersion.attribution?.before_end
+                        ? new Date(
+                            selectedVersion.attribution.before_end
+                          ).toLocaleString()
+                        : '-'}
+                    </div>
+                    <div className="text-sm text-nofx-text-muted mt-1">
+                      After:{' '}
+                      {selectedVersion.attribution?.after_start
+                        ? new Date(
+                            selectedVersion.attribution.after_start
+                          ).toLocaleString()
+                        : '-'}{' '}
+                      to{' '}
+                      {selectedVersion.attribution?.after_end
+                        ? new Date(
+                            selectedVersion.attribution.after_end
+                          ).toLocaleString()
+                        : '-'}
+                    </div>
+                    {selectedVersion.attribution?.note && (
+                      <div className="text-sm text-nofx-text-muted mt-3">
+                        {selectedVersion.attribution.note}
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="rounded-lg border border-white/10 bg-black/20 p-4 mt-4">
+                    <div className="text-xs uppercase tracking-[0.2em] text-nofx-text-muted mb-2">
+                      Regression warnings
+                    </div>
+                    {!selectedVersion.attribution?.warnings ||
+                    selectedVersion.attribution.warnings.length === 0 ? (
+                      <div className="text-sm text-emerald-300">
+                        No regression warning triggered for the observed window.
+                      </div>
+                    ) : (
+                      <div className="space-y-1 text-sm text-rose-300">
+                        {selectedVersion.attribution.warnings.map((item) => (
+                          <div key={item}>• {item}</div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         </div>

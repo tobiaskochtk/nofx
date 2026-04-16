@@ -18,6 +18,73 @@ import (
 	"github.com/google/uuid"
 )
 
+func validateTrailingStop(config *store.StrategyConfig) error {
+	if config == nil {
+		return nil
+	}
+
+	raw := config.RiskControl.TrailingStop
+	effective := config.RiskControl.EffectiveTrailingStop()
+
+	if raw.CheckIntervalSec < 0 {
+		return fmt.Errorf("risk_control.trailing_stop.check_interval_sec must be >= 0")
+	}
+	if raw.UpdateThresholdPct < 0 {
+		return fmt.Errorf("risk_control.trailing_stop.update_threshold_pct must be >= 0")
+	}
+	if effective.CheckIntervalSec < 1 || effective.CheckIntervalSec > 3600 {
+		return fmt.Errorf("risk_control.trailing_stop.check_interval_sec must be between 1 and 3600 seconds")
+	}
+	if effective.UpdateThresholdPct <= 0 || effective.UpdateThresholdPct > 100 {
+		return fmt.Errorf("risk_control.trailing_stop.update_threshold_pct must be > 0 and <= 100")
+	}
+
+	tiers := raw.Tiers
+	if len(tiers) == 0 {
+		tiers = effective.Tiers
+	}
+	if len(tiers) == 0 {
+		return fmt.Errorf("risk_control.trailing_stop.tiers must not be empty")
+	}
+
+	seenTriggers := make(map[float64]struct{}, len(tiers))
+	for idx, tier := range tiers {
+		if tier.TriggerProfitPct <= 0 {
+			return fmt.Errorf("risk_control.trailing_stop.tiers[%d].trigger_profit_pct must be > 0", idx)
+		}
+		if _, exists := seenTriggers[tier.TriggerProfitPct]; exists {
+			return fmt.Errorf("risk_control.trailing_stop.tiers[%d].trigger_profit_pct duplicates another tier", idx)
+		}
+		seenTriggers[tier.TriggerProfitPct] = struct{}{}
+
+		mode := strings.ToLower(strings.TrimSpace(tier.Mode))
+		if mode == "" {
+			mode = store.TrailingStopModeLockProfit
+		}
+
+		switch mode {
+		case store.TrailingStopModeLockProfit, "lock", "fixed", "fixed_profit":
+			if tier.LockProfitPct < 0 {
+				return fmt.Errorf("risk_control.trailing_stop.tiers[%d].lock_profit_pct must be >= 0", idx)
+			}
+			if tier.LockProfitPct > tier.TriggerProfitPct {
+				return fmt.Errorf("risk_control.trailing_stop.tiers[%d].lock_profit_pct must be <= trigger_profit_pct", idx)
+			}
+		case store.TrailingStopModeTrailOffset, "trail", "offset", "trail_by_offset":
+			if tier.TrailOffsetPct <= 0 {
+				return fmt.Errorf("risk_control.trailing_stop.tiers[%d].trail_offset_pct must be > 0", idx)
+			}
+			if tier.TrailOffsetPct > tier.TriggerProfitPct {
+				return fmt.Errorf("risk_control.trailing_stop.tiers[%d].trail_offset_pct must be <= trigger_profit_pct", idx)
+			}
+		default:
+			return fmt.Errorf("risk_control.trailing_stop.tiers[%d].mode %q is invalid", idx, tier.Mode)
+		}
+	}
+
+	return nil
+}
+
 func validateSignalProvider(config *store.StrategyConfig) error {
 	rawProvider := config.SignalProvider
 	if strings.TrimSpace(rawProvider.Type) == "" && strings.TrimSpace(rawProvider.BaseURL) == "" && strings.TrimSpace(rawProvider.APIKey) == "" {
@@ -37,6 +104,10 @@ func validateSignalProvider(config *store.StrategyConfig) error {
 // validateStrategyConfig validates strategy configuration and returns warnings.
 func validateStrategyConfig(config *store.StrategyConfig) ([]string, error) {
 	var warnings []string
+
+	if err := validateTrailingStop(config); err != nil {
+		return nil, err
+	}
 
 	if err := validateSignalProvider(config); err != nil {
 		return nil, err

@@ -141,6 +141,7 @@ func (at *AutoTrader) executeOpenLongWithRecord(decision *kernel.Decision, actio
 	if err := at.trader.SetTakeProfit(decision.Symbol, "LONG", quantity, decision.TakeProfit); err != nil {
 		logger.Infof("  ⚠ Failed to set take profit: %v", err)
 	}
+	at.seedTrailingStopState(decision.Symbol, "long", decision.StopLoss, decision.TakeProfit)
 
 	return nil
 }
@@ -258,6 +259,7 @@ func (at *AutoTrader) executeOpenShortWithRecord(decision *kernel.Decision, acti
 	if err := at.trader.SetTakeProfit(decision.Symbol, "SHORT", quantity, decision.TakeProfit); err != nil {
 		logger.Infof("  ⚠ Failed to set take profit: %v", err)
 	}
+	at.seedTrailingStopState(decision.Symbol, "short", decision.StopLoss, decision.TakeProfit)
 
 	return nil
 }
@@ -321,6 +323,7 @@ func (at *AutoTrader) executeCloseLongWithRecord(decision *kernel.Decision, acti
 
 	// Record order to database and poll for confirmation
 	at.recordAndConfirmOrder(order, decision.Symbol, "close_long", quantity, marketData.CurrentPrice, 0, entryPrice, at.buildDealReviewDecisionInput(record, decision, actionRecord))
+	at.clearTrailingStopState(decision.Symbol, "long")
 
 	logger.Infof("  ✓ Position closed successfully")
 	return nil
@@ -385,6 +388,7 @@ func (at *AutoTrader) executeCloseShortWithRecord(decision *kernel.Decision, act
 
 	// Record order to database and poll for confirmation
 	at.recordAndConfirmOrder(order, decision.Symbol, "close_short", quantity, marketData.CurrentPrice, 0, entryPrice, at.buildDealReviewDecisionInput(record, decision, actionRecord))
+	at.clearTrailingStopState(decision.Symbol, "short")
 
 	logger.Infof("  ✓ Position closed successfully")
 	return nil

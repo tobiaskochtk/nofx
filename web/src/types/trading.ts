@@ -189,7 +189,42 @@ export interface DealReviewCase {
   open_confidence: number
   close_confidence: number
   open_selection_bucket: string
+  open_trend_regime: string
+  open_volatility_regime: string
+  open_btc_strength_regime: string
+  open_funding_regime: string
+  open_oi_regime: string
+  open_session_bucket: string
+  open_weekday_bucket: string
+  open_venue_tier: string
+  open_liquidity_tier: string
+  open_spread_bucket: string
+  open_slippage_bucket: string
+  close_trend_regime: string
+  close_volatility_regime: string
+  close_btc_strength_regime: string
+  close_funding_regime: string
+  close_oi_regime: string
+  close_session_bucket: string
+  close_weekday_bucket: string
+  close_venue_tier: string
+  close_liquidity_tier: string
+  close_spread_bucket: string
+  close_slippage_bucket: string
   analyst_note: string
+  max_favorable_excursion: number
+  max_favorable_excursion_pct: number
+  max_adverse_excursion: number
+  max_adverse_excursion_pct: number
+  mfe_captured_pct: number
+  profit_given_back: number
+  profit_given_back_pct: number
+  time_to_first_profit_ms: number
+  time_to_max_drawdown_ms: number
+  planned_risk_pct: number
+  exit_efficiency_score: number
+  entry_timing_score: number
+  risk_sizing_score: number
   realized_pnl: number
   realized_pnl_pct: number
   fee: number
@@ -207,6 +242,22 @@ export interface DealReviewCaseListItem {
   close_reasoning: string
   labels?: string[]
   open_candidate_sources?: string[]
+  price_timeline_summary?: DealReviewPriceTimelineSummary
+  classifier_assist?: DealReviewClassifierAssist
+}
+
+export interface DealReviewFilterPreset {
+  id: string
+  user_id: string
+  trader_id: string
+  name: string
+  created_at: string
+  updated_at: string
+}
+
+export interface DealReviewFilterPresetDetail {
+  preset: DealReviewFilterPreset
+  filters?: Record<string, unknown>
 }
 
 export interface DealReviewDatasetSummary {
@@ -228,6 +279,16 @@ export interface DealReviewDatasetSummary {
   short_deals: number
   long_net_pnl: number
   short_net_pnl: number
+  avg_mfe_captured_pct: number
+  avg_profit_given_back_pct: number
+  avg_exit_efficiency_score: number
+  avg_entry_timing_score: number
+  avg_risk_sizing_score: number
+  bad_entry_deals: number
+  bad_exit_deals: number
+  avoidable_loss_deals: number
+  strong_entry_weak_exit_deals: number
+  weak_entry_lucky_exit_deals: number
 }
 
 export interface DealReviewListResponse {
@@ -236,11 +297,50 @@ export interface DealReviewListResponse {
   total: number
 }
 
+export interface DealReviewMarketContextSnapshot {
+  source?: string
+  symbol?: string
+  timeframe?: string
+  price_type?: string
+  price?: number
+  trend_regime?: string
+  volatility_regime?: string
+  btc_strength_regime?: string
+  funding_regime?: string
+  oi_regime?: string
+  session_bucket?: string
+  weekday_bucket?: string
+  venue_tier?: string
+  liquidity_tier?: string
+  spread_bucket?: string
+  slippage_bucket?: string
+  price_change_1h?: number
+  price_change_4h?: number
+  ema_fast?: number
+  macd?: number
+  rsi?: number
+  oi_delta_1h_pct?: number
+  funding_bps?: number
+  basis_pct?: number
+  btc_relative_strength_1h?: number
+  btc_relative_strength_4h?: number
+  btc_relative_strength_ctx?: number
+  spread_bps?: number
+  slippage_est_25usd?: number
+  slippage_est_100usd?: number
+  liq_score?: number
+  venue_supported?: boolean
+  book_state?: string
+  price_source?: string
+  freshness_bucket?: string
+}
+
 export interface DealReviewEventSnapshot {
   account_state?: AccountSnapshot
   positions?: PositionSnapshot[]
   candidate_coins?: string[]
   candidate_details?: CandidateDetail[]
+  market_context?: DealReviewMarketContextSnapshot
   execution_log?: string[]
   system_prompt?: string
   user_prompt?: string
@@ -303,6 +403,7 @@ export interface DealReviewPriceTimelinePoint {
 
 export interface DealReviewPriceTimelineSummary {
   cycle_samples: number
+  platform_samples: number
   point_count: number
   ever_in_profit: boolean
   max_unrealized_pnl: number
@@ -327,6 +428,30 @@ export interface DealReviewCaseDetail {
   open?: DealReviewEventDetail
   close?: DealReviewEventDetail
   price_timeline?: DealReviewPriceTimeline
+  classifier_assist?: DealReviewClassifierAssist
+  ai_classifier_assist?: DealReviewClassifierAssist
+}
+
+export interface DealReviewClassifierSuggestion {
+  classifier_id: string
+  suggestion_key: string
+  label: string
+  issue_type?: string
+  score: number
+  highlight_level?: string
+  evidence_count: number
+  accepted_count: number
+  rejected_count: number
+  feedback_verdict?: string
+  rationale?: string
+}
+
+export interface DealReviewClassifierAssist {
+  source: string
+  summary: string
+  highlight_score: number
+  highlight_level?: string
+  suggestions?: DealReviewClassifierSuggestion[]
 }
 
 export interface DealReviewActionItem {
@@ -449,6 +574,62 @@ export interface DealReviewAIScanCompareResponse {
   weakness_overlap?: string[]
   immediate_actions_a?: string[]
   immediate_actions_b?: string[]
+  recommendation_overlap?: DealReviewAIScanCompareRecommendationBlock
+  shared_evidence?: DealReviewAIScanCompareEvidenceBlock
+  target_cohorts?: DealReviewAIScanCompareTargetCohortBlock
+  conflict_score: number
+  disagreement_level?: string
+  disagreement_summary?: string
+  flags?: DealReviewAIScanCompareFlag[]
+  model_leaderboards?: DealReviewAIScanLeaderboardGroup[]
+}
+
+export interface DealReviewAIScanCompareRecommendationBlock {
+  overlap_score: number
+  shared?: string[]
+  left_only?: string[]
+  right_only?: string[]
+}
+
+export interface DealReviewAIScanCompareEvidenceBlock {
+  shared_strengths?: string[]
+  shared_weaknesses?: string[]
+  shared_patterns?: string[]
+  total_shared: number
+}
+
+export interface DealReviewAIScanCompareTargetCohortBlock {
+  left_tags?: string[]
+  right_tags?: string[]
+  shared_tags?: string[]
+  conflicting_dimensions?: string[]
+}
+
+export interface DealReviewAIScanCompareFlag {
+  code: string
+  tone: string
+  title: string
+  note: string
+}
+
+export interface DealReviewAIScanLeaderboardEntry {
+  model_key: string
+  model_label: string
+  scan_count: number
+  promotion_ready_count: number
+  applied_count: number
+  challenger_win_count: number
+  challenger_loss_count: number
+  net_pnl_delta: number
+  avg_net_pnl_delta: number
+  usefulness_score: number
+}
+
+export interface DealReviewAIScanLeaderboardGroup {
+  cohort_key: string
+  cohort_label: string
+  relevant: boolean
+  entries?: DealReviewAIScanLeaderboardEntry[]
 }
 
 export interface DealReviewStrategyVersion {
@@ -460,14 +641,37 @@ export interface DealReviewStrategyVersion {
   source_compare_id: string
   source_type: string
   summary: string
+  expected_effect: string
+  applied_at?: string
   created_at: string
   updated_at: string
+}
+
+export interface DealReviewStrategyVersionAttribution {
+  observation_ready: boolean
+  before_start?: string
+  before_end?: string
+  after_start?: string
+  after_end?: string
+  full_before_summary?: DealReviewDatasetSummary
+  full_after_summary?: DealReviewDatasetSummary
+  target_before_summary?: DealReviewDatasetSummary
+  target_after_summary?: DealReviewDatasetSummary
+  non_target_before_summary?: DealReviewDatasetSummary
+  non_target_after_summary?: DealReviewDatasetSummary
+  warnings?: string[]
+  rollback_suggested: boolean
+  note?: string
 }
 
 export interface DealReviewStrategyVersionDetail {
   version: DealReviewStrategyVersion
   previous_config?: Record<string, unknown>
   next_config?: Record<string, unknown>
+  target_cohort?: Record<string, unknown>
+  source_scan_summary?: string
+  compare_summary?: string
+  attribution?: DealReviewStrategyVersionAttribution
 }
 
 export interface DealReviewChallengerMetrics {
@@ -553,12 +757,49 @@ export interface DealReviewAnomalyCloseReason {
   avg_pnl: number
 }
 
+export interface DealReviewAnomalyGiveBack {
+  symbol: string
+  deals: number
+  net_pnl: number
+  avg_give_back_pct: number
+  avg_mfe_captured_pct: number
+}
+
+export interface DealReviewAnomalyStopOut {
+  symbol: string
+  deals: number
+  net_pnl: number
+  avg_hold_ms: number
+  avg_mae_pct: number
+}
+
+export interface DealReviewAnomalySizing {
+  symbol: string
+  deals: number
+  net_pnl: number
+  avg_risk_sizing_score: number
+  avg_planned_risk_pct: number
+}
+
+export interface DealReviewAnomalyCloseReasonQuality {
+  reason: string
+  deals: number
+  net_pnl: number
+  avg_exit_efficiency_score: number
+  avg_mfe_captured_pct: number
+  avg_give_back_pct: number
+}
+
 export interface DealReviewAnomalySummary {
   closed_deals: number
   worst_symbols?: DealReviewAnomalySymbol[]
   overtraded_symbols?: DealReviewAnomalySymbol[]
   weak_buckets?: DealReviewAnomalyBucket[]
   weak_close_reasons?: DealReviewAnomalyCloseReason[]
+  profit_give_back_hotspots?: DealReviewAnomalyGiveBack[]
+  early_stop_out_hotspots?: DealReviewAnomalyStopOut[]
+  oversized_loss_hotspots?: DealReviewAnomalySizing[]
+  close_reason_quality?: DealReviewAnomalyCloseReasonQuality[]
   notes?: string[]
 }
 

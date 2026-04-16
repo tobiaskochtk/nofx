@@ -169,6 +169,18 @@ func (at *AutoTrader) GetStatus() map[string]interface{} {
 		if at.config.StrategyConfig.GridConfig != nil {
 			result["grid_symbol"] = at.config.StrategyConfig.GridConfig.Symbol
 		}
+
+		cfg := at.trailingStopConfig()
+		at.trailingStopStateMu.RLock()
+		trackedPositions := len(at.trailingStopState)
+		at.trailingStopStateMu.RUnlock()
+		result["trailing_stop"] = map[string]interface{}{
+			"enabled":              cfg.Enabled,
+			"check_interval_sec":   cfg.CheckIntervalSec,
+			"update_threshold_pct": cfg.UpdateThresholdPct,
+			"tier_count":           len(cfg.Tiers),
+			"tracked_positions":    trackedPositions,
+		}
 	}
 
 	return result

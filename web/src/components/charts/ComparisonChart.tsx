@@ -28,6 +28,30 @@ const TIME_PERIODS = [
   { key: 'all', hours: 0 },
 ] as const
 
+type TraderHistoryPoint = {
+  timestamp: string
+  total_equity: number
+  total_pnl_pct?: number
+}
+
+function downsampleSeries<T>(data: T[], maxPoints: number): T[] {
+  if (maxPoints <= 1) {
+    return data.slice(-1)
+  }
+
+  if (data.length <= maxPoints) {
+    return data
+  }
+
+  const lastIndex = data.length - 1
+  const step = lastIndex / (maxPoints - 1)
+
+  return Array.from({ length: maxPoints }, (_, index) => {
+    const dataIndex = index === maxPoints - 1 ? lastIndex : Math.floor(index * step)
+    return data[dataIndex]
+  })
+}
+
 interface ComparisonChartProps {
   traders: CompetitionTraderData[]
 }
@@ -45,28 +69,29 @@ export function ComparisonChart({ traders }: ComparisonChartProps) {
     .sort()
     .join(',')
 
-  const { data: allTraderHistories, isLoading } = useSWR(
+  const { data: traderHistories, isLoading } = useSWR<Record<string, TraderHistoryPoint[]>>(
     traders.length > 0 ? `equity-histories-${tradersKey}-${selectedHours}` : null,
     async () => {
       console.log('Fetching equity history with hours:', selectedHours)
       const traderIds = traders.map((trader) => trader.trader_id)
       const batchData = await api.getEquityHistoryBatch(traderIds, selectedHours)
       console.log('Received data points:', Object.values(batchData.histories || {}).map((h: any) => h?.length))
-      return traders.map((trader) => {
+      return traders.reduce<Record<string, TraderHistoryPoint[]>>((histories, trader) => {
         const history = batchData.histories?.[trader.trader_id] || []
 
         // If backend doesn't return total_pnl_pct, calculate it from equity
         if (history.length > 0 && history[0].total_pnl_pct === undefined) {
           const initialEquity = history[0].total_equity
-          history.forEach((point: any) => {
+          history.forEach((point: TraderHistoryPoint) => {
             point.total_pnl_pct = initialEquity > 0
               ? ((point.total_equity - initialEquity) / initialEquity) * 100
               : 0
           })
         }
 
-        return history
-      })
+        histories[trader.trader_id] = history
+        return histories
+      }, {})
     },
     {
       refreshInterval: 30000,
@@ -76,15 +101,8 @@ export function ComparisonChart({ traders }: ComparisonChartProps) {
     }
   )
 
-  const traderHistories = useMemo(() => {
-    if (!allTraderHistories) {
-      return traders.map(() => ({ data: undefined }))
-    }
-    return allTraderHistories.map((data) => ({ data }))
-  }, [allTraderHistories, traders.length])
-
   const combinedData = useMemo(() => {
-    const allLoaded = traderHistories.every((h) => h.data)
+    const allLoaded = !!traderHistories && traders.every((trader) => Array.isArray(traderHistories[trader.trader_id]))
     if (!allLoaded) return []
 
     const timestampMap = new Map<
@@ -103,11 +121,10 @@ export function ComparisonChart({ traders }: ComparisonChartProps) {
       return date.toISOString()
     }
 
-    traderHistories.forEach((history, index) => {
-      const trader = traders[index]
-      if (!history.data) return
+    traders.forEach((trader) => {
+      const history = traderHistories?.[trader.trader_id] || []
 
-      history.data.forEach((point: any) => {
+      history.forEach((point) => {
         // Normalize timestamp to nearest minute so different traders' data aligns
         const normalizedTs = normalizeTimestamp(point.timestamp)
 
@@ -181,7 +198,7 @@ export function ComparisonChart({ traders }: ComparisonChartProps) {
     })
 
     return combined
-  }, [allTraderHistories, traders, selectedHours])
+  }, [traderHistories, traders, selectedHours])
 
   // Get trader color
   const traderColor = (traderId: string) => getTraderColor(traders, traderId)
@@ -220,10 +237,10 @@ export function ComparisonChart({ traders }: ComparisonChartProps) {
   }
 
   const MAX_DISPLAY_POINTS = 500
-  const displayData =
-    combinedData.length > MAX_DISPLAY_POINTS
-      ? combinedData.slice(-MAX_DISPLAY_POINTS)
-      : combinedData
+  const displayData = useMemo(
+    () => downsampleSeries(combinedData, MAX_DISPLAY_POINTS),
+    [combinedData]
+  )
 
   // Calculate Y axis domain with better padding
   const calculateYDomain = () => {

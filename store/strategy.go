@@ -423,6 +423,105 @@ type RiskControlConfig struct {
 	MinRiskRewardRatio float64 `json:"min_risk_reward_ratio"`
 	// Min AI confidence to open position (AI guided)
 	MinConfidence int `json:"min_confidence"`
+
+	// Strategy-configurable trailing stop monitor (CODE ENFORCED)
+	TrailingStop TrailingStopConfig `json:"trailing_stop,omitempty"`
+}
+
+const (
+	TrailingStopModeLockProfit  = "lock_profit"
+	TrailingStopModeTrailOffset = "trail_offset"
+
+	DefaultTrailingStopCheckIntervalSec   = 30
+	DefaultTrailingStopUpdateThresholdPct = 0.3
+)
+
+// TrailingStopConfig controls the runtime trailing-stop monitor for a strategy.
+type TrailingStopConfig struct {
+	Enabled            bool               `json:"enabled"`
+	CheckIntervalSec   int                `json:"check_interval_sec,omitempty"`
+	UpdateThresholdPct float64            `json:"update_threshold_pct,omitempty"`
+	Tiers              []TrailingStopTier `json:"tiers,omitempty"`
+}
+
+// TrailingStopTier defines a single trailing-stop activation level.
+type TrailingStopTier struct {
+	TriggerProfitPct float64 `json:"trigger_profit_pct"`
+	Mode             string  `json:"mode,omitempty"`
+	LockProfitPct    float64 `json:"lock_profit_pct,omitempty"`
+	TrailOffsetPct   float64 `json:"trail_offset_pct,omitempty"`
+}
+
+// DefaultTrailingStopTiers returns the default stepped trailing levels.
+func DefaultTrailingStopTiers() []TrailingStopTier {
+	return []TrailingStopTier{
+		{TriggerProfitPct: 0.5, Mode: TrailingStopModeLockProfit, LockProfitPct: 0.2},
+		{TriggerProfitPct: 1.0, Mode: TrailingStopModeTrailOffset, TrailOffsetPct: 0.5},
+		{TriggerProfitPct: 3.0, Mode: TrailingStopModeTrailOffset, TrailOffsetPct: 1.0},
+		{TriggerProfitPct: 10.0, Mode: TrailingStopModeTrailOffset, TrailOffsetPct: 3.0},
+	}
+}
+
+// DefaultTrailingStopConfig returns a safe default configuration for new strategies.
+func DefaultTrailingStopConfig() TrailingStopConfig {
+	return TrailingStopConfig{
+		Enabled:            false,
+		CheckIntervalSec:   DefaultTrailingStopCheckIntervalSec,
+		UpdateThresholdPct: DefaultTrailingStopUpdateThresholdPct,
+		Tiers:              DefaultTrailingStopTiers(),
+	}
+}
+
+func normalizeTrailingStopMode(mode string) string {
+	switch strings.ToLower(strings.TrimSpace(mode)) {
+	case "", "lock", "fixed", "fixed_profit", TrailingStopModeLockProfit:
+		return TrailingStopModeLockProfit
+	case "trail", "offset", "trail_by_offset", TrailingStopModeTrailOffset:
+		return TrailingStopModeTrailOffset
+	default:
+		return ""
+	}
+}
+
+func normalizeTrailingStopConfig(cfg TrailingStopConfig) TrailingStopConfig {
+	normalized := cfg
+	if normalized.CheckIntervalSec <= 0 {
+		normalized.CheckIntervalSec = DefaultTrailingStopCheckIntervalSec
+	}
+	if normalized.UpdateThresholdPct <= 0 {
+		normalized.UpdateThresholdPct = DefaultTrailingStopUpdateThresholdPct
+	}
+
+	if len(normalized.Tiers) == 0 {
+		normalized.Tiers = DefaultTrailingStopTiers()
+	} else {
+		tiers := make([]TrailingStopTier, 0, len(normalized.Tiers))
+		for _, tier := range normalized.Tiers {
+			mode := normalizeTrailingStopMode(tier.Mode)
+			if mode == "" {
+				mode = TrailingStopModeLockProfit
+			}
+
+			normalizedTier := TrailingStopTier{
+				TriggerProfitPct: tier.TriggerProfitPct,
+				Mode:             mode,
+				LockProfitPct:    tier.LockProfitPct,
+				TrailOffsetPct:   tier.TrailOffsetPct,
+			}
+			tiers = append(tiers, normalizedTier)
+		}
+		sort.Slice(tiers, func(i, j int) bool {
+			return tiers[i].TriggerProfitPct < tiers[j].TriggerProfitPct
+		})
+		normalized.Tiers = tiers
+	}
+
+	return normalized
+}
+
+// EffectiveTrailingStop returns the trailing-stop config with defaults applied.
+func (c RiskControlConfig) EffectiveTrailingStop() TrailingStopConfig {
+	return normalizeTrailingStopConfig(c.TrailingStop)
 }
 
 // NewStrategyStore creates a new StrategyStore
@@ -519,6 +618,7 @@ func GetDefaultStrategyConfig(lang string) StrategyConfig {
 			MinPositionSize:              12,  // Min 12 USDT per position (CODE ENFORCED)
 			MinRiskRewardRatio:           3.0, // Min 3:1 profit/loss ratio (AI guided)
 			MinConfidence:                75,  // Min 75% confidence (AI guided)
+			TrailingStop:                 DefaultTrailingStopConfig(),
 		},
 	}
 

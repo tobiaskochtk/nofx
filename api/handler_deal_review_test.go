@@ -3,6 +3,7 @@ package api
 import (
 	"encoding/json"
 	"math"
+	"strings"
 	"testing"
 	"time"
 
@@ -261,6 +262,243 @@ func TestBuildDealReviewReplayValidationBlocksHoldoutRegression(t *testing.T) {
 	}
 }
 
+func TestParseDealReviewCaseClassifierResponse(t *testing.T) {
+	response := `{
+	  "summary":"This looks like an avoidable loss after a weak breakout entry.",
+	  "highlight_level":"high",
+	  "suggestions":[
+	    {
+	      "label":"avoidable loss",
+	      "issue_type":"likely_avoidable_loss",
+	      "highlight_level":"high",
+	      "rationale":"Two warning signs were visible before entry and the stop was reached quickly."
+	    },
+	    {
+	      "label":"bad trade",
+	      "issue_type":"likely_bad_trade",
+	      "highlight_level":"medium",
+	      "rationale":"The setup quality looked below the trader's usual standard."
+	    }
+	  ]
+	}`
+
+	assist, err := parseDealReviewCaseClassifierResponse(response)
+	if err != nil {
+		t.Fatalf("parseDealReviewCaseClassifierResponse() error = %v", err)
+	}
+	if assist.Source != store.DealReviewClassifierAIAssist {
+		t.Fatalf("assist.Source = %q, want %q", assist.Source, store.DealReviewClassifierAIAssist)
+	}
+	if assist.HighlightLevel != "high" {
+		t.Fatalf("assist.HighlightLevel = %q, want high", assist.HighlightLevel)
+	}
+	if len(assist.Suggestions) != 2 {
+		t.Fatalf("len(assist.Suggestions) = %d, want 2", len(assist.Suggestions))
+	}
+	if assist.Suggestions[0].Label != "avoidable loss" {
+		t.Fatalf("top suggestion = %q, want avoidable loss", assist.Suggestions[0].Label)
+	}
+	if assist.Suggestions[0].SuggestionKey == "" {
+		t.Fatal("expected AI assist suggestion key to be populated")
+	}
+}
+
+func TestBuildDealReviewAIScanDisagreementSummaryFlagsMaterialSplit(t *testing.T) {
+	left := &store.DealReviewAIScanDetail{
+		Scan: store.DealReviewAIScan{
+			Provider:         "openai",
+			ModelName:        "gpt-5.4",
+			ValidationStatus: store.DealReviewAIScanValidationFailed,
+		},
+		Filters: map[string]any{
+			"symbol": "BTCUSDT",
+			"side":   "LONG",
+		},
+		Result: store.DealReviewAIScanResult{
+			ExecutiveSummary: "Trend regime setup for BTC longs",
+			ImmediateActions: []store.DealReviewActionItem{
+				{Title: "Reduce BTC long aggressiveness"},
+			},
+			Patterns: []string{"Trend regime losses cluster on late momentum entries"},
+		},
+		StrategyPatch: map[string]any{
+			"execution": map[string]any{"max_positions": 2},
+		},
+	}
+	right := &store.DealReviewAIScanDetail{
+		Scan: store.DealReviewAIScan{
+			Provider:         "gemini",
+			ModelName:        "gemini-3-pro-preview",
+			ValidationStatus: store.DealReviewAIScanValidationFailed,
+		},
+		Filters: map[string]any{
+			"symbol": "ETHUSDT",
+			"side":   "SHORT",
+		},
+		Result: store.DealReviewAIScanResult{
+			ExecutiveSummary: "Chop regime setup for ETH shorts",
+			ImmediateActions: []store.DealReviewActionItem{
+				{Title: "Increase ETH short participation"},
+			},
+			Patterns: []string{"Chop regime mean reversion opportunity"},
+		},
+		StrategyPatch: map[string]any{
+			"risk_control": map[string]any{"min_confidence": 82},
+		},
+	}
+
+	recommendations := buildDealReviewAIScanRecommendationBlock(left, right)
+	evidence := buildDealReviewAIScanEvidenceBlock(left, right)
+	targets := buildDealReviewAIScanTargetCohortBlock(
+		deriveDealReviewAIScanCohortTags(left, nil),
+		deriveDealReviewAIScanCohortTags(right, nil),
+	)
+	score, level, summary, flags := buildDealReviewAIScanDisagreementSummary(
+		left,
+		right,
+		recommendations,
+		evidence,
+		targets,
+	)
+
+	if score < 60 {
+		t.Fatalf("conflict score = %v, want material split >= 60", score)
+	}
+	if level != "high" {
+		t.Fatalf("level = %q, want high", level)
+	}
+	if !strings.Contains(strings.ToLower(summary), "disagreement") &&
+		!strings.Contains(strings.ToLower(summary), "split") {
+		t.Fatalf("summary = %q, want disagreement framing", summary)
+	}
+	flagCodes := map[string]struct{}{}
+	for _, flag := range flags {
+		flagCodes[flag.Code] = struct{}{}
+	}
+	if _, ok := flagCodes["mixed_recommendation"]; !ok {
+		t.Fatalf("flags = %#v, want mixed_recommendation", flags)
+	}
+	if _, ok := flagCodes["low_confidence_disagreement"]; !ok {
+		t.Fatalf("flags = %#v, want low_confidence_disagreement", flags)
+	}
+}
+
+func TestBuildDealReviewAIScanLeaderboardsRanksModelsByCohort(t *testing.T) {
+	scans := []store.DealReviewAIScanDetail{
+		{
+			Scan: store.DealReviewAIScan{
+				ID:               "scan-gpt",
+				Provider:         "openai",
+				ModelName:        "gpt-5.4",
+				ValidationStatus: store.DealReviewAIScanValidationPassed,
+			},
+			Filters: map[string]any{"symbol": "BTCUSDT"},
+			Result: store.DealReviewAIScanResult{
+				ExecutiveSummary: "Trend regime improvements for BTC momentum",
+			},
+			Validation: &store.DealReviewAIScanValidation{
+				Status:         store.DealReviewAIScanValidationPassed,
+				PromotionReady: true,
+				Replay: &store.DealReviewAIScanReplay{
+					HoldoutNetPnLDelta: 1.4,
+				},
+			},
+		},
+		{
+			Scan: store.DealReviewAIScan{
+				ID:               "scan-gemini",
+				Provider:         "gemini",
+				ModelName:        "gemini-3-pro-preview",
+				ValidationStatus: store.DealReviewAIScanValidationFailed,
+			},
+			Filters: map[string]any{"symbol": "BTCUSDT"},
+			Result: store.DealReviewAIScanResult{
+				ExecutiveSummary: "Trend regime but weaker BTC setup",
+			},
+			Validation: &store.DealReviewAIScanValidation{
+				Status:         store.DealReviewAIScanValidationFailed,
+				PromotionReady: false,
+				Replay: &store.DealReviewAIScanReplay{
+					HoldoutNetPnLDelta: -0.8,
+				},
+			},
+		},
+	}
+	versions := []store.DealReviewStrategyVersionDetail{
+		{
+			Version: store.DealReviewStrategyVersion{SourceScanID: "scan-gpt"},
+			TargetCohort: map[string]any{
+				"symbol": "BTCUSDT",
+			},
+			Attribution: &store.DealReviewStrategyVersionAttribution{
+				TargetBeforeSummary: &store.DealReviewDatasetSummary{NetPnL: -1.0},
+				TargetAfterSummary:  &store.DealReviewDatasetSummary{NetPnL: 1.5},
+			},
+		},
+		{
+			Version: store.DealReviewStrategyVersion{SourceScanID: "scan-gemini"},
+			TargetCohort: map[string]any{
+				"symbol": "BTCUSDT",
+			},
+			Attribution: &store.DealReviewStrategyVersionAttribution{
+				TargetBeforeSummary: &store.DealReviewDatasetSummary{NetPnL: 0.4},
+				TargetAfterSummary:  &store.DealReviewDatasetSummary{NetPnL: -0.6},
+			},
+		},
+	}
+	compares := []store.DealReviewChallengerCompareDetail{
+		{
+			Compare: store.DealReviewChallengerCompare{
+				SourceScanID:       "scan-gpt",
+				Status:             store.DealReviewChallengerStatusCompleted,
+				WinnerTraderID:     "challenger",
+				ChallengerTraderID: "challenger",
+			},
+		},
+		{
+			Compare: store.DealReviewChallengerCompare{
+				SourceScanID:       "scan-gemini",
+				Status:             store.DealReviewChallengerStatusCompleted,
+				WinnerTraderID:     "incumbent",
+				ChallengerTraderID: "challenger-2",
+			},
+		},
+	}
+
+	leaderboards := buildDealReviewAIScanLeaderboards(
+		scans,
+		versions,
+		compares,
+		[]dealReviewCohortTag{{Key: "regime:trend", Label: "Trend regime", Dimension: "regime"}},
+	)
+	if len(leaderboards) == 0 {
+		t.Fatal("expected at least one leaderboard group")
+	}
+
+	var trendGroup *dealReviewAIScanLeaderboardGroup
+	for i := range leaderboards {
+		if leaderboards[i].CohortKey == "regime:trend" {
+			trendGroup = &leaderboards[i]
+			break
+		}
+	}
+	if trendGroup == nil {
+		t.Fatalf("leaderboards = %#v, want trend regime group", leaderboards)
+	}
+	if !trendGroup.Relevant {
+		t.Fatalf("trend group relevant = false, want true")
+	}
+	if len(trendGroup.Entries) < 2 {
+		t.Fatalf("trend group entries = %#v, want 2 models", trendGroup.Entries)
+	}
+	if trendGroup.Entries[0].ModelLabel != "openai / gpt-5.4" {
+		t.Fatalf("top model = %q, want openai / gpt-5.4", trendGroup.Entries[0].ModelLabel)
+	}
+	if trendGroup.Entries[0].UsefulnessScore <= trendGroup.Entries[1].UsefulnessScore {
+		t.Fatalf("entries = %#v, want first model usefulness score to rank above second", trendGroup.Entries)
+	}
+}
+
 func TestBuildDealReviewReplayValidationTracksRecentLiveLikeSlice(t *testing.T) {
 	original := &store.StrategyConfig{
 		RiskControl: store.RiskControlConfig{
@@ -411,6 +649,215 @@ func TestBuildDealReviewReplayValidationSupportsRestrictiveLeverageCaps(t *testi
 	}
 	if replay.HoldoutNetPnLDelta <= 0 {
 		t.Fatalf("holdout delta = %v, want positive delta after leverage cap reduces holdout loss size", replay.HoldoutNetPnLDelta)
+	}
+}
+
+func TestBuildDealReviewReplayValidationSupportsMaxPositions(t *testing.T) {
+	original := &store.StrategyConfig{
+		RiskControl: store.RiskControlConfig{
+			MaxPositions:    3,
+			MinPositionSize: 10,
+		},
+	}
+	merged := &store.StrategyConfig{
+		RiskControl: store.RiskControlConfig{
+			MaxPositions:    1,
+			MinPositionSize: 10,
+		},
+	}
+
+	training := []store.DealReviewCaseDetail{
+		{
+			Case: store.DealReviewCase{Symbol: "RAVEUSDT", Side: "LONG", Status: "CLOSED", RealizedPnL: -1.5, EntryPrice: 1, EntryQuantity: 20},
+			Open: &store.DealReviewEventDetail{
+				Snapshot: &store.DealReviewEventSnapshot{
+					AccountState: store.AccountSnapshot{PositionCount: 1, TotalBalance: 1000},
+				},
+			},
+		},
+		{
+			Case: store.DealReviewCase{Symbol: "TONUSDT", Side: "LONG", Status: "CLOSED", RealizedPnL: 0.8, EntryPrice: 1, EntryQuantity: 20},
+			Open: &store.DealReviewEventDetail{
+				Snapshot: &store.DealReviewEventSnapshot{
+					AccountState: store.AccountSnapshot{PositionCount: 0, TotalBalance: 1000},
+				},
+			},
+		},
+	}
+	holdout := []store.DealReviewCaseDetail{
+		{
+			Case: store.DealReviewCase{Symbol: "ETHUSDT", Side: "LONG", Status: "CLOSED", RealizedPnL: -0.6, EntryPrice: 100, EntryQuantity: 0.2},
+			Open: &store.DealReviewEventDetail{
+				Snapshot: &store.DealReviewEventSnapshot{
+					AccountState: store.AccountSnapshot{PositionCount: 1, TotalBalance: 1000},
+				},
+			},
+		},
+	}
+
+	replay := buildDealReviewReplayValidation(
+		original,
+		merged,
+		map[string]any{"risk_control": map[string]any{"max_positions": 1}},
+		training,
+		holdout,
+		holdout,
+		"latest 1 holdout deals",
+		1,
+	)
+	if replay == nil || !replay.Supported {
+		t.Fatalf("replay = %#v, want supported replay", replay)
+	}
+	if replay.TrainingNetPnLDelta <= 0 {
+		t.Fatalf("training delta = %v, want positive delta after restrictive max_positions removes blocked loser", replay.TrainingNetPnLDelta)
+	}
+}
+
+func TestBuildDealReviewReplayValidationSupportsMaxMarginUsage(t *testing.T) {
+	original := &store.StrategyConfig{
+		RiskControl: store.RiskControlConfig{
+			MaxMarginUsage: 0.90,
+		},
+	}
+	merged := &store.StrategyConfig{
+		RiskControl: store.RiskControlConfig{
+			MaxMarginUsage: 0.50,
+		},
+	}
+
+	training := []store.DealReviewCaseDetail{
+		{
+			Case: store.DealReviewCase{Symbol: "RAVEUSDT", Side: "LONG", Status: "CLOSED", RealizedPnL: -2, EntryPrice: 10, EntryQuantity: 20, Leverage: 2},
+			Open: &store.DealReviewEventDetail{
+				Event: &store.DealReviewEvent{PositionSizeUSD: 200, Leverage: 2},
+				Snapshot: &store.DealReviewEventSnapshot{
+					AccountState: store.AccountSnapshot{TotalBalance: 1000, MarginUsedPct: 42},
+				},
+			},
+		},
+		{
+			Case: store.DealReviewCase{Symbol: "TONUSDT", Side: "LONG", Status: "CLOSED", RealizedPnL: 0.7, EntryPrice: 1, EntryQuantity: 20, Leverage: 2},
+			Open: &store.DealReviewEventDetail{
+				Event: &store.DealReviewEvent{PositionSizeUSD: 20, Leverage: 2},
+				Snapshot: &store.DealReviewEventSnapshot{
+					AccountState: store.AccountSnapshot{TotalBalance: 1000, MarginUsedPct: 10},
+				},
+			},
+		},
+	}
+	holdout := []store.DealReviewCaseDetail{
+		{
+			Case: store.DealReviewCase{Symbol: "ETHUSDT", Side: "LONG", Status: "CLOSED", RealizedPnL: -1.1, EntryPrice: 100, EntryQuantity: 1, Leverage: 2},
+			Open: &store.DealReviewEventDetail{
+				Event: &store.DealReviewEvent{PositionSizeUSD: 100, Leverage: 2},
+				Snapshot: &store.DealReviewEventSnapshot{
+					AccountState: store.AccountSnapshot{TotalBalance: 1000, MarginUsedPct: 48},
+				},
+			},
+		},
+	}
+
+	replay := buildDealReviewReplayValidation(
+		original,
+		merged,
+		map[string]any{"risk_control": map[string]any{"max_margin_usage": 0.5}},
+		training,
+		holdout,
+		holdout,
+		"latest 1 holdout deals",
+		1,
+	)
+	if replay == nil || !replay.Supported {
+		t.Fatalf("replay = %#v, want supported replay", replay)
+	}
+	if replay.TrainingNetPnLDelta <= 0 {
+		t.Fatalf("training delta = %v, want positive delta after restrictive max_margin gate removes blocked loser", replay.TrainingNetPnLDelta)
+	}
+	if replay.HoldoutNetPnLDelta <= 0 {
+		t.Fatalf("holdout delta = %v, want positive delta after restrictive max_margin gate removes blocked holdout loser", replay.HoldoutNetPnLDelta)
+	}
+}
+
+func TestBuildDealReviewReplayValidationSupportsCandidateSourceRestrictions(t *testing.T) {
+	original := &store.StrategyConfig{
+		CoinSource: store.CoinSourceConfig{
+			SourceType: "mixed",
+			UseAI500:   true,
+			AI500Limit: 3,
+			UseOITop:   true,
+			OITopLimit: 3,
+		},
+	}
+	merged := &store.StrategyConfig{
+		CoinSource: store.CoinSourceConfig{
+			SourceType: "mixed",
+			UseAI500:   true,
+			AI500Limit: 1,
+			UseOITop:   false,
+			OITopLimit: 3,
+		},
+	}
+
+	training := []store.DealReviewCaseDetail{
+		{
+			Case:                 store.DealReviewCase{Symbol: "TONUSDT", Side: "LONG", Status: "CLOSED", RealizedPnL: -1.7, EntryPrice: 1, EntryQuantity: 20},
+			OpenCandidateSources: []string{"ai500", "oi_top"},
+			Open: &store.DealReviewEventDetail{
+				Snapshot: &store.DealReviewEventSnapshot{
+					CandidateCoins: []string{"RAVEUSDT", "TONUSDT"},
+					CandidateDetails: []store.CandidateDetail{
+						{Symbol: "RAVEUSDT", Sources: []string{"ai500"}},
+						{Symbol: "TONUSDT", Sources: []string{"ai500", "oi_top"}},
+					},
+				},
+			},
+		},
+		{
+			Case:                 store.DealReviewCase{Symbol: "RAVEUSDT", Side: "LONG", Status: "CLOSED", RealizedPnL: 0.9, EntryPrice: 1, EntryQuantity: 20},
+			OpenCandidateSources: []string{"ai500"},
+			Open: &store.DealReviewEventDetail{
+				Snapshot: &store.DealReviewEventSnapshot{
+					CandidateCoins: []string{"RAVEUSDT", "TONUSDT"},
+					CandidateDetails: []store.CandidateDetail{
+						{Symbol: "RAVEUSDT", Sources: []string{"ai500"}},
+						{Symbol: "TONUSDT", Sources: []string{"ai500", "oi_top"}},
+					},
+				},
+			},
+		},
+	}
+	holdout := []store.DealReviewCaseDetail{
+		training[0],
+	}
+
+	replay := buildDealReviewReplayValidation(
+		original,
+		merged,
+		map[string]any{"coin_source": map[string]any{"ai500_limit": 1, "use_oi_top": false}},
+		training,
+		holdout,
+		holdout,
+		"latest 1 holdout deals",
+		1,
+	)
+	if replay == nil || !replay.Supported {
+		t.Fatalf("replay = %#v, want supported replay", replay)
+	}
+	if replay.TrainingNetPnLDelta <= 0 {
+		t.Fatalf("training delta = %v, want positive delta after source restriction removes blocked loser", replay.TrainingNetPnLDelta)
+	}
+	foundAI500Limit := false
+	foundOITopToggle := false
+	for _, path := range replay.SupportedPaths {
+		if path == "coin_source.ai500_limit" {
+			foundAI500Limit = true
+		}
+		if path == "coin_source.use_oi_top" {
+			foundOITopToggle = true
+		}
+	}
+	if !foundAI500Limit || !foundOITopToggle {
+		t.Fatalf("supported paths = %#v, want coin_source.ai500_limit and coin_source.use_oi_top", replay.SupportedPaths)
 	}
 }
 

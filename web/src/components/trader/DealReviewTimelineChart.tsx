@@ -59,9 +59,9 @@ export function DealReviewTimelineChart({
   if (!timeline || points.length === 0) {
     return (
       <div className="rounded-xl border border-white/10 bg-black/20 p-4">
-        <div className="font-semibold">Price path by decision cycle</div>
+        <div className="font-semibold">Price path by cycle + platform updates</div>
         <div className="text-sm text-nofx-text-muted mt-2">
-          No cycle price history stored for this deal yet.
+          No stored cycle or platform price history for this deal yet.
         </div>
       </div>
     )
@@ -86,6 +86,8 @@ export function DealReviewTimelineChart({
             ? 'Entry snapshot'
             : point.source === 'exit'
               ? 'Exit snapshot'
+              : point.source === 'platform'
+                ? 'Platform price update'
               : `Decision cycle ${point.decision_cycle_number || '-'}`}
         </div>
         <div className="text-xs text-nofx-text-muted mt-2">
@@ -113,20 +115,27 @@ export function DealReviewTimelineChart({
     <div className="rounded-xl border border-white/10 bg-black/20 p-4 space-y-4">
       <div className="flex items-center justify-between gap-4">
         <div>
-          <div className="font-semibold">Price path by decision cycle</div>
+          <div className="font-semibold">Price path by cycle + platform updates</div>
           <div className="text-xs text-nofx-text-muted mt-1">
-            Entry/exit points are synthetic; cycle points come from stored
-            decision snapshots.
+            Entry/exit points are synthetic. Cycle points come from stored
+            decision snapshots; platform points come from synced exchange mark
+            price captures between cycles.
           </div>
         </div>
         <div className="text-xs text-nofx-text-muted">{side} timeline</div>
       </div>
 
-      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4 text-xs">
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-5 text-xs">
         <div className="rounded-lg border border-white/10 bg-black/30 px-3 py-3">
           <div className="text-nofx-text-muted">Cycle samples</div>
           <div className="mt-1 font-semibold text-white">
             {summary?.cycle_samples || 0}
+          </div>
+        </div>
+        <div className="rounded-lg border border-white/10 bg-black/30 px-3 py-3">
+          <div className="text-nofx-text-muted">Platform samples</div>
+          <div className="mt-1 font-semibold text-white">
+            {summary?.platform_samples || 0}
           </div>
         </div>
         <div className="rounded-lg border border-white/10 bg-black/30 px-3 py-3">

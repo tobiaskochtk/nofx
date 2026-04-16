@@ -12,7 +12,9 @@ import type {
   DealReviewAIScanDetail,
   DealReviewAIScanCompareResponse,
   DealReviewAnomalySummary,
+  DealReviewClassifierAssist,
   DealReviewChallengerCompareDetail,
+  DealReviewFilterPresetDetail,
   DealReviewStrategyVersionDetail,
 } from '../../types'
 import { API_BASE, httpClient } from './helpers'
@@ -183,6 +185,44 @@ export const dataApi = {
     return result.data!
   },
 
+  async getDealReviewFilterPresets(
+    traderId: string
+  ): Promise<DealReviewFilterPresetDetail[]> {
+    const result = await httpClient.get<{ items: DealReviewFilterPresetDetail[] }>(
+      `${API_BASE}/traders/${traderId}/deal-review/filter-presets`
+    )
+    if (!result.success) {
+      throw new Error('Failed to fetch deal review filter presets')
+    }
+    return result.data?.items || []
+  },
+
+  async saveDealReviewFilterPreset(
+    traderId: string,
+    body: Record<string, unknown>
+  ): Promise<DealReviewFilterPresetDetail[]> {
+    const result = await httpClient.post<{ items: DealReviewFilterPresetDetail[] }>(
+      `${API_BASE}/traders/${traderId}/deal-review/filter-presets`,
+      body
+    )
+    if (!result.success) {
+      throw new Error('Failed to save deal review filter preset')
+    }
+    return result.data?.items || []
+  },
+
+  async deleteDealReviewFilterPreset(
+    traderId: string,
+    presetId: string
+  ): Promise<void> {
+    const result = await httpClient.delete(
+      `${API_BASE}/traders/${traderId}/deal-review/filter-presets/${presetId}`
+    )
+    if (!result.success) {
+      throw new Error('Failed to delete deal review filter preset')
+    }
+  },
+
   async updateDealReviewCaseReview(
     traderId: string,
     caseId: string,
@@ -194,6 +234,41 @@ export const dataApi = {
     )
     if (!result.success)
       throw new Error('Failed to update deal review annotations')
+    return result.data!
+  },
+
+  async applyDealReviewClassifierFeedback(
+    traderId: string,
+    caseId: string,
+    body: {
+      classifier_id: string
+      suggestion_key: string
+      label: string
+      issue_type?: string
+      verdict: 'accepted' | 'rejected'
+      rationale?: string
+      apply_label?: boolean
+    }
+  ): Promise<DealReviewCaseDetail> {
+    const result = await httpClient.post<DealReviewCaseDetail>(
+      `${API_BASE}/traders/${traderId}/deal-review/cases/${caseId}/classifier-feedback`,
+      body
+    )
+    if (!result.success)
+      throw new Error('Failed to apply classifier feedback')
+    return result.data!
+  },
+
+  async runDealReviewCaseAIAssist(
+    traderId: string,
+    caseId: string,
+    body?: { model_id?: string; override_model_name?: string }
+  ): Promise<DealReviewClassifierAssist> {
+    const result = await httpClient.post<DealReviewClassifierAssist>(
+      `${API_BASE}/traders/${traderId}/deal-review/cases/${caseId}/ai-assist`,
+      body || {}
+    )
+    if (!result.success) throw new Error('Failed to run AI review assist')
     return result.data!
   },
 

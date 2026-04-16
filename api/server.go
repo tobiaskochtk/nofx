@@ -192,6 +192,8 @@ Query params:
   side=LONG|SHORT
   status=OPEN|CLOSED
   outcome=profit|loss|flat|open
+  open_selection_bucket=<string>
+  close_reason=<string>
   from_time=<unix ms>
   to_time=<unix ms>
   min_pnl=<number>
@@ -200,6 +202,17 @@ Query params:
   offset=<int, default 0>
 Returns compact open/close rationale entries per deal plus dataset summary.`,
 				s.handleTraderDealReviewCases)
+			s.routeWithSchema(protected, "GET", "/traders/:id/deal-review/filter-presets", "List saved deal-review cohort/filter presets for a trader",
+				`:id = trader_id from GET /api/my-traders.`,
+				s.handleTraderDealReviewFilterPresets)
+			s.routeWithSchema(protected, "POST", "/traders/:id/deal-review/filter-presets", "Create or update a saved deal-review cohort/filter preset",
+				`:id = trader_id from GET /api/my-traders.
+Body: {"id":"<optional preset id for update>","name":"Loss review queue","filters":{"symbol":"","side":"LONG","date_range":"30d","review_queue":"unlabeled_losses"}}`,
+				s.handleTraderDealReviewSaveFilterPreset)
+			s.routeWithSchema(protected, "DELETE", "/traders/:id/deal-review/filter-presets/:presetId", "Delete a saved deal-review cohort/filter preset",
+				`:id = trader_id from GET /api/my-traders.
+:presetId = id from GET /api/traders/:id/deal-review/filter-presets.`,
+				s.handleTraderDealReviewDeleteFilterPreset)
 			s.routeWithSchema(protected, "GET", "/traders/:id/deal-review/cases/:caseId", "Get one deal-review case detail",
 				`:id = trader_id from GET /api/my-traders.
 :caseId = id from GET /api/traders/:id/deal-review/cases.`,
@@ -209,6 +222,17 @@ Returns compact open/close rationale entries per deal plus dataset summary.`,
 :caseId = id from GET /api/traders/:id/deal-review/cases.
 Body: {"labels":["good entry","avoidable loss"],"analyst_note":"<optional free-text note>"}`,
 				s.handleTraderDealReviewCaseReview)
+			s.routeWithSchema(protected, "POST", "/traders/:id/deal-review/cases/:caseId/classifier-feedback", "Accept or reject a deal-review classifier suggestion",
+				`:id = trader_id from GET /api/my-traders.
+:caseId = id from GET /api/traders/:id/deal-review/cases.
+Body: {"classifier_id":"heuristic_label_memory|ai_review_assist","suggestion_key":"<id>","label":"avoidable loss","issue_type":"likely_avoidable_loss","verdict":"accepted|rejected","rationale":"<optional>","apply_label":true}`,
+				s.handleTraderDealReviewCaseClassifierFeedback)
+			s.routeWithSchema(protected, "POST", "/traders/:id/deal-review/cases/:caseId/ai-assist", "Run AI review assistance for one deal-review case",
+				`:id = trader_id from GET /api/my-traders.
+:caseId = id from GET /api/traders/:id/deal-review/cases.
+Body: {"model_id":"<optional configured AI model id from GET /api/models>","override_model_name":"<optional remote model id>"}
+Returns review-assist suggestions only; it does not auto-label the deal.`,
+				s.handleTraderDealReviewCaseAIAssist)
 			s.routeWithSchema(protected, "GET", "/traders/:id/deal-review/anomalies", "Get heuristic anomaly summary for the filtered deal-review dataset",
 				`:id = trader_id from GET /api/my-traders.
 Query params match GET /api/traders/:id/deal-review/cases.`,
@@ -270,6 +294,33 @@ Body: {"winner_trader_id":"<incumbent_trader_id|challenger_trader_id>"}`,
 				`:id = trader_id from GET /api/my-traders.
 :versionId = id from GET /api/traders/:id/deal-review/strategy-versions.`,
 				s.handleTraderDealReviewRollbackStrategyVersion)
+			s.routeWithSchema(protected, "GET", "/traders/:id/autonomous-optimizer/config", "Get autonomous optimizer settings for a trader",
+				`:id = trader_id from GET /api/my-traders.
+Returns cadence, auto-apply flags, rollback settings, and proposer/critic model defaults.`,
+				s.handleTraderAutonomousOptimizerConfig)
+			s.routeWithSchema(protected, "PUT", "/traders/:id/autonomous-optimizer/config", "Update autonomous optimizer settings for a trader",
+				`:id = trader_id from GET /api/my-traders.
+Body fields are partial and optional, e.g. {"enabled":true,"review_interval_hours":12,"primary_model_name":"gpt-5.4","critic_model_name":"gpt-5.4"}.`,
+				s.handleTraderAutonomousOptimizerUpdateConfig)
+			s.routeWithSchema(protected, "POST", "/traders/:id/autonomous-optimizer/bootstrap", "Seed a trader for autonomous optimization from another trader",
+				`:id = target trader_id from GET /api/my-traders.
+Body: {"source_trader_id":"<another trader_id from GET /api/my-traders>"}.
+Duplicates the source strategy, applies source prompt defaults to the target trader, persists optimizer baseline metadata, and schedules the first review window.`,
+				s.handleTraderAutonomousOptimizerBootstrap)
+			s.routeWithSchema(protected, "GET", "/traders/:id/autonomous-optimizer/runs", "List autonomous optimizer run history for a trader",
+				`:id = trader_id from GET /api/my-traders.
+Query params:
+  limit=<int, default 20, max 100>`,
+				s.handleTraderAutonomousOptimizerRuns)
+			s.routeWithSchema(protected, "GET", "/traders/:id/autonomous-optimizer/backlog", "List scored autonomous optimizer backlog items for a trader",
+				`:id = trader_id from GET /api/my-traders.
+Query params:
+  limit=<int, default 50, max 200>`,
+				s.handleTraderAutonomousOptimizerBacklog)
+			s.routeWithSchema(protected, "POST", "/traders/:id/autonomous-optimizer/backlog", "Create or update an autonomous optimizer backlog item",
+				`:id = trader_id from GET /api/my-traders.
+Body: {"id":"<optional>","title":"Need better OI delta signal","category":"missing_indicator","description":"...","confidence":78,"implementation_cost":25,"urgency":80}`,
+				s.handleTraderAutonomousOptimizerSaveBacklog)
 
 			// AI cost tracking
 			s.route(protected, "GET", "/ai-costs", "Get AI call costs for a trader (?trader_id=xxx&period=today)", s.handleGetAICosts)

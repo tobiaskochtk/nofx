@@ -32,3 +32,35 @@ func TestValidateStrategyConfigAllowsCanonicalNofxOSProvider(t *testing.T) {
 		t.Fatalf("expected canonical nofxos provider to be valid, got: %v", err)
 	}
 }
+
+func TestValidateStrategyConfigRejectsInvalidTrailingStopMode(t *testing.T) {
+	cfg := store.GetDefaultStrategyConfig("en")
+	cfg.RiskControl.TrailingStop.Enabled = true
+	cfg.RiskControl.TrailingStop.Tiers = []store.TrailingStopTier{
+		{
+			TriggerProfitPct: 1.0,
+			Mode:             "mystery_mode",
+			LockProfitPct:    0.5,
+		},
+	}
+
+	if _, err := validateStrategyConfig(&cfg); err == nil {
+		t.Fatal("expected invalid trailing-stop mode to be rejected")
+	}
+}
+
+func TestValidateStrategyConfigRejectsTrailingStopLockAboveTrigger(t *testing.T) {
+	cfg := store.GetDefaultStrategyConfig("en")
+	cfg.RiskControl.TrailingStop.Enabled = true
+	cfg.RiskControl.TrailingStop.Tiers = []store.TrailingStopTier{
+		{
+			TriggerProfitPct: 1.0,
+			Mode:             store.TrailingStopModeLockProfit,
+			LockProfitPct:    1.5,
+		},
+	}
+
+	if _, err := validateStrategyConfig(&cfg); err == nil {
+		t.Fatal("expected trailing-stop lock above trigger to be rejected")
+	}
+}

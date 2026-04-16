@@ -18,19 +18,20 @@ type Store struct {
 	driver *DBDriver // Database driver for abstraction (legacy)
 
 	// Sub-stores (lazy initialization)
-	user           *UserStore
-	aiModel        *AIModelStore
-	exchange       *ExchangeStore
-	trader         *TraderStore
-	decision       *DecisionStore
-	position       *PositionStore
-	strategy       *StrategyStore
-	equity         *EquityStore
-	order          *OrderStore
-	grid           *GridStore
-	dealReview     *DealReviewStore
-	aiCharge       *AIChargeStore
-	telegramConfig TelegramConfigStore
+	user                *UserStore
+	aiModel             *AIModelStore
+	exchange            *ExchangeStore
+	trader              *TraderStore
+	decision            *DecisionStore
+	position            *PositionStore
+	strategy            *StrategyStore
+	equity              *EquityStore
+	order               *OrderStore
+	grid                *GridStore
+	dealReview          *DealReviewStore
+	autonomousOptimizer *AutonomousOptimizerStore
+	aiCharge            *AIChargeStore
+	telegramConfig      TelegramConfigStore
 
 	mu sync.RWMutex
 }
@@ -161,6 +162,9 @@ func (s *Store) initTables() error {
 	}
 	if err := s.DealReview().initTables(); err != nil {
 		return fmt.Errorf("failed to initialize deal review tables: %w", err)
+	}
+	if err := s.AutonomousOptimizer().initTables(); err != nil {
+		return fmt.Errorf("failed to initialize autonomous optimizer tables: %w", err)
 	}
 	if err := s.TelegramConfig().(*telegramConfigStore).initTables(); err != nil {
 		return fmt.Errorf("failed to initialize telegram config tables: %w", err)
@@ -299,6 +303,16 @@ func (s *Store) DealReview() *DealReviewStore {
 		s.dealReview = NewDealReviewStore(s.gdb)
 	}
 	return s.dealReview
+}
+
+// AutonomousOptimizer gets autonomous optimizer storage
+func (s *Store) AutonomousOptimizer() *AutonomousOptimizerStore {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.autonomousOptimizer == nil {
+		s.autonomousOptimizer = NewAutonomousOptimizerStore(s.gdb)
+	}
+	return s.autonomousOptimizer
 }
 
 // AICharge gets AI charge storage
