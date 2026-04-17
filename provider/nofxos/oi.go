@@ -122,7 +122,10 @@ func (c *Client) GetOITopSymbols() ([]string, error) {
 
 	var symbols []string
 	for _, pos := range positions {
-		symbol := NormalizeSymbol(pos.Symbol)
+		symbol, ok := NormalizeValidSymbol(pos.Symbol)
+		if !ok {
+			continue
+		}
 		symbols = append(symbols, symbol)
 	}
 
@@ -147,7 +150,10 @@ func (c *Client) GetOILowSymbols() ([]string, error) {
 
 	var symbols []string
 	for _, pos := range positions {
-		symbol := NormalizeSymbol(pos.Symbol)
+		symbol, ok := NormalizeValidSymbol(pos.Symbol)
+		if !ok {
+			continue
+		}
 		symbols = append(symbols, symbol)
 	}
 

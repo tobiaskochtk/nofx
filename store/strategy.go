@@ -255,8 +255,12 @@ type PromptSectionsConfig struct {
 	TradingFrequency string `json:"trading_frequency,omitempty"`
 	// entry standards
 	EntryStandards string `json:"entry_standards,omitempty"`
+	// market-context interpretation guidance
+	MarketContext string `json:"market_context,omitempty"`
 	// decision process
 	DecisionProcess string `json:"decision_process,omitempty"`
+	// decision-format and rubric guidance before the hard output contract
+	DecisionFormat string `json:"decision_format,omitempty"`
 }
 
 // CoinSourceConfig coin source configuration
@@ -636,11 +640,17 @@ func GetDefaultStrategyConfig(lang string) StrategyConfig {
 			EntryStandards: `# 🎯 入场标准（严格）
 
 只在多个信号共振时入场。自由使用任何有效的分析方法，避免单一指标、信号矛盾、横盘震荡、或平仓后立即重新开仓等低质量行为。`,
+			MarketContext: `# 🌐 市场上下文解读
+
+先判断 BTC 基准环境、候选币相对强弱、成交与流动性可执行性，再决定是否值得交易。若市场上下文、执行质量、盘口支持或跨周期结构不一致，应优先等待而不是勉强给出交易。`,
 			DecisionProcess: `# 📋 决策流程
 
 1. 检查持仓 → 是否止盈/止损
 2. 扫描候选币种 + 多时间框架 → 是否存在强信号
 3. 先写思维链，再输出结构化JSON`,
+			DecisionFormat: `# 🧾 决策输出与评分准则
+
+输出要简洁、可执行、机器可解析。只在真实存在边际优势时给出 ENTER；没有优势时返回空 decisions。confidence 要与证据强度一致，reason_codes 只写短标签，不写长句。`,
 		}
 	} else {
 		config.PromptSections = PromptSectionsConfig{
@@ -656,11 +666,17 @@ If you find yourself trading every cycle → standards are too low; if closing p
 			EntryStandards: `# 🎯 Entry Standards (Strict)
 
 Only enter positions when multiple signals resonate. Freely use any effective analysis methods, avoid low-quality behaviors such as single indicators, contradictory signals, sideways oscillation, or immediately restarting after closing positions.`,
+			MarketContext: `# 🌐 Market Context Interpretation
+
+Judge the BTC benchmark regime, candidate relative strength, and execution feasibility before deciding a trade is worth taking. If market context, execution quality, venue support, or multi-timeframe structure do not line up, prefer waiting over forcing a trade.`,
 			DecisionProcess: `# 📋 Decision Process
 
 1. Check positions → whether to take profit/stop loss
 2. Scan candidate coins + multi-timeframe → whether strong signals exist
 3. Write chain of thought first, then output structured JSON`,
+			DecisionFormat: `# 🧾 Decision Format And Rubric
+
+Keep the output compact, actionable, and machine-parseable. Only issue ENTER when there is real edge; otherwise return an empty decisions array. Confidence must match evidence strength, and reason_codes should stay short machine-friendly tags rather than prose.`,
 		}
 	}
 
@@ -947,7 +963,9 @@ func (c *StrategyConfig) EstimateTokens() TokenEstimate {
 	baseChars += len(c.PromptSections.RoleDefinition)
 	baseChars += len(c.PromptSections.TradingFrequency)
 	baseChars += len(c.PromptSections.EntryStandards)
+	baseChars += len(c.PromptSections.MarketContext)
 	baseChars += len(c.PromptSections.DecisionProcess)
+	baseChars += len(c.PromptSections.DecisionFormat)
 	baseChars += len(c.CustomPrompt)
 
 	if c.Language == "zh" {

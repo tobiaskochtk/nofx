@@ -80,8 +80,12 @@ func (c *Client) fetchAI500() ([]CoinData, error) {
 		return []CoinData{}, nil
 	}
 
+	coins, dropped := filterValidAI500Coins(response.Data.Coins)
+	if dropped > 0 {
+		log.Printf("⚠️  Dropped %d invalid AI500 symbol(s) from feed response", dropped)
+	}
+
 	// Set IsAvailable flag
-	coins := response.Data.Coins
 	for i := range coins {
 		coins[i].IsAvailable = true
 	}
@@ -109,10 +113,14 @@ func logAI500BucketMix(coins []CoinData) {
 			}
 		}
 		if idx < 6 {
+			normalizedSymbol, ok := NormalizeValidSymbol(coin.Pair)
+			if !ok {
+				continue
+			}
 			if bucket == "" {
 				bucket = "unclassified"
 			}
-			sample = append(sample, fmt.Sprintf("%s[%s:%.2f]", NormalizeSymbol(coin.Pair), bucket, coin.Score))
+			sample = append(sample, fmt.Sprintf("%s[%s:%.2f]", normalizedSymbol, bucket, coin.Score))
 		}
 	}
 	if !hasBucketMetadata {
@@ -183,7 +191,10 @@ func (c *Client) GetTopRatedCoins(limit int) ([]string, error) {
 
 	var symbols []string
 	for _, coin := range coins {
-		symbol := NormalizeSymbol(coin.Pair)
+		symbol, ok := NormalizeValidSymbol(coin.Pair)
+		if !ok {
+			continue
+		}
 		symbols = append(symbols, symbol)
 	}
 
@@ -200,7 +211,10 @@ func (c *Client) GetAvailableCoins() ([]string, error) {
 	var symbols []string
 	for _, coin := range coins {
 		if coin.IsAvailable {
-			symbol := NormalizeSymbol(coin.Pair)
+			symbol, ok := NormalizeValidSymbol(coin.Pair)
+			if !ok {
+				continue
+			}
 			symbols = append(symbols, symbol)
 		}
 	}
@@ -217,4 +231,37 @@ func NormalizeSymbol(symbol string) string {
 		symbol = symbol + "USDT"
 	}
 	return symbol
+}
+
+func NormalizeValidSymbol(symbol string) (string, bool) {
+	normalized := NormalizeSymbol(symbol)
+	base := strings.TrimSuffix(normalized, "USDT")
+	if len(base) < 2 || len(base) > 24 {
+		return "", false
+	}
+	for _, r := range base {
+		if r >= 'A' && r <= 'Z' {
+			continue
+		}
+		if r >= '0' && r <= '9' {
+			continue
+		}
+		return "", false
+	}
+	return normalized, true
+}
+
+func filterValidAI500Coins(coins []CoinData) ([]CoinData, int) {
+	filtered := make([]CoinData, 0, len(coins))
+	dropped := 0
+	for _, coin := range coins {
+		normalized, ok := NormalizeValidSymbol(coin.Pair)
+		if !ok {
+			dropped++
+			continue
+		}
+		coin.Pair = normalized
+		filtered = append(filtered, coin)
+	}
+	return filtered, dropped
 }

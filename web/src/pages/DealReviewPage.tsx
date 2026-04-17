@@ -932,6 +932,8 @@ export function DealReviewPage({
   const [openSpreadBucket, setOpenSpreadBucket] = useState('')
   const [openSlippageBucket, setOpenSlippageBucket] = useState('')
   const [dateRange, setDateRange] = useState('30d')
+  const [customFromTime, setCustomFromTime] = useState<number | null>(null)
+  const [customToTime, setCustomToTime] = useState<number | null>(null)
   const [minPnl, setMinPnl] = useState('')
   const [maxPnl, setMaxPnl] = useState('')
   const [reviewQueueMode, setReviewQueueMode] = useState('')
@@ -1006,6 +1008,10 @@ export function DealReviewPage({
   const [compareLoading, setCompareLoading] = useState(false)
   const compareDetailRef = useRef<HTMLDivElement | null>(null)
   const versionDetailRef = useRef<HTMLDivElement | null>(null)
+  const previousTraderIdRef = useRef<string | undefined>(undefined)
+  const detailRequestKeyRef = useRef(0)
+  const comparePeerRequestKeyRef = useRef(0)
+  const traderChanged = previousTraderIdRef.current !== selectedTraderId
 
   const selectedTrader = traders?.find(
     (item) => item.trader_id === selectedTraderId
@@ -1026,6 +1032,12 @@ export function DealReviewPage({
   const displayedItems = buildReviewQueueItems(items, reviewQueueMode)
   const selectedCaseIndex = displayedItems.findIndex(
     (item) => item.case.id === selectedCaseId
+  )
+  const selectedCaseVisible = Boolean(
+    selectedCaseId && items.some((item) => item.case.id === selectedCaseId)
+  )
+  const comparePeerCaseVisible = Boolean(
+    comparePeerCaseId && items.some((item) => item.case.id === comparePeerCaseId)
   )
 
   const buildFilterPayload = (
@@ -1051,9 +1063,16 @@ export function DealReviewPage({
       open_slippage_bucket: openSlippageBucket || undefined,
       limit: 150,
     }
-    const rangeStart = getDateRangeStart(dateRange)
-    if (rangeStart !== undefined) {
-      filter.from_time = rangeStart
+    if (customFromTime) {
+      filter.from_time = customFromTime
+    } else {
+      const rangeStart = getDateRangeStart(dateRange)
+      if (rangeStart !== undefined) {
+        filter.from_time = rangeStart
+      }
+    }
+    if (customToTime) {
+      filter.to_time = customToTime
     }
     if (minPnl.trim()) {
       const parsed = Number(minPnl.trim())
@@ -1099,6 +1118,8 @@ export function DealReviewPage({
     const hasStatus = Boolean(
       filters && Object.prototype.hasOwnProperty.call(filters, 'status')
     )
+    setCustomFromTime(null)
+    setCustomToTime(null)
     setSymbol(normalizePresetText(filters?.symbol).toUpperCase())
     setSide(normalizePresetText(filters?.side))
     setStatus(hasStatus ? normalizePresetText(filters?.status) : 'CLOSED')
@@ -1127,6 +1148,8 @@ export function DealReviewPage({
     note?: string
   ) => {
     setSelectedPresetId('')
+    setCustomFromTime(null)
+    setCustomToTime(null)
     if (typeof patch.symbol === 'string') {
       setSymbol(patch.symbol)
     }
@@ -1184,14 +1207,16 @@ export function DealReviewPage({
     }
   }
 
-  const loadCases = async () => {
+  const loadCases = async (
+    overrides?: Record<string, string | number | undefined>
+  ) => {
     if (!selectedTraderId) return
     setLoading(true)
     setError(null)
     try {
       const result = await api.getDealReviewCases(
         selectedTraderId,
-        buildFilterPayload()
+        buildFilterPayload(overrides)
       )
       setItems(result.items)
       setSummary(result.summary)
@@ -1216,22 +1241,28 @@ export function DealReviewPage({
   }
 
   const loadDetail = async () => {
-    if (!selectedTraderId || !selectedCaseId) {
+    if (!selectedTraderId || !selectedCaseId || !selectedCaseVisible) {
       setDetail(null)
       return
     }
+    const requestKey = detailRequestKeyRef.current + 1
+    detailRequestKeyRef.current = requestKey
     setDetailLoading(true)
     try {
       const result = await api.getDealReviewCaseDetail(
         selectedTraderId,
         selectedCaseId
       )
+      if (detailRequestKeyRef.current !== requestKey) return
       setDetail(result)
     } catch (err) {
+      if (detailRequestKeyRef.current !== requestKey) return
+      setDetail(null)
       notify.error(
         err instanceof Error ? err.message : 'Failed to fetch deal detail'
       )
     } finally {
+      if (detailRequestKeyRef.current !== requestKey) return
       setDetailLoading(false)
     }
   }
@@ -1317,12 +1348,14 @@ export function DealReviewPage({
     }
   }
 
-  const loadAnomalies = async () => {
+  const loadAnomalies = async (
+    overrides?: Record<string, string | number | undefined>
+  ) => {
     if (!selectedTraderId) return
     try {
       const result = await api.getDealReviewAnomalies(
         selectedTraderId,
-        buildFilterPayload()
+        buildFilterPayload(overrides)
       )
       setAnomalies(result)
     } catch (err) {
@@ -1349,7 +1382,7 @@ export function DealReviewPage({
     try {
       const result = await api.getDealReviewStrategyVersions(
         selectedTraderId,
-        8
+        20
       )
       setVersions(result)
     } catch (err) {
@@ -1432,6 +1465,24 @@ export function DealReviewPage({
   }, [])
 
   useEffect(() => {
+    previousTraderIdRef.current = selectedTraderId
+  }, [selectedTraderId])
+
+  useEffect(() => {
+    if (!traderChanged) {
+      return
+    }
+    setItems([])
+    setSummary(null)
+    setSelectedCaseId(null)
+    setDetail(null)
+    setComparePeerCaseId('')
+    setComparePeerDetail(null)
+    setReviewQueueMode('')
+    setError(null)
+  }, [selectedTraderId, traderChanged])
+
+  useEffect(() => {
     void loadCases()
   }, [
     selectedTraderId,
@@ -1442,13 +1493,18 @@ export function DealReviewPage({
     openSelectionBucket,
     closeReason,
     dateRange,
+    customFromTime,
+    customToTime,
     minPnl,
     maxPnl,
   ])
 
   useEffect(() => {
+    if (traderChanged) {
+      return
+    }
     void loadDetail()
-  }, [selectedTraderId, selectedCaseId])
+  }, [selectedTraderId, selectedCaseId, selectedCaseVisible, traderChanged])
 
   useEffect(() => {
     if (!selectedCaseId || !comparePeerCaseId) return
@@ -1459,7 +1515,7 @@ export function DealReviewPage({
   }, [selectedCaseId, comparePeerCaseId])
 
   useEffect(() => {
-    if (!selectedTraderId || !comparePeerCaseId) {
+    if (!selectedTraderId || !comparePeerCaseId || !comparePeerCaseVisible) {
       setComparePeerDetail(null)
       setComparePeerLoading(false)
       return
@@ -1471,20 +1527,26 @@ export function DealReviewPage({
     }
 
     let active = true
+    const requestKey = comparePeerRequestKeyRef.current + 1
+    comparePeerRequestKeyRef.current = requestKey
     setComparePeerLoading(true)
     void (async () => {
       try {
         if (detail?.case.id === comparePeerCaseId) {
-          if (active) setComparePeerDetail(detail)
+          if (active && comparePeerRequestKeyRef.current === requestKey) {
+            setComparePeerDetail(detail)
+          }
           return
         }
         const result = await api.getDealReviewCaseDetail(
           selectedTraderId,
           comparePeerCaseId
         )
-        if (active) setComparePeerDetail(result)
+        if (active && comparePeerRequestKeyRef.current === requestKey) {
+          setComparePeerDetail(result)
+        }
       } catch (err) {
-        if (active) {
+        if (active && comparePeerRequestKeyRef.current === requestKey) {
           setComparePeerDetail(null)
           notify.error(
             err instanceof Error
@@ -1493,14 +1555,22 @@ export function DealReviewPage({
           )
         }
       } finally {
-        if (active) setComparePeerLoading(false)
+        if (active && comparePeerRequestKeyRef.current === requestKey) {
+          setComparePeerLoading(false)
+        }
       }
     })()
 
     return () => {
       active = false
     }
-  }, [selectedTraderId, selectedCaseId, comparePeerCaseId, detail])
+  }, [
+    selectedTraderId,
+    selectedCaseId,
+    comparePeerCaseId,
+    comparePeerCaseVisible,
+    detail,
+  ])
 
   useEffect(() => {
     void loadScanHistory()
@@ -1517,9 +1587,33 @@ export function DealReviewPage({
     openSelectionBucket,
     closeReason,
     dateRange,
+    customFromTime,
+    customToTime,
     minPnl,
     maxPnl,
   ])
+
+  useEffect(() => {
+    if (!selectedTraderId || window.location.pathname !== '/deal-review') {
+      return
+    }
+    const params = new URLSearchParams(window.location.search)
+    const fromTime = Number(params.get('optimizer_from_time') || '')
+    const toTime = Number(params.get('optimizer_to_time') || '')
+    const versionId = params.get('optimizer_version_id')?.trim() || ''
+
+    if (Number.isFinite(fromTime) && fromTime > 0) {
+      setSelectedPresetId('')
+      setCustomFromTime(fromTime)
+    }
+    if (Number.isFinite(toTime) && toTime > 0) {
+      setSelectedPresetId('')
+      setCustomToTime(toTime)
+    }
+    if (versionId) {
+      setSelectedVersionId(versionId)
+    }
+  }, [selectedTraderId])
 
   useEffect(() => {
     if (!selectedTraderId) {
@@ -1698,6 +1792,10 @@ export function DealReviewPage({
     successMessage: string = 'AI scan completed'
   ) => {
     if (!selectedTraderId) return
+    if (items.length === 0) {
+      notify.error('No deals matched the selected filters')
+      return
+    }
     setRunningScan(true)
     try {
       const result = await api.runDealReviewAIScan(selectedTraderId, {
@@ -2136,7 +2234,18 @@ export function DealReviewPage({
     }
   }
 
-  const openVersionDetail = (versionId: string) => {
+  const openVersionDetail = (
+    versionId: string,
+    detailOverride?: DealReviewStrategyVersionDetail | null
+  ) => {
+    if (detailOverride) {
+      setVersions((current) => {
+        const withoutCurrent = current.filter(
+          (item) => item.version.id !== detailOverride.version.id
+        )
+        return [detailOverride, ...withoutCurrent]
+      })
+    }
     setSelectedVersionId(versionId)
     window.setTimeout(() => {
       versionDetailRef.current?.scrollIntoView({
@@ -2350,7 +2459,11 @@ export function DealReviewPage({
                 <div className="h-11 rounded-lg border border-white/10 px-3 flex items-center bg-black/20">
                   <NofxSelect
                     value={dateRange}
-                    onChange={setDateRange}
+                    onChange={(value) => {
+                      setDateRange(value)
+                      setCustomFromTime(null)
+                      setCustomToTime(null)
+                    }}
                     options={rangeOptions}
                   />
                 </div>
@@ -2480,6 +2593,27 @@ export function DealReviewPage({
                   />
                 </div>
               </div>
+              {(customFromTime || customToTime) && (
+                <div className="mt-3 rounded-lg border border-sky-400/20 bg-sky-500/10 p-3 flex flex-col md:flex-row md:items-center md:justify-between gap-3">
+                  <div className="text-sm text-sky-200">
+                    Exact optimizer review window active:{' '}
+                    {customFromTime
+                      ? new Date(customFromTime).toLocaleString()
+                      : '-'}{' '}
+                    to{' '}
+                    {customToTime ? new Date(customToTime).toLocaleString() : '-'}
+                  </div>
+                  <button
+                    onClick={() => {
+                      setCustomFromTime(null)
+                      setCustomToTime(null)
+                    }}
+                    className="h-9 px-3 rounded-lg border border-sky-300/30 text-sky-200"
+                  >
+                    Clear exact window
+                  </button>
+                </div>
+              )}
             </div>
 
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
@@ -4204,7 +4338,11 @@ export function DealReviewPage({
                                         item.scanNote
                                       )
                                     }
-                                    disabled={!selectedTraderId || runningScan}
+                                    disabled={
+                                      !selectedTraderId ||
+                                      runningScan ||
+                                      items.length === 0
+                                    }
                                     className="px-2.5 py-1 rounded-lg border border-nofx-gold/30 bg-nofx-gold/10 text-nofx-gold text-xs font-medium disabled:opacity-50"
                                   >
                                     Scan this cohort
@@ -4244,7 +4382,9 @@ export function DealReviewPage({
                   </button>
                   <button
                     onClick={() => void runAIScan()}
-                    disabled={!selectedTraderId || runningScan}
+                    disabled={
+                      !selectedTraderId || runningScan || items.length === 0
+                    }
                     className="h-10 px-4 rounded-lg bg-nofx-gold text-black font-semibold disabled:opacity-50"
                   >
                     {runningScan ? 'Running…' : 'Run scan'}

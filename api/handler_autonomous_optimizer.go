@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -16,17 +17,21 @@ import (
 )
 
 type autonomousOptimizerConfigRequest struct {
-	Enabled              *bool  `json:"enabled"`
-	ReviewIntervalHours  *int   `json:"review_interval_hours"`
-	AutoApplyConfigPatch *bool  `json:"auto_apply_config_patch"`
-	AutoApplyPromptPatch *bool  `json:"auto_apply_prompt_patch"`
-	AutoRollbackEnabled  *bool  `json:"auto_rollback_enabled"`
-	SelfPauseEnabled     *bool  `json:"self_pause_enabled"`
-	Status               string `json:"status"`
-	PrimaryModelConfigID string `json:"primary_model_config_id"`
-	PrimaryModelName     string `json:"primary_model_name"`
-	CriticModelConfigID  string `json:"critic_model_config_id"`
-	CriticModelName      string `json:"critic_model_name"`
+	Enabled                    *bool   `json:"enabled"`
+	ReviewIntervalHours        *int    `json:"review_interval_hours"`
+	AutoApplyCooldownHours     *int    `json:"auto_apply_cooldown_hours"`
+	MaxConsecutiveAutoApplies  *int    `json:"max_consecutive_auto_applies"`
+	AutoApplyConfigPatch       *bool   `json:"auto_apply_config_patch"`
+	AutoApplyPromptPatch       *bool   `json:"auto_apply_prompt_patch"`
+	AutoRollbackEnabled        *bool   `json:"auto_rollback_enabled"`
+	SelfPauseEnabled           *bool   `json:"self_pause_enabled"`
+	Status                     string  `json:"status"`
+	PrimaryModelConfigID       string  `json:"primary_model_config_id"`
+	PrimaryModelName           string  `json:"primary_model_name"`
+	CriticModelConfigID        string  `json:"critic_model_config_id"`
+	CriticModelName            string  `json:"critic_model_name"`
+	ProposalPromptInstructions *string `json:"proposal_prompt_instructions"`
+	CriticPromptInstructions   *string `json:"critic_prompt_instructions"`
 }
 
 type autonomousOptimizerBootstrapRequest struct {
@@ -47,6 +52,53 @@ type autonomousOptimizerBacklogRequest struct {
 	Status             string   `json:"status"`
 	AIGenerated        *bool    `json:"ai_generated"`
 	UserEdited         *bool    `json:"user_edited"`
+}
+
+type autonomousOptimizerRunDetailResponse struct {
+	Run                  *store.AutonomousOptimizerRun          `json:"run"`
+	ConfigPatch          map[string]any                         `json:"config_patch,omitempty"`
+	PromptPatch          map[string]any                         `json:"prompt_patch,omitempty"`
+	Validation           map[string]any                         `json:"validation,omitempty"`
+	Metadata             map[string]any                         `json:"metadata,omitempty"`
+	GateReasons          []string                               `json:"gate_reasons,omitempty"`
+	StrategyDifferences  []dealReviewJSONDiffEntry              `json:"strategy_differences,omitempty"`
+	TraderDifferences    []dealReviewJSONDiffEntry              `json:"trader_differences,omitempty"`
+	OptimizerDifferences []dealReviewJSONDiffEntry              `json:"optimizer_differences,omitempty"`
+	ReviewWindowStartMS  int64                                  `json:"review_window_start_ms,omitempty"`
+	ReviewWindowEndMS    int64                                  `json:"review_window_end_ms,omitempty"`
+	LinkedStrategy       *store.DealReviewStrategyVersionDetail `json:"linked_strategy_version,omitempty"`
+}
+
+type autonomousOptimizerModelOutcomeEntry struct {
+	ModelKey             string         `json:"model_key"`
+	ModelLabel           string         `json:"model_label"`
+	PrimaryModelConfigID string         `json:"primary_model_config_id,omitempty"`
+	PrimaryModelName     string         `json:"primary_model_name,omitempty"`
+	PrimaryModelLabel    string         `json:"primary_model_label,omitempty"`
+	CriticModelConfigID  string         `json:"critic_model_config_id,omitempty"`
+	CriticModelName      string         `json:"critic_model_name,omitempty"`
+	CriticModelLabel     string         `json:"critic_model_label,omitempty"`
+	TotalRuns            int            `json:"total_runs"`
+	ApplyCount           int            `json:"apply_count"`
+	ApplyRate            float64        `json:"apply_rate"`
+	MonitoringCount      int            `json:"monitoring_count"`
+	KeptCount            int            `json:"kept_count"`
+	KeptWinCount         int            `json:"kept_win_count"`
+	KeptWinRate          float64        `json:"kept_win_rate"`
+	RollbackCount        int            `json:"rollback_count"`
+	RollbackRate         float64        `json:"rollback_rate"`
+	BacklogItemCount     int            `json:"backlog_item_count"`
+	UsefulBacklogCount   int            `json:"useful_backlog_count"`
+	DoneBacklogCount     int            `json:"done_backlog_count"`
+	RejectedBacklogCount int            `json:"rejected_backlog_count"`
+	BacklogUsefulness    float64        `json:"backlog_usefulness"`
+	OutcomeScore         float64        `json:"outcome_score"`
+	LastUsedAt           time.Time      `json:"last_used_at"`
+	StatusCounts         map[string]int `json:"status_counts,omitempty"`
+}
+
+type autonomousOptimizerModelOutcomeResponse struct {
+	Items []autonomousOptimizerModelOutcomeEntry `json:"items"`
 }
 
 func (s *Server) handleTraderAutonomousOptimizerConfig(c *gin.Context) {
@@ -105,6 +157,12 @@ func (s *Server) handleTraderAutonomousOptimizerUpdateConfig(c *gin.Context) {
 			cfg.NextRunAt = time.Now().UTC().Add(time.Duration(cfg.ReviewIntervalHours) * time.Hour)
 		}
 	}
+	if req.AutoApplyCooldownHours != nil {
+		cfg.AutoApplyCooldownHours = *req.AutoApplyCooldownHours
+	}
+	if req.MaxConsecutiveAutoApplies != nil {
+		cfg.MaxConsecutiveAutoApplies = *req.MaxConsecutiveAutoApplies
+	}
 	if req.AutoApplyConfigPatch != nil {
 		cfg.AutoApplyConfigPatch = *req.AutoApplyConfigPatch
 	}
@@ -142,6 +200,12 @@ func (s *Server) handleTraderAutonomousOptimizerUpdateConfig(c *gin.Context) {
 	if strings.TrimSpace(req.CriticModelName) != "" {
 		cfg.CriticModelName = strings.TrimSpace(req.CriticModelName)
 	}
+	if req.ProposalPromptInstructions != nil {
+		cfg.ProposalPromptInstructions = strings.TrimSpace(*req.ProposalPromptInstructions)
+	}
+	if req.CriticPromptInstructions != nil {
+		cfg.CriticPromptInstructions = strings.TrimSpace(*req.CriticPromptInstructions)
+	}
 	if err := s.ensureAutonomousOptimizerModelDefaults(userID, cfg); err != nil {
 		SafeInternalError(c, "Failed to resolve autonomous optimizer model defaults", err)
 		return
@@ -172,6 +236,91 @@ func (s *Server) handleTraderAutonomousOptimizerRuns(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"items": items})
+}
+
+func (s *Server) handleTraderAutonomousOptimizerModelOutcomes(c *gin.Context) {
+	userID := c.GetString("user_id")
+	traderID := c.Param("id")
+	if _, err := s.store.Trader().Get(userID, traderID); err != nil {
+		SafeNotFound(c, "Trader")
+		return
+	}
+
+	runs, err := s.store.AutonomousOptimizer().ListRuns(userID, traderID, 250)
+	if err != nil {
+		SafeInternalError(c, "Failed to fetch autonomous optimizer runs", err)
+		return
+	}
+	backlog, err := s.store.AutonomousOptimizer().ListBacklog(userID, traderID, 200)
+	if err != nil {
+		SafeInternalError(c, "Failed to fetch autonomous optimizer backlog", err)
+		return
+	}
+	models, err := s.store.AIModel().List(userID)
+	if err != nil {
+		SafeInternalError(c, "Failed to fetch AI model configs for optimizer outcomes", err)
+		return
+	}
+
+	c.JSON(http.StatusOK, autonomousOptimizerModelOutcomeResponse{
+		Items: buildAutonomousOptimizerModelOutcomes(runs, backlog, models),
+	})
+}
+
+func (s *Server) handleTraderAutonomousOptimizerRunDetail(c *gin.Context) {
+	userID := c.GetString("user_id")
+	traderID := c.Param("id")
+	runID := c.Param("runId")
+	if _, err := s.store.Trader().Get(userID, traderID); err != nil {
+		SafeNotFound(c, "Trader")
+		return
+	}
+
+	run, err := s.store.AutonomousOptimizer().GetRun(userID, traderID, runID)
+	if err != nil {
+		SafeNotFound(c, "Autonomous optimizer run")
+		return
+	}
+
+	detail := &autonomousOptimizerRunDetailResponse{
+		Run:         run,
+		ConfigPatch: parseAutonomousOptimizerJSONObject(run.ConfigPatchJSON),
+		PromptPatch: parseAutonomousOptimizerJSONObject(run.PromptPatchJSON),
+		Validation:  parseAutonomousOptimizerJSONObject(run.ValidationJSON),
+		Metadata:    parseAutonomousOptimizerJSONObject(run.MetadataJSON),
+	}
+	detail.GateReasons = autonomousOptimizerStringSliceFromValue(detail.Validation["gate_reasons"])
+	if start, ok := autonomousOptimizerInt64FromValue(detail.Metadata["window_start_ms"]); ok {
+		detail.ReviewWindowStartMS = start
+	}
+	if end, ok := autonomousOptimizerInt64FromValue(detail.Metadata["window_end_ms"]); ok {
+		detail.ReviewWindowEndMS = end
+	}
+
+	applyData := parseAutonomousOptimizerNestedObject(detail.Metadata, "apply")
+	previousStrategy := parseAutonomousOptimizerNestedObject(applyData, "previous_strategy_config")
+	nextStrategy := parseAutonomousOptimizerNestedObject(applyData, "next_strategy_config")
+	if len(previousStrategy) > 0 || len(nextStrategy) > 0 {
+		detail.StrategyDifferences = diffJSONMaps(previousStrategy, nextStrategy)
+	}
+	previousTrader := parseAutonomousOptimizerNestedObject(applyData, "previous_trader")
+	nextTrader := parseAutonomousOptimizerNestedObject(applyData, "next_trader")
+	if len(previousTrader) > 0 || len(nextTrader) > 0 {
+		detail.TraderDifferences = diffJSONMaps(previousTrader, nextTrader)
+	}
+	previousOptimizer := parseAutonomousOptimizerNestedObject(applyData, "previous_optimizer_config")
+	nextOptimizer := parseAutonomousOptimizerNestedObject(applyData, "next_optimizer_config")
+	if len(previousOptimizer) > 0 || len(nextOptimizer) > 0 {
+		detail.OptimizerDifferences = diffJSONMaps(previousOptimizer, nextOptimizer)
+	}
+
+	if strings.TrimSpace(run.AppliedStrategyVersionID) != "" {
+		if version, versionErr := s.store.DealReview().GetStrategyVersion(userID, traderID, run.AppliedStrategyVersionID); versionErr == nil {
+			detail.LinkedStrategy = version
+		}
+	}
+
+	c.JSON(http.StatusOK, detail)
 }
 
 func (s *Server) handleTraderAutonomousOptimizerBacklog(c *gin.Context) {
@@ -213,40 +362,54 @@ func (s *Server) handleTraderAutonomousOptimizerSaveBacklog(c *gin.Context) {
 		return
 	}
 
-	item := &store.AutonomousOptimizerBacklogItem{
-		ID:             strings.TrimSpace(req.ID),
-		UserID:         userID,
-		TraderID:       traderID,
-		Title:          strings.TrimSpace(req.Title),
-		Category:       strings.TrimSpace(req.Category),
-		Description:    strings.TrimSpace(req.Description),
-		ExpectedImpact: strings.TrimSpace(req.ExpectedImpact),
-		Status:         strings.TrimSpace(req.Status),
-	}
-	if req.Confidence != nil {
-		item.Confidence = *req.Confidence
-	}
-	if req.ImplementationCost != nil {
-		item.ImplementationCost = *req.ImplementationCost
-	}
-	if req.Urgency != nil {
-		item.Urgency = *req.Urgency
-	}
-	if req.RecurrenceCount != nil && *req.RecurrenceCount > 0 {
-		item.RecurrenceCount = *req.RecurrenceCount
-	}
-	if req.CompositeScore != nil {
-		item.CompositeScore = *req.CompositeScore
-	}
-	if req.AIGenerated != nil {
-		item.AIGenerated = *req.AIGenerated
+	var item *store.AutonomousOptimizerBacklogItem
+	itemID := strings.TrimSpace(req.ID)
+	if itemID != "" {
+		existing, err := s.store.AutonomousOptimizer().GetBacklogItem(userID, traderID, itemID)
+		if err != nil {
+			if err == gorm.ErrRecordNotFound {
+				SafeNotFound(c, "Autonomous optimizer backlog item")
+				return
+			}
+			SafeInternalError(c, "Failed to load autonomous optimizer backlog item", err)
+			return
+		}
+		item = mergeAutonomousOptimizerBacklogUpdate(existing, req)
 	} else {
-		item.AIGenerated = true
+		item = &store.AutonomousOptimizerBacklogItem{
+			ID:             itemID,
+			UserID:         userID,
+			TraderID:       traderID,
+			Title:          strings.TrimSpace(req.Title),
+			Category:       strings.TrimSpace(req.Category),
+			Description:    strings.TrimSpace(req.Description),
+			ExpectedImpact: strings.TrimSpace(req.ExpectedImpact),
+			Status:         strings.TrimSpace(req.Status),
+			AIGenerated:    true,
+			UserEdited:     false,
+		}
+		if req.Confidence != nil {
+			item.Confidence = *req.Confidence
+		}
+		if req.ImplementationCost != nil {
+			item.ImplementationCost = *req.ImplementationCost
+		}
+		if req.Urgency != nil {
+			item.Urgency = *req.Urgency
+		}
+		if req.RecurrenceCount != nil && *req.RecurrenceCount > 0 {
+			item.RecurrenceCount = *req.RecurrenceCount
+		}
+		if req.AIGenerated != nil {
+			item.AIGenerated = *req.AIGenerated
+		}
+		if req.UserEdited != nil {
+			item.UserEdited = *req.UserEdited
+		}
 	}
-	if req.UserEdited != nil {
-		item.UserEdited = *req.UserEdited
-	}
-	if item.CompositeScore == 0 {
+	if req.CompositeScore != nil && *req.CompositeScore > 0 {
+		item.CompositeScore = *req.CompositeScore
+	} else {
 		item.CompositeScore = buildAutonomousOptimizerBacklogScore(item)
 	}
 	if err := s.store.AutonomousOptimizer().SaveBacklogItem(item); err != nil {
@@ -254,6 +417,371 @@ func (s *Server) handleTraderAutonomousOptimizerSaveBacklog(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, item)
+}
+
+func mergeAutonomousOptimizerBacklogUpdate(existing *store.AutonomousOptimizerBacklogItem, req autonomousOptimizerBacklogRequest) *store.AutonomousOptimizerBacklogItem {
+	if existing == nil {
+		return nil
+	}
+	updated := *existing
+	updated.Title = strings.TrimSpace(req.Title)
+	updated.Category = strings.TrimSpace(req.Category)
+	updated.Description = strings.TrimSpace(req.Description)
+	updated.ExpectedImpact = strings.TrimSpace(req.ExpectedImpact)
+	if strings.TrimSpace(req.Status) != "" {
+		updated.Status = strings.TrimSpace(req.Status)
+	}
+	if req.Confidence != nil {
+		updated.Confidence = *req.Confidence
+	}
+	if req.ImplementationCost != nil {
+		updated.ImplementationCost = *req.ImplementationCost
+	}
+	if req.Urgency != nil {
+		updated.Urgency = *req.Urgency
+	}
+	if req.RecurrenceCount != nil && *req.RecurrenceCount > 0 {
+		updated.RecurrenceCount = *req.RecurrenceCount
+	}
+	updated.UserEdited = true
+	if req.UserEdited != nil {
+		updated.UserEdited = *req.UserEdited || updated.UserEdited
+	}
+	return &updated
+}
+
+type autonomousOptimizerModelOutcomeAgg struct {
+	Entry            autonomousOptimizerModelOutcomeEntry
+	BacklogWeightSum float64
+}
+
+type autonomousOptimizerApplyResolution struct {
+	Status         string
+	ObservedNetPnL float64
+	Timestamp      time.Time
+}
+
+func buildAutonomousOptimizerModelOutcomes(runs []*store.AutonomousOptimizerRun, backlog []*store.AutonomousOptimizerBacklogItem, models []*store.AIModel) []autonomousOptimizerModelOutcomeEntry {
+	if len(runs) == 0 && len(backlog) == 0 {
+		return []autonomousOptimizerModelOutcomeEntry{}
+	}
+
+	modelLabels := make(map[string]string, len(models))
+	for _, item := range models {
+		if item == nil {
+			continue
+		}
+		label := strings.TrimSpace(item.CustomModelName)
+		if label == "" {
+			label = strings.TrimSpace(item.Name)
+		}
+		if label == "" {
+			label = strings.TrimSpace(item.Provider)
+		}
+		if label == "" {
+			label = item.ID
+		}
+		modelLabels[item.ID] = label
+	}
+
+	aggs := map[string]*autonomousOptimizerModelOutcomeAgg{}
+	runModelKey := map[string]string{}
+	runIndex := map[string]*store.AutonomousOptimizerRun{}
+	rootResolutions := map[string]autonomousOptimizerApplyResolution{}
+
+	for _, run := range runs {
+		if run == nil {
+			continue
+		}
+		runIndex[run.ID] = run
+		modelKey, label, primaryLabel, criticLabel := buildAutonomousOptimizerModelKey(run, modelLabels)
+		runModelKey[run.ID] = modelKey
+		entry := ensureAutonomousOptimizerModelOutcomeAgg(aggs, modelKey, run, label, primaryLabel, criticLabel)
+		entry.Entry.TotalRuns++
+		if entry.Entry.StatusCounts == nil {
+			entry.Entry.StatusCounts = map[string]int{}
+		}
+		entry.Entry.StatusCounts[run.Status]++
+		if run.Status == store.AutonomousOptimizerStatusAutoApplied {
+			entry.Entry.ApplyCount++
+		}
+		if ts := autonomousOptimizerRunEventTime(run); ts.After(entry.Entry.LastUsedAt) {
+			entry.Entry.LastUsedAt = ts
+		}
+	}
+
+	for _, run := range runs {
+		if run == nil {
+			continue
+		}
+		rootID := autonomousOptimizerRootApplyID(run)
+		if strings.TrimSpace(rootID) == "" || rootID == run.ID {
+			continue
+		}
+		switch run.Status {
+		case store.AutonomousOptimizerStatusMonitoring, store.AutonomousOptimizerStatusKept, store.AutonomousOptimizerStatusRolledBack:
+		default:
+			continue
+		}
+		current := rootResolutions[rootID]
+		next := autonomousOptimizerApplyResolution{
+			Status:         run.Status,
+			ObservedNetPnL: autonomousOptimizerObservedNetPnL(run),
+			Timestamp:      autonomousOptimizerRunEventTime(run),
+		}
+		if current.Timestamp.IsZero() || next.Timestamp.After(current.Timestamp) {
+			rootResolutions[rootID] = next
+		}
+	}
+
+	for _, run := range runs {
+		if run == nil || run.Status != store.AutonomousOptimizerStatusAutoApplied {
+			continue
+		}
+		modelKey := runModelKey[run.ID]
+		entry := ensureAutonomousOptimizerModelOutcomeAgg(aggs, modelKey, run, "", "", "")
+		resolution, ok := rootResolutions[run.ID]
+		if !ok {
+			continue
+		}
+		switch resolution.Status {
+		case store.AutonomousOptimizerStatusMonitoring:
+			entry.Entry.MonitoringCount++
+		case store.AutonomousOptimizerStatusKept:
+			entry.Entry.KeptCount++
+			if resolution.ObservedNetPnL > 0 {
+				entry.Entry.KeptWinCount++
+			}
+		case store.AutonomousOptimizerStatusRolledBack:
+			entry.Entry.RollbackCount++
+		}
+	}
+
+	for _, item := range backlog {
+		if item == nil {
+			continue
+		}
+		runID := strings.TrimSpace(item.RunID)
+		if runID == "" {
+			continue
+		}
+		modelKey := runModelKey[runID]
+		if modelKey == "" {
+			if run := runIndex[runID]; run != nil {
+				modelKey, _, _, _ = buildAutonomousOptimizerModelKey(run, modelLabels)
+			}
+		}
+		if modelKey == "" {
+			continue
+		}
+		run := runIndex[runID]
+		entry := ensureAutonomousOptimizerModelOutcomeAgg(aggs, modelKey, run, "", "", "")
+		entry.Entry.BacklogItemCount++
+		switch item.Status {
+		case store.AutonomousOptimizerBacklogStatusConfirmed, store.AutonomousOptimizerBacklogStatusPlanned, store.AutonomousOptimizerBacklogStatusInProgress, store.AutonomousOptimizerBacklogStatusDone:
+			entry.Entry.UsefulBacklogCount++
+		}
+		switch item.Status {
+		case store.AutonomousOptimizerBacklogStatusDone:
+			entry.Entry.DoneBacklogCount++
+		case store.AutonomousOptimizerBacklogStatusRejected:
+			entry.Entry.RejectedBacklogCount++
+		}
+		entry.BacklogWeightSum += autonomousOptimizerBacklogUsefulnessWeight(item.Status)
+	}
+
+	items := make([]autonomousOptimizerModelOutcomeEntry, 0, len(aggs))
+	for _, agg := range aggs {
+		if agg == nil {
+			continue
+		}
+		if agg.Entry.TotalRuns > 0 {
+			agg.Entry.ApplyRate = (float64(agg.Entry.ApplyCount) / float64(agg.Entry.TotalRuns)) * 100
+		}
+		if agg.Entry.ApplyCount > 0 {
+			agg.Entry.RollbackRate = (float64(agg.Entry.RollbackCount) / float64(agg.Entry.ApplyCount)) * 100
+		}
+		if agg.Entry.KeptCount > 0 {
+			agg.Entry.KeptWinRate = (float64(agg.Entry.KeptWinCount) / float64(agg.Entry.KeptCount)) * 100
+		}
+		if agg.Entry.BacklogItemCount > 0 {
+			agg.Entry.BacklogUsefulness = (agg.BacklogWeightSum / float64(agg.Entry.BacklogItemCount)) * 100
+		}
+		agg.Entry.OutcomeScore = autonomousOptimizerOutcomeScore(agg.Entry)
+		items = append(items, agg.Entry)
+	}
+
+	sort.Slice(items, func(i, j int) bool {
+		if items[i].OutcomeScore != items[j].OutcomeScore {
+			return items[i].OutcomeScore > items[j].OutcomeScore
+		}
+		if !items[i].LastUsedAt.Equal(items[j].LastUsedAt) {
+			return items[i].LastUsedAt.After(items[j].LastUsedAt)
+		}
+		return items[i].ModelLabel < items[j].ModelLabel
+	})
+
+	return items
+}
+
+func ensureAutonomousOptimizerModelOutcomeAgg(index map[string]*autonomousOptimizerModelOutcomeAgg, modelKey string, run *store.AutonomousOptimizerRun, label, primaryLabel, criticLabel string) *autonomousOptimizerModelOutcomeAgg {
+	if existing := index[modelKey]; existing != nil {
+		if strings.TrimSpace(label) != "" {
+			existing.Entry.ModelLabel = label
+		}
+		if strings.TrimSpace(primaryLabel) != "" {
+			existing.Entry.PrimaryModelLabel = primaryLabel
+		}
+		if strings.TrimSpace(criticLabel) != "" {
+			existing.Entry.CriticModelLabel = criticLabel
+		}
+		return existing
+	}
+	entry := autonomousOptimizerModelOutcomeEntry{
+		ModelKey:     modelKey,
+		ModelLabel:   label,
+		StatusCounts: map[string]int{},
+	}
+	if run != nil {
+		entry.PrimaryModelConfigID = run.PrimaryModelConfigID
+		entry.PrimaryModelName = run.PrimaryModelName
+		entry.CriticModelConfigID = run.CriticModelConfigID
+		entry.CriticModelName = run.CriticModelName
+	}
+	if strings.TrimSpace(primaryLabel) != "" {
+		entry.PrimaryModelLabel = primaryLabel
+	}
+	if strings.TrimSpace(criticLabel) != "" {
+		entry.CriticModelLabel = criticLabel
+	}
+	agg := &autonomousOptimizerModelOutcomeAgg{Entry: entry}
+	index[modelKey] = agg
+	return agg
+}
+
+func buildAutonomousOptimizerModelKey(run *store.AutonomousOptimizerRun, modelLabels map[string]string) (string, string, string, string) {
+	if run == nil {
+		return "unknown", "Unknown / Unknown", "Unknown", "Unknown"
+	}
+	primaryLabel := autonomousOptimizerModelDisplayLabel(run.PrimaryModelConfigID, run.PrimaryModelName, modelLabels)
+	criticLabel := autonomousOptimizerModelDisplayLabel(run.CriticModelConfigID, run.CriticModelName, modelLabels)
+	key := strings.Join([]string{
+		strings.TrimSpace(run.PrimaryModelConfigID),
+		strings.TrimSpace(run.PrimaryModelName),
+		strings.TrimSpace(run.CriticModelConfigID),
+		strings.TrimSpace(run.CriticModelName),
+	}, "|")
+	if strings.Trim(strings.ReplaceAll(key, "|", ""), " ") == "" {
+		key = strings.ToLower(strings.TrimSpace(primaryLabel + "|" + criticLabel))
+	}
+	return key, fmt.Sprintf("%s / %s", primaryLabel, criticLabel), primaryLabel, criticLabel
+}
+
+func autonomousOptimizerModelDisplayLabel(configID, modelName string, modelLabels map[string]string) string {
+	accountLabel := strings.TrimSpace(modelLabels[configID])
+	modelName = strings.TrimSpace(modelName)
+	switch {
+	case accountLabel != "" && modelName != "":
+		return fmt.Sprintf("%s (%s)", accountLabel, modelName)
+	case accountLabel != "":
+		return accountLabel
+	case modelName != "":
+		return modelName
+	case strings.TrimSpace(configID) != "":
+		return configID
+	default:
+		return "Unknown"
+	}
+}
+
+func autonomousOptimizerRootApplyID(run *store.AutonomousOptimizerRun) string {
+	if run == nil {
+		return ""
+	}
+	if run.Status == store.AutonomousOptimizerStatusAutoApplied {
+		return run.ID
+	}
+	metadata := parseAutonomousOptimizerJSONObject(run.MetadataJSON)
+	for _, key := range []string{"monitoring_source_run_id", "rollback_source_run_id", "monitoring_root_run_id"} {
+		if value := autonomousOptimizerString(metadata[key]); value != "" {
+			return value
+		}
+	}
+	rollbackAnalysis := parseAutonomousOptimizerNestedObject(metadata, "rollback_analysis")
+	if value := autonomousOptimizerString(rollbackAnalysis["monitoring_root_run_id"]); value != "" {
+		return value
+	}
+	return ""
+}
+
+func autonomousOptimizerObservedNetPnL(run *store.AutonomousOptimizerRun) float64 {
+	if run == nil {
+		return 0
+	}
+	metadata := parseAutonomousOptimizerJSONObject(run.MetadataJSON)
+	rollbackAnalysis := parseAutonomousOptimizerNestedObject(metadata, "rollback_analysis")
+	if value, ok := autonomousOptimizerFloat64FromValue(rollbackAnalysis["observed_net_pnl"]); ok {
+		return value
+	}
+	monitoringChain := parseAutonomousOptimizerNestedObject(metadata, "monitoring_chain")
+	if value, ok := autonomousOptimizerFloat64FromValue(monitoringChain["total_net_pnl"]); ok {
+		return value
+	}
+	return 0
+}
+
+func autonomousOptimizerRunEventTime(run *store.AutonomousOptimizerRun) time.Time {
+	if run == nil {
+		return time.Time{}
+	}
+	for _, candidate := range []time.Time{run.CompletedAt.UTC(), run.UpdatedAt.UTC(), run.StartedAt.UTC(), run.CreatedAt.UTC()} {
+		if !candidate.IsZero() {
+			return candidate
+		}
+	}
+	return time.Time{}
+}
+
+func autonomousOptimizerBacklogUsefulnessWeight(status string) float64 {
+	switch strings.ToLower(strings.TrimSpace(status)) {
+	case store.AutonomousOptimizerBacklogStatusDone:
+		return 1.0
+	case store.AutonomousOptimizerBacklogStatusInProgress:
+		return 0.85
+	case store.AutonomousOptimizerBacklogStatusPlanned:
+		return 0.7
+	case store.AutonomousOptimizerBacklogStatusConfirmed:
+		return 0.55
+	case store.AutonomousOptimizerBacklogStatusNew:
+		return 0.2
+	case store.AutonomousOptimizerBacklogStatusRejected:
+		return 0
+	default:
+		return 0.15
+	}
+}
+
+func autonomousOptimizerOutcomeScore(entry autonomousOptimizerModelOutcomeEntry) float64 {
+	applySignal := entry.ApplyRate
+	if entry.ApplyCount == 0 && entry.TotalRuns > 0 {
+		applySignal = 25
+	}
+	safetySignal := 100 - entry.RollbackRate
+	if entry.ApplyCount == 0 {
+		safetySignal = 50
+	}
+	keptSignal := entry.KeptWinRate
+	if entry.KeptCount == 0 {
+		keptSignal = 40
+	}
+	score := (applySignal * 0.20) + (safetySignal * 0.35) + (keptSignal * 0.30) + (entry.BacklogUsefulness * 0.15)
+	if score < 0 {
+		return 0
+	}
+	if score > 100 {
+		return 100
+	}
+	return score
 }
 
 func (s *Server) handleTraderAutonomousOptimizerBootstrap(c *gin.Context) {
@@ -515,4 +1043,65 @@ func buildAutonomousOptimizerBacklogScore(item *store.AutonomousOptimizerBacklog
 		return 0
 	}
 	return score
+}
+
+func autonomousOptimizerStringSliceFromValue(value any) []string {
+	switch typed := value.(type) {
+	case []string:
+		out := make([]string, 0, len(typed))
+		for _, item := range typed {
+			if trimmed := strings.TrimSpace(item); trimmed != "" {
+				out = append(out, trimmed)
+			}
+		}
+		return out
+	case []any:
+		out := make([]string, 0, len(typed))
+		for _, item := range typed {
+			if str, ok := item.(string); ok {
+				if trimmed := strings.TrimSpace(str); trimmed != "" {
+					out = append(out, trimmed)
+				}
+			}
+		}
+		return out
+	default:
+		return nil
+	}
+}
+
+func autonomousOptimizerInt64FromValue(value any) (int64, bool) {
+	switch typed := value.(type) {
+	case int64:
+		return typed, true
+	case int:
+		return int64(typed), true
+	case float64:
+		return int64(typed), true
+	case float32:
+		return int64(typed), true
+	case json.Number:
+		parsed, err := typed.Int64()
+		return parsed, err == nil
+	default:
+		return 0, false
+	}
+}
+
+func autonomousOptimizerFloat64FromValue(value any) (float64, bool) {
+	switch typed := value.(type) {
+	case float64:
+		return typed, true
+	case float32:
+		return float64(typed), true
+	case int:
+		return float64(typed), true
+	case int64:
+		return float64(typed), true
+	case json.Number:
+		parsed, err := typed.Float64()
+		return parsed, err == nil
+	default:
+		return 0, false
+	}
 }

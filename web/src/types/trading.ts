@@ -973,3 +973,120 @@ export interface GridRiskInfo {
   breakout_level: string
   breakout_direction: string
 }
+
+export interface AutonomousOptimizerConfig {
+  id: string
+  user_id: string
+  trader_id: string
+  enabled: boolean
+  status: string
+  review_interval_hours: number
+  auto_apply_cooldown_hours: number
+  max_consecutive_auto_applies: number
+  auto_apply_config_patch: boolean
+  auto_apply_prompt_patch: boolean
+  auto_rollback_enabled: boolean
+  self_pause_enabled: boolean
+  proposal_prompt_instructions: string
+  critic_prompt_instructions: string
+  primary_model_config_id: string
+  primary_model_name: string
+  critic_model_config_id: string
+  critic_model_name: string
+  seed_source_trader_id: string
+  seed_source_strategy_id: string
+  baseline_strategy_id: string
+  current_seed_strategy_id: string
+  last_run_id: string
+  last_run_at: string
+  next_run_at: string
+  seeded_at: string
+  created_at: string
+  updated_at: string
+}
+
+export interface AutonomousOptimizerRun {
+  id: string
+  user_id: string
+  trader_id: string
+  config_id: string
+  trigger: string
+  status: string
+  summary: string
+  primary_model_config_id: string
+  primary_model_name: string
+  critic_model_config_id: string
+  critic_model_name: string
+  source_trader_id: string
+  source_strategy_id: string
+  applied_strategy_version_id: string
+  started_at: string
+  completed_at: string
+  created_at: string
+  updated_at: string
+}
+
+export interface AutonomousOptimizerModelOutcome {
+  model_key: string
+  model_label: string
+  primary_model_config_id: string
+  primary_model_name: string
+  primary_model_label: string
+  critic_model_config_id: string
+  critic_model_name: string
+  critic_model_label: string
+  total_runs: number
+  apply_count: number
+  apply_rate: number
+  monitoring_count: number
+  kept_count: number
+  kept_win_count: number
+  kept_win_rate: number
+  rollback_count: number
+  rollback_rate: number
+  backlog_item_count: number
+  useful_backlog_count: number
+  done_backlog_count: number
+  rejected_backlog_count: number
+  backlog_usefulness: number
+  outcome_score: number
+  last_used_at: string
+  status_counts?: Record<string, number>
+}
+
+export interface AutonomousOptimizerRunDetail {
+  run: AutonomousOptimizerRun
+  config_patch?: Record<string, unknown>
+  prompt_patch?: Record<string, unknown>
+  validation?: Record<string, unknown>
+  metadata?: Record<string, unknown>
+  gate_reasons?: string[]
+  strategy_differences?: DealReviewJSONDiffEntry[]
+  trader_differences?: DealReviewJSONDiffEntry[]
+  optimizer_differences?: DealReviewJSONDiffEntry[]
+  review_window_start_ms?: number
+  review_window_end_ms?: number
+  linked_strategy_version?: DealReviewStrategyVersionDetail
+}
+
+export interface AutonomousOptimizerBacklogItem {
+  id: string
+  user_id: string
+  trader_id: string
+  run_id: string
+  title: string
+  category: string
+  description: string
+  expected_impact: string
+  confidence: number
+  implementation_cost: number
+  urgency: number
+  recurrence_count: number
+  composite_score: number
+  status: string
+  ai_generated: boolean
+  user_edited: boolean
+  merged_finding_count: number
+  created_at: string
+  updated_at: string
+}

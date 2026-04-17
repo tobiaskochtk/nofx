@@ -120,8 +120,13 @@ func aggregateUniverseSnapshots(snapshots []rawUniverseSnapshot, limit int) []ra
 	}
 
 	grouped := make(map[string]*aggregate)
+	invalidSymbols := make([]string, 0, 4)
 	for _, snapshot := range snapshots {
-		symbol := normalizePair(snapshot.Symbol)
+		symbol, ok := normalizeValidPair(snapshot.Symbol)
+		if !ok {
+			invalidSymbols = appendUniqueSymbol(invalidSymbols, snapshot.Symbol)
+			continue
+		}
 		item := grouped[symbol]
 		if item == nil {
 			item = &aggregate{
@@ -154,6 +159,9 @@ func aggregateUniverseSnapshots(snapshots []rawUniverseSnapshot, limit int) []ra
 		item.Volume24H += snapshot.Volume24H
 		item.VolumeBase24H += snapshot.VolumeBase24H
 		item.IsAvailable = item.IsAvailable || snapshot.IsAvailable
+	}
+	if len(invalidSymbols) > 0 {
+		log.Printf("[selfhosted-ai500] aggregate skipped %d invalid symbol(s): %s", len(invalidSymbols), strings.Join(invalidSymbols, ", "))
 	}
 
 	result := make([]rawUniverseSnapshot, 0, len(grouped))

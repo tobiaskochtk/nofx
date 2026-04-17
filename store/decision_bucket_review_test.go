@@ -58,9 +58,12 @@ func TestDecisionStoreGetBucketReview(t *testing.T) {
 			CandidateMetaVer: DecisionCandidateMetadataVersion,
 			CandidateDetails: []CandidateDetail{
 				{Symbol: "XRPUSDT", SelectionBucket: "exploration", Sources: []string{"ai500"}},
+				{Symbol: "DOGEUSDT", SelectionBucket: "primary", Sources: []string{"ai500"}},
 			},
 			Decisions: []DecisionAction{
-				{Action: "open_short", Symbol: "XRPUSDT"},
+				{Action: "open_short", Symbol: "XRPUSDT", Confidence: 84},
+				{Action: "hold", Symbol: "DOGEUSDT", Confidence: 62, Reasoning: "confidence below threshold"},
+				{Action: "wait", Confidence: 41, Reasoning: "spread too wide"},
 			},
 			Success: true,
 		},
@@ -91,11 +94,23 @@ func TestDecisionStoreGetBucketReview(t *testing.T) {
 	if review.LegacyRecordCount != 1 {
 		t.Fatalf("LegacyRecordCount = %d, want 1", review.LegacyRecordCount)
 	}
-	if review.TotalCandidates != 3 {
-		t.Fatalf("TotalCandidates = %d, want 3", review.TotalCandidates)
+	if review.TotalCandidates != 4 {
+		t.Fatalf("TotalCandidates = %d, want 4", review.TotalCandidates)
 	}
 	if review.TotalOpenDecisions != 2 {
 		t.Fatalf("TotalOpenDecisions = %d, want 2", review.TotalOpenDecisions)
+	}
+	if review.HoldDecisionCount != 1 {
+		t.Fatalf("HoldDecisionCount = %d, want 1", review.HoldDecisionCount)
+	}
+	if review.WaitDecisionCount != 1 {
+		t.Fatalf("WaitDecisionCount = %d, want 1", review.WaitDecisionCount)
+	}
+	if review.DecisionConversionRate != 50 {
+		t.Fatalf("DecisionConversionRate = %.1f, want 50.0", review.DecisionConversionRate)
+	}
+	if review.AvgDecisionConfidence < 62 || review.AvgDecisionConfidence > 63 {
+		t.Fatalf("AvgDecisionConfidence = %.1f, want about 62.3", review.AvgDecisionConfidence)
 	}
 	if review.CyclesWithCandidates != 2 {
 		t.Fatalf("CyclesWithCandidates = %d, want 2", review.CyclesWithCandidates)
@@ -111,5 +126,20 @@ func TestDecisionStoreGetBucketReview(t *testing.T) {
 	}
 	if review.CoverageHours < 2.9 || review.CoverageHours > 3.2 {
 		t.Fatalf("CoverageHours = %.1f, want about 3h", review.CoverageHours)
+	}
+	if len(review.RejectReasons) < 2 {
+		t.Fatalf("RejectReasons = %#v, want at least two entries", review.RejectReasons)
+	}
+	if review.RejectReasons[0].Reason != "execution_quality" && review.RejectReasons[0].Reason != "low_confidence" {
+		t.Fatalf("RejectReasons[0] = %#v, want normalized reject reason", review.RejectReasons[0])
+	}
+	if len(review.ConfidenceBands) != 3 {
+		t.Fatalf("ConfidenceBands = %#v, want three populated bands", review.ConfidenceBands)
+	}
+	if len(review.OpportunitySessions) == 0 || review.OpportunitySessions[0].Session == "" {
+		t.Fatalf("OpportunitySessions = %#v, want populated session summaries", review.OpportunitySessions)
+	}
+	if len(review.OpportunitySymbols) < 2 {
+		t.Fatalf("OpportunitySymbols = %#v, want populated symbol summaries", review.OpportunitySymbols)
 	}
 }

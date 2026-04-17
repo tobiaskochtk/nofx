@@ -7,6 +7,11 @@ import type {
   CompetitionData,
   PositionHistoryResponse,
   TraderAI500BucketReview,
+  AutonomousOptimizerBacklogItem,
+  AutonomousOptimizerConfig,
+  AutonomousOptimizerModelOutcome,
+  AutonomousOptimizerRunDetail,
+  AutonomousOptimizerRun,
   DealReviewListResponse,
   DealReviewCaseDetail,
   DealReviewAIScanDetail,
@@ -154,6 +159,99 @@ export const dataApi = {
       { silent }
     )
     if (!result.success) throw new Error('Failed to fetch AI500 bucket review')
+    return result.data!
+  },
+
+  async getTraderAutonomousOptimizerConfig(
+    traderId: string
+  ): Promise<AutonomousOptimizerConfig> {
+    const result = await httpClient.get<AutonomousOptimizerConfig>(
+      `${API_BASE}/traders/${traderId}/autonomous-optimizer/config`
+    )
+    if (!result.success) {
+      throw new Error('Failed to fetch autonomous optimizer config')
+    }
+    return result.data!
+  },
+
+  async updateTraderAutonomousOptimizerConfig(
+    traderId: string,
+    body: Record<string, unknown>
+  ): Promise<AutonomousOptimizerConfig> {
+    const result = await httpClient.put<AutonomousOptimizerConfig>(
+      `${API_BASE}/traders/${traderId}/autonomous-optimizer/config`,
+      body
+    )
+    if (!result.success) {
+      throw new Error('Failed to save autonomous optimizer config')
+    }
+    return result.data!
+  },
+
+  async getTraderAutonomousOptimizerRuns(
+    traderId: string,
+    limit: number = 20
+  ): Promise<AutonomousOptimizerRun[]> {
+    const result = await httpClient.get<{ items: AutonomousOptimizerRun[] }>(
+      `${API_BASE}/traders/${traderId}/autonomous-optimizer/runs?limit=${limit}`
+    )
+    if (!result.success) {
+      throw new Error('Failed to fetch autonomous optimizer runs')
+    }
+    return result.data?.items || []
+  },
+
+  async getTraderAutonomousOptimizerModelOutcomes(
+    traderId: string
+  ): Promise<AutonomousOptimizerModelOutcome[]> {
+    const result = await httpClient.get<{ items: AutonomousOptimizerModelOutcome[] }>(
+      `${API_BASE}/traders/${traderId}/autonomous-optimizer/model-outcomes`
+    )
+    if (!result.success) {
+      throw new Error('Failed to fetch autonomous optimizer model outcomes')
+    }
+    return result.data?.items || []
+  },
+
+  async getTraderAutonomousOptimizerRunDetail(
+    traderId: string,
+    runId: string
+  ): Promise<AutonomousOptimizerRunDetail> {
+    const result = await httpClient.get<AutonomousOptimizerRunDetail>(
+      `${API_BASE}/traders/${traderId}/autonomous-optimizer/runs/${runId}`
+    )
+    if (!result.success) {
+      throw new Error('Failed to fetch autonomous optimizer run detail')
+    }
+    return result.data!
+  },
+
+  async getTraderAutonomousOptimizerBacklog(
+    traderId: string,
+    limit: number = 50
+  ): Promise<AutonomousOptimizerBacklogItem[]> {
+    const result = await httpClient.get<{
+      items: AutonomousOptimizerBacklogItem[]
+    }>(
+      `${API_BASE}/traders/${traderId}/autonomous-optimizer/backlog?limit=${limit}`
+    )
+    if (!result.success) {
+      throw new Error('Failed to fetch autonomous optimizer backlog')
+    }
+    return result.data?.items || []
+  },
+
+  async saveTraderAutonomousOptimizerBacklog(
+    traderId: string,
+    body: Record<string, unknown>
+  ): Promise<AutonomousOptimizerBacklogItem> {
+    const result = await httpClient.post<AutonomousOptimizerBacklogItem>(
+      `${API_BASE}/traders/${traderId}/autonomous-optimizer/backlog`,
+      body
+    )
+    if (!result.success) {
+      throw new Error('Failed to save autonomous optimizer backlog item')
+    }
     return result.data!
   },
 
@@ -321,7 +419,9 @@ export const dataApi = {
       `${API_BASE}/traders/${traderId}/deal-review/ai-scans`,
       body
     )
-    if (!result.success) throw new Error('Failed to run deal review AI scan')
+    if (!result.success) {
+      throw new Error(result.message || 'Failed to run deal review AI scan')
+    }
     return result.data!
   },
 
@@ -344,7 +444,9 @@ export const dataApi = {
     const result = await httpClient.post<DealReviewAIScanDetail>(
       `${API_BASE}/traders/${traderId}/deal-review/ai-scans/${scanId}/validate`
     )
-    if (!result.success) throw new Error('Failed to validate AI scan')
+    if (!result.success) {
+      throw new Error(result.message || 'Failed to validate AI scan')
+    }
     return result.data!
   },
 

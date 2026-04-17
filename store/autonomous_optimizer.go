@@ -10,18 +10,20 @@ import (
 )
 
 const (
-	AutonomousOptimizerStatusScheduled            = "scheduled"
-	AutonomousOptimizerStatusRunning              = "running"
-	AutonomousOptimizerStatusInsufficientEvidence = "insufficient_evidence"
-	AutonomousOptimizerStatusNoChange             = "no_change"
-	AutonomousOptimizerStatusBacklogOnly          = "backlog_only"
-	AutonomousOptimizerStatusBlockedByGate        = "blocked_by_gate"
-	AutonomousOptimizerStatusAutoApplied          = "auto_applied"
-	AutonomousOptimizerStatusMonitoring           = "monitoring"
-	AutonomousOptimizerStatusRolledBack           = "rolled_back"
-	AutonomousOptimizerStatusKept                 = "kept"
-	AutonomousOptimizerStatusPaused               = "paused"
-	AutonomousOptimizerStatusFailed               = "failed"
+	AutonomousOptimizerStatusScheduled             = "scheduled"
+	AutonomousOptimizerStatusRunning               = "running"
+	AutonomousOptimizerStatusInsufficientEvidence  = "insufficient_evidence"
+	AutonomousOptimizerStatusNoChange              = "no_change"
+	AutonomousOptimizerStatusBacklogOnly           = "backlog_only"
+	AutonomousOptimizerStatusBlockedByGate         = "blocked_by_gate"
+	AutonomousOptimizerStatusDeferredForNextWindow = "deferred_for_next_window"
+	AutonomousOptimizerStatusAutoApplied           = "auto_applied"
+	AutonomousOptimizerStatusMonitoring            = "monitoring"
+	AutonomousOptimizerStatusRollbackPending       = "rollback_pending"
+	AutonomousOptimizerStatusRolledBack            = "rolled_back"
+	AutonomousOptimizerStatusKept                  = "kept"
+	AutonomousOptimizerStatusPaused                = "paused"
+	AutonomousOptimizerStatusFailed                = "failed"
 
 	AutonomousOptimizerRunTriggerManual    = "manual"
 	AutonomousOptimizerRunTriggerBootstrap = "bootstrap"
@@ -34,8 +36,10 @@ const (
 	AutonomousOptimizerBacklogStatusDone       = "done"
 	AutonomousOptimizerBacklogStatusRejected   = "rejected"
 
-	AutonomousOptimizerDefaultReviewIntervalHours = 12
-	AutonomousOptimizerDefaultModelName           = "gpt-5.4"
+	AutonomousOptimizerDefaultReviewIntervalHours   = 12
+	AutonomousOptimizerDefaultCooldownHours         = 12
+	AutonomousOptimizerDefaultMaxConsecutiveApplies = 2
+	AutonomousOptimizerDefaultModelName             = "gpt-5.4"
 )
 
 type AutonomousOptimizerStore struct {
@@ -43,32 +47,36 @@ type AutonomousOptimizerStore struct {
 }
 
 type AutonomousOptimizerConfig struct {
-	ID                    string    `gorm:"primaryKey" json:"id"`
-	UserID                string    `gorm:"column:user_id;not null;index:idx_autonomous_optimizer_configs_user_trader,unique" json:"user_id"`
-	TraderID              string    `gorm:"column:trader_id;not null;index:idx_autonomous_optimizer_configs_user_trader,unique" json:"trader_id"`
-	Enabled               bool      `gorm:"column:enabled;default:false" json:"enabled"`
-	Status                string    `gorm:"column:status;default:paused;index:idx_autonomous_optimizer_configs_status" json:"status"`
-	ReviewIntervalHours   int       `gorm:"column:review_interval_hours;default:12" json:"review_interval_hours"`
-	AutoApplyConfigPatch  bool      `gorm:"column:auto_apply_config_patch;default:true" json:"auto_apply_config_patch"`
-	AutoApplyPromptPatch  bool      `gorm:"column:auto_apply_prompt_patch;default:true" json:"auto_apply_prompt_patch"`
-	AutoRollbackEnabled   bool      `gorm:"column:auto_rollback_enabled;default:true" json:"auto_rollback_enabled"`
-	SelfPauseEnabled      bool      `gorm:"column:self_pause_enabled;default:true" json:"self_pause_enabled"`
-	PrimaryModelConfigID  string    `gorm:"column:primary_model_config_id;default:''" json:"primary_model_config_id"`
-	PrimaryModelName      string    `gorm:"column:primary_model_name;default:'gpt-5.4'" json:"primary_model_name"`
-	CriticModelConfigID   string    `gorm:"column:critic_model_config_id;default:''" json:"critic_model_config_id"`
-	CriticModelName       string    `gorm:"column:critic_model_name;default:'gpt-5.4'" json:"critic_model_name"`
-	SeedSourceTraderID    string    `gorm:"column:seed_source_trader_id;default:''" json:"seed_source_trader_id"`
-	SeedSourceStrategyID  string    `gorm:"column:seed_source_strategy_id;default:''" json:"seed_source_strategy_id"`
-	BaselineStrategyID    string    `gorm:"column:baseline_strategy_id;default:''" json:"baseline_strategy_id"`
-	BaselineStrategyJSON  string    `gorm:"column:baseline_strategy_json;type:text;default:'{}'" json:"-"`
-	BaselineTraderJSON    string    `gorm:"column:baseline_trader_json;type:text;default:'{}'" json:"-"`
-	CurrentSeedStrategyID string    `gorm:"column:current_seed_strategy_id;default:''" json:"current_seed_strategy_id"`
-	LastRunID             string    `gorm:"column:last_run_id;default:''" json:"last_run_id"`
-	LastRunAt             time.Time `gorm:"column:last_run_at" json:"last_run_at"`
-	NextRunAt             time.Time `gorm:"column:next_run_at;index:idx_autonomous_optimizer_configs_next_run" json:"next_run_at"`
-	SeededAt              time.Time `gorm:"column:seeded_at" json:"seeded_at"`
-	CreatedAt             time.Time `json:"created_at"`
-	UpdatedAt             time.Time `json:"updated_at"`
+	ID                         string    `gorm:"primaryKey" json:"id"`
+	UserID                     string    `gorm:"column:user_id;not null;index:idx_autonomous_optimizer_configs_user_trader,unique" json:"user_id"`
+	TraderID                   string    `gorm:"column:trader_id;not null;index:idx_autonomous_optimizer_configs_user_trader,unique" json:"trader_id"`
+	Enabled                    bool      `gorm:"column:enabled;default:false" json:"enabled"`
+	Status                     string    `gorm:"column:status;default:paused;index:idx_autonomous_optimizer_configs_status" json:"status"`
+	ReviewIntervalHours        int       `gorm:"column:review_interval_hours;default:12" json:"review_interval_hours"`
+	AutoApplyCooldownHours     int       `gorm:"column:auto_apply_cooldown_hours;default:12" json:"auto_apply_cooldown_hours"`
+	MaxConsecutiveAutoApplies  int       `gorm:"column:max_consecutive_auto_applies;default:2" json:"max_consecutive_auto_applies"`
+	AutoApplyConfigPatch       bool      `gorm:"column:auto_apply_config_patch;default:true" json:"auto_apply_config_patch"`
+	AutoApplyPromptPatch       bool      `gorm:"column:auto_apply_prompt_patch;default:true" json:"auto_apply_prompt_patch"`
+	AutoRollbackEnabled        bool      `gorm:"column:auto_rollback_enabled;default:true" json:"auto_rollback_enabled"`
+	SelfPauseEnabled           bool      `gorm:"column:self_pause_enabled;default:true" json:"self_pause_enabled"`
+	ProposalPromptInstructions string    `gorm:"column:proposal_prompt_instructions;type:text;default:''" json:"proposal_prompt_instructions"`
+	CriticPromptInstructions   string    `gorm:"column:critic_prompt_instructions;type:text;default:''" json:"critic_prompt_instructions"`
+	PrimaryModelConfigID       string    `gorm:"column:primary_model_config_id;default:''" json:"primary_model_config_id"`
+	PrimaryModelName           string    `gorm:"column:primary_model_name;default:'gpt-5.4'" json:"primary_model_name"`
+	CriticModelConfigID        string    `gorm:"column:critic_model_config_id;default:''" json:"critic_model_config_id"`
+	CriticModelName            string    `gorm:"column:critic_model_name;default:'gpt-5.4'" json:"critic_model_name"`
+	SeedSourceTraderID         string    `gorm:"column:seed_source_trader_id;default:''" json:"seed_source_trader_id"`
+	SeedSourceStrategyID       string    `gorm:"column:seed_source_strategy_id;default:''" json:"seed_source_strategy_id"`
+	BaselineStrategyID         string    `gorm:"column:baseline_strategy_id;default:''" json:"baseline_strategy_id"`
+	BaselineStrategyJSON       string    `gorm:"column:baseline_strategy_json;type:text;default:'{}'" json:"-"`
+	BaselineTraderJSON         string    `gorm:"column:baseline_trader_json;type:text;default:'{}'" json:"-"`
+	CurrentSeedStrategyID      string    `gorm:"column:current_seed_strategy_id;default:''" json:"current_seed_strategy_id"`
+	LastRunID                  string    `gorm:"column:last_run_id;default:''" json:"last_run_id"`
+	LastRunAt                  time.Time `gorm:"column:last_run_at" json:"last_run_at"`
+	NextRunAt                  time.Time `gorm:"column:next_run_at;index:idx_autonomous_optimizer_configs_next_run" json:"next_run_at"`
+	SeededAt                   time.Time `gorm:"column:seeded_at" json:"seeded_at"`
+	CreatedAt                  time.Time `json:"created_at"`
+	UpdatedAt                  time.Time `json:"updated_at"`
 }
 
 func (AutonomousOptimizerConfig) TableName() string { return "autonomous_optimizer_configs" }
@@ -145,6 +153,20 @@ func (s *AutonomousOptimizerStore) GetConfig(userID, traderID string) (*Autonomo
 func (s *AutonomousOptimizerStore) GetOrCreateConfig(userID, traderID string) (*AutonomousOptimizerConfig, error) {
 	cfg, err := s.GetConfig(userID, traderID)
 	if err == nil {
+		normalizedCooldown := normalizeAutonomousOptimizerCooldownHours(cfg.AutoApplyCooldownHours)
+		normalizedMaxApplies := normalizeAutonomousOptimizerMaxConsecutiveApplies(cfg.MaxConsecutiveAutoApplies)
+		expectedNextRunAt := cfg.NextRunAt
+		if cfg.Enabled && cfg.Status != AutonomousOptimizerStatusPaused && expectedNextRunAt.IsZero() {
+			expectedNextRunAt = nextAutonomousOptimizerRunAt(cfg.LastRunAt, cfg.ReviewIntervalHours)
+		}
+		if cfg.AutoApplyCooldownHours != normalizedCooldown || cfg.MaxConsecutiveAutoApplies != normalizedMaxApplies || !cfg.NextRunAt.Equal(expectedNextRunAt) {
+			cfg.AutoApplyCooldownHours = normalizedCooldown
+			cfg.MaxConsecutiveAutoApplies = normalizedMaxApplies
+			cfg.NextRunAt = expectedNextRunAt
+			if saveErr := s.db.Save(cfg).Error; saveErr != nil {
+				return nil, saveErr
+			}
+		}
 		return cfg, nil
 	}
 	if err != gorm.ErrRecordNotFound {
@@ -152,21 +174,23 @@ func (s *AutonomousOptimizerStore) GetOrCreateConfig(userID, traderID string) (*
 	}
 	now := time.Now().UTC()
 	cfg = &AutonomousOptimizerConfig{
-		ID:                   uuid.NewString(),
-		UserID:               userID,
-		TraderID:             traderID,
-		Enabled:              false,
-		Status:               AutonomousOptimizerStatusPaused,
-		ReviewIntervalHours:  AutonomousOptimizerDefaultReviewIntervalHours,
-		AutoApplyConfigPatch: true,
-		AutoApplyPromptPatch: true,
-		AutoRollbackEnabled:  true,
-		SelfPauseEnabled:     true,
-		PrimaryModelName:     AutonomousOptimizerDefaultModelName,
-		CriticModelName:      AutonomousOptimizerDefaultModelName,
-		BaselineStrategyJSON: "{}",
-		BaselineTraderJSON:   "{}",
-		NextRunAt:            now.Add(AutonomousOptimizerDefaultReviewIntervalHours * time.Hour),
+		ID:                        uuid.NewString(),
+		UserID:                    userID,
+		TraderID:                  traderID,
+		Enabled:                   false,
+		Status:                    AutonomousOptimizerStatusPaused,
+		ReviewIntervalHours:       AutonomousOptimizerDefaultReviewIntervalHours,
+		AutoApplyCooldownHours:    AutonomousOptimizerDefaultCooldownHours,
+		MaxConsecutiveAutoApplies: AutonomousOptimizerDefaultMaxConsecutiveApplies,
+		AutoApplyConfigPatch:      true,
+		AutoApplyPromptPatch:      true,
+		AutoRollbackEnabled:       true,
+		SelfPauseEnabled:          true,
+		PrimaryModelName:          AutonomousOptimizerDefaultModelName,
+		CriticModelName:           AutonomousOptimizerDefaultModelName,
+		BaselineStrategyJSON:      "{}",
+		BaselineTraderJSON:        "{}",
+		NextRunAt:                 now.Add(AutonomousOptimizerDefaultReviewIntervalHours * time.Hour),
 	}
 	if err := s.db.Create(cfg).Error; err != nil {
 		return nil, err
@@ -179,11 +203,16 @@ func (s *AutonomousOptimizerStore) SaveConfig(cfg *AutonomousOptimizerConfig) er
 		return fmt.Errorf("autonomous optimizer config cannot be nil")
 	}
 	cfg.ReviewIntervalHours = normalizeAutonomousOptimizerInterval(cfg.ReviewIntervalHours)
+	cfg.AutoApplyCooldownHours = normalizeAutonomousOptimizerCooldownHours(cfg.AutoApplyCooldownHours)
+	cfg.MaxConsecutiveAutoApplies = normalizeAutonomousOptimizerMaxConsecutiveApplies(cfg.MaxConsecutiveAutoApplies)
 	cfg.Status = normalizeAutonomousOptimizerStatus(cfg.Status)
 	cfg.PrimaryModelName = normalizeAutonomousOptimizerModelName(cfg.PrimaryModelName)
 	cfg.CriticModelName = normalizeAutonomousOptimizerModelName(cfg.CriticModelName)
 	if cfg.ID == "" {
 		cfg.ID = uuid.NewString()
+	}
+	if cfg.Enabled && cfg.Status != AutonomousOptimizerStatusPaused && cfg.NextRunAt.IsZero() {
+		cfg.NextRunAt = nextAutonomousOptimizerRunAt(cfg.LastRunAt, cfg.ReviewIntervalHours)
 	}
 	return s.db.Save(cfg).Error
 }
@@ -213,7 +242,9 @@ func (s *AutonomousOptimizerStore) ListDueConfigs(now time.Time, limit int) ([]A
 			AutonomousOptimizerStatusNoChange,
 			AutonomousOptimizerStatusInsufficientEvidence,
 			AutonomousOptimizerStatusBlockedByGate,
+			AutonomousOptimizerStatusDeferredForNextWindow,
 			AutonomousOptimizerStatusMonitoring,
+			AutonomousOptimizerStatusRollbackPending,
 			AutonomousOptimizerStatusKept,
 			AutonomousOptimizerStatusRolledBack,
 			AutonomousOptimizerStatusFailed,
@@ -236,12 +267,71 @@ func (s *AutonomousOptimizerStore) ListRuns(userID, traderID string, limit int) 
 	return items, err
 }
 
+func (s *AutonomousOptimizerStore) GetRun(userID, traderID, runID string) (*AutonomousOptimizerRun, error) {
+	var item AutonomousOptimizerRun
+	if err := s.db.Where("user_id = ? AND trader_id = ? AND id = ?", userID, traderID, runID).First(&item).Error; err != nil {
+		return nil, err
+	}
+	return &item, nil
+}
+
+func (s *AutonomousOptimizerStore) ListStaleRunningRuns(cutoff time.Time, limit int) ([]*AutonomousOptimizerRun, error) {
+	if limit <= 0 || limit > 100 {
+		limit = 20
+	}
+	var items []*AutonomousOptimizerRun
+	err := s.db.
+		Where("status = ? AND started_at <= ?", AutonomousOptimizerStatusRunning, cutoff).
+		Order("started_at ASC").
+		Limit(limit).
+		Find(&items).Error
+	return items, err
+}
+
+func (s *AutonomousOptimizerStore) ListConfigsByStatus(status string, limit int) ([]AutonomousOptimizerConfig, error) {
+	if limit <= 0 || limit > 100 {
+		limit = 20
+	}
+	var items []AutonomousOptimizerConfig
+	err := s.db.
+		Where("status = ?", normalizeAutonomousOptimizerStatus(status)).
+		Order("updated_at ASC").
+		Limit(limit).
+		Find(&items).Error
+	return items, err
+}
+
+func (s *AutonomousOptimizerStore) GetLatestRunByStatus(userID, traderID, status string) (*AutonomousOptimizerRun, error) {
+	var item AutonomousOptimizerRun
+	if err := s.db.
+		Where("user_id = ? AND trader_id = ? AND status = ?", userID, traderID, normalizeAutonomousOptimizerStatus(status)).
+		Order("started_at DESC, created_at DESC").
+		First(&item).Error; err != nil {
+		return nil, err
+	}
+	return &item, nil
+}
+
+func (s *AutonomousOptimizerStore) GetBacklogItem(userID, traderID, itemID string) (*AutonomousOptimizerBacklogItem, error) {
+	var item AutonomousOptimizerBacklogItem
+	if err := s.db.Where("user_id = ? AND trader_id = ? AND id = ?", userID, traderID, itemID).First(&item).Error; err != nil {
+		return nil, err
+	}
+	return &item, nil
+}
+
 func (s *AutonomousOptimizerStore) SaveBacklogItem(item *AutonomousOptimizerBacklogItem) error {
 	if item == nil {
 		return fmt.Errorf("autonomous optimizer backlog item cannot be nil")
 	}
 	if item.ID == "" {
 		item.ID = uuid.NewString()
+	}
+	if item.RecurrenceCount <= 0 {
+		item.RecurrenceCount = 1
+	}
+	if item.MergedFindingCount <= 0 {
+		item.MergedFindingCount = 1
 	}
 	item.Status = normalizeAutonomousOptimizerBacklogStatus(item.Status)
 	return s.db.Save(item).Error
@@ -269,6 +359,26 @@ func normalizeAutonomousOptimizerInterval(hours int) int {
 	return hours
 }
 
+func normalizeAutonomousOptimizerCooldownHours(hours int) int {
+	if hours <= 0 {
+		return AutonomousOptimizerDefaultCooldownHours
+	}
+	if hours > 168 {
+		return 168
+	}
+	return hours
+}
+
+func normalizeAutonomousOptimizerMaxConsecutiveApplies(value int) int {
+	if value <= 0 {
+		return AutonomousOptimizerDefaultMaxConsecutiveApplies
+	}
+	if value > 10 {
+		return 10
+	}
+	return value
+}
+
 func normalizeAutonomousOptimizerStatus(value string) string {
 	switch strings.ToLower(strings.TrimSpace(value)) {
 	case AutonomousOptimizerStatusScheduled,
@@ -277,8 +387,10 @@ func normalizeAutonomousOptimizerStatus(value string) string {
 		AutonomousOptimizerStatusNoChange,
 		AutonomousOptimizerStatusBacklogOnly,
 		AutonomousOptimizerStatusBlockedByGate,
+		AutonomousOptimizerStatusDeferredForNextWindow,
 		AutonomousOptimizerStatusAutoApplied,
 		AutonomousOptimizerStatusMonitoring,
+		AutonomousOptimizerStatusRollbackPending,
 		AutonomousOptimizerStatusRolledBack,
 		AutonomousOptimizerStatusKept,
 		AutonomousOptimizerStatusPaused,
@@ -318,4 +430,12 @@ func normalizeAutonomousOptimizerModelName(value string) string {
 		return AutonomousOptimizerDefaultModelName
 	}
 	return value
+}
+
+func nextAutonomousOptimizerRunAt(base time.Time, intervalHours int) time.Time {
+	base = base.UTC()
+	if base.IsZero() {
+		base = time.Now().UTC()
+	}
+	return base.Add(time.Duration(normalizeAutonomousOptimizerInterval(intervalHours)) * time.Hour)
 }

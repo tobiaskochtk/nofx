@@ -16,6 +16,7 @@ import { StrategyStudioPage } from './pages/StrategyStudioPage'
 import { StrategyMarketPage } from './pages/StrategyMarketPage'
 import { DataPage } from './pages/DataPage'
 import { DealReviewPage } from './pages/DealReviewPage'
+import { AutonomousOptimizerPage } from './pages/AutonomousOptimizerPage'
 import { BeginnerOnboardingPage } from './pages/BeginnerOnboardingPage'
 import { LoginRequiredOverlay } from './components/auth/LoginRequiredOverlay'
 import HeaderBar from './components/common/HeaderBar'
@@ -44,6 +45,7 @@ type Page =
   | 'strategy'
   | 'strategy-market'
   | 'deal-review'
+  | 'optimizer'
   | 'data'
   | 'faq'
   | 'login'
@@ -66,6 +68,7 @@ function App() {
     if (path === '/strategy-market' || hash === 'strategy-market')
       return 'strategy-market'
     if (path === '/deal-review' || hash === 'deal-review') return 'deal-review'
+    if (path === '/optimizer' || hash === 'optimizer') return 'optimizer'
     if (path === '/data' || hash === 'data') return 'data'
     if (path === '/dashboard' || hash === 'trader' || hash === 'details')
       return 'trader'
@@ -87,6 +90,7 @@ function App() {
       competition: '/competition',
       'strategy-market': '/strategy-market',
       'deal-review': '/deal-review',
+      optimizer: '/optimizer',
       data: '/data',
       traders: '/traders',
       trader: '/dashboard',
@@ -168,6 +172,8 @@ function App() {
         setCurrentPage('strategy-market')
       } else if (path === '/deal-review' || hash === 'deal-review') {
         setCurrentPage('deal-review')
+      } else if (path === '/optimizer' || hash === 'optimizer') {
+        setCurrentPage('optimizer')
       } else if (path === '/data' || hash === 'data') {
         setCurrentPage('data')
       } else if (
@@ -364,6 +370,8 @@ function App() {
       setCurrentPage('competition')
     } else if (route === '/traders') {
       setCurrentPage('traders')
+    } else if (route === '/optimizer') {
+      setCurrentPage('optimizer')
     } else if (route === '/dashboard') {
       setCurrentPage('trader')
     }
@@ -547,6 +555,20 @@ function App() {
               <StrategyMarketPage />
             ) : currentPage === 'deal-review' ? (
               <DealReviewPage
+                traders={traders}
+                tradersError={tradersError}
+                selectedTraderId={selectedTraderId}
+                onTraderSelect={(traderId) => {
+                  setSelectedTraderId(traderId)
+                  const trader = traders?.find((t) => t.trader_id === traderId)
+                  if (trader) {
+                    const slug = getTraderSlug(trader)
+                    setSelectedTraderSlug(slug)
+                  }
+                }}
+              />
+            ) : currentPage === 'optimizer' ? (
+              <AutonomousOptimizerPage
                 traders={traders}
                 tradersError={tradersError}
                 selectedTraderId={selectedTraderId}

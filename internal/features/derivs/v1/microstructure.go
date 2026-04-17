@@ -3,12 +3,15 @@ package derivsv1
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"math"
+	"net"
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/gorilla/websocket"
@@ -42,12 +45,37 @@ const (
 	bbPeriod               = 20
 	rvShortWindow          = 20
 	rvLongWindow           = 80
+	liqVenueCooldown       = 2 * time.Minute
+	liqSymbolCooldown      = 3 * time.Minute
+	liqVenueTimeoutLimit   = 2
 )
 
 type microFetcher struct {
 	client    *http.Client
 	apiKey    string
 	apiSecret string
+}
+
+type liqFetchOutcome struct {
+	Attempted       bool
+	CooldownSkipped bool
+}
+
+type liqFetchCircuit struct {
+	mu                sync.Mutex
+	symbolCooldowns   map[string]time.Time
+	venueCooldowns    map[string]time.Time
+	venueTimeoutCount map[string]int
+}
+
+var globalLiqFetchCircuit = newLiqFetchCircuit()
+
+func newLiqFetchCircuit() *liqFetchCircuit {
+	return &liqFetchCircuit{
+		symbolCooldowns:   make(map[string]time.Time),
+		venueCooldowns:    make(map[string]time.Time),
+		venueTimeoutCount: make(map[string]int),
+	}
 }
 
 func newMicroFetcher() *microFetcher {
@@ -155,11 +183,11 @@ func ComputeMicrostructureFeatures(cfg MicroFeatureConfig) (map[string]interface
 		log.Printf("[ComputeMicrostructureFeatures] %s: price series fetch failed: %v", cfg.Symbol, err)
 		return result, nil
 	}
-	liqEvents, err := cfg.Fetcher.fetchLiquidations(cfg.Symbol)
-	if err != nil {
+	liqEvents, liqOutcome, err := cfg.Fetcher.fetchLiquidations(cfg.Symbol)
+	if err != nil && !liqOutcome.CooldownSkipped {
 		log.Printf("[ComputeMicrostructureFeatures] %s: liq events fetch failed: %v", cfg.Symbol, err)
 	}
-	if len(liqEvents) == 0 {
+	if len(liqEvents) == 0 && liqOutcome.Attempted && !liqOutcome.CooldownSkipped {
 		log.Printf("[ComputeMicrostructureFeatures] %s: liq fallback metrics engaged (no live liquidation events)", cfg.Symbol)
 	}
 
@@ -368,43 +396,76 @@ func (f *microFetcher) fetchPriceSeries(symbol string) ([]float64, []klineCandle
 	return prices, candles, atr, nil
 }
 
-func (f *microFetcher) fetchLiquidations(symbol string) ([]liqEvent, error) {
+func (f *microFetcher) fetchLiquidations(symbol string) ([]liqEvent, liqFetchOutcome, error) {
+	outcome := liqFetchOutcome{}
 	limit := liqLimit
 	if limit > bybitLiqMax {
 		limit = bybitLiqMax
 	}
+	now := time.Now()
+	if globalLiqFetchCircuit.shouldSkipSymbol(symbol, now) {
+		outcome.CooldownSkipped = true
+		return nil, outcome, nil
+	}
 	var errors []string
+	venuesAttempted := 0
 
-	for attempt := 1; attempt <= liqFetchAttempts; attempt++ {
-		events, err := f.fetchBybitLiquidations(symbol, limit)
-		if len(events) > 0 {
-			return events, nil
-		}
-		if err != nil {
-			errors = append(errors, fmt.Sprintf("bybit attempt %d: %v", attempt, err))
-		}
-		if attempt < liqFetchAttempts {
-			time.Sleep(liqFetchRetryDelay)
+	if globalLiqFetchCircuit.shouldAttemptVenue("bybit", now) {
+		venuesAttempted++
+		outcome.Attempted = true
+		for attempt := 1; attempt <= liqFetchAttempts; attempt++ {
+			events, err := f.fetchBybitLiquidations(symbol, limit)
+			if len(events) > 0 {
+				globalLiqFetchCircuit.clearSymbolCooldown(symbol)
+				globalLiqFetchCircuit.recordVenueSuccess("bybit")
+				return events, outcome, nil
+			}
+			if err != nil {
+				errors = append(errors, fmt.Sprintf("bybit attempt %d: %v", attempt, err))
+				if triggered, until := globalLiqFetchCircuit.recordVenueFailure("bybit", err, time.Now()); triggered {
+					log.Printf("[ComputeMicrostructureFeatures] bybit liq stream cooldown engaged until %s after repeated transport timeouts", until.UTC().Format(time.RFC3339))
+					break
+				}
+			}
+			if attempt < liqFetchAttempts {
+				time.Sleep(liqFetchRetryDelay)
+			}
 		}
 	}
 
-	for attempt := 1; attempt <= liqFetchAttempts; attempt++ {
-		events, err := f.fetchBinanceLiquidations(symbol, limit)
-		if len(events) > 0 {
-			return events, nil
-		}
-		if err != nil {
-			errors = append(errors, fmt.Sprintf("binance attempt %d: %v", attempt, err))
-		}
-		if attempt < liqFetchAttempts {
-			time.Sleep(liqFetchRetryDelay)
+	if globalLiqFetchCircuit.shouldAttemptVenue("binance", now) {
+		venuesAttempted++
+		outcome.Attempted = true
+		for attempt := 1; attempt <= liqFetchAttempts; attempt++ {
+			events, err := f.fetchBinanceLiquidations(symbol, limit)
+			if len(events) > 0 {
+				globalLiqFetchCircuit.clearSymbolCooldown(symbol)
+				globalLiqFetchCircuit.recordVenueSuccess("binance")
+				return events, outcome, nil
+			}
+			if err != nil {
+				errors = append(errors, fmt.Sprintf("binance attempt %d: %v", attempt, err))
+				if triggered, until := globalLiqFetchCircuit.recordVenueFailure("binance", err, time.Now()); triggered {
+					log.Printf("[ComputeMicrostructureFeatures] binance liq stream cooldown engaged until %s after repeated transport timeouts", until.UTC().Format(time.RFC3339))
+					break
+				}
+			}
+			if attempt < liqFetchAttempts {
+				time.Sleep(liqFetchRetryDelay)
+			}
 		}
 	}
 
+	if venuesAttempted == 0 {
+		outcome.CooldownSkipped = true
+		globalLiqFetchCircuit.markSymbolCooldown(symbol, now)
+		return nil, outcome, nil
+	}
+	globalLiqFetchCircuit.markSymbolCooldown(symbol, time.Now())
 	if len(errors) == 0 {
-		return nil, fmt.Errorf("no liquidation events for %s", strings.ToUpper(symbol))
+		return nil, outcome, fmt.Errorf("no liquidation events for %s", strings.ToUpper(symbol))
 	}
-	return nil, fmt.Errorf("no liquidation events for %s (%s)", strings.ToUpper(symbol), strings.Join(errors, "; "))
+	return nil, outcome, fmt.Errorf("no liquidation events for %s (%s)", strings.ToUpper(symbol), strings.Join(errors, "; "))
 }
 
 func (f *microFetcher) fetchBybitLiquidations(symbol string, limit int) ([]liqEvent, error) {
@@ -588,6 +649,71 @@ func parseBinanceForceOrderMessage(raw []byte, want string) *liqEvent {
 		side:  msg.Order.Side,
 		ts:    ts,
 	}
+}
+
+func (c *liqFetchCircuit) shouldSkipSymbol(symbol string, now time.Time) bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	until := c.symbolCooldowns[strings.ToUpper(strings.TrimSpace(symbol))]
+	return !until.IsZero() && until.After(now)
+}
+
+func (c *liqFetchCircuit) markSymbolCooldown(symbol string, now time.Time) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.symbolCooldowns[strings.ToUpper(strings.TrimSpace(symbol))] = now.Add(liqSymbolCooldown)
+}
+
+func (c *liqFetchCircuit) clearSymbolCooldown(symbol string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	delete(c.symbolCooldowns, strings.ToUpper(strings.TrimSpace(symbol)))
+}
+
+func (c *liqFetchCircuit) shouldAttemptVenue(venue string, now time.Time) bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	until := c.venueCooldowns[strings.ToLower(strings.TrimSpace(venue))]
+	return until.IsZero() || !until.After(now)
+}
+
+func (c *liqFetchCircuit) recordVenueSuccess(venue string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	venue = strings.ToLower(strings.TrimSpace(venue))
+	c.venueTimeoutCount[venue] = 0
+	delete(c.venueCooldowns, venue)
+}
+
+func (c *liqFetchCircuit) recordVenueFailure(venue string, err error, now time.Time) (bool, time.Time) {
+	if !isLiqTransportTimeout(err) {
+		return false, time.Time{}
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	venue = strings.ToLower(strings.TrimSpace(venue))
+	c.venueTimeoutCount[venue]++
+	if c.venueTimeoutCount[venue] < liqVenueTimeoutLimit {
+		return false, time.Time{}
+	}
+	until := now.Add(liqVenueCooldown)
+	c.venueCooldowns[venue] = until
+	c.venueTimeoutCount[venue] = 0
+	return true, until
+}
+
+func isLiqTransportTimeout(err error) bool {
+	if err == nil {
+		return false
+	}
+	var netErr net.Error
+	if errors.As(err, &netErr) && netErr.Timeout() {
+		return true
+	}
+	lower := strings.ToLower(err.Error())
+	return strings.Contains(lower, "i/o timeout") ||
+		strings.Contains(lower, "context deadline exceeded") ||
+		strings.Contains(lower, "timeout")
 }
 
 func parsePositiveFloat(raw string) float64 {

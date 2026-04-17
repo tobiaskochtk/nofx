@@ -18,6 +18,7 @@ type Page =
   | 'strategy'
   | 'strategy-market'
   | 'deal-review'
+  | 'optimizer'
   | 'data'
   | 'faq'
   | 'login'
@@ -149,6 +150,17 @@ export default function HeaderBar({
                       : language === 'id'
                         ? 'Review'
                         : 'Review',
+                  requiresAuth: true,
+                },
+                {
+                  page: 'optimizer',
+                  path: '/optimizer',
+                  label:
+                    language === 'zh'
+                      ? '优化器'
+                      : language === 'id'
+                        ? 'Optimizer'
+                        : 'Optimizer',
                   requiresAuth: true,
                 },
                 {
@@ -481,6 +493,17 @@ export default function HeaderBar({
                           : language === 'id'
                             ? 'Review'
                             : 'Review',
+                      requiresAuth: true,
+                    },
+                    {
+                      page: 'optimizer',
+                      path: '/optimizer',
+                      label:
+                        language === 'zh'
+                          ? '优化器'
+                          : language === 'id'
+                            ? 'Optimizer'
+                            : 'Optimizer',
                       requiresAuth: true,
                     },
                     {

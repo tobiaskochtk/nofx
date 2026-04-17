@@ -153,11 +153,17 @@ func (s *Service) Refresh(ctx context.Context) error {
 	snapshots := make(map[string]*marketSnapshot, len(rawSnapshots))
 	volumeValues := make([]float64, 0, len(rawSnapshots))
 	oiNotionalValues := make([]float64, 0, len(rawSnapshots))
+	skippedInvalidSymbols := make([]string, 0, 4)
 
 	for _, item := range rawSnapshots {
+		normalizedSymbol, ok := normalizeValidPair(item.Symbol)
+		if !ok {
+			skippedInvalidSymbols = appendUniqueSymbol(skippedInvalidSymbols, item.Symbol)
+			continue
+		}
 		snapshot := &marketSnapshot{
-			Symbol:        normalizePair(item.Symbol),
-			Pair:          normalizePair(item.Symbol),
+			Symbol:        normalizedSymbol,
+			Pair:          normalizedSymbol,
 			Sources:       append([]string(nil), item.Sources...),
 			Price:         item.Price,
 			PrevDayPrice:  item.PrevDayPrice,
@@ -212,6 +218,9 @@ func (s *Service) Refresh(ctx context.Context) error {
 		volumeValues = append(volumeValues, snapshot.Volume24H)
 		oiNotionalValues = append(oiNotionalValues, snapshot.OpenInterest*snapshot.Price)
 		snapshots[snapshot.Symbol] = snapshot
+	}
+	if len(skippedInvalidSymbols) > 0 {
+		log.Printf("[selfhosted-ai500] skipped %d invalid universe symbol(s): %s", len(skippedInvalidSymbols), strings.Join(skippedInvalidSymbols, ", "))
 	}
 
 	sort.Float64s(volumeValues)
@@ -1689,6 +1698,37 @@ func normalizePair(symbol string) string {
 	upper := strings.ToUpper(strings.TrimSpace(symbol))
 	upper = strings.TrimSuffix(upper, "USDT")
 	return upper + "USDT"
+}
+
+func normalizeValidPair(symbol string) (string, bool) {
+	upper := strings.ToUpper(strings.TrimSpace(symbol))
+	upper = strings.TrimSuffix(upper, "USDT")
+	if len(upper) < 2 || len(upper) > 24 {
+		return "", false
+	}
+	for _, r := range upper {
+		if r >= 'A' && r <= 'Z' {
+			continue
+		}
+		if r >= '0' && r <= '9' {
+			continue
+		}
+		return "", false
+	}
+	return upper + "USDT", true
+}
+
+func appendUniqueSymbol(items []string, symbol string) []string {
+	normalized := strings.TrimSpace(symbol)
+	if normalized == "" {
+		return items
+	}
+	for _, existing := range items {
+		if existing == normalized {
+			return items
+		}
+	}
+	return append(items, normalized)
 }
 
 func durationWeight(duration string) float64 {

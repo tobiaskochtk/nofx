@@ -92,18 +92,18 @@ Start the experiment from a stronger base than the current inactive `GAMMA-RAY` 
 
 ### Draft Scope
 
-- [ ] Add a one-time bootstrap workflow that copies:
+- [x] Add a one-time bootstrap workflow that copies:
   - strategy config
   - prompt config / prompt bindings where applicable
   - trader risk defaults that are safe to inherit
-- [ ] Persist a baseline snapshot so the original `GAMMA-RAY` can always be reconstructed.
-- [ ] Mark the bootstrap event in strategy history and optimizer history.
-- [ ] Tag the resulting trader/version as `autonomous_optimizer_seed`.
+- [x] Persist a baseline snapshot so the original `GAMMA-RAY` can always be reconstructed.
+- [x] Mark the bootstrap event in strategy history and optimizer history.
+- [x] Tag the resulting trader/version as `autonomous_optimizer_seed`.
 - [ ] Keep the experiment scoped to `GAMMA-RAY` only in v1.
 
 ### Acceptance
 
-- [ ] `GAMMA-RAY` can be reseeded from `Aggressive Altcoin Hunter` with one explicit tracked baseline version.
+- [x] `GAMMA-RAY` can be reseeded from `Aggressive Altcoin Hunter` with one explicit tracked baseline version.
 
 ## B. Autonomous Review Loop
 
@@ -113,27 +113,27 @@ Make the system review and act on a fixed cadence without waiting for manual ope
 
 ### Draft Scope
 
-- [ ] Add an optimizer schedule record per trader.
-- [ ] Default cadence to `12h`, but keep it configurable.
-- [ ] On each run, build a review bundle from:
+- [x] Add an optimizer schedule record per trader.
+- [x] Default cadence to `12h`, but keep it configurable.
+- [x] On each run, build a review bundle from:
   - newly closed deals
   - still-open deal behavior
   - no-trade / skipped-opportunity windows
   - current config
   - current prompt bundle
   - recent auto-change history
-- [ ] Produce one of these run outcomes:
+- [x] Produce one of these run outcomes:
   - `no_change`
   - `config_patch`
   - `prompt_patch`
   - `config_and_prompt_patch`
   - `backlog_only`
   - `pause_optimizer`
-- [ ] Persist every run, even when the answer is `no_change`.
+- [x] Persist every run, even when the answer is `no_change`.
 
 ### Acceptance
 
-- [ ] Every review window ends in an explicit persisted result, not silent inactivity.
+- [x] Every review window ends in an explicit persisted result, not silent inactivity.
 
 ## C. Low-Trade / No-Trade Intelligence Layer
 
@@ -143,18 +143,18 @@ Avoid making bad optimization decisions just because `GAMMA-RAY` does not trade 
 
 ### Draft Scope
 
-- [ ] Persist reviewable `no-trade` evidence, not just executed deals.
-- [ ] Persist candidate / near-candidate context when the system considered but rejected trades.
-- [ ] Track trade starvation metrics such as:
+- [x] Persist reviewable `no-trade` evidence, not just executed deals.
+- [x] Persist candidate / near-candidate context when the system considered but rejected trades.
+- [x] Track trade starvation metrics such as:
   - candidate count
   - reject count
   - reject reasons
   - confidence distribution
   - symbol/session opportunity density
-- [ ] Let AI analyze both:
+- [x] Let AI analyze both:
   - bad executed trades
   - missed or over-filtered opportunities
-- [ ] Add a hard `insufficient_evidence` outcome when there is not enough deal or candidate data.
+- [x] Add a hard `insufficient_evidence` outcome when there is not enough deal or candidate data.
 
 ### Why This Is Required
 
@@ -162,7 +162,7 @@ For a trader doing `< 1 trade / 48h`, optimizing only from closed deals is too w
 
 ### Acceptance
 
-- [ ] The optimizer can explain both `why trades were bad` and `why the trader stayed too inactive`.
+- [x] The optimizer can explain both `why trades were bad` and `why the trader stayed too inactive`.
 
 ## D. Auto-Apply Without Human Approval
 
@@ -172,27 +172,27 @@ Let the optimizer apply changes automatically, but only when machine gates say t
 
 ### Draft Scope
 
-- [ ] Reuse the existing review validation flow as the first machine gate.
-- [ ] Extend validation so autonomous applies can be blocked by:
+- [x] Reuse the existing review validation flow as the first machine gate.
+- [x] Extend validation so autonomous applies can be blocked by:
   - insufficient sample size
   - holdout degradation
   - replay degradation where replay is supported
   - oversized patch scope
   - too many consecutive auto-applies
   - active cooldown window
-- [ ] Add per-run apply budget controls:
+- [x] Add per-run apply budget controls:
   - max one auto-apply per review window
   - max config paths changed per run
   - max prompt sections changed per run
-- [ ] Support automatic outcomes:
+- [x] Support automatic outcomes:
   - `auto_applied`
   - `blocked_by_gate`
   - `deferred_for_next_window`
-- [ ] Persist the exact gate reasons in optimizer history.
+- [x] Persist the exact gate reasons in optimizer history.
 
 ### Acceptance
 
-- [ ] The system can auto-apply without a click, but it can also refuse to apply and explain exactly why.
+- [x] The system can auto-apply without a click, but it can also refuse to apply and explain exactly why.
 
 ## E. Prompt Evolution Layer
 
@@ -202,22 +202,22 @@ Treat prompts as first-class optimization targets, not only the trader config JS
 
 ### Draft Scope
 
-- [ ] Persist versioned prompt bundles attached to optimizer runs.
-- [ ] Allow AI output to propose prompt diffs for:
+- [x] Persist versioned prompt bundles attached to optimizer runs.
+- [x] Allow AI output to propose prompt diffs for:
   - system prompt
   - market-context prompt
   - review / optimization prompt
   - decision formatting / rubric guidance
-- [ ] Validate prompt changes before activation:
+- [x] Validate prompt changes before activation:
   - required placeholders still present
   - output contract still parseable
   - guardrail instructions not removed
-- [ ] Record prompt diffs in the same history stream as config diffs.
-- [ ] Support rollback for prompt-only and mixed config+prompt changes.
+- [x] Record prompt diffs in the same history stream as config diffs.
+- [x] Support rollback for prompt-only and mixed config+prompt changes.
 
 ### Acceptance
 
-- [ ] A run can safely auto-apply a prompt improvement and show the exact diff later.
+- [x] A run can safely auto-apply a prompt improvement and show the exact diff later.
 
 ## F. Missing Capability Backlog
 
@@ -227,8 +227,8 @@ Turn AI observations like "this needs better OI delta" or "we need a pair residu
 
 ### Draft Scope
 
-- [ ] Add a new optimizer backlog entity.
-- [ ] Backlog item types should include:
+- [x] Add a new optimizer backlog entity.
+- [x] Backlog item types should include:
   - missing indicator / feature
   - missing market data source
   - missing execution telemetry
@@ -237,7 +237,7 @@ Turn AI observations like "this needs better OI delta" or "we need a pair residu
   - missing prompt instruction
   - missing review metric
   - other system capability gap
-- [ ] Persist for each backlog item:
+- [x] Persist for each backlog item:
   - title
   - category
   - description
@@ -250,16 +250,16 @@ Turn AI observations like "this needs better OI delta" or "we need a pair residu
   - recurrence count
   - composite score
   - status
-- [ ] Support backlog statuses:
+- [x] Support backlog statuses:
   - `new`
   - `confirmed`
   - `planned`
   - `in_progress`
   - `done`
   - `rejected`
-- [ ] Make backlog items editable from the UI, while preserving AI-origin metadata and source evidence.
-- [ ] Show whether an item was created by AI, edited by user, or merged from repeated findings.
-- [ ] Deduplicate repeated AI findings into the same backlog theme where possible.
+- [x] Make backlog items editable from the UI, while preserving AI-origin metadata and source evidence.
+- [x] Show whether an item was created by AI, edited by user, or merged from repeated findings.
+- [x] Deduplicate repeated AI findings into the same backlog theme where possible.
 
 ### Proposed Score Inputs
 
@@ -272,7 +272,7 @@ Turn AI observations like "this needs better OI delta" or "we need a pair residu
 
 ### Acceptance
 
-- [ ] Missing capabilities no longer disappear inside scan prose; they become ranked work items.
+- [x] Missing capabilities no longer disappear inside scan prose; they become ranked work items.
 
 ## G. Auto-Rollback And Drift Control
 
@@ -282,19 +282,19 @@ Prevent the optimizer from walking itself into a degraded state.
 
 ### Draft Scope
 
-- [ ] Add post-apply monitoring windows for each autonomous change.
-- [ ] Add automatic rollback triggers such as:
+- [x] Add post-apply monitoring windows for each autonomous change.
+- [x] Add automatic rollback triggers such as:
   - target cohort degradation
   - repeated losing windows after apply
   - sharp drop in trade quality
   - sharp increase in inactivity without better outcome
-- [ ] Add `rollback_pending`, `rolled_back`, and `kept` states.
-- [ ] Persist rollback rationale and link it to the source optimizer run.
-- [ ] Prevent repeated flip-flopping by using rollback cooldowns.
+- [x] Add `rollback_pending`, `rolled_back`, and `kept` states.
+- [x] Persist rollback rationale and link it to the source optimizer run.
+- [x] Prevent repeated flip-flopping by using rollback cooldowns.
 
 ### Acceptance
 
-- [ ] Every automatic change is either kept, rolled back, or still in monitored observation.
+- [x] Every automatic change is either kept, rolled back, or still in monitored observation.
 
 ## H. Operator UI / Observability
 
@@ -304,28 +304,28 @@ Make the autonomous loop inspectable instead of opaque.
 
 ### Draft Scope
 
-- [ ] Add an optimizer overview page or section showing:
+- [x] Add an optimizer overview page or section showing:
   - current state
   - next scheduled run
   - last run result
   - current prompt/config version
   - current backlog top items
-- [ ] Add run history with filters for:
+- [x] Add run history with filters for:
   - applied
   - blocked
   - backlog-only
   - no-change
   - rolled-back
-- [ ] Add a diff viewer for:
+- [x] Add a diff viewer for:
   - config changes
   - prompt changes
   - gate results
-- [ ] Add backlog board with score sorting and status updates.
-- [ ] Add links from optimizer runs into deal-review cohorts and strategy-version details.
+- [x] Add backlog board with score sorting and status updates.
+- [x] Add links from optimizer runs into deal-review cohorts and strategy-version details.
 
 ### Acceptance
 
-- [ ] The user can reconstruct exactly why the optimizer changed or did not change `GAMMA-RAY`.
+- [x] The user can reconstruct exactly why the optimizer changed or did not change `GAMMA-RAY`.
 
 ## I. Model Strategy
 
@@ -335,15 +335,15 @@ Allow the autonomous loop to evolve safely across available ChatGPT models inste
 
 ### Draft Scope
 
-- [ ] Let the optimizer choose from configured available models.
-- [ ] Default the proposer model to `OpenAI GPT-5.4`.
-- [ ] Default the critic model to `OpenAI GPT-5.4` unless explicitly changed.
-- [ ] Add configurable optimizer model selection in the config UI so the default can be changed without code edits.
-- [ ] Persist which model authored each autonomous run.
-- [ ] Support:
+- [x] Let the optimizer choose from configured available models.
+- [x] Default the proposer model to `OpenAI GPT-5.4`.
+- [x] Default the critic model to `OpenAI GPT-5.4` unless explicitly changed.
+- [x] Add configurable optimizer model selection in the config UI so the default can be changed without code edits.
+- [x] Persist which model authored each autonomous run.
+- [x] Support:
   - primary model for proposal
   - secondary model for critique / veto
-- [ ] Add per-model optimizer outcome tracking:
+- [x] Add per-model optimizer outcome tracking:
   - apply rate
   - rollback rate
   - kept-win rate
@@ -351,35 +351,37 @@ Allow the autonomous loop to evolve safely across available ChatGPT models inste
 
 ### Acceptance
 
-- [ ] The system can later show which model produced the safest or most useful autonomous changes.
+- [x] The system can later show which model produced the safest or most useful autonomous changes.
 
 ## Proposed Status Model
 
-- [ ] `scheduled`
-- [ ] `running`
-- [ ] `insufficient_evidence`
-- [ ] `no_change`
-- [ ] `backlog_only`
-- [ ] `blocked_by_gate`
-- [ ] `auto_applied`
-- [ ] `monitoring`
-- [ ] `rolled_back`
-- [ ] `kept`
-- [ ] `paused`
-- [ ] `failed`
+- [x] `scheduled`
+- [x] `running`
+- [x] `insufficient_evidence`
+- [x] `no_change`
+- [x] `backlog_only`
+- [x] `blocked_by_gate`
+- [x] `deferred_for_next_window`
+- [x] `auto_applied`
+- [x] `monitoring`
+- [x] `rollback_pending`
+- [x] `rolled_back`
+- [x] `kept`
+- [x] `paused`
+- [x] `failed`
 
 ## Suggested First Delivery Slice
 
 If we want the safest useful first live version, the first slice should be:
 
-- [ ] Bootstrap `GAMMA-RAY` from `Aggressive Altcoin Hunter`
-- [ ] 12h autonomous review scheduler
-- [ ] no-trade / inactivity intelligence
-- [ ] automatic config + prompt patch apply with hard machine validation
-- [ ] active auto-rollback
-- [ ] optimizer run history
-- [ ] scored missing-capability backlog
-- [ ] proposer+critic model execution with `GPT-5.4` as the default pair
+- [x] Bootstrap `GAMMA-RAY` from `Aggressive Altcoin Hunter`
+- [x] 12h autonomous review scheduler
+- [x] no-trade / inactivity intelligence
+- [x] automatic config + prompt patch apply with hard machine validation
+- [x] active auto-rollback
+- [x] optimizer run history
+- [x] scored missing-capability backlog
+- [x] proposer+critic model execution with `GPT-5.4` as the default pair
 
 This first slice would already prove the core loop without yet requiring the full prompt-evolution and rollback stack.
 
@@ -419,12 +421,12 @@ This first slice would already prove the core loop without yet requiring the ful
 - [x] Scope reviewed with user
 - [x] Scope adjusted after user edits
 - [x] Implementation started
-- [ ] Bootstrap flow live
-- [ ] Autonomous scheduler live
-- [ ] Auto-apply gate live
-- [ ] Backlog scoring live
-- [ ] Prompt evolution live
-- [ ] Rollback control live
+- [x] Bootstrap flow live
+- [x] Autonomous scheduler live
+- [x] Auto-apply gate live
+- [x] Backlog scoring live
+- [x] Prompt evolution live
+- [x] Rollback control live
 
 ## Current Progress Notes
 
@@ -435,7 +437,58 @@ This first slice would already prove the core loop without yet requiring the ful
   - list optimizer runs
   - list/create backlog items
   - bootstrap a target trader from a source trader
-- [ ] The scheduled autonomous review executor has not been wired yet.
-- [ ] The auto-apply decision loop has not been wired yet.
-- [ ] Prompt-diff generation/validation has not been wired yet.
-- [ ] UI pages for this module are still pending.
+- [x] `GAMMA-RAY` has been bootstrapped live from `Aggressive Altcoin Hunter`, with a dedicated seed strategy version and optimizer bootstrap run persisted.
+- [x] The scheduled autonomous review executor is live and now writes explicit run outcomes on due windows.
+- [x] The first live scheduled `GAMMA-RAY` run already recorded `insufficient_evidence` instead of mutating config blindly:
+  - `0` closed deals
+  - `109` decision cycles
+  - `1090` candidate observations
+- [x] The auto-apply decision loop now runs proposer + critic and can auto-apply validated `config_patch` and `prompt_patch` outcomes.
+- [x] Low-trade windows can now still generate `prompt_patch` or `backlog_only` outcomes from decision-cycle telemetry, while `config_patch` stays blocked until closed-deal validation is strong enough.
+- [x] Prompt patches now cover the broader live prompt surfaces and are validated for scope, template existence, token budget, and output-contract safety before activation:
+  - strategy market-context guidance
+  - strategy decision-format / rubric guidance
+  - optimizer proposer instructions
+  - optimizer critic instructions
+- [x] Applied autonomous runs now enter monitored state and can auto-rollback on a negative monitored post-apply window, with rollback linked back to the source run.
+- [x] The deal-review UI now includes a live Autonomous Optimizer section with config controls, scored improvement steps, and run history for the selected trader.
+- [x] Optimizer runs now expose a detail inspector with gate reasons, config/trader/optimizer diffs, raw patch payloads, and direct links into the exact review cohort or linked strategy version.
+- [x] The optimizer UI has been separated onto its own `/optimizer` page so the deal-review page stays focused on deal analysis.
+- [x] The optimizer now receives explicit low-trade/starvation telemetry from decision records:
+  - hold vs wait counts
+  - normalized reject reasons
+  - confidence-band distributions
+  - opportunity density by session
+  - opportunity density by symbol
+- [x] Run detail now makes the learning context visible:
+  - recent optimizer runs used as context for proposer/critic
+  - low-trade telemetry summary per window
+  - reject reasons, session density, symbol density, and confidence bands directly in the UI
+- [x] Autonomous gate cooldown and `deferred_for_next_window` handling are now live:
+  - configurable cooldown hours
+  - configurable max consecutive auto-applies
+  - deferred status instead of hard-block when a patch is valid but must wait
+  - stored next-eligible apply time visible in the optimizer UI
+- [x] Broader monitoring and rollback drift control is now live:
+  - monitoring windows now resolve back to the original applied run even after multiple monitoring passes
+  - rollback can trigger on repeated losing windows, target cohort degradation, trade quality drop, or inactivity drift
+  - rollback analysis, baseline snapshot, and cumulative monitored metrics are visible in optimizer run detail
+  - rolled-back runs participate in cooldown handling so the loop does not immediately flip back
+- [x] Backlog items are now fully editable in the optimizer UI:
+  - title, category, description, expected impact, urgency, confidence, implementation cost, recurrence, and status
+  - backend updates preserve AI origin, source run linkage, merged finding count, and stored evidence/metadata
+- [x] Optimizer config UI now exposes the live proposer/critic instruction overlays, so the broader optimizer-review prompt surfaces are inspectable and editable without leaving `/optimizer`.
+- [x] `/optimizer` now exposes per-model outcome tracking for proposer/critic pairs:
+  - apply rate
+  - rollback rate
+  - kept-win rate
+  - backlog usefulness
+  - ranked outcome score with current active pair highlighted
+- [x] Stale autonomous optimizer state is now auto-recovered:
+  - stale `running` runs are marked `failed` with explicit recovery metadata
+  - orphan `running` configs without an active run are reset automatically
+  - `next review window` is re-populated instead of staying blank after an interrupted run
+- [x] `rollback_pending` is now used as a real transitional state:
+  - degrading monitoring first marks rollback as pending
+  - the next due optimizer window executes the actual rollback
+  - run history and current state now show the intermediate governance step explicitly

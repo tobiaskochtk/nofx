@@ -81,25 +81,33 @@ type CandidateDetail struct {
 
 // TraderBucketReview is a live 24h-style review aggregated from stored decision records.
 type TraderBucketReview struct {
-	TraderID                string                `json:"trader_id"`
-	WindowHours             int                   `json:"window_hours"`
-	WindowStart             time.Time             `json:"window_start"`
-	WindowEnd               time.Time             `json:"window_end"`
-	GeneratedAt             time.Time             `json:"generated_at"`
-	CandidateMetaVer        int                   `json:"candidate_metadata_version"`
-	HasFullWindow           bool                  `json:"has_full_window"`
-	CoverageHours           float64               `json:"coverage_hours"`
-	RecordCount             int                   `json:"record_count"`
-	LegacyRecordCount       int                   `json:"legacy_record_count"`
-	CyclesWithCandidates    int                   `json:"cycles_with_candidates"`
-	CyclesWithoutCandidates int                   `json:"cycles_without_candidates"`
-	CyclesWithOpenDecisions int                   `json:"cycles_with_open_decisions"`
-	TotalCandidates         int                   `json:"total_candidates"`
-	TotalOpenDecisions      int                   `json:"total_open_decisions"`
-	FirstRecordAt           *time.Time            `json:"first_record_at,omitempty"`
-	LastRecordAt            *time.Time            `json:"last_record_at,omitempty"`
-	Buckets                 []TraderBucketSummary `json:"buckets"`
-	RecentCycles            []TraderBucketCycle   `json:"recent_cycles"`
+	TraderID                string                 `json:"trader_id"`
+	WindowHours             int                    `json:"window_hours"`
+	WindowStart             time.Time              `json:"window_start"`
+	WindowEnd               time.Time              `json:"window_end"`
+	GeneratedAt             time.Time              `json:"generated_at"`
+	CandidateMetaVer        int                    `json:"candidate_metadata_version"`
+	HasFullWindow           bool                   `json:"has_full_window"`
+	CoverageHours           float64                `json:"coverage_hours"`
+	RecordCount             int                    `json:"record_count"`
+	LegacyRecordCount       int                    `json:"legacy_record_count"`
+	CyclesWithCandidates    int                    `json:"cycles_with_candidates"`
+	CyclesWithoutCandidates int                    `json:"cycles_without_candidates"`
+	CyclesWithOpenDecisions int                    `json:"cycles_with_open_decisions"`
+	TotalCandidates         int                    `json:"total_candidates"`
+	TotalOpenDecisions      int                    `json:"total_open_decisions"`
+	HoldDecisionCount       int                    `json:"hold_decision_count"`
+	WaitDecisionCount       int                    `json:"wait_decision_count"`
+	DecisionConversionRate  float64                `json:"decision_conversion_rate"`
+	AvgDecisionConfidence   float64                `json:"avg_decision_confidence"`
+	FirstRecordAt           *time.Time             `json:"first_record_at,omitempty"`
+	LastRecordAt            *time.Time             `json:"last_record_at,omitempty"`
+	Buckets                 []TraderBucketSummary  `json:"buckets"`
+	RecentCycles            []TraderBucketCycle    `json:"recent_cycles"`
+	RejectReasons           []TraderRejectReason   `json:"reject_reasons,omitempty"`
+	ConfidenceBands         []TraderConfidenceBand `json:"confidence_bands,omitempty"`
+	OpportunitySessions     []TraderSessionSummary `json:"opportunity_sessions,omitempty"`
+	OpportunitySymbols      []TraderSymbolSummary  `json:"opportunity_symbols,omitempty"`
 }
 
 // TraderBucketSummary aggregates usage for a single selection bucket.
@@ -125,6 +133,42 @@ type TraderBucketCycleBreak struct {
 	Name    string   `json:"name"`
 	Count   int      `json:"count"`
 	Symbols []string `json:"symbols,omitempty"`
+}
+
+type TraderRejectReason struct {
+	Reason   string  `json:"reason"`
+	Count    int     `json:"count"`
+	SharePct float64 `json:"share_pct,omitempty"`
+}
+
+type TraderConfidenceBand struct {
+	Band              string  `json:"band"`
+	DecisionCount     int     `json:"decision_count"`
+	OpenDecisionCount int     `json:"open_decision_count"`
+	HoldDecisionCount int     `json:"hold_decision_count"`
+	WaitDecisionCount int     `json:"wait_decision_count"`
+	AvgConfidence     float64 `json:"avg_confidence,omitempty"`
+}
+
+type TraderSessionSummary struct {
+	Session           string  `json:"session"`
+	CycleCount        int     `json:"cycle_count"`
+	CandidateCount    int     `json:"candidate_count"`
+	OpenDecisionCount int     `json:"open_decision_count"`
+	HoldDecisionCount int     `json:"hold_decision_count"`
+	WaitDecisionCount int     `json:"wait_decision_count"`
+	AvgConfidence     float64 `json:"avg_confidence,omitempty"`
+}
+
+type TraderSymbolSummary struct {
+	Symbol            string   `json:"symbol"`
+	CandidateCount    int      `json:"candidate_count"`
+	OpenDecisionCount int      `json:"open_decision_count"`
+	HoldDecisionCount int      `json:"hold_decision_count"`
+	WaitDecisionCount int      `json:"wait_decision_count"`
+	AvgConfidence     float64  `json:"avg_confidence,omitempty"`
+	Sessions          []string `json:"sessions,omitempty"`
+	SelectionBuckets  []string `json:"selection_buckets,omitempty"`
 }
 
 // AccountSnapshot account state snapshot
@@ -444,6 +488,36 @@ type traderBucketAccumulator struct {
 	UniqueSymbols     map[string]struct{}
 }
 
+type traderConfidenceAccumulator struct {
+	DecisionCount     int
+	OpenDecisionCount int
+	HoldDecisionCount int
+	WaitDecisionCount int
+	ConfidenceTotal   int
+	ConfidenceSamples int
+}
+
+type traderSessionAccumulator struct {
+	CycleCount        int
+	CandidateCount    int
+	OpenDecisionCount int
+	HoldDecisionCount int
+	WaitDecisionCount int
+	ConfidenceTotal   int
+	ConfidenceSamples int
+}
+
+type traderSymbolAccumulator struct {
+	CandidateCount    int
+	OpenDecisionCount int
+	HoldDecisionCount int
+	WaitDecisionCount int
+	ConfidenceTotal   int
+	ConfidenceSamples int
+	Sessions          map[string]struct{}
+	SelectionBuckets  map[string]struct{}
+}
+
 var traderBucketOrder = []string{
 	"primary",
 	"adaptive",
@@ -486,9 +560,15 @@ func (s *DecisionStore) GetBucketReview(traderID string, window time.Duration, c
 	}
 
 	accumulators := make(map[string]*traderBucketAccumulator)
+	rejectReasons := make(map[string]int)
+	confidenceBands := make(map[string]*traderConfidenceAccumulator)
+	sessionAccumulators := make(map[string]*traderSessionAccumulator)
+	symbolAccumulators := make(map[string]*traderSymbolAccumulator)
 	recentCycles := make([]TraderBucketCycle, 0, len(dbRecords))
 	var firstRecordAt *time.Time
 	var lastRecordAt *time.Time
+	totalDecisionConfidence := 0
+	totalDecisionConfidenceSamples := 0
 
 	for _, dbRecord := range dbRecords {
 		record := dbRecord.toRecord()
@@ -500,6 +580,9 @@ func (s *DecisionStore) GetBucketReview(traderID string, window time.Duration, c
 		report.RecordCount++
 
 		ts := record.Timestamp.UTC()
+		sessionBucket := deriveDealReviewSessionBucket(ts)
+		sessionAcc := ensureTraderSessionAccumulator(sessionAccumulators, sessionBucket)
+		sessionAcc.CycleCount++
 		if firstRecordAt == nil {
 			firstRecordAt = &ts
 		}
@@ -529,27 +612,87 @@ func (s *DecisionStore) GetBucketReview(traderID string, window time.Duration, c
 			acc.CandidateCount++
 			acc.UniqueSymbols[symbol] = struct{}{}
 			cycleBucketSymbols[bucket] = appendUniqueSortedSymbol(cycleBucketSymbols[bucket], symbol)
+
+			symbolAcc := ensureTraderSymbolAccumulator(symbolAccumulators, symbol)
+			symbolAcc.CandidateCount++
+			symbolAcc.Sessions[sessionBucket] = struct{}{}
+			symbolAcc.SelectionBuckets[bucket] = struct{}{}
 		}
+		sessionAcc.CandidateCount += len(record.CandidateDetails)
 
 		openDecisionSymbols := []string{}
 		hasOpenDecision := false
 		for _, action := range record.Decisions {
 			actionType := strings.ToLower(strings.TrimSpace(action.Action))
-			if !strings.HasPrefix(actionType, "open_") {
-				continue
-			}
 			symbol := strings.ToUpper(strings.TrimSpace(action.Symbol))
-			if symbol == "" {
+			isOpenDecision := strings.HasPrefix(actionType, "open_")
+			isHoldDecision := actionType == "hold"
+			isWaitDecision := actionType == "wait"
+			if !isOpenDecision && !isHoldDecision && !isWaitDecision {
 				continue
 			}
 
-			hasOpenDecision = true
-			report.TotalOpenDecisions++
-			openDecisionSymbols = appendUniqueSortedSymbol(openDecisionSymbols, symbol)
+			if action.Confidence > 0 {
+				totalDecisionConfidence += action.Confidence
+				totalDecisionConfidenceSamples++
+				sessionAcc.ConfidenceTotal += action.Confidence
+				sessionAcc.ConfidenceSamples++
+				bandAcc := ensureTraderConfidenceAccumulator(confidenceBands, traderConfidenceBand(action.Confidence))
+				bandAcc.DecisionCount++
+				bandAcc.ConfidenceTotal += action.Confidence
+				bandAcc.ConfidenceSamples++
+				if isOpenDecision {
+					bandAcc.OpenDecisionCount++
+				} else if isHoldDecision {
+					bandAcc.HoldDecisionCount++
+				} else {
+					bandAcc.WaitDecisionCount++
+				}
+				if symbol != "" {
+					symbolAcc := ensureTraderSymbolAccumulator(symbolAccumulators, symbol)
+					symbolAcc.ConfidenceTotal += action.Confidence
+					symbolAcc.ConfidenceSamples++
+				}
+			}
 
-			bucket := normalizeTraderBucket(symbolToBucket[symbol])
-			acc := ensureTraderBucketAccumulator(accumulators, bucket)
-			acc.OpenDecisionCount++
+			if isOpenDecision {
+				if symbol == "" {
+					continue
+				}
+				hasOpenDecision = true
+				report.TotalOpenDecisions++
+				sessionAcc.OpenDecisionCount++
+				openDecisionSymbols = appendUniqueSortedSymbol(openDecisionSymbols, symbol)
+
+				bucket := normalizeTraderBucket(symbolToBucket[symbol])
+				acc := ensureTraderBucketAccumulator(accumulators, bucket)
+				acc.OpenDecisionCount++
+
+				symbolAcc := ensureTraderSymbolAccumulator(symbolAccumulators, symbol)
+				symbolAcc.OpenDecisionCount++
+				symbolAcc.Sessions[sessionBucket] = struct{}{}
+				symbolAcc.SelectionBuckets[bucket] = struct{}{}
+				continue
+			}
+
+			rejectReasons[normalizeTraderRejectReason(action.Reasoning)]++
+			if isHoldDecision {
+				report.HoldDecisionCount++
+				sessionAcc.HoldDecisionCount++
+				if symbol != "" {
+					symbolAcc := ensureTraderSymbolAccumulator(symbolAccumulators, symbol)
+					symbolAcc.HoldDecisionCount++
+					symbolAcc.Sessions[sessionBucket] = struct{}{}
+				}
+			} else {
+				report.WaitDecisionCount++
+				sessionAcc.WaitDecisionCount++
+				if symbol != "" {
+					symbolAcc := ensureTraderSymbolAccumulator(symbolAccumulators, symbol)
+					symbolAcc.WaitDecisionCount++
+					symbolAcc.Sessions[sessionBucket] = struct{}{}
+				}
+			}
 		}
 		if hasOpenDecision {
 			report.CyclesWithOpenDecisions++
@@ -577,6 +720,16 @@ func (s *DecisionStore) GetBucketReview(traderID string, window time.Duration, c
 
 	report.Buckets = buildTraderBucketSummaries(accumulators)
 	report.RecentCycles = selectRecentTraderCycles(recentCycles, cycleLimit)
+	if report.TotalCandidates > 0 {
+		report.DecisionConversionRate = roundFloat(float64(report.TotalOpenDecisions)/float64(report.TotalCandidates)*100, 1)
+	}
+	if totalDecisionConfidenceSamples > 0 {
+		report.AvgDecisionConfidence = roundFloat(float64(totalDecisionConfidence)/float64(totalDecisionConfidenceSamples), 1)
+	}
+	report.RejectReasons = buildTraderRejectReasons(rejectReasons, report.HoldDecisionCount+report.WaitDecisionCount, 6)
+	report.ConfidenceBands = buildTraderConfidenceBands(confidenceBands)
+	report.OpportunitySessions = buildTraderSessionSummaries(sessionAccumulators, 4)
+	report.OpportunitySymbols = buildTraderSymbolSummaries(symbolAccumulators, 6)
 
 	return report, nil
 }
@@ -598,6 +751,38 @@ func ensureTraderBucketAccumulator(accumulators map[string]*traderBucketAccumula
 		}
 	}
 	return accumulators[bucket]
+}
+
+func ensureTraderConfidenceAccumulator(accumulators map[string]*traderConfidenceAccumulator, band string) *traderConfidenceAccumulator {
+	if accumulators[band] == nil {
+		accumulators[band] = &traderConfidenceAccumulator{}
+	}
+	return accumulators[band]
+}
+
+func ensureTraderSessionAccumulator(accumulators map[string]*traderSessionAccumulator, session string) *traderSessionAccumulator {
+	session = strings.TrimSpace(session)
+	if session == "" {
+		session = "other"
+	}
+	if accumulators[session] == nil {
+		accumulators[session] = &traderSessionAccumulator{}
+	}
+	return accumulators[session]
+}
+
+func ensureTraderSymbolAccumulator(accumulators map[string]*traderSymbolAccumulator, symbol string) *traderSymbolAccumulator {
+	symbol = strings.ToUpper(strings.TrimSpace(symbol))
+	if symbol == "" {
+		symbol = "UNKNOWN"
+	}
+	if accumulators[symbol] == nil {
+		accumulators[symbol] = &traderSymbolAccumulator{
+			Sessions:         make(map[string]struct{}),
+			SelectionBuckets: make(map[string]struct{}),
+		}
+	}
+	return accumulators[symbol]
 }
 
 func appendUniqueSortedSymbol(symbols []string, symbol string) []string {
@@ -653,6 +838,122 @@ func buildTraderBucketSummaries(accumulators map[string]*traderBucketAccumulator
 	return summaries
 }
 
+func buildTraderRejectReasons(counts map[string]int, totalRejects int, limit int) []TraderRejectReason {
+	if len(counts) == 0 {
+		return []TraderRejectReason{}
+	}
+	items := make([]TraderRejectReason, 0, len(counts))
+	for reason, count := range counts {
+		entry := TraderRejectReason{
+			Reason: reason,
+			Count:  count,
+		}
+		if totalRejects > 0 {
+			entry.SharePct = roundFloat(float64(count)/float64(totalRejects)*100, 1)
+		}
+		items = append(items, entry)
+	}
+	sort.Slice(items, func(i, j int) bool {
+		if items[i].Count == items[j].Count {
+			return items[i].Reason < items[j].Reason
+		}
+		return items[i].Count > items[j].Count
+	})
+	if limit > 0 && len(items) > limit {
+		items = items[:limit]
+	}
+	return items
+}
+
+func buildTraderConfidenceBands(accumulators map[string]*traderConfidenceAccumulator) []TraderConfidenceBand {
+	order := []string{"0-39", "40-59", "60-74", "75-89", "90-100"}
+	result := make([]TraderConfidenceBand, 0, len(order))
+	for _, band := range order {
+		acc := accumulators[band]
+		if acc == nil {
+			continue
+		}
+		entry := TraderConfidenceBand{
+			Band:              band,
+			DecisionCount:     acc.DecisionCount,
+			OpenDecisionCount: acc.OpenDecisionCount,
+			HoldDecisionCount: acc.HoldDecisionCount,
+			WaitDecisionCount: acc.WaitDecisionCount,
+		}
+		if acc.ConfidenceSamples > 0 {
+			entry.AvgConfidence = roundFloat(float64(acc.ConfidenceTotal)/float64(acc.ConfidenceSamples), 1)
+		}
+		result = append(result, entry)
+	}
+	return result
+}
+
+func buildTraderSessionSummaries(accumulators map[string]*traderSessionAccumulator, limit int) []TraderSessionSummary {
+	if len(accumulators) == 0 {
+		return []TraderSessionSummary{}
+	}
+	result := make([]TraderSessionSummary, 0, len(accumulators))
+	for session, acc := range accumulators {
+		entry := TraderSessionSummary{
+			Session:           session,
+			CycleCount:        acc.CycleCount,
+			CandidateCount:    acc.CandidateCount,
+			OpenDecisionCount: acc.OpenDecisionCount,
+			HoldDecisionCount: acc.HoldDecisionCount,
+			WaitDecisionCount: acc.WaitDecisionCount,
+		}
+		if acc.ConfidenceSamples > 0 {
+			entry.AvgConfidence = roundFloat(float64(acc.ConfidenceTotal)/float64(acc.ConfidenceSamples), 1)
+		}
+		result = append(result, entry)
+	}
+	sort.Slice(result, func(i, j int) bool {
+		if result[i].CandidateCount == result[j].CandidateCount {
+			return result[i].Session < result[j].Session
+		}
+		return result[i].CandidateCount > result[j].CandidateCount
+	})
+	if limit > 0 && len(result) > limit {
+		result = result[:limit]
+	}
+	return result
+}
+
+func buildTraderSymbolSummaries(accumulators map[string]*traderSymbolAccumulator, limit int) []TraderSymbolSummary {
+	if len(accumulators) == 0 {
+		return []TraderSymbolSummary{}
+	}
+	result := make([]TraderSymbolSummary, 0, len(accumulators))
+	for symbol, acc := range accumulators {
+		entry := TraderSymbolSummary{
+			Symbol:            symbol,
+			CandidateCount:    acc.CandidateCount,
+			OpenDecisionCount: acc.OpenDecisionCount,
+			HoldDecisionCount: acc.HoldDecisionCount,
+			WaitDecisionCount: acc.WaitDecisionCount,
+			Sessions:          mapKeysSorted(acc.Sessions),
+			SelectionBuckets:  mapKeysSorted(acc.SelectionBuckets),
+		}
+		if acc.ConfidenceSamples > 0 {
+			entry.AvgConfidence = roundFloat(float64(acc.ConfidenceTotal)/float64(acc.ConfidenceSamples), 1)
+		}
+		result = append(result, entry)
+	}
+	sort.Slice(result, func(i, j int) bool {
+		if result[i].CandidateCount == result[j].CandidateCount {
+			if result[i].OpenDecisionCount == result[j].OpenDecisionCount {
+				return result[i].Symbol < result[j].Symbol
+			}
+			return result[i].OpenDecisionCount > result[j].OpenDecisionCount
+		}
+		return result[i].CandidateCount > result[j].CandidateCount
+	})
+	if limit > 0 && len(result) > limit {
+		result = result[:limit]
+	}
+	return result
+}
+
 func selectRecentTraderCycles(cycles []TraderBucketCycle, limit int) []TraderBucketCycle {
 	if len(cycles) == 0 {
 		return []TraderBucketCycle{}
@@ -664,6 +965,79 @@ func selectRecentTraderCycles(cycles []TraderBucketCycle, limit int) []TraderBuc
 	for i := len(cycles) - 1; i >= 0; i-- {
 		result = append(result, cycles[i])
 	}
+	return result
+}
+
+func traderConfidenceBand(confidence int) string {
+	switch {
+	case confidence < 40:
+		return "0-39"
+	case confidence < 60:
+		return "40-59"
+	case confidence < 75:
+		return "60-74"
+	case confidence < 90:
+		return "75-89"
+	default:
+		return "90-100"
+	}
+}
+
+func normalizeTraderRejectReason(reasoning string) string {
+	value := strings.ToLower(strings.TrimSpace(reasoning))
+	switch {
+	case value == "":
+		return "unspecified"
+	case strings.Contains(value, "confidence"):
+		return "low_confidence"
+	case strings.Contains(value, "position") && strings.Contains(value, "limit"):
+		return "position_limit"
+	case strings.Contains(value, "risk"):
+		return "risk_budget"
+	case strings.Contains(value, "liquid"), strings.Contains(value, "spread"), strings.Contains(value, "slippage"):
+		return "execution_quality"
+	case strings.Contains(value, "volatil"):
+		return "volatility"
+	case strings.Contains(value, "trend"), strings.Contains(value, "regime"):
+		return "regime_mismatch"
+	case strings.Contains(value, "funding"):
+		return "funding_constraint"
+	case strings.Contains(value, "oi"), strings.Contains(value, "open interest"):
+		return "oi_constraint"
+	case strings.Contains(value, "btc"):
+		return "btc_relative_strength"
+	case strings.Contains(value, "conflict"), strings.Contains(value, "mixed"), strings.Contains(value, "unclear"):
+		return "signal_conflict"
+	default:
+		value = strings.Split(value, "\n")[0]
+		for _, splitter := range []string{";", ".", ","} {
+			if idx := strings.Index(value, splitter); idx > 0 {
+				value = value[:idx]
+				break
+			}
+		}
+		value = strings.TrimSpace(value)
+		if len(value) > 48 {
+			value = value[:48]
+		}
+		if value == "" {
+			return "unspecified"
+		}
+		return value
+	}
+}
+
+func mapKeysSorted(values map[string]struct{}) []string {
+	if len(values) == 0 {
+		return nil
+	}
+	result := make([]string, 0, len(values))
+	for key := range values {
+		if trimmed := strings.TrimSpace(key); trimmed != "" {
+			result = append(result, trimmed)
+		}
+	}
+	sort.Strings(result)
 	return result
 }
 

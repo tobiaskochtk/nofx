@@ -203,6 +203,12 @@ export function ComparisonChart({ traders }: ComparisonChartProps) {
   // Get trader color
   const traderColor = (traderId: string) => getTraderColor(traders, traderId)
 
+  const MAX_DISPLAY_POINTS = 500
+  const displayData = useMemo(
+    () => downsampleSeries(combinedData, MAX_DISPLAY_POINTS),
+    [combinedData]
+  )
+
   if (isLoading) {
     return (
       <div className="flex flex-col items-center justify-center py-20">
@@ -235,12 +241,6 @@ export function ComparisonChart({ traders }: ComparisonChartProps) {
       </div>
     )
   }
-
-  const MAX_DISPLAY_POINTS = 500
-  const displayData = useMemo(
-    () => downsampleSeries(combinedData, MAX_DISPLAY_POINTS),
-    [combinedData]
-  )
 
   // Calculate Y axis domain with better padding
   const calculateYDomain = () => {

@@ -202,6 +202,35 @@ func TestNormalizeDurationAndSplitDurations(t *testing.T) {
 	}
 }
 
+func TestNormalizeValidPairRejectsNonTradingSymbols(t *testing.T) {
+	if _, ok := normalizeValidPair("币安人生USDT"); ok {
+		t.Fatal("expected non-ASCII pair to be rejected")
+	}
+	if _, ok := normalizeValidPair("BTC-USDT"); ok {
+		t.Fatal("expected punctuated pair to be rejected")
+	}
+	normalized, ok := normalizeValidPair("1000pepe")
+	if !ok {
+		t.Fatal("expected 1000pepe to be accepted")
+	}
+	if normalized != "1000PEPEUSDT" {
+		t.Fatalf("normalized = %q, want %q", normalized, "1000PEPEUSDT")
+	}
+}
+
+func TestAggregateUniverseSnapshotsSkipsInvalidSymbols(t *testing.T) {
+	aggregated := aggregateUniverseSnapshots([]rawUniverseSnapshot{
+		{Symbol: "BTCUSDT", Sources: []string{"binance"}, Price: 10, OpenInterest: 2, Volume24H: 100},
+		{Symbol: "币安人生USDT", Sources: []string{"bybit"}, Price: 11, OpenInterest: 3, Volume24H: 120},
+	}, 10)
+	if len(aggregated) != 1 {
+		t.Fatalf("len(aggregated) = %d, want 1", len(aggregated))
+	}
+	if aggregated[0].Symbol != "BTCUSDT" {
+		t.Fatalf("symbol = %q, want BTCUSDT", aggregated[0].Symbol)
+	}
+}
+
 func TestAuthMiddlewareSupportsQueryAndBearerAndRejectsMissing(t *testing.T) {
 	router := NewRouter(NewService(Config{}, nil), "secret-token")
 

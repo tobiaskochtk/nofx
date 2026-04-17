@@ -128,7 +128,19 @@ func (e *StrategyEngine) BuildSystemPrompt(accountEquity float64, variant string
 		sb.WriteString(fmt.Sprintf("\nFeel free to use any effective analysis method, but **confidence ≥ %d** required to open positions; avoid low-quality behaviors such as single indicators, contradictory signals, sideways consolidation, reopening immediately after closing, etc.\n\n", riskControl.MinConfidence))
 	}
 
-	// 6. Decision process (editable)
+	// 6. Market-context guidance (editable)
+	if promptSections.MarketContext != "" {
+		sb.WriteString(promptSections.MarketContext)
+		sb.WriteString("\n\n")
+	} else {
+		sb.WriteString("# 🌐 Market Context Interpretation\n\n")
+		sb.WriteString("Before taking any trade, judge whether the broader market context actually supports acting now.\n")
+		sb.WriteString("- Start with the BTC benchmark regime and whether the candidate is outperforming or lagging BTC\n")
+		sb.WriteString("- Use execution-quality, liquidity, spread, and venue-tradability data to decide whether the setup is realistically executable\n")
+		sb.WriteString("- Treat conflicting timeframe structure, weak market leadership, or poor execution feasibility as reasons to wait instead of forcing a trade\n\n")
+	}
+
+	// 7. Decision process (editable)
 	if promptSections.DecisionProcess != "" {
 		sb.WriteString(promptSections.DecisionProcess)
 		sb.WriteString("\n\n")
@@ -139,8 +151,20 @@ func (e *StrategyEngine) BuildSystemPrompt(accountEquity float64, variant string
 		sb.WriteString("3. Write chain of thought first, then output structured JSON\n\n")
 	}
 
-	// 7. Output format
-	sb.WriteString("# Output Format (Strictly Follow)\n\n")
+	// 8. Decision-format guidance (editable)
+	if promptSections.DecisionFormat != "" {
+		sb.WriteString(promptSections.DecisionFormat)
+		sb.WriteString("\n\n")
+	} else {
+		sb.WriteString("# 🧾 Decision Format And Rubric\n\n")
+		sb.WriteString("- Keep the output concise, actionable, and machine-parseable\n")
+		sb.WriteString("- Use ENTER only when there is real edge; otherwise return an empty `decisions` array\n")
+		sb.WriteString("- Confidence should match evidence quality, not optimism\n")
+		sb.WriteString("- `reason_codes` must stay short machine-friendly tokens rather than prose\n\n")
+	}
+
+	// 9. Final output contract
+	sb.WriteString("# Final Output Contract (Strictly Follow)\n\n")
 	sb.WriteString("Use XML tags `<reasoning>` and `<decision>` to separate analysis from the decision JSON.\n\n")
 	sb.WriteString("## Format Requirements\n\n")
 	sb.WriteString("<reasoning>\n")

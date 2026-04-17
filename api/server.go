@@ -312,6 +312,14 @@ Duplicates the source strategy, applies source prompt defaults to the target tra
 Query params:
   limit=<int, default 20, max 100>`,
 				s.handleTraderAutonomousOptimizerRuns)
+			s.routeWithSchema(protected, "GET", "/traders/:id/autonomous-optimizer/model-outcomes", "List per-model autonomous optimizer outcome metrics for a trader",
+				`:id = trader_id from GET /api/my-traders.
+Aggregates recent optimizer runs and backlog adoption into per-model metrics such as apply rate, rollback rate, kept-win rate, and backlog usefulness.`,
+				s.handleTraderAutonomousOptimizerModelOutcomes)
+			s.routeWithSchema(protected, "GET", "/traders/:id/autonomous-optimizer/runs/:runId", "Get one autonomous optimizer run with patches, gate output, and linked version detail",
+				`:id = trader_id from GET /api/my-traders.
+:runId = run id from GET /api/traders/:id/autonomous-optimizer/runs.`,
+				s.handleTraderAutonomousOptimizerRunDetail)
 			s.routeWithSchema(protected, "GET", "/traders/:id/autonomous-optimizer/backlog", "List scored autonomous optimizer backlog items for a trader",
 				`:id = trader_id from GET /api/my-traders.
 Query params:
