@@ -3,6 +3,7 @@ package trader
 import (
 	"fmt"
 	"nofx/logger"
+	"nofx/store"
 	"strings"
 	"time"
 )
@@ -97,7 +98,7 @@ func (at *AutoTrader) checkPositionDrawdown() {
 				symbol, side, currentPnLPct, peakPnLPct, drawdownPct)
 
 			// Execute close position
-			if err := at.emergencyClosePosition(symbol, side); err != nil {
+			if err := at.emergencyClosePosition(symbol, side, quantity, markPrice, entryPrice, currentPnLPct, peakPnLPct, drawdownPct); err != nil {
 				logger.Infof("❌ Drawdown close position failed (%s %s): %v", symbol, side, err)
 			} else {
 				logger.Infof("✅ Drawdown close position succeeded: %s %s", symbol, side)
@@ -113,7 +114,14 @@ func (at *AutoTrader) checkPositionDrawdown() {
 }
 
 // emergencyClosePosition emergency close position function
-func (at *AutoTrader) emergencyClosePosition(symbol, side string) error {
+func (at *AutoTrader) emergencyClosePosition(symbol, side string, quantity, markPrice, entryPrice, currentPnLPct, peakPnLPct, drawdownPct float64) error {
+	summary := fmt.Sprintf(
+		"Matched drawdown-guard exit at current profit %.2f%% after peak %.2f%% with %.2f%% drawdown.",
+		currentPnLPct,
+		peakPnLPct,
+		drawdownPct,
+	)
+	reasoning := summary
 	switch side {
 	case "long":
 		order, err := at.trader.CloseLong(symbol, 0) // 0 = close all
@@ -121,6 +129,7 @@ func (at *AutoTrader) emergencyClosePosition(symbol, side string) error {
 			return err
 		}
 		logger.Infof("✅ Emergency close long position succeeded, order ID: %v", order["orderId"])
+		at.recordSystemExitIntent(order, symbol, side, store.DealReviewExitIntentTypeDrawdownGuard, "trader.auto_trader_risk", summary, reasoning, quantity, markPrice, entryPrice)
 		at.clearTrailingStopState(symbol, side)
 	case "short":
 		order, err := at.trader.CloseShort(symbol, 0) // 0 = close all
@@ -128,6 +137,7 @@ func (at *AutoTrader) emergencyClosePosition(symbol, side string) error {
 			return err
 		}
 		logger.Infof("✅ Emergency close short position succeeded, order ID: %v", order["orderId"])
+		at.recordSystemExitIntent(order, symbol, side, store.DealReviewExitIntentTypeDrawdownGuard, "trader.auto_trader_risk", summary, reasoning, quantity, markPrice, entryPrice)
 		at.clearTrailingStopState(symbol, side)
 	default:
 		return fmt.Errorf("unknown position direction: %s", side)

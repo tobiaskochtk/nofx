@@ -3,6 +3,7 @@ package api
 import (
 	"encoding/json"
 	"fmt"
+	"math"
 	"sort"
 	"strings"
 	"time"
@@ -18,6 +19,8 @@ const (
 	autonomousOptimizerMaxConfigPatchPaths             = 8
 	autonomousOptimizerMaxPromptPatchFields            = 6
 	autonomousOptimizerMaxPromptFieldChars             = 6000
+	autonomousOptimizerEarlyTighteningMinutes          = 15
+	autonomousOptimizerSameSessionGapHours             = 12
 )
 
 type autonomousOptimizerWindowBundle struct {
@@ -107,12 +110,85 @@ type autonomousOptimizerOptimizerPromptPatch struct {
 }
 
 type autonomousOptimizerPromptValidation struct {
-	ChangedFields     []string `json:"changed_fields,omitempty"`
-	ChangedFieldCount int      `json:"changed_field_count,omitempty"`
-	Warnings          []string `json:"warnings,omitempty"`
-	BlockingIssues    []string `json:"blocking_issues,omitempty"`
-	EstimatedTokens   int      `json:"estimated_tokens,omitempty"`
-	ContextLimit      int      `json:"context_limit,omitempty"`
+	ChangedFields       []string `json:"changed_fields,omitempty"`
+	ChangedFieldCount   int      `json:"changed_field_count,omitempty"`
+	RequestedFields     []string `json:"requested_fields,omitempty"`
+	RequestedFieldCount int      `json:"requested_field_count,omitempty"`
+	DeferredFields      []string `json:"deferred_fields,omitempty"`
+	AppliedFieldLimit   int      `json:"applied_field_limit,omitempty"`
+	AutoTrimmed         bool     `json:"auto_trimmed,omitempty"`
+	Warnings            []string `json:"warnings,omitempty"`
+	BlockingIssues      []string `json:"blocking_issues,omitempty"`
+	EstimatedTokens     int      `json:"estimated_tokens,omitempty"`
+	ContextLimit        int      `json:"context_limit,omitempty"`
+}
+
+type autonomousOptimizerPromptFieldCandidate struct {
+	Label    string
+	Priority int
+	Apply    func()
+}
+
+type autonomousOptimizerCooldownSymbolAgg struct {
+	Symbol               string
+	ReentryCount         int
+	RepeatAfterLossCount int
+	PnLSum               float64
+	LastGapMinutes       float64
+}
+
+type autonomousOptimizerCooldownRegimeAgg struct {
+	TrendRegime          string
+	VolatilityRegime     string
+	OIRegime             string
+	ReentryCount         int
+	RepeatAfterLossCount int
+	PnLSum               float64
+}
+
+func autonomousOptimizerPromptFieldPriority(label string) int {
+	switch strings.TrimSpace(label) {
+	case "strategy.prompt_sections.entry_standards":
+		return 10
+	case "strategy.prompt_sections.market_context":
+		return 20
+	case "strategy.prompt_sections.decision_process":
+		return 30
+	case "strategy.prompt_sections.trading_frequency":
+		return 40
+	case "strategy.prompt_sections.role_definition":
+		return 50
+	case "strategy.prompt_sections.decision_format":
+		return 60
+	case "strategy.custom_prompt":
+		return 70
+	case "trader.custom_prompt":
+		return 80
+	case "optimizer.proposal_instructions":
+		return 90
+	case "optimizer.critic_instructions":
+		return 100
+	case "trader.system_prompt_template":
+		return 110
+	case "trader.override_base_prompt":
+		return 120
+	default:
+		return 999
+	}
+}
+
+func autonomousOptimizerPromptCandidateLabels(candidates []autonomousOptimizerPromptFieldCandidate) []string {
+	if len(candidates) == 0 {
+		return nil
+	}
+	labels := make([]string, 0, len(candidates))
+	for _, item := range candidates {
+		if strings.TrimSpace(item.Label) == "" {
+			continue
+		}
+		labels = append(labels, item.Label)
+	}
+	return labels
 }
 
 func (s *Server) collectAutonomousOptimizerWindowBundle(cfg *store.AutonomousOptimizerConfig, now time.Time) (*autonomousOptimizerWindowBundle, error) {
@@ -173,6 +249,7 @@ func (s *Server) collectAutonomousOptimizerWindowBundle(cfg *store.AutonomousOpt
 			DecisionRecordCount:      bucketReview.RecordCount,
 			DecisionCandidateCount:   bucketReview.TotalCandidates,
 			OpenDecisionCount:        bucketReview.TotalOpenDecisions,
+			RejectedCandidateCount:   bucketReview.RejectedCandidateCount,
 			CyclesWithCandidates:     bucketReview.CyclesWithCandidates,
 			CyclesWithOpenDecisions:  bucketReview.CyclesWithOpenDecisions,
 			HoldDecisionCount:        bucketReview.HoldDecisionCount,
@@ -192,8 +269,364 @@ func (s *Server) collectAutonomousOptimizerWindowBundle(cfg *store.AutonomousOpt
 			ConfidenceBands:          bucketReview.ConfidenceBands,
 			OpportunitySessions:      bucketReview.OpportunitySessions,
 			OpportunitySymbols:       bucketReview.OpportunitySymbols,
+			ExecutionStatuses:        bucketReview.ExecutionStatuses,
+			RecentOpenExecutions:     bucketReview.RecentOpenExecutions,
+			RegimeSummaries:          bucketReview.RegimeSummaries,
 		},
 	}, nil
+}
+
+func (s *Server) attachAutonomousOptimizerTelemetry(cfg *store.AutonomousOptimizerConfig, strategyCfg *store.StrategyConfig, bundle *autonomousOptimizerWindowBundle) error {
+	if cfg == nil || bundle == nil {
+		return nil
+	}
+
+	positionIDs := autonomousOptimizerTrailingTelemetryPositionIDs(bundle.Cases)
+	firstTrailingUpdates := map[int64]store.DealReviewTrailingUpdateRecord{}
+	if len(positionIDs) > 0 {
+		updates, err := s.store.DealReview().GetFirstTrailingUpdatesByPosition(cfg.UserID, cfg.TraderID, positionIDs)
+		if err != nil {
+			return err
+		}
+		firstTrailingUpdates = updates
+	}
+
+	bundle.Metadata.TrailingStopTelemetry = buildAutonomousOptimizerTrailingStopTelemetry(bundle.Cases, firstTrailingUpdates)
+	bundle.Metadata.AdaptiveCooldownTelemetry = buildAutonomousOptimizerAdaptiveCooldownTelemetry(strategyCfg, bundle.Cases)
+	return nil
+}
+
+func autonomousOptimizerTrailingTelemetryPositionIDs(cases []store.DealReviewCaseDetail) []int64 {
+	seen := make(map[int64]struct{})
+	ids := make([]int64, 0, len(cases))
+	for _, detail := range cases {
+		caseRec := detail.Case
+		if normalizeAutonomousOptimizerCloseReason(caseRec.CloseReason) != "trailing_stop" {
+			continue
+		}
+		if caseRec.PositionID <= 0 {
+			continue
+		}
+		if _, exists := seen[caseRec.PositionID]; exists {
+			continue
+		}
+		seen[caseRec.PositionID] = struct{}{}
+		ids = append(ids, caseRec.PositionID)
+	}
+	return ids
+}
+
+func buildAutonomousOptimizerTrailingStopTelemetry(cases []store.DealReviewCaseDetail, firstTrailingUpdates map[int64]store.DealReviewTrailingUpdateRecord) *autonomousOptimizerTrailingStopTelemetry {
+	telemetry := &autonomousOptimizerTrailingStopTelemetry{}
+	var trailingPnLSum float64
+	var stopLossPnLSum float64
+	var minutesToFirstSum float64
+	var minutesFromFirstToExitSum float64
+	var timedTrailingSamples int
+	auditItems := make([]autonomousOptimizerTrailingStopUpdateAuditItem, 0)
+
+	for _, detail := range cases {
+		caseRec := detail.Case
+		if !strings.EqualFold(caseRec.Status, store.DealReviewCaseStatusClosed) {
+			continue
+		}
+		if record, ok := firstTrailingUpdates[caseRec.PositionID]; ok && record.TimestampMs > 0 {
+			item := autonomousOptimizerTrailingStopUpdateAuditItem{
+				PositionID:                caseRec.PositionID,
+				Symbol:                    strings.TrimSpace(caseRec.Symbol),
+				Side:                      strings.TrimSpace(caseRec.Side),
+				CloseReason:               normalizeAutonomousOptimizerCloseReason(caseRec.CloseReason),
+				TrailingMode:              strings.TrimSpace(record.TrailingMode),
+				UpdateTimeMs:              record.TimestampMs,
+				PreUpdateUnrealizedPnL:    roundAutonomousOptimizerFloat(record.UnrealizedPnL, 4),
+				PreUpdateUnrealizedPnLPct: roundAutonomousOptimizerFloat(record.UnrealizedPnLPct, 2),
+				StopProfitPct:             roundAutonomousOptimizerFloat(record.StopProfitPct, 2),
+				ProtectsBreakeven:         record.ProtectsBreakeven,
+				RealizedPnLPct:            roundAutonomousOptimizerFloat(caseRec.RealizedPnLPct, 2),
+				PreviousStopPrice:         roundAutonomousOptimizerFloat(record.PreviousStopPrice, 8),
+				NewStopPrice:              roundAutonomousOptimizerFloat(record.NewStopPrice, 8),
+				TierTriggerProfitPct:      roundAutonomousOptimizerFloat(record.TierTriggerProfitPct, 2),
+			}
+			if record.TimestampMs > caseRec.EntryTimeMs && caseRec.EntryTimeMs > 0 {
+				item.MinutesToFirstUpdate = roundAutonomousOptimizerFloat(float64(record.TimestampMs-caseRec.EntryTimeMs)/60000, 1)
+			}
+			if caseRec.ExitTimeMs > record.TimestampMs && record.TimestampMs > 0 {
+				item.MinutesFromUpdateToExit = roundAutonomousOptimizerFloat(float64(caseRec.ExitTimeMs-record.TimestampMs)/60000, 1)
+			}
+			telemetry.FirstUpdateAuditCount++
+			if record.ProtectsBreakeven {
+				telemetry.BreakevenProtectedCount++
+			}
+			auditItems = append(auditItems, item)
+		}
+
+		switch normalizeAutonomousOptimizerCloseReason(caseRec.CloseReason) {
+		case "trailing_stop":
+			telemetry.TrailingExitCount++
+			trailingPnLSum += caseRec.RealizedPnLPct
+			switch {
+			case caseRec.RealizedPnLPct > 0:
+				telemetry.TrailingProfitExitCount++
+			case caseRec.RealizedPnLPct < 0:
+				telemetry.TrailingLossExitCount++
+			}
+
+			updateMs := int64(0)
+			if record, ok := firstTrailingUpdates[caseRec.PositionID]; ok && record.TimestampMs > 0 {
+				updateMs = record.TimestampMs
+			} else if caseRec.ExitEvidence != nil && caseRec.ExitEvidence.TrailingUpdatedAtMs > 0 {
+				updateMs = caseRec.ExitEvidence.TrailingUpdatedAtMs
+			}
+			if updateMs > caseRec.EntryTimeMs && caseRec.ExitTimeMs > updateMs {
+				minutesToFirst := float64(updateMs-caseRec.EntryTimeMs) / 60000
+				minutesFromFirstToExit := float64(caseRec.ExitTimeMs-updateMs) / 60000
+				minutesToFirstSum += minutesToFirst
+				minutesFromFirstToExitSum += minutesFromFirstToExit
+				timedTrailingSamples++
+				if minutesToFirst <= autonomousOptimizerEarlyTighteningMinutes {
+					telemetry.EarlyTighteningCount++
+					if caseRec.RealizedPnLPct < 0 {
+						telemetry.EarlyTighteningLossCount++
+					}
+				}
+			}
+		case "stop_loss":
+			telemetry.InitialStopLossCount++
+			stopLossPnLSum += caseRec.RealizedPnLPct
+		}
+	}
+
+	if telemetry.TrailingExitCount == 0 && telemetry.InitialStopLossCount == 0 && len(auditItems) == 0 {
+		return nil
+	}
+	if telemetry.TrailingExitCount > 0 {
+		telemetry.TrailingExitAvgPnLPct = roundAutonomousOptimizerFloat(trailingPnLSum/float64(telemetry.TrailingExitCount), 2)
+	}
+	if telemetry.InitialStopLossCount > 0 {
+		telemetry.InitialStopLossAvgPnLPct = roundAutonomousOptimizerFloat(stopLossPnLSum/float64(telemetry.InitialStopLossCount), 2)
+	}
+	if timedTrailingSamples > 0 {
+		telemetry.AvgMinutesToFirstUpdate = roundAutonomousOptimizerFloat(minutesToFirstSum/float64(timedTrailingSamples), 1)
+		telemetry.AvgMinutesFromFirstUpdateToExit = roundAutonomousOptimizerFloat(minutesFromFirstToExitSum/float64(timedTrailingSamples), 1)
+	}
+	if len(auditItems) > 0 {
+		sort.Slice(auditItems, func(i, j int) bool {
+			if auditItems[i].RealizedPnLPct == auditItems[j].RealizedPnLPct {
+				if auditItems[i].MinutesToFirstUpdate == auditItems[j].MinutesToFirstUpdate {
+					return auditItems[i].UpdateTimeMs > auditItems[j].UpdateTimeMs
+				}
+				return auditItems[i].MinutesToFirstUpdate < auditItems[j].MinutesToFirstUpdate
+			}
+			return auditItems[i].RealizedPnLPct < auditItems[j].RealizedPnLPct
+		})
+		if len(auditItems) > 10 {
+			auditItems = auditItems[:10]
+		}
+		telemetry.SampleUpdates = auditItems
+	}
+	return telemetry
+}
+
+func buildAutonomousOptimizerAdaptiveCooldownTelemetry(strategyCfg *store.StrategyConfig, cases []store.DealReviewCaseDetail) *autonomousOptimizerAdaptiveCooldownTelemetry {
+	cfg := store.DefaultAdaptiveReentryGuardConfig()
+	if strategyCfg != nil {
+		cfg = strategyCfg.RiskControl.EffectiveAdaptiveReentryGuard()
+	}
+
+	telemetry := &autonomousOptimizerAdaptiveCooldownTelemetry{
+		Config: autonomousOptimizerAdaptiveCooldownConfigSnapshot{
+			Enabled:                       cfg.Enabled,
+			RequireWeakExecutionRegime:    cfg.RequireWeakExecutionRegime,
+			RecentTradeWindow:             cfg.RecentTradeWindow,
+			MinRecentTrades:               cfg.MinRecentTrades,
+			SameSymbolLossCooldownMinutes: cfg.SameSymbolLossCooldownMinutes,
+			PairLossLookbackHours:         cfg.PairLossLookbackHours,
+		},
+	}
+
+	closedCases := make([]store.DealReviewCase, 0, len(cases))
+	for _, detail := range cases {
+		caseRec := detail.Case
+		if strings.EqualFold(caseRec.Status, store.DealReviewCaseStatusClosed) && caseRec.EntryTimeMs > 0 && caseRec.ExitTimeMs > 0 {
+			closedCases = append(closedCases, caseRec)
+		}
+	}
+	if len(closedCases) == 0 {
+		return telemetry
+	}
+
+	sort.Slice(closedCases, func(i, j int) bool {
+		if closedCases[i].EntryTimeMs == closedCases[j].EntryTimeMs {
+			return closedCases[i].ExitTimeMs < closedCases[j].ExitTimeMs
+		}
+		return closedCases[i].EntryTimeMs < closedCases[j].EntryTimeMs
+	})
+
+	lastBySymbol := make(map[string]store.DealReviewCase)
+	lastLossByRegime := make(map[string]store.DealReviewCase)
+	symbolAggs := make(map[string]*autonomousOptimizerCooldownSymbolAgg)
+	regimeAggs := make(map[string]*autonomousOptimizerCooldownRegimeAgg)
+	cooldownWindow := time.Duration(cfg.SameSymbolLossCooldownMinutes) * time.Minute
+	regimeLookback := time.Duration(cfg.PairLossLookbackHours) * time.Hour
+	sameSessionWindow := time.Duration(autonomousOptimizerSameSessionGapHours) * time.Hour
+
+	for _, caseRec := range closedCases {
+		symbol := strings.ToUpper(strings.TrimSpace(caseRec.Symbol))
+		if symbol != "" {
+			if prev, ok := lastBySymbol[symbol]; ok && prev.ExitTimeMs > 0 && caseRec.EntryTimeMs > prev.ExitTimeMs {
+				gap := time.Duration(caseRec.EntryTimeMs-prev.ExitTimeMs) * time.Millisecond
+				sameSession := prev.OpenSessionBucket != "" &&
+					prev.OpenSessionBucket == caseRec.OpenSessionBucket &&
+					gap <= sameSessionWindow
+				if gap <= cooldownWindow || sameSession {
+					telemetry.CooldownCandidateCount++
+					agg := symbolAggs[symbol]
+					if agg == nil {
+						agg = &autonomousOptimizerCooldownSymbolAgg{Symbol: symbol}
+						symbolAggs[symbol] = agg
+					}
+					agg.ReentryCount++
+					agg.PnLSum += caseRec.RealizedPnLPct
+					agg.LastGapMinutes = roundAutonomousOptimizerFloat(gap.Minutes(), 1)
+					if prev.RealizedPnLPct < 0 {
+						telemetry.RepeatAfterLossCount++
+						agg.RepeatAfterLossCount++
+					}
+					if sameSession {
+						telemetry.SameSessionReentryCount++
+					}
+				}
+			}
+			lastBySymbol[symbol] = caseRec
+		}
+
+		regimeKey := autonomousOptimizerRegimeKey(caseRec)
+		if regimeKey != "" {
+			if prevLoss, ok := lastLossByRegime[regimeKey]; ok && prevLoss.ExitTimeMs > 0 && caseRec.EntryTimeMs > prevLoss.ExitTimeMs {
+				gap := time.Duration(caseRec.EntryTimeMs-prevLoss.ExitTimeMs) * time.Millisecond
+				if gap <= regimeLookback {
+					telemetry.RegimeRepeatLossCount++
+					agg := regimeAggs[regimeKey]
+					if agg == nil {
+						agg = &autonomousOptimizerCooldownRegimeAgg{
+							TrendRegime:      strings.TrimSpace(caseRec.OpenTrendRegime),
+							VolatilityRegime: strings.TrimSpace(caseRec.OpenVolatilityRegime),
+							OIRegime:         strings.TrimSpace(caseRec.OpenOIRegime),
+						}
+						regimeAggs[regimeKey] = agg
+					}
+					agg.ReentryCount++
+					agg.RepeatAfterLossCount++
+					agg.PnLSum += caseRec.RealizedPnLPct
+				}
+			}
+			if caseRec.RealizedPnLPct < 0 {
+				lastLossByRegime[regimeKey] = caseRec
+			}
+		}
+	}
+
+	telemetry.TopSymbols = buildAutonomousOptimizerCooldownSymbols(symbolAggs, 6)
+	telemetry.TopRegimes = buildAutonomousOptimizerCooldownRegimes(regimeAggs, 6)
+	return telemetry
+}
+
+func buildAutonomousOptimizerCooldownSymbols(items map[string]*autonomousOptimizerCooldownSymbolAgg, limit int) []autonomousOptimizerAdaptiveCooldownSymbol {
+	if len(items) == 0 {
+		return nil
+	}
+	result := make([]autonomousOptimizerAdaptiveCooldownSymbol, 0, len(items))
+	for _, item := range items {
+		if item == nil || item.ReentryCount == 0 {
+			continue
+		}
+		result = append(result, autonomousOptimizerAdaptiveCooldownSymbol{
+			Symbol:               item.Symbol,
+			ReentryCount:         item.ReentryCount,
+			RepeatAfterLossCount: item.RepeatAfterLossCount,
+			AvgPnLPct:            roundAutonomousOptimizerFloat(item.PnLSum/float64(item.ReentryCount), 2),
+			LastGapMinutes:       item.LastGapMinutes,
+		})
+	}
+	sort.Slice(result, func(i, j int) bool {
+		if result[i].RepeatAfterLossCount == result[j].RepeatAfterLossCount {
+			if result[i].ReentryCount == result[j].ReentryCount {
+				return result[i].Symbol < result[j].Symbol
+			}
+			return result[i].ReentryCount > result[j].ReentryCount
+		}
+		return result[i].RepeatAfterLossCount > result[j].RepeatAfterLossCount
+	})
+	if limit > 0 && len(result) > limit {
+		return result[:limit]
+	}
+	return result
+}
+
+func buildAutonomousOptimizerCooldownRegimes(items map[string]*autonomousOptimizerCooldownRegimeAgg, limit int) []autonomousOptimizerAdaptiveCooldownRegime {
+	if len(items) == 0 {
+		return nil
+	}
+	result := make([]autonomousOptimizerAdaptiveCooldownRegime, 0, len(items))
+	for _, item := range items {
+		if item == nil || item.ReentryCount == 0 {
+			continue
+		}
+		result = append(result, autonomousOptimizerAdaptiveCooldownRegime{
+			TrendRegime:          item.TrendRegime,
+			VolatilityRegime:     item.VolatilityRegime,
+			OIRegime:             item.OIRegime,
+			ReentryCount:         item.ReentryCount,
+			RepeatAfterLossCount: item.RepeatAfterLossCount,
+			AvgPnLPct:            roundAutonomousOptimizerFloat(item.PnLSum/float64(item.ReentryCount), 2),
+		})
+	}
+	sort.Slice(result, func(i, j int) bool {
+		if result[i].RepeatAfterLossCount == result[j].RepeatAfterLossCount {
+			if result[i].ReentryCount == result[j].ReentryCount {
+				leftKey := result[i].TrendRegime + "|" + result[i].VolatilityRegime + "|" + result[i].OIRegime
+				rightKey := result[j].TrendRegime + "|" + result[j].VolatilityRegime + "|" + result[j].OIRegime
+				return leftKey < rightKey
+			}
+			return result[i].ReentryCount > result[j].ReentryCount
+		}
+		return result[i].RepeatAfterLossCount > result[j].RepeatAfterLossCount
+	})
+	if limit > 0 && len(result) > limit {
+		return result[:limit]
+	}
+	return result
+}
+
+func autonomousOptimizerRegimeKey(caseRec store.DealReviewCase) string {
+	parts := []string{
+		strings.TrimSpace(caseRec.OpenTrendRegime),
+		strings.TrimSpace(caseRec.OpenVolatilityRegime),
+		strings.TrimSpace(caseRec.OpenOIRegime),
+	}
+	if parts[0] == "" && parts[1] == "" && parts[2] == "" {
+		return ""
+	}
+	return strings.Join(parts, "|")
+}
+
+func normalizeAutonomousOptimizerCloseReason(reason string) string {
+	switch strings.ToLower(strings.TrimSpace(reason)) {
+	case "trailing", "trailing-stop", "trailing_stop":
+		return "trailing_stop"
+	case "stop", "stop-loss", "stop_loss":
+		return "stop_loss"
+	default:
+		return strings.ToLower(strings.TrimSpace(reason))
+	}
+}
+
+func roundAutonomousOptimizerFloat(value float64, digits int) float64 {
+	factor := math.Pow(10, float64(digits))
+	if factor == 0 {
+		return value
+	}
+	return math.Round(value*factor) / factor
 }
 
 func autonomousOptimizerHasProposalEvidence(bundle *autonomousOptimizerWindowBundle) bool {
@@ -248,8 +681,11 @@ func buildAutonomousOptimizerReviewPayload(cfg *store.AutonomousOptimizerConfig,
 	}
 	basePayload["decision_bucket_review"] = bundle.BucketReview
 	basePayload["decision_starvation_metrics"] = buildAutonomousOptimizerStarvationMetrics(bundle.BucketReview)
+	basePayload["trailing_stop_telemetry"] = bundle.Metadata.TrailingStopTelemetry
+	basePayload["adaptive_cooldown_telemetry"] = bundle.Metadata.AdaptiveCooldownTelemetry
 	basePayload["current_prompt_bundle"] = buildAutonomousOptimizerPromptBundle(cfg, traderCfg, strategyCfg)
 	basePayload["recent_optimizer_runs"] = summarizeAutonomousOptimizerRuns(recentRuns)
+	basePayload["latest_gate_feedback"] = buildAutonomousOptimizerLatestGateFeedback(recentRuns)
 	return basePayload, nil
 }
 
@@ -311,8 +747,12 @@ Rules:
 - If the system lacks data or features needed for a stronger recommendation, create backlog_items instead of hallucinating unavailable inputs.
 - Prefer prompt_patch over config_patch when the evidence is mostly low-trade / no-trade telemetry rather than realized deal outcomes.
 - Use decision_starvation_metrics and recent_optimizer_runs explicitly. Explain whether the main problem is bad executed trades, over-filtered inactivity, or repeated failure of the last optimizer changes.
+- Use latest_gate_feedback explicitly when it is present. If the last optimizer run was blocked, do not repeat the same patch unchanged. Either propose a materially narrower subset, switch to backlog_only, or explain why the new evidence is now different enough.
 - When inactivity is the problem, cite concrete reject reasons, confidence bands, sessions, or symbols from the supplied telemetry.
+- Use trailing_stop_telemetry when exit management is the issue. Distinguish profitable protective trailing exits from early loss-making stop tightening before proposing stop logic changes, and use sample_updates for first-tighten timing plus pre-update unrealized PnL context.
+- Use adaptive_cooldown_telemetry plus current risk_control settings when repeated same-symbol or same-regime re-entries are the issue. Prefer narrow cooldown controls over blunt reductions in trade frequency.
 - Keep patches minimal and high-signal. Do not modify credentials, exchange bindings, or unrelated trader settings.
+- If you touch more than 6 prompt fields, only the highest-priority 6 fields will be auto-applied. Concentrate changes into the most causally important prompt surfaces first.
 - Never output markdown or code fences.`
 	if cfg != nil {
 		if extra := strings.TrimSpace(cfg.ProposalPromptInstructions); extra != "" {
@@ -434,7 +874,9 @@ func decodeAutonomousOptimizerPromptPatch(raw map[string]any) (*autonomousOptimi
 }
 
 func validateAutonomousOptimizerPromptPatch(cfg *store.AutonomousOptimizerConfig, traderCfg *store.Trader, strategyCfg *store.StrategyConfig, modelCfg *store.AIModel, modelName string, patch *autonomousOptimizerPromptPatch) (*store.AutonomousOptimizerConfig, *store.Trader, *store.StrategyConfig, *autonomousOptimizerPromptValidation, error) {
-	validation := &autonomousOptimizerPromptValidation{}
+	validation := &autonomousOptimizerPromptValidation{
+		AppliedFieldLimit: autonomousOptimizerMaxPromptPatchFields,
+	}
 	if traderCfg == nil || strategyCfg == nil {
 		validation.BlockingIssues = append(validation.BlockingIssues, "Trader or strategy config is unavailable for prompt validation.")
 		return nil, nil, nil, validation, nil
@@ -458,50 +900,79 @@ func validateAutonomousOptimizerPromptPatch(cfg *store.AutonomousOptimizerConfig
 		mergedStrategy = &store.StrategyConfig{}
 	}
 
-	applyText := func(label string, target *string, value *string) {
+	candidates := make([]autonomousOptimizerPromptFieldCandidate, 0, 12)
+	addTextCandidate := func(label string, target *string, value *string) {
 		if value == nil {
 			return
 		}
 		trimmed := strings.TrimSpace(*value)
+		if trimmed == "" {
+			validation.Warnings = append(validation.Warnings, fmt.Sprintf("Ignored blank autonomous prompt patch for %s.", label))
+			return
+		}
 		if len([]rune(trimmed)) > autonomousOptimizerMaxPromptFieldChars {
 			validation.BlockingIssues = append(validation.BlockingIssues, fmt.Sprintf("%s exceeds the %d character limit.", label, autonomousOptimizerMaxPromptFieldChars))
 			return
 		}
-		*target = trimmed
-		validation.ChangedFields = append(validation.ChangedFields, label)
+		if target == nil || *target == trimmed {
+			return
+		}
+		candidates = append(candidates, autonomousOptimizerPromptFieldCandidate{
+			Label:    label,
+			Priority: autonomousOptimizerPromptFieldPriority(label),
+			Apply: func() {
+				*target = trimmed
+			},
+		})
 	}
 
 	if patch.Strategy != nil {
-		applyText("strategy.custom_prompt", &mergedStrategy.CustomPrompt, patch.Strategy.CustomPrompt)
+		addTextCandidate("strategy.custom_prompt", &mergedStrategy.CustomPrompt, patch.Strategy.CustomPrompt)
 		if patch.Strategy.PromptSections != nil {
-			applyText("strategy.prompt_sections.role_definition", &mergedStrategy.PromptSections.RoleDefinition, patch.Strategy.PromptSections.RoleDefinition)
-			applyText("strategy.prompt_sections.trading_frequency", &mergedStrategy.PromptSections.TradingFrequency, patch.Strategy.PromptSections.TradingFrequency)
-			applyText("strategy.prompt_sections.entry_standards", &mergedStrategy.PromptSections.EntryStandards, patch.Strategy.PromptSections.EntryStandards)
-			applyText("strategy.prompt_sections.market_context", &mergedStrategy.PromptSections.MarketContext, patch.Strategy.PromptSections.MarketContext)
-			applyText("strategy.prompt_sections.decision_process", &mergedStrategy.PromptSections.DecisionProcess, patch.Strategy.PromptSections.DecisionProcess)
-			applyText("strategy.prompt_sections.decision_format", &mergedStrategy.PromptSections.DecisionFormat, patch.Strategy.PromptSections.DecisionFormat)
+			addTextCandidate("strategy.prompt_sections.role_definition", &mergedStrategy.PromptSections.RoleDefinition, patch.Strategy.PromptSections.RoleDefinition)
+			addTextCandidate("strategy.prompt_sections.trading_frequency", &mergedStrategy.PromptSections.TradingFrequency, patch.Strategy.PromptSections.TradingFrequency)
+			addTextCandidate("strategy.prompt_sections.entry_standards", &mergedStrategy.PromptSections.EntryStandards, patch.Strategy.PromptSections.EntryStandards)
+			addTextCandidate("strategy.prompt_sections.market_context", &mergedStrategy.PromptSections.MarketContext, patch.Strategy.PromptSections.MarketContext)
+			addTextCandidate("strategy.prompt_sections.decision_process", &mergedStrategy.PromptSections.DecisionProcess, patch.Strategy.PromptSections.DecisionProcess)
+			addTextCandidate("strategy.prompt_sections.decision_format", &mergedStrategy.PromptSections.DecisionFormat, patch.Strategy.PromptSections.DecisionFormat)
 		}
 	}
 	if patch.Trader != nil {
-		applyText("trader.custom_prompt", &mergedTrader.CustomPrompt, patch.Trader.CustomPrompt)
+		addTextCandidate("trader.custom_prompt", &mergedTrader.CustomPrompt, patch.Trader.CustomPrompt)
 		if patch.Trader.OverrideBasePrompt != nil {
 			if *patch.Trader.OverrideBasePrompt && !mergedTrader.OverrideBasePrompt {
 				validation.BlockingIssues = append(validation.BlockingIssues, "Autonomous prompt patches may not enable trader.override_base_prompt automatically.")
 			} else if mergedTrader.OverrideBasePrompt != *patch.Trader.OverrideBasePrompt {
-				mergedTrader.OverrideBasePrompt = *patch.Trader.OverrideBasePrompt
-				validation.ChangedFields = append(validation.ChangedFields, "trader.override_base_prompt")
+				nextValue := *patch.Trader.OverrideBasePrompt
+				candidates = append(candidates, autonomousOptimizerPromptFieldCandidate{
+					Label:    "trader.override_base_prompt",
+					Priority: autonomousOptimizerPromptFieldPriority("trader.override_base_prompt"),
+					Apply: func() {
+						mergedTrader.OverrideBasePrompt = nextValue
+					},
+				})
 			}
 		}
 		if patch.Trader.SystemPromptTemplate != nil {
 			templateName := strings.TrimSpace(*patch.Trader.SystemPromptTemplate)
+			if templateName == "" {
+				validation.Warnings = append(validation.Warnings, "Ignored blank autonomous prompt patch for trader.system_prompt_template.")
+				templateName = mergedTrader.SystemPromptTemplate
+			}
 			if templateName != "" && !strings.EqualFold(templateName, "strategy") {
 				if _, err := decision.GetPromptTemplate(templateName); err != nil {
 					validation.BlockingIssues = append(validation.BlockingIssues, fmt.Sprintf("Unknown system prompt template %q.", templateName))
 				}
 			}
 			if mergedTrader.SystemPromptTemplate != templateName {
-				mergedTrader.SystemPromptTemplate = templateName
-				validation.ChangedFields = append(validation.ChangedFields, "trader.system_prompt_template")
+				nextTemplateName := templateName
+				candidates = append(candidates, autonomousOptimizerPromptFieldCandidate{
+					Label:    "trader.system_prompt_template",
+					Priority: autonomousOptimizerPromptFieldPriority("trader.system_prompt_template"),
+					Apply: func() {
+						mergedTrader.SystemPromptTemplate = nextTemplateName
+					},
+				})
 			}
 		}
 	}
@@ -509,18 +980,42 @@ func validateAutonomousOptimizerPromptPatch(cfg *store.AutonomousOptimizerConfig
 		if mergedOptimizer == nil {
 			validation.BlockingIssues = append(validation.BlockingIssues, "Optimizer config is unavailable for optimizer prompt validation.")
 		} else {
-			applyText("optimizer.proposal_instructions", &mergedOptimizer.ProposalPromptInstructions, patch.Optimizer.ProposalInstructions)
-			applyText("optimizer.critic_instructions", &mergedOptimizer.CriticPromptInstructions, patch.Optimizer.CriticInstructions)
+			addTextCandidate("optimizer.proposal_instructions", &mergedOptimizer.ProposalPromptInstructions, patch.Optimizer.ProposalInstructions)
+			addTextCandidate("optimizer.critic_instructions", &mergedOptimizer.CriticPromptInstructions, patch.Optimizer.CriticInstructions)
 		}
 	}
 
-	validation.ChangedFields = dedupeSortedStrings(validation.ChangedFields)
+	sort.SliceStable(candidates, func(i, j int) bool {
+		if candidates[i].Priority == candidates[j].Priority {
+			return candidates[i].Label < candidates[j].Label
+		}
+		return candidates[i].Priority < candidates[j].Priority
+	})
+	validation.RequestedFields = autonomousOptimizerPromptCandidateLabels(candidates)
+	validation.RequestedFieldCount = len(validation.RequestedFields)
+	selectedCandidates := candidates
+	if len(selectedCandidates) > autonomousOptimizerMaxPromptPatchFields {
+		validation.AutoTrimmed = true
+		validation.DeferredFields = autonomousOptimizerPromptCandidateLabels(selectedCandidates[autonomousOptimizerMaxPromptPatchFields:])
+		selectedCandidates = selectedCandidates[:autonomousOptimizerMaxPromptPatchFields]
+		validation.Warnings = append(validation.Warnings,
+			fmt.Sprintf(
+				"Prompt patch requested %d fields; automatically applied the highest-priority %d fields and deferred %d for a later optimizer window.",
+				validation.RequestedFieldCount,
+				len(selectedCandidates),
+				len(validation.DeferredFields),
+			),
+		)
+	}
+	for _, item := range selectedCandidates {
+		if item.Apply != nil {
+			item.Apply()
+		}
+	}
+	validation.ChangedFields = autonomousOptimizerPromptCandidateLabels(selectedCandidates)
 	validation.ChangedFieldCount = len(validation.ChangedFields)
 	if len(validation.ChangedFields) == 0 {
 		validation.BlockingIssues = append(validation.BlockingIssues, "Prompt patch does not modify any supported prompt surface.")
-	}
-	if len(validation.ChangedFields) > autonomousOptimizerMaxPromptPatchFields {
-		validation.BlockingIssues = append(validation.BlockingIssues, fmt.Sprintf("Prompt patch touches %d fields, which exceeds the limit of %d.", len(validation.ChangedFields), autonomousOptimizerMaxPromptPatchFields))
 	}
 
 	estimate := mergedStrategy.EstimateTokens()
@@ -643,6 +1138,7 @@ func buildAutonomousOptimizerStarvationMetrics(review *store.TraderBucketReview)
 		"record_count":               review.RecordCount,
 		"candidate_count":            review.TotalCandidates,
 		"open_decision_count":        review.TotalOpenDecisions,
+		"rejected_candidate_count":   review.RejectedCandidateCount,
 		"hold_decision_count":        review.HoldDecisionCount,
 		"wait_decision_count":        review.WaitDecisionCount,
 		"decision_conversion_rate":   review.DecisionConversionRate,
@@ -651,6 +1147,9 @@ func buildAutonomousOptimizerStarvationMetrics(review *store.TraderBucketReview)
 		"confidence_bands":           review.ConfidenceBands,
 		"opportunity_sessions":       review.OpportunitySessions,
 		"opportunity_symbols":        review.OpportunitySymbols,
+		"execution_statuses":         review.ExecutionStatuses,
+		"recent_open_executions":     review.RecentOpenExecutions,
+		"regime_summaries":           review.RegimeSummaries,
 		"cycles_with_candidates":     review.CyclesWithCandidates,
 		"cycles_with_open_decisions": review.CyclesWithOpenDecisions,
 	}
@@ -662,7 +1161,7 @@ func summarizeAutonomousOptimizerRuns(runs []*store.AutonomousOptimizerRun) []ma
 		if item == nil {
 			continue
 		}
-		result = append(result, map[string]any{
+		entry := map[string]any{
 			"id":                          item.ID,
 			"trigger":                     item.Trigger,
 			"status":                      item.Status,
@@ -672,12 +1171,126 @@ func summarizeAutonomousOptimizerRuns(runs []*store.AutonomousOptimizerRun) []ma
 			"applied_strategy_version_id": item.AppliedStrategyVersionID,
 			"primary_model_name":          item.PrimaryModelName,
 			"critic_model_name":           item.CriticModelName,
-		})
+		}
+		validation := parseAutonomousOptimizerJSONObject(item.ValidationJSON)
+		if gateReasons := autonomousOptimizerStringSlice(validation["gate_reasons"]); len(gateReasons) > 0 {
+			entry["gate_reasons"] = gateReasons
+		}
+		critic := parseAutonomousOptimizerNestedObject(validation, "critic")
+		if len(critic) > 0 {
+			if summary := autonomousOptimizerString(critic["summary"]); summary != "" {
+				entry["critic_summary"] = clipDealReviewAIScanText(summary, 240)
+			}
+			if action := autonomousOptimizerString(critic["recommended_action"]); action != "" {
+				entry["critic_recommended_action"] = action
+			}
+			if blockingIssues := autonomousOptimizerStringSlice(critic["blocking_issues"]); len(blockingIssues) > 0 {
+				entry["critic_blocking_issues"] = blockingIssues
+			}
+		}
+		promptValidation := parseAutonomousOptimizerNestedObject(validation, "prompt_validation")
+		if len(promptValidation) > 0 {
+			if count, ok := promptValidation["requested_field_count"].(float64); ok && count > 0 {
+				entry["prompt_requested_field_count"] = int(count)
+			}
+			if count, ok := promptValidation["changed_field_count"].(float64); ok && count > 0 {
+				entry["prompt_applied_field_count"] = int(count)
+			}
+			if deferred := autonomousOptimizerStringSlice(promptValidation["deferred_fields"]); len(deferred) > 0 {
+				entry["prompt_deferred_fields"] = deferred
+			}
+			if trimmed, ok := promptValidation["auto_trimmed"].(bool); ok {
+				entry["prompt_auto_trimmed"] = trimmed
+			}
+		}
+		result = append(result, entry)
 		if len(result) >= 6 {
 			break
 		}
 	}
 	return result
+}
+
+func buildAutonomousOptimizerLatestGateFeedback(runs []*store.AutonomousOptimizerRun) map[string]any {
+	for _, item := range runs {
+		if item == nil {
+			continue
+		}
+		switch item.Status {
+		case store.AutonomousOptimizerStatusBlockedByGate, store.AutonomousOptimizerStatusDeferredForNextWindow:
+		default:
+			continue
+		}
+
+		validation := parseAutonomousOptimizerJSONObject(item.ValidationJSON)
+		metadata := parseAutonomousOptimizerJSONObject(item.MetadataJSON)
+		critic := parseAutonomousOptimizerNestedObject(validation, "critic")
+		promptValidation := parseAutonomousOptimizerNestedObject(validation, "prompt_validation")
+		proposal := parseAutonomousOptimizerNestedObject(metadata, "proposal")
+
+		feedback := map[string]any{
+			"run_id":       item.ID,
+			"status":       item.Status,
+			"trigger":      item.Trigger,
+			"summary":      clipDealReviewAIScanText(item.Summary, 320),
+			"started_at":   item.StartedAt.UTC().Format(time.RFC3339),
+			"completed_at": item.CompletedAt.UTC().Format(time.RFC3339),
+			"gate_reasons": autonomousOptimizerStringSlice(validation["gate_reasons"]),
+			"deferred_reasons": autonomousOptimizerStringSlice(
+				validation["deferred_reasons"],
+			),
+			"config_patch_paths": autonomousOptimizerStringSlice(
+				validation["config_patch_paths"],
+			),
+		}
+		if len(critic) > 0 {
+			feedback["critic"] = map[string]any{
+				"approved":           autonomousOptimizerBool(critic["approved"]),
+				"recommended_action": autonomousOptimizerString(critic["recommended_action"]),
+				"summary": clipDealReviewAIScanText(
+					autonomousOptimizerString(critic["summary"]),
+					240,
+				),
+				"blocking_issues": autonomousOptimizerStringSlice(critic["blocking_issues"]),
+				"warnings":        autonomousOptimizerStringSlice(critic["warnings"]),
+			}
+		}
+		if len(promptValidation) > 0 {
+			promptFeedback := map[string]any{}
+			if requested, ok := promptValidation["requested_field_count"].(float64); ok && requested > 0 {
+				promptFeedback["requested_field_count"] = int(requested)
+			}
+			if changed, ok := promptValidation["changed_field_count"].(float64); ok && changed > 0 {
+				promptFeedback["changed_field_count"] = int(changed)
+			}
+			if deferred := autonomousOptimizerStringSlice(promptValidation["deferred_fields"]); len(deferred) > 0 {
+				promptFeedback["deferred_fields"] = deferred
+			}
+			if issues := autonomousOptimizerStringSlice(promptValidation["blocking_issues"]); len(issues) > 0 {
+				promptFeedback["blocking_issues"] = issues
+			}
+			if len(promptFeedback) > 0 {
+				feedback["prompt_validation"] = promptFeedback
+			}
+		}
+		if len(proposal) > 0 {
+			proposalFeedback := map[string]any{}
+			if proposalType := autonomousOptimizerString(proposal["proposal_type"]); proposalType != "" {
+				proposalFeedback["proposal_type"] = proposalType
+			}
+			if expectedEffect := autonomousOptimizerString(proposal["expected_effect"]); expectedEffect != "" {
+				proposalFeedback["expected_effect"] = clipDealReviewAIScanText(expectedEffect, 240)
+			}
+			if rationale := autonomousOptimizerStringSlice(proposal["rationale"]); len(rationale) > 0 {
+				proposalFeedback["rationale"] = rationale
+			}
+			if len(proposalFeedback) > 0 {
+				feedback["proposal"] = proposalFeedback
+			}
+		}
+		return feedback
+	}
+	return map[string]any{}
 }
 
 func sanitizeAutonomousOptimizerBacklogProposal(item autonomousOptimizerBacklogProposal) autonomousOptimizerBacklogProposal {

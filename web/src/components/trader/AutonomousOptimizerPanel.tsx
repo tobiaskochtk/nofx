@@ -60,7 +60,10 @@ const backlogStatusOptions = [
 const backlogCategoryOptions = [
   { value: 'missing_indicator', label: 'Missing indicator' },
   { value: 'missing_market_data', label: 'Missing market data' },
-  { value: 'missing_execution_telemetry', label: 'Missing execution telemetry' },
+  {
+    value: 'missing_execution_telemetry',
+    label: 'Missing execution telemetry',
+  },
   { value: 'missing_regime_metadata', label: 'Missing regime metadata' },
   { value: 'missing_risk_control', label: 'Missing risk control' },
   { value: 'missing_prompt_instruction', label: 'Missing prompt instruction' },
@@ -118,6 +121,7 @@ function statusToneClasses(status?: string): string {
     case 'auto_applied':
     case 'kept':
     case 'done':
+    case 'submitted':
       return 'border-emerald-400/25 bg-emerald-500/15 text-emerald-300'
     case 'blocked_by_gate':
     case 'deferred_for_next_window':
@@ -127,10 +131,16 @@ function statusToneClasses(status?: string): string {
     case 'rollback_pending':
     case 'planned':
     case 'in_progress':
+    case 'blocked_by_risk_control':
+    case 'blocked_by_position_state':
       return 'border-amber-400/25 bg-amber-500/15 text-amber-200'
     case 'failed':
     case 'rolled_back':
     case 'rejected':
+    case 'failed_exchange_validation':
+    case 'rejected_or_canceled':
+    case 'submit_failed':
+    case 'never_handed_to_execution':
       return 'border-rose-400/25 bg-rose-500/15 text-rose-300'
     default:
       return 'border-white/10 bg-white/5 text-nofx-text-muted'
@@ -163,7 +173,9 @@ function sortBacklogItems(items: AutonomousOptimizerBacklogItem[]) {
   })
 }
 
-function buildBacklogEditDraft(item: AutonomousOptimizerBacklogItem): BacklogEditDraft {
+function buildBacklogEditDraft(
+  item: AutonomousOptimizerBacklogItem
+): BacklogEditDraft {
   return {
     title: item.title || '',
     category: item.category || 'other_capability_gap',
@@ -212,6 +224,18 @@ function readNestedNumber(
     : undefined
 }
 
+function readNestedBoolean(
+  body: Record<string, unknown> | undefined,
+  ...path: string[]
+): boolean | undefined {
+  let current: unknown = body
+  for (const key of path) {
+    if (!current || typeof current !== 'object') return undefined
+    current = (current as Record<string, unknown>)[key]
+  }
+  return typeof current === 'boolean' ? current : undefined
+}
+
 function readNestedObjectArray(
   body: Record<string, unknown> | undefined,
   ...path: string[]
@@ -226,6 +250,21 @@ function readNestedObjectArray(
     (item): item is Record<string, unknown> =>
       Boolean(item) && typeof item === 'object' && !Array.isArray(item)
   )
+}
+
+function readNestedObject(
+  body: Record<string, unknown> | undefined,
+  ...path: string[]
+): Record<string, unknown> | undefined {
+  let current: unknown = body
+  for (const key of path) {
+    if (!current || typeof current !== 'object') return undefined
+    current = (current as Record<string, unknown>)[key]
+  }
+  if (!current || typeof current !== 'object' || Array.isArray(current)) {
+    return undefined
+  }
+  return current as Record<string, unknown>
 }
 
 function readStringArray(value: unknown): string[] {
@@ -292,32 +331,38 @@ export function AutonomousOptimizerPanel({
   const [config, setConfig] = useState<AutonomousOptimizerConfig | null>(null)
   const [runs, setRuns] = useState<AutonomousOptimizerRun[]>([])
   const [backlog, setBacklog] = useState<AutonomousOptimizerBacklogItem[]>([])
-  const [modelOutcomes, setModelOutcomes] = useState<AutonomousOptimizerModelOutcome[]>([])
+  const [modelOutcomes, setModelOutcomes] = useState<
+    AutonomousOptimizerModelOutcome[]
+  >([])
   const [models, setModels] = useState<AIModel[]>([])
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null)
   const [selectedRunDetail, setSelectedRunDetail] =
     useState<AutonomousOptimizerRunDetail | null>(null)
   const [runDetailLoading, setRunDetailLoading] = useState(false)
+  const [manualRunLoading, setManualRunLoading] = useState(false)
   const [loading, setLoading] = useState(false)
   const [savingConfig, setSavingConfig] = useState(false)
   const [savingBacklogId, setSavingBacklogId] = useState<string | null>(null)
   const [editingBacklogId, setEditingBacklogId] = useState<string | null>(null)
-  const [backlogDraft, setBacklogDraft] = useState<BacklogEditDraft | null>(null)
+  const [backlogDraft, setBacklogDraft] = useState<BacklogEditDraft | null>(
+    null
+  )
   const [error, setError] = useState<string | null>(null)
   const [runStatusFilter, setRunStatusFilter] = useState('')
   const [backlogStatusFilter, setBacklogStatusFilter] = useState('')
   const [primaryRemoteModels, setPrimaryRemoteModels] = useState<
     RemoteModelInfo[]
   >([])
-  const [criticRemoteModels, setCriticRemoteModels] = useState<RemoteModelInfo[]>(
-    []
-  )
+  const [criticRemoteModels, setCriticRemoteModels] = useState<
+    RemoteModelInfo[]
+  >([])
 
   const [enabled, setEnabled] = useState(false)
   const [configStatus, setConfigStatus] = useState('paused')
   const [reviewIntervalHours, setReviewIntervalHours] = useState('12')
   const [autoApplyCooldownHours, setAutoApplyCooldownHours] = useState('12')
-  const [maxConsecutiveAutoApplies, setMaxConsecutiveAutoApplies] = useState('2')
+  const [maxConsecutiveAutoApplies, setMaxConsecutiveAutoApplies] =
+    useState('2')
   const [autoApplyConfigPatch, setAutoApplyConfigPatch] = useState(true)
   const [autoApplyPromptPatch, setAutoApplyPromptPatch] = useState(true)
   const [autoRollbackEnabled, setAutoRollbackEnabled] = useState(true)
@@ -326,7 +371,8 @@ export function AutonomousOptimizerPanel({
   const [primaryModelName, setPrimaryModelName] = useState('')
   const [criticModelConfigID, setCriticModelConfigID] = useState('')
   const [criticModelName, setCriticModelName] = useState('')
-  const [proposalPromptInstructions, setProposalPromptInstructions] = useState('')
+  const [proposalPromptInstructions, setProposalPromptInstructions] =
+    useState('')
   const [criticPromptInstructions, setCriticPromptInstructions] = useState('')
 
   const loadPanel = async () => {
@@ -383,6 +429,26 @@ export function AutonomousOptimizerPanel({
       )
     } finally {
       setRunDetailLoading(false)
+    }
+  }
+
+  const runOptimizerNow = async () => {
+    if (!traderId) return
+    setManualRunLoading(true)
+    try {
+      const detail = await api.runTraderAutonomousOptimizerNow(traderId)
+      setSelectedRunId(detail.run.id)
+      setSelectedRunDetail(detail)
+      await loadPanel()
+      notify.success('Autonomous optimizer run completed')
+    } catch (err) {
+      notify.error(
+        err instanceof Error
+          ? err.message
+          : 'Failed to execute autonomous optimizer run'
+      )
+    } finally {
+      setManualRunLoading(false)
     }
   }
 
@@ -506,7 +572,11 @@ export function AutonomousOptimizerPanel({
     'proposal',
     'expected_effect'
   )
-  const criticSummary = readNestedString(selectedValidation, 'critic', 'summary')
+  const criticSummary = readNestedString(
+    selectedValidation,
+    'critic',
+    'summary'
+  )
   const configValidationStatus = readNestedString(
     selectedValidation,
     'config_validation',
@@ -516,6 +586,21 @@ export function AutonomousOptimizerPanel({
     selectedValidation,
     'prompt_validation',
     'changed_field_count'
+  )
+  const promptRequestedFieldCount = readNestedNumber(
+    selectedValidation,
+    'prompt_validation',
+    'requested_field_count'
+  )
+  const promptDeferredFields = readNestedStringArray(
+    selectedValidation,
+    'prompt_validation',
+    'deferred_fields'
+  )
+  const promptAutoTrimmed = readNestedBoolean(
+    selectedValidation,
+    'prompt_validation',
+    'auto_trimmed'
   )
   const reviewWindowClosedDeals = readNestedNumber(
     selectedMetadata,
@@ -528,6 +613,10 @@ export function AutonomousOptimizerPanel({
   const openDecisionCount = readNestedNumber(
     selectedMetadata,
     'open_decision_count'
+  )
+  const rejectedCandidateCount = readNestedNumber(
+    selectedMetadata,
+    'rejected_candidate_count'
   )
   const reviewWindowCycles = readNestedNumber(
     selectedMetadata,
@@ -550,7 +639,10 @@ export function AutonomousOptimizerPanel({
     selectedMetadata,
     'avg_decision_confidence'
   )
-  const rejectReasons = readNestedObjectArray(selectedMetadata, 'reject_reasons')
+  const rejectReasons = readNestedObjectArray(
+    selectedMetadata,
+    'reject_reasons'
+  )
   const confidenceBands = readNestedObjectArray(
     selectedMetadata,
     'confidence_bands'
@@ -563,11 +655,50 @@ export function AutonomousOptimizerPanel({
     selectedMetadata,
     'opportunity_symbols'
   )
+  const executionStatuses = readNestedObjectArray(
+    selectedMetadata,
+    'execution_statuses'
+  )
+  const recentOpenExecutions = readNestedObjectArray(
+    selectedMetadata,
+    'recent_open_executions'
+  )
+  const regimeSummaries = readNestedObjectArray(
+    selectedMetadata,
+    'regime_summaries'
+  )
+  const trailingStopTelemetry = readNestedObject(
+    selectedMetadata,
+    'trailing_stop_telemetry'
+  )
+  const trailingStopSamples = readNestedObjectArray(
+    trailingStopTelemetry,
+    'sample_updates'
+  )
+  const adaptiveCooldownTelemetry = readNestedObject(
+    selectedMetadata,
+    'adaptive_cooldown_telemetry'
+  )
+  const adaptiveCooldownConfig = readNestedObject(
+    adaptiveCooldownTelemetry,
+    'config'
+  )
+  const adaptiveCooldownTopSymbols = readNestedObjectArray(
+    adaptiveCooldownTelemetry,
+    'top_symbols'
+  )
+  const adaptiveCooldownTopRegimes = readNestedObjectArray(
+    adaptiveCooldownTelemetry,
+    'top_regimes'
+  )
   const recentOptimizerContext = readNestedObjectArray(
     selectedMetadata,
     'recent_optimizer_runs'
   )
-  const cooldownUntilMs = readNestedNumber(selectedMetadata, 'cooldown_until_ms')
+  const cooldownUntilMs = readNestedNumber(
+    selectedMetadata,
+    'cooldown_until_ms'
+  )
   const nextEligibleRunMs = readNestedNumber(
     selectedMetadata,
     'next_eligible_run_ms'
@@ -766,9 +897,7 @@ export function AutonomousOptimizerPanel({
   const openLinkedStrategyVersion = () => {
     const version =
       selectedRunDetail?.linked_strategy_version ||
-      (selectedRunDetail?.run.applied_strategy_version_id
-        ? null
-        : null)
+      (selectedRunDetail?.run.applied_strategy_version_id ? null : null)
     const versionId =
       version?.version.id ||
       selectedRunDetail?.run.applied_strategy_version_id ||
@@ -813,13 +942,22 @@ export function AutonomousOptimizerPanel({
             optimizer status, and the recent automatic review outcomes.
           </p>
         </div>
-        <button
-          onClick={() => void loadPanel()}
-          disabled={!traderId || loading}
-          className="h-10 px-4 rounded-lg border border-white/10 bg-black/20 text-sm font-semibold disabled:opacity-50"
-        >
-          {loading ? 'Refreshing…' : 'Refresh optimizer'}
-        </button>
+        <div className="flex flex-col sm:flex-row gap-2">
+          <button
+            onClick={() => void runOptimizerNow()}
+            disabled={!traderId || manualRunLoading || loading}
+            className="h-10 px-4 rounded-lg bg-nofx-gold text-black text-sm font-semibold disabled:opacity-50"
+          >
+            {manualRunLoading ? 'Running…' : 'Run now'}
+          </button>
+          <button
+            onClick={() => void loadPanel()}
+            disabled={!traderId || loading || manualRunLoading}
+            className="h-10 px-4 rounded-lg border border-white/10 bg-black/20 text-sm font-semibold disabled:opacity-50"
+          >
+            {loading ? 'Refreshing…' : 'Refresh optimizer'}
+          </button>
+        </div>
       </div>
 
       {error && (
@@ -859,20 +997,31 @@ export function AutonomousOptimizerPanel({
             {formatLabel(lastRun?.status || 'none')}
           </div>
           <div className="text-xs text-nofx-text-muted mt-2">
-            {lastRun ? normalizeTime(lastRun.completed_at || lastRun.started_at) : '-'}
+            {lastRun
+              ? normalizeTime(lastRun.completed_at || lastRun.started_at)
+              : '-'}
           </div>
         </div>
 
         <div className="rounded-xl border border-white/10 bg-black/20 p-4">
-          <div className="text-xs text-nofx-text-muted">Open improvement steps</div>
-          <div className="text-lg font-semibold mt-2">{activeBacklog.length}</div>
+          <div className="text-xs text-nofx-text-muted">
+            Open improvement steps
+          </div>
+          <div className="text-lg font-semibold mt-2">
+            {activeBacklog.length}
+          </div>
           <div className="text-xs text-nofx-text-muted mt-2">
-            Highest score {activeBacklog[0] ? formatScore(activeBacklog[0].composite_score) : '-'}
+            Highest score{' '}
+            {activeBacklog[0]
+              ? formatScore(activeBacklog[0].composite_score)
+              : '-'}
           </div>
         </div>
 
         <div className="rounded-xl border border-white/10 bg-black/20 p-4">
-          <div className="text-xs text-nofx-text-muted">Last applied change</div>
+          <div className="text-xs text-nofx-text-muted">
+            Last applied change
+          </div>
           <div className="text-sm font-semibold mt-2 line-clamp-2">
             {lastAppliedRun?.summary || 'No applied autonomous change yet'}
           </div>
@@ -1012,7 +1161,10 @@ export function AutonomousOptimizerPanel({
                   value={primaryModelName}
                   onChange={setPrimaryModelName}
                   options={[
-                    { value: primaryModelName || '', label: 'Current model name' },
+                    {
+                      value: primaryModelName || '',
+                      label: 'Current model name',
+                    },
                     ...primaryRemoteModels
                       .filter((item) => item.available)
                       .map((item) => ({
@@ -1046,7 +1198,10 @@ export function AutonomousOptimizerPanel({
                   value={criticModelName}
                   onChange={setCriticModelName}
                   options={[
-                    { value: criticModelName || '', label: 'Current model name' },
+                    {
+                      value: criticModelName || '',
+                      label: 'Current model name',
+                    },
                     ...criticRemoteModels
                       .filter((item) => item.available)
                       .map((item) => ({
@@ -1207,10 +1362,15 @@ export function AutonomousOptimizerPanel({
                         <span>Score {formatScore(item.composite_score)}</span>
                         <span>Confidence {formatScore(item.confidence)}</span>
                         <span>Urgency {formatScore(item.urgency)}</span>
-                        <span>Cost {formatScore(item.implementation_cost)}</span>
+                        <span>
+                          Cost {formatScore(item.implementation_cost)}
+                        </span>
                         <span>Recurrent {item.recurrence_count}x</span>
                         <span>Merged {item.merged_finding_count}x</span>
-                        <span>Source run {item.run_id ? item.run_id.slice(0, 8) : '-'}</span>
+                        <span>
+                          Source run{' '}
+                          {item.run_id ? item.run_id.slice(0, 8) : '-'}
+                        </span>
                       </div>
                       <div className="flex flex-wrap gap-2 mt-3">
                         <button
@@ -1224,10 +1384,14 @@ export function AutonomousOptimizerPanel({
                           <>
                             <button
                               onClick={() => void saveBacklogEdit(item)}
-                              disabled={savingBacklogId === item.id || !backlogDraft}
+                              disabled={
+                                savingBacklogId === item.id || !backlogDraft
+                              }
                               className="h-9 px-3 rounded-lg bg-nofx-gold text-black text-xs font-semibold disabled:opacity-50"
                             >
-                              {savingBacklogId === item.id ? 'Saving…' : 'Save edit'}
+                              {savingBacklogId === item.id
+                                ? 'Saving…'
+                                : 'Save edit'}
                             </button>
                             <button
                               onClick={cancelBacklogEdit}
@@ -1263,7 +1427,9 @@ export function AutonomousOptimizerPanel({
                   {editingBacklogId === item.id && backlogDraft && (
                     <div className="mt-4 grid grid-cols-1 xl:grid-cols-2 gap-3">
                       <label className="rounded-lg border border-white/10 bg-black/20 p-3 text-sm">
-                        <div className="text-xs text-nofx-text-muted mb-2">Title</div>
+                        <div className="text-xs text-nofx-text-muted mb-2">
+                          Title
+                        </div>
                         <input
                           value={backlogDraft.title}
                           onChange={(event) =>
@@ -1277,13 +1443,17 @@ export function AutonomousOptimizerPanel({
                         />
                       </label>
                       <div className="rounded-lg border border-white/10 bg-black/20 p-3">
-                        <div className="text-xs text-nofx-text-muted mb-2">Category</div>
+                        <div className="text-xs text-nofx-text-muted mb-2">
+                          Category
+                        </div>
                         <div className="h-10 rounded-lg border border-white/10 px-3 flex items-center">
                           <NofxSelect
                             value={backlogDraft.category}
                             onChange={(value) =>
                               setBacklogDraft((current) =>
-                                current ? { ...current, category: value } : current
+                                current
+                                  ? { ...current, category: value }
+                                  : current
                               )
                             }
                             options={backlogCategoryOptions}
@@ -1291,13 +1461,18 @@ export function AutonomousOptimizerPanel({
                         </div>
                       </div>
                       <label className="rounded-lg border border-white/10 bg-black/20 p-3 text-sm xl:col-span-2">
-                        <div className="text-xs text-nofx-text-muted mb-2">Description</div>
+                        <div className="text-xs text-nofx-text-muted mb-2">
+                          Description
+                        </div>
                         <textarea
                           value={backlogDraft.description}
                           onChange={(event) =>
                             setBacklogDraft((current) =>
                               current
-                                ? { ...current, description: event.target.value }
+                                ? {
+                                    ...current,
+                                    description: event.target.value,
+                                  }
                                 : current
                             )
                           }
@@ -1306,13 +1481,18 @@ export function AutonomousOptimizerPanel({
                         />
                       </label>
                       <label className="rounded-lg border border-white/10 bg-black/20 p-3 text-sm xl:col-span-2">
-                        <div className="text-xs text-nofx-text-muted mb-2">Expected impact</div>
+                        <div className="text-xs text-nofx-text-muted mb-2">
+                          Expected impact
+                        </div>
                         <textarea
                           value={backlogDraft.expectedImpact}
                           onChange={(event) =>
                             setBacklogDraft((current) =>
                               current
-                                ? { ...current, expectedImpact: event.target.value }
+                                ? {
+                                    ...current,
+                                    expectedImpact: event.target.value,
+                                  }
                                 : current
                             )
                           }
@@ -1321,7 +1501,9 @@ export function AutonomousOptimizerPanel({
                         />
                       </label>
                       <label className="rounded-lg border border-white/10 bg-black/20 p-3 text-sm">
-                        <div className="text-xs text-nofx-text-muted mb-2">Confidence</div>
+                        <div className="text-xs text-nofx-text-muted mb-2">
+                          Confidence
+                        </div>
                         <input
                           value={backlogDraft.confidence}
                           onChange={(event) =>
@@ -1335,13 +1517,18 @@ export function AutonomousOptimizerPanel({
                         />
                       </label>
                       <label className="rounded-lg border border-white/10 bg-black/20 p-3 text-sm">
-                        <div className="text-xs text-nofx-text-muted mb-2">Implementation cost</div>
+                        <div className="text-xs text-nofx-text-muted mb-2">
+                          Implementation cost
+                        </div>
                         <input
                           value={backlogDraft.implementationCost}
                           onChange={(event) =>
                             setBacklogDraft((current) =>
                               current
-                                ? { ...current, implementationCost: event.target.value }
+                                ? {
+                                    ...current,
+                                    implementationCost: event.target.value,
+                                  }
                                 : current
                             )
                           }
@@ -1349,7 +1536,9 @@ export function AutonomousOptimizerPanel({
                         />
                       </label>
                       <label className="rounded-lg border border-white/10 bg-black/20 p-3 text-sm">
-                        <div className="text-xs text-nofx-text-muted mb-2">Urgency</div>
+                        <div className="text-xs text-nofx-text-muted mb-2">
+                          Urgency
+                        </div>
                         <input
                           value={backlogDraft.urgency}
                           onChange={(event) =>
@@ -1363,13 +1552,18 @@ export function AutonomousOptimizerPanel({
                         />
                       </label>
                       <label className="rounded-lg border border-white/10 bg-black/20 p-3 text-sm">
-                        <div className="text-xs text-nofx-text-muted mb-2">Recurrence count</div>
+                        <div className="text-xs text-nofx-text-muted mb-2">
+                          Recurrence count
+                        </div>
                         <input
                           value={backlogDraft.recurrenceCount}
                           onChange={(event) =>
                             setBacklogDraft((current) =>
                               current
-                                ? { ...current, recurrenceCount: event.target.value }
+                                ? {
+                                    ...current,
+                                    recurrenceCount: event.target.value,
+                                  }
                                 : current
                             )
                           }
@@ -1377,16 +1571,22 @@ export function AutonomousOptimizerPanel({
                         />
                       </label>
                       <div className="rounded-lg border border-white/10 bg-black/20 p-3">
-                        <div className="text-xs text-nofx-text-muted mb-2">Status</div>
+                        <div className="text-xs text-nofx-text-muted mb-2">
+                          Status
+                        </div>
                         <div className="h-10 rounded-lg border border-white/10 px-3 flex items-center">
                           <NofxSelect
                             value={backlogDraft.status}
                             onChange={(value) =>
                               setBacklogDraft((current) =>
-                                current ? { ...current, status: value } : current
+                                current
+                                  ? { ...current, status: value }
+                                  : current
                               )
                             }
-                            options={backlogStatusOptions.filter((option) => option.value)}
+                            options={backlogStatusOptions.filter(
+                              (option) => option.value
+                            )}
                           />
                         </div>
                       </div>
@@ -1418,7 +1618,8 @@ export function AutonomousOptimizerPanel({
         ) : (
           <div className="grid grid-cols-1 xl:grid-cols-2 gap-3">
             {modelOutcomes.map((item) => {
-              const isActive = activeModelKey && item.model_key === activeModelKey
+              const isActive =
+                activeModelKey && item.model_key === activeModelKey
               return (
                 <div
                   key={item.model_key}
@@ -1443,16 +1644,20 @@ export function AutonomousOptimizerPanel({
                       </div>
                     </div>
                     <div className="text-right">
-                      <div className="text-xs text-nofx-text-muted">Outcome score</div>
+                      <div className="text-xs text-nofx-text-muted">
+                        Outcome score
+                      </div>
                       <div className="text-lg font-semibold mt-1">
                         {formatScore(item.outcome_score)}
                       </div>
                     </div>
                   </div>
 
-                  <div className="grid grid-cols-2 xl:grid-cols-4 gap-3 mt-4">
+                  <div className="grid grid-cols-2 xl:grid-cols-5 gap-3 mt-4">
                     <div className="rounded-lg border border-white/10 bg-black/20 p-3">
-                      <div className="text-xs text-nofx-text-muted">Apply rate</div>
+                      <div className="text-xs text-nofx-text-muted">
+                        Apply rate
+                      </div>
                       <div className="text-base font-semibold mt-1">
                         {formatPct(item.apply_rate)}
                       </div>
@@ -1461,37 +1666,65 @@ export function AutonomousOptimizerPanel({
                       </div>
                     </div>
                     <div className="rounded-lg border border-white/10 bg-black/20 p-3">
-                      <div className="text-xs text-nofx-text-muted">Rollback rate</div>
+                      <div className="text-xs text-nofx-text-muted">
+                        Rollback rate
+                      </div>
                       <div className="text-base font-semibold mt-1">
                         {formatPct(item.rollback_rate)}
                       </div>
                       <div className="text-xs text-nofx-text-muted mt-1">
-                        {item.rollback_count} rollback / {item.apply_count} applies
+                        {item.rollback_count} rollback / {item.apply_count}{' '}
+                        applies
                       </div>
                     </div>
                     <div className="rounded-lg border border-white/10 bg-black/20 p-3">
-                      <div className="text-xs text-nofx-text-muted">Kept-win rate</div>
+                      <div className="text-xs text-nofx-text-muted">
+                        Kept-win rate
+                      </div>
                       <div className="text-base font-semibold mt-1">
                         {formatPct(item.kept_win_rate)}
                       </div>
                       <div className="text-xs text-nofx-text-muted mt-1">
-                        {item.kept_win_count} positive kept / {item.kept_count} kept
+                        {item.kept_win_count} positive kept / {item.kept_count}{' '}
+                        kept
                       </div>
                     </div>
                     <div className="rounded-lg border border-white/10 bg-black/20 p-3">
-                      <div className="text-xs text-nofx-text-muted">Backlog usefulness</div>
+                      <div className="text-xs text-nofx-text-muted">
+                        Backlog usefulness
+                      </div>
                       <div className="text-base font-semibold mt-1">
                         {formatPct(item.backlog_usefulness)}
                       </div>
                       <div className="text-xs text-nofx-text-muted mt-1">
-                        {item.useful_backlog_count} useful / {item.backlog_item_count} items
+                        {item.useful_backlog_count} useful /{' '}
+                        {item.backlog_item_count} items
+                      </div>
+                    </div>
+                    <div className="rounded-lg border border-white/10 bg-black/20 p-3">
+                      <div className="text-xs text-nofx-text-muted">
+                        Operational health
+                      </div>
+                      <div className="text-base font-semibold mt-1">
+                        {formatPct(item.operational_health_score)}
+                      </div>
+                      <div className="text-xs text-nofx-text-muted mt-1">
+                        {item.failed_count} failed • {item.stale_recovery_count}{' '}
+                        stale
                       </div>
                     </div>
                   </div>
 
-                  <div className="grid grid-cols-2 xl:grid-cols-4 gap-3 mt-3 text-xs text-nofx-text-muted">
+                  <div className="grid grid-cols-2 xl:grid-cols-3 gap-3 mt-3 text-xs text-nofx-text-muted">
                     <div className="rounded-lg border border-white/10 bg-black/20 p-3">
                       Monitoring applies: {item.monitoring_count}
+                    </div>
+                    <div className="rounded-lg border border-white/10 bg-black/20 p-3">
+                      Failed runs: {item.failed_count}
+                    </div>
+                    <div className="rounded-lg border border-white/10 bg-black/20 p-3">
+                      Evidence-gap overlaps:{' '}
+                      {item.failure_overlap_insufficient_evidence_count}
                     </div>
                     <div className="rounded-lg border border-white/10 bg-black/20 p-3">
                       Done backlog items: {item.done_backlog_count}
@@ -1571,7 +1804,8 @@ export function AutonomousOptimizerPanel({
                       <span>Updated {normalizeTime(run.updated_at)}</span>
                       {run.applied_strategy_version_id && (
                         <span>
-                          Strategy version {run.applied_strategy_version_id.slice(0, 8)}
+                          Strategy version{' '}
+                          {run.applied_strategy_version_id.slice(0, 8)}
                         </span>
                       )}
                     </div>
@@ -1620,7 +1854,9 @@ export function AutonomousOptimizerPanel({
                 <div className="flex flex-wrap gap-2">
                   <button
                     onClick={openLinkedStrategyVersion}
-                    disabled={!selectedRunDetail?.run.applied_strategy_version_id}
+                    disabled={
+                      !selectedRunDetail?.run.applied_strategy_version_id
+                    }
                     className="h-10 px-3 rounded-lg border border-nofx-gold/30 text-nofx-gold disabled:opacity-50"
                   >
                     Open strategy version
@@ -1644,27 +1880,41 @@ export function AutonomousOptimizerPanel({
                 <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-5 gap-3 text-sm">
                   <div className="rounded-lg border border-white/10 bg-black/20 p-3">
                     <div className="text-xs text-nofx-text-muted">Started</div>
-                    <div className="mt-1">{normalizeTime(selectedRunDetail.run.started_at)}</div>
-                  </div>
-                  <div className="rounded-lg border border-white/10 bg-black/20 p-3">
-                    <div className="text-xs text-nofx-text-muted">Finished</div>
-                    <div className="mt-1">{normalizeTime(selectedRunDetail.run.completed_at)}</div>
-                  </div>
-                  <div className="rounded-lg border border-white/10 bg-black/20 p-3">
-                    <div className="text-xs text-nofx-text-muted">Window stats</div>
                     <div className="mt-1">
-                      {reviewWindowClosedDeals ?? '-'} deals | {reviewWindowCycles ?? '-'} cycles | {reviewWindowCandidates ?? '-'} candidates
+                      {normalizeTime(selectedRunDetail.run.started_at)}
                     </div>
                   </div>
                   <div className="rounded-lg border border-white/10 bg-black/20 p-3">
-                    <div className="text-xs text-nofx-text-muted">Window PnL</div>
+                    <div className="text-xs text-nofx-text-muted">Finished</div>
+                    <div className="mt-1">
+                      {normalizeTime(selectedRunDetail.run.completed_at)}
+                    </div>
+                  </div>
+                  <div className="rounded-lg border border-white/10 bg-black/20 p-3">
+                    <div className="text-xs text-nofx-text-muted">
+                      Window stats
+                    </div>
+                    <div className="mt-1">
+                      {reviewWindowClosedDeals ?? '-'} deals |{' '}
+                      {reviewWindowCycles ?? '-'} cycles |{' '}
+                      {reviewWindowCandidates ?? '-'} candidates
+                    </div>
+                  </div>
+                  <div className="rounded-lg border border-white/10 bg-black/20 p-3">
+                    <div className="text-xs text-nofx-text-muted">
+                      Window PnL
+                    </div>
                     <div className="mt-1">{formatNumber(reviewWindowPnL)}</div>
                   </div>
                   <div className="rounded-lg border border-white/10 bg-black/20 p-3">
-                    <div className="text-xs text-nofx-text-muted">Next eligible apply</div>
+                    <div className="text-xs text-nofx-text-muted">
+                      Next eligible apply
+                    </div>
                     <div className="mt-1">
                       {typeof nextEligibleRunMs === 'number'
-                        ? normalizeTime(new Date(nextEligibleRunMs).toISOString())
+                        ? normalizeTime(
+                            new Date(nextEligibleRunMs).toISOString()
+                          )
                         : '-'}
                     </div>
                     <div className="text-xs text-nofx-text-muted mt-1">
@@ -1683,13 +1933,17 @@ export function AutonomousOptimizerPanel({
                   </div>
                   <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3 text-sm">
                     <div>
-                      <div className="text-xs text-nofx-text-muted">Root apply run</div>
+                      <div className="text-xs text-nofx-text-muted">
+                        Root apply run
+                      </div>
                       <div className="mt-1 break-all">
                         {monitoringRootRunId || '-'}
                       </div>
                     </div>
                     <div>
-                      <div className="text-xs text-nofx-text-muted">Observed windows</div>
+                      <div className="text-xs text-nofx-text-muted">
+                        Observed windows
+                      </div>
                       <div className="mt-1 font-semibold">
                         {typeof monitoringWindowsObserved === 'number'
                           ? Math.round(monitoringWindowsObserved + 1)
@@ -1723,7 +1977,9 @@ export function AutonomousOptimizerPanel({
                   </div>
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-sm mt-4">
                     <div className="rounded-lg border border-white/10 bg-black/20 p-3">
-                      <div className="text-xs text-nofx-text-muted">Baseline net PnL</div>
+                      <div className="text-xs text-nofx-text-muted">
+                        Baseline net PnL
+                      </div>
                       <div className="mt-1 font-semibold">
                         {typeof sourceBaselineNetPnL === 'number'
                           ? formatNumber(sourceBaselineNetPnL)
@@ -1731,7 +1987,9 @@ export function AutonomousOptimizerPanel({
                       </div>
                     </div>
                     <div className="rounded-lg border border-white/10 bg-black/20 p-3">
-                      <div className="text-xs text-nofx-text-muted">Baseline win rate</div>
+                      <div className="text-xs text-nofx-text-muted">
+                        Baseline win rate
+                      </div>
                       <div className="mt-1 font-semibold">
                         {typeof sourceBaselineWinRate === 'number'
                           ? `${formatNumber(sourceBaselineWinRate)}%`
@@ -1786,7 +2044,9 @@ export function AutonomousOptimizerPanel({
                     </div>
                     <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
                       <div>
-                        <div className="text-xs text-nofx-text-muted">Open decisions</div>
+                        <div className="text-xs text-nofx-text-muted">
+                          Open decisions
+                        </div>
                         <div className="mt-1 font-semibold">
                           {typeof openDecisionCount === 'number'
                             ? Math.round(openDecisionCount)
@@ -1794,7 +2054,9 @@ export function AutonomousOptimizerPanel({
                         </div>
                       </div>
                       <div>
-                        <div className="text-xs text-nofx-text-muted">Hold decisions</div>
+                        <div className="text-xs text-nofx-text-muted">
+                          Hold decisions
+                        </div>
                         <div className="mt-1 font-semibold">
                           {typeof holdDecisionCount === 'number'
                             ? Math.round(holdDecisionCount)
@@ -1802,7 +2064,9 @@ export function AutonomousOptimizerPanel({
                         </div>
                       </div>
                       <div>
-                        <div className="text-xs text-nofx-text-muted">Wait decisions</div>
+                        <div className="text-xs text-nofx-text-muted">
+                          Wait decisions
+                        </div>
                         <div className="mt-1 font-semibold">
                           {typeof waitDecisionCount === 'number'
                             ? Math.round(waitDecisionCount)
@@ -1810,7 +2074,9 @@ export function AutonomousOptimizerPanel({
                         </div>
                       </div>
                       <div>
-                        <div className="text-xs text-nofx-text-muted">Conversion</div>
+                        <div className="text-xs text-nofx-text-muted">
+                          Conversion
+                        </div>
                         <div className="mt-1 font-semibold">
                           {typeof decisionConversionRate === 'number'
                             ? `${formatNumber(decisionConversionRate)}%`
@@ -1836,40 +2102,44 @@ export function AutonomousOptimizerPanel({
                       </div>
                     ) : (
                       <div className="space-y-2">
-                        {recentOptimizerContext.slice(0, 4).map((item, index) => (
-                          <div
-                            key={`${String(item.id || index)}`}
-                            className="rounded-lg border border-white/10 bg-black/20 p-3"
-                          >
-                            <div className="flex flex-wrap items-center gap-2">
-                              <span
-                                className={`inline-flex px-2 py-1 rounded-full border text-[11px] ${statusToneClasses(
-                                  typeof item.status === 'string' ? item.status : ''
-                                )}`}
-                              >
-                                {formatLabel(
-                                  typeof item.status === 'string'
-                                    ? item.status
-                                    : 'unknown'
-                                )}
-                              </span>
-                              <span className="text-xs text-nofx-text-muted">
-                                {typeof item.primary_model_name === 'string'
-                                  ? item.primary_model_name
-                                  : '-'}{' '}
-                                /{' '}
-                                {typeof item.critic_model_name === 'string'
-                                  ? item.critic_model_name
-                                  : '-'}
-                              </span>
+                        {recentOptimizerContext
+                          .slice(0, 4)
+                          .map((item, index) => (
+                            <div
+                              key={`${String(item.id || index)}`}
+                              className="rounded-lg border border-white/10 bg-black/20 p-3"
+                            >
+                              <div className="flex flex-wrap items-center gap-2">
+                                <span
+                                  className={`inline-flex px-2 py-1 rounded-full border text-[11px] ${statusToneClasses(
+                                    typeof item.status === 'string'
+                                      ? item.status
+                                      : ''
+                                  )}`}
+                                >
+                                  {formatLabel(
+                                    typeof item.status === 'string'
+                                      ? item.status
+                                      : 'unknown'
+                                  )}
+                                </span>
+                                <span className="text-xs text-nofx-text-muted">
+                                  {typeof item.primary_model_name === 'string'
+                                    ? item.primary_model_name
+                                    : '-'}{' '}
+                                  /{' '}
+                                  {typeof item.critic_model_name === 'string'
+                                    ? item.critic_model_name
+                                    : '-'}
+                                </span>
+                              </div>
+                              <div className="text-sm mt-2">
+                                {typeof item.summary === 'string'
+                                  ? item.summary
+                                  : 'No summary stored'}
+                              </div>
                             </div>
-                            <div className="text-sm mt-2">
-                              {typeof item.summary === 'string'
-                                ? item.summary
-                                : 'No summary stored'}
-                            </div>
-                          </div>
-                        ))}
+                          ))}
                       </div>
                     )}
                   </div>
@@ -1882,7 +2152,8 @@ export function AutonomousOptimizerPanel({
                     </div>
                     {rejectReasons.length === 0 ? (
                       <div className="text-sm text-nofx-text-muted">
-                        No hold/wait reject reasons were stored in this window.
+                        No structured skipped-candidate reject reasons were
+                        stored in this window.
                       </div>
                     ) : (
                       <div className="space-y-2">
@@ -1975,7 +2246,9 @@ export function AutonomousOptimizerPanel({
                             className="rounded-lg border border-white/10 bg-black/20 p-3 text-sm"
                           >
                             <div className="font-semibold">
-                              {typeof item.band === 'string' ? item.band : 'unknown'}
+                              {typeof item.band === 'string'
+                                ? item.band
+                                : 'unknown'}
                             </div>
                             <div className="text-xs text-nofx-text-muted mt-1">
                               {typeof item.decision_count === 'number'
@@ -1999,7 +2272,8 @@ export function AutonomousOptimizerPanel({
                   </div>
                   {opportunitySymbols.length === 0 ? (
                     <div className="text-sm text-nofx-text-muted">
-                      No symbol-level opportunity density was stored for this run.
+                      No symbol-level opportunity density was stored for this
+                      run.
                     </div>
                   ) : (
                     <div className="space-y-2">
@@ -2042,14 +2316,16 @@ export function AutonomousOptimizerPanel({
                             </div>
                           </div>
                           <div className="flex flex-wrap gap-2 mt-2">
-                            {readStringArray(item.selection_buckets).map((bucket) => (
-                              <span
-                                key={`${String(item.symbol)}-${bucket}`}
-                                className="inline-flex px-2 py-1 rounded-full border border-white/10 bg-white/5 text-[11px] text-nofx-text-muted"
-                              >
-                                {formatLabel(bucket)}
-                              </span>
-                            ))}
+                            {readStringArray(item.selection_buckets).map(
+                              (bucket) => (
+                                <span
+                                  key={`${String(item.symbol)}-${bucket}`}
+                                  className="inline-flex px-2 py-1 rounded-full border border-white/10 bg-white/5 text-[11px] text-nofx-text-muted"
+                                >
+                                  {formatLabel(bucket)}
+                                </span>
+                              )
+                            )}
                             {readStringArray(item.sessions).map((session) => (
                               <span
                                 key={`${String(item.symbol)}-session-${session}`}
@@ -2065,6 +2341,637 @@ export function AutonomousOptimizerPanel({
                   )}
                 </div>
 
+                <div className="grid grid-cols-1 xl:grid-cols-3 gap-4">
+                  <div className="rounded-lg border border-white/10 bg-black/20 p-4">
+                    <div className="text-xs uppercase tracking-[0.2em] text-nofx-text-muted mb-3">
+                      Execution Statuses
+                    </div>
+                    <div className="text-xs text-nofx-text-muted mb-3">
+                      {typeof openDecisionCount === 'number'
+                        ? Math.round(openDecisionCount)
+                        : '-'}{' '}
+                      open decisions
+                      {typeof rejectedCandidateCount === 'number'
+                        ? ` • ${Math.round(rejectedCandidateCount)} rejected candidates`
+                        : ''}
+                    </div>
+                    {executionStatuses.length === 0 ? (
+                      <div className="text-sm text-nofx-text-muted">
+                        No open-decision execution telemetry was stored in this
+                        window.
+                      </div>
+                    ) : (
+                      <div className="space-y-2">
+                        {executionStatuses.map((item, index) => (
+                          <div
+                            key={`${String(item.status || index)}`}
+                            className="rounded-lg border border-white/10 bg-black/20 p-3 text-sm"
+                          >
+                            <div className="font-semibold">
+                              {formatLabel(
+                                typeof item.status === 'string'
+                                  ? item.status
+                                  : 'unknown'
+                              )}
+                            </div>
+                            <div className="text-xs text-nofx-text-muted mt-1">
+                              {typeof item.count === 'number'
+                                ? Math.round(item.count)
+                                : '-'}{' '}
+                              times
+                              {typeof item.share_pct === 'number'
+                                ? ` • ${formatNumber(item.share_pct)}%`
+                                : ''}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="rounded-lg border border-white/10 bg-black/20 p-4">
+                    <div className="text-xs uppercase tracking-[0.2em] text-nofx-text-muted mb-3">
+                      Recent Open Executions
+                    </div>
+                    {recentOpenExecutions.length === 0 ? (
+                      <div className="text-sm text-nofx-text-muted">
+                        No recent open-decision execution samples were stored.
+                      </div>
+                    ) : (
+                      <div className="space-y-2">
+                        {recentOpenExecutions.map((item, index) => (
+                          <div
+                            key={`${String(item.symbol || index)}-${String(item.timestamp || index)}`}
+                            className="rounded-lg border border-white/10 bg-black/20 p-3 text-sm"
+                          >
+                            <div className="flex flex-wrap items-center gap-2">
+                              <div className="font-semibold">
+                                {typeof item.symbol === 'string'
+                                  ? item.symbol
+                                  : 'UNKNOWN'}
+                              </div>
+                              <span
+                                className={`inline-flex px-2 py-1 rounded-full border text-[11px] ${statusToneClasses(
+                                  typeof item.terminal_status === 'string'
+                                    ? item.terminal_status
+                                    : ''
+                                )}`}
+                              >
+                                {formatLabel(
+                                  typeof item.terminal_status === 'string'
+                                    ? item.terminal_status
+                                    : 'unknown'
+                                )}
+                              </span>
+                            </div>
+                            <div className="text-xs text-nofx-text-muted mt-1">
+                              {typeof item.side === 'string'
+                                ? formatLabel(item.side)
+                                : '-'}{' '}
+                              • conf{' '}
+                              {typeof item.confidence === 'number'
+                                ? Math.round(item.confidence)
+                                : '-'}{' '}
+                              •{' '}
+                              {normalizeTime(
+                                typeof item.timestamp === 'string'
+                                  ? item.timestamp
+                                  : ''
+                              )}
+                            </div>
+                            <div className="text-xs text-nofx-text-muted mt-1">
+                              {typeof item.failure_category === 'string' &&
+                              item.failure_category
+                                ? `${formatLabel(item.failure_category)} • `
+                                : ''}
+                              {typeof item.liquidity_tier === 'string' &&
+                              item.liquidity_tier
+                                ? `${formatLabel(item.liquidity_tier)} liquidity`
+                                : 'No liquidity tier stored'}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="rounded-lg border border-white/10 bg-black/20 p-4">
+                    <div className="text-xs uppercase tracking-[0.2em] text-nofx-text-muted mb-3">
+                      Regime Snapshots
+                    </div>
+                    {regimeSummaries.length === 0 ? (
+                      <div className="text-sm text-nofx-text-muted">
+                        No persisted regime summary was stored for this run
+                        window.
+                      </div>
+                    ) : (
+                      <div className="space-y-2">
+                        {regimeSummaries.map((item, index) => (
+                          <div
+                            key={`${String(item.key || index)}`}
+                            className="rounded-lg border border-white/10 bg-black/20 p-3 text-sm"
+                          >
+                            <div className="font-semibold">
+                              {formatLabel(
+                                typeof item.trend_regime === 'string' &&
+                                  item.trend_regime
+                                  ? item.trend_regime
+                                  : 'unknown'
+                              )}{' '}
+                              /{' '}
+                              {formatLabel(
+                                typeof item.volatility_regime === 'string' &&
+                                  item.volatility_regime
+                                  ? item.volatility_regime
+                                  : 'unknown'
+                              )}
+                            </div>
+                            <div className="text-xs text-nofx-text-muted mt-1">
+                              {typeof item.candidate_count === 'number'
+                                ? Math.round(item.candidate_count)
+                                : '-'}{' '}
+                              candidates •{' '}
+                              {typeof item.open_decision_count === 'number'
+                                ? Math.round(item.open_decision_count)
+                                : '-'}{' '}
+                              opens
+                            </div>
+                            <div className="flex flex-wrap gap-2 mt-2">
+                              {[
+                                typeof item.oi_regime === 'string'
+                                  ? item.oi_regime
+                                  : '',
+                                typeof item.funding_regime === 'string'
+                                  ? item.funding_regime
+                                  : '',
+                                typeof item.session_bucket === 'string'
+                                  ? item.session_bucket
+                                  : '',
+                                typeof item.liquidity_tier === 'string'
+                                  ? item.liquidity_tier
+                                  : '',
+                              ]
+                                .filter(Boolean)
+                                .map((token) => (
+                                  <span
+                                    key={`${String(item.key)}-${token}`}
+                                    className="inline-flex px-2 py-1 rounded-full border border-white/10 bg-white/5 text-[11px] text-nofx-text-muted"
+                                  >
+                                    {formatLabel(token)}
+                                  </span>
+                                ))}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+                  <div className="rounded-lg border border-white/10 bg-black/20 p-4">
+                    <div className="text-xs uppercase tracking-[0.2em] text-nofx-text-muted mb-3">
+                      Trailing Stop Telemetry
+                    </div>
+                    {!trailingStopTelemetry ? (
+                      <div className="text-sm text-nofx-text-muted">
+                        No trailing-stop versus initial stop-loss telemetry was
+                        stored for this run window.
+                      </div>
+                    ) : (
+                      <div className="space-y-3">
+                        <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
+                          <div className="rounded-lg border border-white/10 bg-black/20 p-3">
+                            <div className="text-xs text-nofx-text-muted">
+                              Trailing exits
+                            </div>
+                            <div className="mt-1 font-semibold">
+                              {typeof trailingStopTelemetry.trailing_exit_count ===
+                              'number'
+                                ? Math.round(
+                                    trailingStopTelemetry.trailing_exit_count
+                                  )
+                                : '-'}
+                            </div>
+                          </div>
+                          <div className="rounded-lg border border-white/10 bg-black/20 p-3">
+                            <div className="text-xs text-nofx-text-muted">
+                              Profit / loss
+                            </div>
+                            <div className="mt-1 font-semibold">
+                              {typeof trailingStopTelemetry.trailing_profit_exit_count ===
+                              'number'
+                                ? Math.round(
+                                    trailingStopTelemetry.trailing_profit_exit_count
+                                  )
+                                : '-'}{' '}
+                              /{' '}
+                              {typeof trailingStopTelemetry.trailing_loss_exit_count ===
+                              'number'
+                                ? Math.round(
+                                    trailingStopTelemetry.trailing_loss_exit_count
+                                  )
+                                : '-'}
+                            </div>
+                          </div>
+                          <div className="rounded-lg border border-white/10 bg-black/20 p-3">
+                            <div className="text-xs text-nofx-text-muted">
+                              Initial stop losses
+                            </div>
+                            <div className="mt-1 font-semibold">
+                              {typeof trailingStopTelemetry.initial_stop_loss_count ===
+                              'number'
+                                ? Math.round(
+                                    trailingStopTelemetry.initial_stop_loss_count
+                                  )
+                                : '-'}
+                            </div>
+                          </div>
+                          <div className="rounded-lg border border-white/10 bg-black/20 p-3">
+                            <div className="text-xs text-nofx-text-muted">
+                              Early tightening
+                            </div>
+                            <div className="mt-1 font-semibold">
+                              {typeof trailingStopTelemetry.early_tightening_count ===
+                              'number'
+                                ? Math.round(
+                                    trailingStopTelemetry.early_tightening_count
+                                  )
+                                : '-'}{' '}
+                              /{' '}
+                              {typeof trailingStopTelemetry.early_tightening_loss_count ===
+                              'number'
+                                ? Math.round(
+                                    trailingStopTelemetry.early_tightening_loss_count
+                                  )
+                                : '-'}{' '}
+                              red
+                            </div>
+                          </div>
+                        </div>
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
+                          <div className="rounded-lg border border-white/10 bg-black/20 p-3">
+                            <div className="text-xs text-nofx-text-muted">
+                              Avg trailing exit PnL / initial SL PnL
+                            </div>
+                            <div className="mt-1 font-semibold">
+                              {formatNumber(
+                                trailingStopTelemetry.trailing_exit_avg_pnl_pct
+                              )}
+                              % /{' '}
+                              {formatNumber(
+                                trailingStopTelemetry.initial_stop_loss_avg_pnl_pct
+                              )}
+                              %
+                            </div>
+                          </div>
+                          <div className="rounded-lg border border-white/10 bg-black/20 p-3">
+                            <div className="text-xs text-nofx-text-muted">
+                              Avg first update / update-to-exit
+                            </div>
+                            <div className="mt-1 font-semibold">
+                              {formatNumber(
+                                trailingStopTelemetry.avg_minutes_to_first_update
+                              )}
+                              m /{' '}
+                              {formatNumber(
+                                trailingStopTelemetry.avg_minutes_from_first_update_to_exit
+                              )}
+                              m
+                            </div>
+                          </div>
+                        </div>
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
+                          <div className="rounded-lg border border-white/10 bg-black/20 p-3">
+                            <div className="text-xs text-nofx-text-muted">
+                              Audited first updates
+                            </div>
+                            <div className="mt-1 font-semibold">
+                              {typeof trailingStopTelemetry.first_update_audit_count ===
+                              'number'
+                                ? Math.round(
+                                    trailingStopTelemetry.first_update_audit_count
+                                  )
+                                : '-'}{' '}
+                              /{' '}
+                              {typeof trailingStopTelemetry.breakeven_protected_count ===
+                              'number'
+                                ? Math.round(
+                                    trailingStopTelemetry.breakeven_protected_count
+                                  )
+                                : '-'}{' '}
+                              breakeven
+                            </div>
+                          </div>
+                        </div>
+                        {trailingStopSamples.length > 0 && (
+                          <div className="rounded-lg border border-white/10 bg-black/20 p-3">
+                            <div className="text-xs text-nofx-text-muted mb-2">
+                              First Update Audit
+                            </div>
+                            <div className="space-y-2">
+                              {trailingStopSamples.map((item, index) => (
+                                <div
+                                  key={`${String(readNestedNumber(item, 'position_id') ?? index)}-${index}`}
+                                  className="rounded-lg border border-white/10 bg-white/[0.03] p-3"
+                                >
+                                  <div className="flex flex-wrap items-center gap-2 text-sm">
+                                    <span className="font-semibold">
+                                      {String(readNestedString(item, 'symbol') || '-')}
+                                    </span>
+                                    <span className="text-nofx-text-muted">
+                                      {formatLabel(
+                                        String(readNestedString(item, 'side') || '')
+                                      ) || '-'}
+                                    </span>
+                                    <span className="inline-flex px-2 py-1 rounded-full border border-white/10 bg-white/5 text-[11px] text-nofx-text-muted">
+                                      {formatLabel(
+                                        String(
+                                          readNestedString(item, 'close_reason') ||
+                                            'unknown'
+                                        )
+                                      )}
+                                    </span>
+                                    {readNestedBoolean(item, 'protects_breakeven') && (
+                                      <span className="inline-flex px-2 py-1 rounded-full border border-emerald-400/25 bg-emerald-500/15 text-[11px] text-emerald-300">
+                                        Breakeven protected
+                                      </span>
+                                    )}
+                                  </div>
+                                  <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mt-3 text-xs text-nofx-text-muted">
+                                    <div>
+                                      First update:{' '}
+                                      {formatNumber(
+                                        readNestedNumber(
+                                          item,
+                                          'minutes_to_first_update'
+                                        )
+                                      )}
+                                      m
+                                    </div>
+                                    <div>
+                                      Update to exit:{' '}
+                                      {formatNumber(
+                                        readNestedNumber(
+                                          item,
+                                          'minutes_from_update_to_exit'
+                                        )
+                                      )}
+                                      m
+                                    </div>
+                                    <div>
+                                      Pre-update uPnL:{' '}
+                                      {formatNumber(
+                                        readNestedNumber(
+                                          item,
+                                          'pre_update_unrealized_pnl_pct'
+                                        )
+                                      )}
+                                      % /{' '}
+                                      {formatNumber(
+                                        readNestedNumber(
+                                          item,
+                                          'pre_update_unrealized_pnl'
+                                        )
+                                      )}
+                                    </div>
+                                    <div>
+                                      Stop profit:{' '}
+                                      {formatNumber(
+                                        readNestedNumber(item, 'stop_profit_pct')
+                                      )}
+                                      %
+                                    </div>
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="rounded-lg border border-white/10 bg-black/20 p-4">
+                    <div className="text-xs uppercase tracking-[0.2em] text-nofx-text-muted mb-3">
+                      Adaptive Re-entry Guard
+                    </div>
+                    {!adaptiveCooldownTelemetry ? (
+                      <div className="text-sm text-nofx-text-muted">
+                        No cooldown telemetry was stored for this run window.
+                      </div>
+                    ) : (
+                      <div className="space-y-3">
+                        <div className="flex flex-wrap gap-2">
+                          <span
+                            className={`inline-flex px-2 py-1 rounded-full border text-[11px] ${
+                              readNestedBoolean(
+                                adaptiveCooldownConfig,
+                                'enabled'
+                              )
+                                ? 'border-emerald-400/25 bg-emerald-500/15 text-emerald-300'
+                                : 'border-white/10 bg-white/5 text-nofx-text-muted'
+                            }`}
+                          >
+                            Guard{' '}
+                            {readNestedBoolean(adaptiveCooldownConfig, 'enabled')
+                              ? 'enabled'
+                              : 'disabled'}
+                          </span>
+                          {readNestedBoolean(
+                            adaptiveCooldownConfig,
+                            'require_weak_execution_regime'
+                          ) && (
+                            <span className="inline-flex px-2 py-1 rounded-full border border-amber-400/25 bg-amber-500/15 text-[11px] text-amber-200">
+                              Weak regime only
+                            </span>
+                          )}
+                          {typeof readNestedNumber(
+                            adaptiveCooldownConfig,
+                            'same_symbol_loss_cooldown_minutes'
+                          ) === 'number' && (
+                            <span className="inline-flex px-2 py-1 rounded-full border border-white/10 bg-white/5 text-[11px] text-nofx-text-muted">
+                              {Math.round(
+                                readNestedNumber(
+                                  adaptiveCooldownConfig,
+                                  'same_symbol_loss_cooldown_minutes'
+                                ) || 0
+                              )}
+                              m cooldown
+                            </span>
+                          )}
+                          {typeof readNestedNumber(
+                            adaptiveCooldownConfig,
+                            'pair_loss_lookback_hours'
+                          ) === 'number' && (
+                            <span className="inline-flex px-2 py-1 rounded-full border border-white/10 bg-white/5 text-[11px] text-nofx-text-muted">
+                              {Math.round(
+                                readNestedNumber(
+                                  adaptiveCooldownConfig,
+                                  'pair_loss_lookback_hours'
+                                ) || 0
+                              )}
+                              h lookback
+                            </span>
+                          )}
+                        </div>
+
+                        <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
+                          <div className="rounded-lg border border-white/10 bg-black/20 p-3">
+                            <div className="text-xs text-nofx-text-muted">
+                              Cooldown candidates
+                            </div>
+                            <div className="mt-1 font-semibold">
+                              {typeof adaptiveCooldownTelemetry.cooldown_candidate_count ===
+                              'number'
+                                ? Math.round(
+                                    adaptiveCooldownTelemetry.cooldown_candidate_count
+                                  )
+                                : '-'}
+                            </div>
+                          </div>
+                          <div className="rounded-lg border border-white/10 bg-black/20 p-3">
+                            <div className="text-xs text-nofx-text-muted">
+                              Repeat after loss
+                            </div>
+                            <div className="mt-1 font-semibold">
+                              {typeof adaptiveCooldownTelemetry.repeat_after_loss_count ===
+                              'number'
+                                ? Math.round(
+                                    adaptiveCooldownTelemetry.repeat_after_loss_count
+                                  )
+                                : '-'}
+                            </div>
+                          </div>
+                          <div className="rounded-lg border border-white/10 bg-black/20 p-3">
+                            <div className="text-xs text-nofx-text-muted">
+                              Same-session reentries
+                            </div>
+                            <div className="mt-1 font-semibold">
+                              {typeof adaptiveCooldownTelemetry.same_session_reentry_count ===
+                              'number'
+                                ? Math.round(
+                                    adaptiveCooldownTelemetry.same_session_reentry_count
+                                  )
+                                : '-'}
+                            </div>
+                          </div>
+                          <div className="rounded-lg border border-white/10 bg-black/20 p-3">
+                            <div className="text-xs text-nofx-text-muted">
+                              Regime repeats after loss
+                            </div>
+                            <div className="mt-1 font-semibold">
+                              {typeof adaptiveCooldownTelemetry.regime_repeat_loss_count ===
+                              'number'
+                                ? Math.round(
+                                    adaptiveCooldownTelemetry.regime_repeat_loss_count
+                                  )
+                                : '-'}
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                          <div className="rounded-lg border border-white/10 bg-black/20 p-3">
+                            <div className="text-xs text-nofx-text-muted mb-2">
+                              Top Symbols
+                            </div>
+                            {adaptiveCooldownTopSymbols.length === 0 ? (
+                              <div className="text-sm text-nofx-text-muted">
+                                No repeated symbol re-entry pattern was stored.
+                              </div>
+                            ) : (
+                              <div className="space-y-2">
+                                {adaptiveCooldownTopSymbols.map((item, index) => (
+                                  <div
+                                    key={`${String(item.symbol || index)}`}
+                                    className="rounded-lg border border-white/10 bg-black/20 p-3 text-sm"
+                                  >
+                                    <div className="font-semibold">
+                                      {typeof item.symbol === 'string'
+                                        ? item.symbol
+                                        : 'UNKNOWN'}
+                                    </div>
+                                    <div className="text-xs text-nofx-text-muted mt-1">
+                                      {typeof item.reentry_count === 'number'
+                                        ? Math.round(item.reentry_count)
+                                        : '-'}{' '}
+                                      reentries •{' '}
+                                      {typeof item.repeat_after_loss_count ===
+                                      'number'
+                                        ? Math.round(
+                                            item.repeat_after_loss_count
+                                          )
+                                        : '-'}{' '}
+                                      after loss • avg{' '}
+                                      {formatNumber(item.avg_pnl_pct)}%
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+
+                          <div className="rounded-lg border border-white/10 bg-black/20 p-3">
+                            <div className="text-xs text-nofx-text-muted mb-2">
+                              Top Regimes
+                            </div>
+                            {adaptiveCooldownTopRegimes.length === 0 ? (
+                              <div className="text-sm text-nofx-text-muted">
+                                No repeated regime-loss pattern was stored.
+                              </div>
+                            ) : (
+                              <div className="space-y-2">
+                                {adaptiveCooldownTopRegimes.map((item, index) => (
+                                  <div
+                                    key={`${String(item.trend_regime || index)}-${String(item.volatility_regime || index)}-${String(item.oi_regime || index)}`}
+                                    className="rounded-lg border border-white/10 bg-black/20 p-3 text-sm"
+                                  >
+                                    <div className="font-semibold">
+                                      {formatLabel(
+                                        typeof item.trend_regime === 'string'
+                                          ? item.trend_regime
+                                          : 'unknown'
+                                      )}{' '}
+                                      /{' '}
+                                      {formatLabel(
+                                        typeof item.volatility_regime ===
+                                          'string'
+                                          ? item.volatility_regime
+                                          : 'unknown'
+                                      )}{' '}
+                                      /{' '}
+                                      {formatLabel(
+                                        typeof item.oi_regime === 'string'
+                                          ? item.oi_regime
+                                          : 'unknown'
+                                      )}
+                                    </div>
+                                    <div className="text-xs text-nofx-text-muted mt-1">
+                                      {typeof item.reentry_count === 'number'
+                                        ? Math.round(item.reentry_count)
+                                        : '-'}{' '}
+                                      repeats •{' '}
+                                      {typeof item.repeat_after_loss_count ===
+                                      'number'
+                                        ? Math.round(
+                                            item.repeat_after_loss_count
+                                          )
+                                        : '-'}{' '}
+                                      after loss • avg{' '}
+                                      {formatNumber(item.avg_pnl_pct)}%
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+
                 {(criticSummary ||
                   proposalExpectedEffect ||
                   (selectedRunDetail.gate_reasons &&
@@ -2076,7 +2983,9 @@ export function AutonomousOptimizerPanel({
                     </div>
                     <div className="grid grid-cols-1 xl:grid-cols-2 gap-4 text-sm">
                       <div className="space-y-2">
-                        <div className="text-nofx-text-muted">Critic summary</div>
+                        <div className="text-nofx-text-muted">
+                          Critic summary
+                        </div>
                         <div>{criticSummary || '-'}</div>
                         <div className="text-nofx-text-muted pt-2">
                           Expected effect
@@ -2094,6 +3003,18 @@ export function AutonomousOptimizerPanel({
                             ? Math.round(promptValidationIssues)
                             : '-'}
                         </div>
+                        <div className="text-nofx-text-muted pt-2">
+                          Prompt requested fields
+                        </div>
+                        <div>
+                          {typeof promptRequestedFieldCount === 'number'
+                            ? Math.round(promptRequestedFieldCount)
+                            : '-'}
+                        </div>
+                        <div className="text-nofx-text-muted pt-2">
+                          Prompt auto-trim
+                        </div>
+                        <div>{promptAutoTrimmed ? 'Yes' : 'No'}</div>
                       </div>
                       <div>
                         <div className="text-nofx-text-muted mb-2">
@@ -2113,6 +3034,25 @@ export function AutonomousOptimizerPanel({
                               >
                                 {item}
                               </div>
+                            ))}
+                          </div>
+                        )}
+                        <div className="text-nofx-text-muted mt-4 mb-2">
+                          Deferred prompt fields
+                        </div>
+                        {promptDeferredFields.length === 0 ? (
+                          <div className="text-sm text-nofx-text-muted">
+                            No deferred prompt fields.
+                          </div>
+                        ) : (
+                          <div className="flex flex-wrap gap-2">
+                            {promptDeferredFields.map((item) => (
+                              <span
+                                key={item}
+                                className="inline-flex px-2 py-1 rounded-full border border-amber-400/20 bg-amber-500/10 text-[11px] text-amber-200"
+                              >
+                                {item}
+                              </span>
                             ))}
                           </div>
                         )}

@@ -511,6 +511,26 @@ export const riskControl = {
     en: 'Minimum relative stop-price move required before a new update is sent',
     es: 'Movimiento mínimo relativo del stop antes de enviar una actualización',
   },
+  trailingStopFirstTightenDelay: {
+    zh: 'é¦–æ¬¡æ”¶ç´§å»¶è¿Ÿ',
+    en: 'First Tighten Delay',
+    es: 'Retraso del Primer Ajuste',
+  },
+  trailingStopFirstTightenDelayDesc: {
+    zh: 'å¼€ä»“åŽè‡³å°‘ç­‰å¾…è¿™ä¹ˆå¤šç§’ï¼Œæ‰å…è®¸ç¬¬ä¸€æ¬¡è¿½è¸ªæ­¢æŸæ›´æ–°',
+    en: 'Minimum hold time before the first trailing-stop update is allowed',
+    es: 'Tiempo mÃ­nimo antes de permitir la primera actualizaciÃ³n del trailing stop',
+  },
+  trailingStopMinFirstUpdateProfit: {
+    zh: 'é¦–æ¬¡æ”¶ç´§æœ€å°æµ®ç›ˆ',
+    en: 'Min Profit Before First Tighten',
+    es: 'Ganancia MÃ­nima antes del Primer Ajuste',
+  },
+  trailingStopMinFirstUpdateProfitDesc: {
+    zh: 'åœ¨ç¬¬ä¸€æ¬¡æ”¶ç´§æ­¢æŸå‰ï¼ŒæŒä»“éœ€å…ˆè¾¾åˆ°è¿™ä¸ªæœªå®žçŽ°ç›ˆåˆ©ç™¾åˆ†æ¯”é—¨æ§›',
+    en: 'Minimum unrealized profit percentage required before the first trailing update can activate',
+    es: 'Porcentaje mÃ­nimo de ganancia no realizada antes de activar el primer trailing update',
+  },
   trailingStopLevels: {
     zh: '利润档位',
     en: 'Profit Levels',
@@ -551,6 +571,73 @@ export const riskControl = {
     zh: '回撤偏移',
     en: 'Trailing Offset',
     es: 'Offset de Trailing',
+  },
+  adaptiveReentryGuard: {
+    zh: '自适应重入冷却',
+    en: 'Adaptive Re-entry Guard',
+    es: 'Protección de Reentrada Adaptativa',
+  },
+  adaptiveReentryGuardEnable: {
+    zh: '启用同币种重入保护',
+    en: 'Enable Same-Symbol Re-entry Guard',
+    es: 'Habilitar Protección de Reentrada',
+  },
+  adaptiveReentryGuardDesc: {
+    zh: '当最近成交质量转弱时，阻止亏损后短时间内再次追同一币种',
+    en: 'Blocks fast same-symbol re-entries after losses once recent execution quality weakens',
+    es: 'Bloquea reentradas rápidas tras pérdidas cuando la calidad reciente se debilita',
+  },
+  adaptiveReentryGuardOn: { zh: '已启用', en: 'Enabled', es: 'Activo' },
+  adaptiveReentryGuardOff: { zh: '已关闭', en: 'Disabled', es: 'Inactivo' },
+  adaptiveReentryRequireWeak: {
+    zh: '仅在弱执行阶段启用',
+    en: 'Require Weak Execution Regime',
+    es: 'Requerir Régimen Débil',
+  },
+  adaptiveReentryRequireWeakDesc: {
+    zh: '强跟随行情继续放行，只有最近成交进入 churn/弱势时才触发冷却',
+    en: 'Stay aggressive in strong follow-through and only trigger cooldowns in weak/choppy recent tape',
+    es: 'Mantiene agresividad con buen follow-through y solo enfría en tape débil',
+  },
+  adaptiveReentryRecentWindow: {
+    zh: '最近成交窗口',
+    en: 'Recent Trade Window',
+    es: 'Ventana de Trades Recientes',
+  },
+  adaptiveReentryRecentWindowDesc: {
+    zh: '用于判断最近执行阶段的已平仓交易数量',
+    en: 'How many recent closed trades are used to classify execution regime',
+    es: 'Cuántos trades cerrados se usan para clasificar el régimen',
+  },
+  adaptiveReentryMinTrades: {
+    zh: '最少样本数',
+    en: 'Minimum Trade Sample',
+    es: 'Muestra Mínima',
+  },
+  adaptiveReentryMinTradesDesc: {
+    zh: '达到该样本数后才开始判定弱执行阶段',
+    en: 'Minimum number of closed trades required before weak-regime cooldowns activate',
+    es: 'Cantidad mínima de trades antes de activar el cooldown',
+  },
+  adaptiveReentryLossCooldown: {
+    zh: '亏损后冷却',
+    en: 'Loss Cooldown',
+    es: 'Cooldown tras Pérdida',
+  },
+  adaptiveReentryLossCooldownDesc: {
+    zh: '同币种亏损后，在该分钟数内禁止再次进场',
+    en: 'Minutes to block another entry in the same symbol after a loss',
+    es: 'Minutos para bloquear otra entrada en el mismo símbolo tras una pérdida',
+  },
+  adaptiveReentryPairLookback: {
+    zh: '双亏损回看',
+    en: 'Two-Loss Lookback',
+    es: 'Ventana de Dos Pérdidas',
+  },
+  adaptiveReentryPairLookbackDesc: {
+    zh: '若同币种在该小时窗口内连续两次亏损，则继续阻止重入',
+    en: 'Hours to keep blocking re-entry when the same symbol posts two recent losses',
+    es: 'Horas para seguir bloqueando si el mismo símbolo acumula dos pérdidas recientes',
   },
 }
 

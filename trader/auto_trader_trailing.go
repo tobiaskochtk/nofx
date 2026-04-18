@@ -6,6 +6,7 @@ import (
 	"nofx/logger"
 	"nofx/store"
 	tradertypes "nofx/trader/types"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -16,6 +17,8 @@ type trailingStopPositionState struct {
 	TakeProfitPrice  float64
 	HasTakeProfit    bool
 	HighestTierIndex int
+	FirstSeenAtMs    int64
+	HasActivated     bool
 }
 
 func newTrailingStopPositionState() *trailingStopPositionState {
@@ -105,6 +108,10 @@ func (at *AutoTrader) updateTrailingStops() {
 		if state == nil {
 			state = newTrailingStopPositionState()
 		}
+		positionStartMs := at.resolveTrailingPositionStartMs(symbol, side, pos, state)
+		if positionStartMs > 0 {
+			state.FirstSeenAtMs = positionStartMs
+		}
 
 		profitPct := calculateLeveragedProfitPct(side, entryPrice, markPrice, leverage)
 		currentTierIndex := resolveTrailingTierIndex(cfg.Tiers, profitPct)
@@ -118,11 +125,27 @@ func (at *AutoTrader) updateTrailingStops() {
 		}
 
 		activeTier := cfg.Tiers[activeTierIndex]
+		nowMs := time.Now().UTC().UnixMilli()
+		if !state.HasActivated {
+			if cfg.FirstTightenDelaySec > 0 && positionStartMs > 0 {
+				minAllowedUpdateMs := positionStartMs + int64(cfg.FirstTightenDelaySec)*1000
+				if nowMs < minAllowedUpdateMs {
+					at.saveTrailingStopPositionState(symbol, side, state)
+					continue
+				}
+			}
+			if cfg.MinFirstUpdateProfitPct > 0 && profitPct < cfg.MinFirstUpdateProfitPct {
+				at.saveTrailingStopPositionState(symbol, side, state)
+				continue
+			}
+		}
 		targetStopProfitPct := calculateTargetStopProfitPct(activeTier, profitPct)
 		newStopPrice := calculateTrailingStopPrice(side, entryPrice, markPrice, leverage, targetStopProfitPct)
 		if newStopPrice <= 0 {
 			continue
 		}
+		unrealizedPnL, unrealizedPnLPct := resolveTrailingUpdateUnrealizedPnL(pos, side, entryPrice, markPrice, quantity)
+		protectsBreakeven := trailingStopProtectsBreakeven(side, entryPrice, newStopPrice)
 
 		if at.trailingStopUpdateRequiresTakeProfitRestore() && !state.HasTakeProfit {
 			logger.Warnf("⚠️ Trailing stop skipped for %s %s: exchange %s cannot preserve TP automatically and no TP target is known",
@@ -136,6 +159,7 @@ func (at *AutoTrader) updateTrailingStops() {
 			continue
 		}
 
+		previousStopPrice := state.LastStopPrice
 		if err := at.applyTrailingStopUpdate(symbol, side, quantity, newStopPrice, state); err != nil {
 			logger.Infof("⚠️ Trailing stop update failed for %s %s: %v", symbol, side, err)
 			at.saveTrailingStopPositionState(symbol, side, state)
@@ -144,7 +168,9 @@ func (at *AutoTrader) updateTrailingStops() {
 
 		state.LastStopPrice = newStopPrice
 		state.HasLastStopPrice = true
+		state.HasActivated = true
 		at.saveTrailingStopPositionState(symbol, side, state)
+		at.recordTrailingStopUpdate(symbol, side, previousStopPrice, newStopPrice, state, quantity, entryPrice, markPrice, int(leverage), profitPct, unrealizedPnL, unrealizedPnLPct, targetStopProfitPct, protectsBreakeven, activeTierIndex, activeTier)
 
 		logger.Infof("🎯 Trailing stop updated: %s %s -> %.8f (profit %.2f%%, tier %.2f%%)",
 			symbol, side, newStopPrice, profitPct, activeTier.TriggerProfitPct)
@@ -180,6 +206,43 @@ func (at *AutoTrader) applyTrailingStopUpdate(symbol, side string, quantity, new
 	return nil
 }
 
+func (at *AutoTrader) recordTrailingStopUpdate(symbol, side string, previousStopPrice, newStopPrice float64, state *trailingStopPositionState, quantity, entryPrice, markPrice float64, leverage int, profitPct, unrealizedPnL, unrealizedPnLPct, stopProfitPct float64, protectsBreakeven bool, tierIndex int, tier store.TrailingStopTier) {
+	if at == nil || at.store == nil || newStopPrice <= 0 {
+		return
+	}
+
+	input := &store.DealReviewTrailingUpdateInput{
+		UserID:               at.userID,
+		TraderID:             at.id,
+		ExchangeID:           at.exchangeID,
+		Symbol:               symbol,
+		Side:                 side,
+		Timestamp:            time.Now().UTC(),
+		PreviousStopPrice:    previousStopPrice,
+		NewStopPrice:         newStopPrice,
+		Quantity:             quantity,
+		EntryPrice:           entryPrice,
+		MarkPrice:            markPrice,
+		Leverage:             leverage,
+		ProfitPct:            profitPct,
+		UnrealizedPnL:        unrealizedPnL,
+		UnrealizedPnLPct:     unrealizedPnLPct,
+		StopProfitPct:        stopProfitPct,
+		ProtectsBreakeven:    protectsBreakeven,
+		TierIndex:            tierIndex,
+		TierTriggerProfitPct: tier.TriggerProfitPct,
+		TrailingMode:         tier.Mode,
+		LockProfitPct:        tier.LockProfitPct,
+		TrailOffsetPct:       tier.TrailOffsetPct,
+	}
+	if state != nil && state.HasTakeProfit {
+		input.TakeProfitPrice = state.TakeProfitPrice
+	}
+	if err := at.store.DealReview().RecordTrailingStopUpdate(input); err != nil {
+		logger.Warnf("⚠️ Failed to persist trailing-stop update for %s %s: %v", symbol, side, err)
+	}
+}
+
 func (at *AutoTrader) trailingStopUpdateRequiresTakeProfitRestore() bool {
 	switch strings.ToLower(strings.TrimSpace(at.exchange)) {
 	case "hyperliquid", "lighter":
@@ -205,6 +268,11 @@ func (at *AutoTrader) seedTrailingStopState(symbol, side string, stopLoss, takeP
 	if takeProfit > 0 {
 		state.TakeProfitPrice = takeProfit
 		state.HasTakeProfit = true
+	}
+	if state.FirstSeenAtMs == 0 && at.positionFirstSeenTime != nil {
+		if firstSeen, ok := at.positionFirstSeenTime[trailingStopPositionKey(symbol, side)]; ok && firstSeen > 0 {
+			state.FirstSeenAtMs = firstSeen
+		}
 	}
 	at.saveTrailingStopPositionState(symbol, side, state)
 }
@@ -253,6 +321,7 @@ func (at *AutoTrader) ensureTrailingStopPositionState(symbol, side string) *trai
 	if hasStopLoss {
 		state.LastStopPrice = stopLoss
 		state.HasLastStopPrice = true
+		state.HasActivated = at.isTrailingStopAlreadyActivated(symbol, side, stopLoss)
 	}
 	if hasTakeProfit {
 		state.TakeProfitPrice = takeProfit
@@ -320,6 +389,48 @@ func (at *AutoTrader) loadTrailingTargetsFromExchange(symbol, side string) (stop
 
 func trailingStopPositionKey(symbol, side string) string {
 	return strings.ToUpper(strings.TrimSpace(symbol)) + "_" + normalizeTrailingSide(side)
+}
+
+func (at *AutoTrader) resolveTrailingPositionStartMs(symbol, side string, pos map[string]interface{}, state *trailingStopPositionState) int64 {
+	if state != nil && state.FirstSeenAtMs > 0 {
+		return state.FirstSeenAtMs
+	}
+
+	if at != nil && at.store != nil {
+		if dbPos, err := at.store.Position().GetOpenPositionBySymbol(at.id, symbol, strings.ToUpper(side)); err == nil && dbPos != nil && dbPos.EntryTime > 0 {
+			return dbPos.EntryTime
+		}
+	}
+
+	if createdTime := trailingPositionCreatedTimeMs(pos); createdTime > 0 {
+		return createdTime
+	}
+
+	if at == nil {
+		return 0
+	}
+	if at.positionFirstSeenTime == nil {
+		at.positionFirstSeenTime = make(map[string]int64)
+	}
+	key := trailingStopPositionKey(symbol, side)
+	if firstSeen, ok := at.positionFirstSeenTime[key]; ok && firstSeen > 0 {
+		return firstSeen
+	}
+
+	nowMs := time.Now().UTC().UnixMilli()
+	at.positionFirstSeenTime[key] = nowMs
+	return nowMs
+}
+
+func (at *AutoTrader) isTrailingStopAlreadyActivated(symbol, side string, currentStopPrice float64) bool {
+	if at == nil || at.store == nil || currentStopPrice <= 0 {
+		return false
+	}
+	caseRec, err := at.store.DealReview().GetLatestOpenCaseBySymbol(at.userID, at.id, symbol, strings.ToUpper(side))
+	if err != nil || caseRec == nil || caseRec.OpenStopLoss <= 0 {
+		return false
+	}
+	return isTrailingStopMovedFavorably(side, caseRec.OpenStopLoss, currentStopPrice)
 }
 
 func normalizeTrailingSide(raw any) string {
@@ -454,6 +565,98 @@ func isTakeProfitOrderType(orderType string) bool {
 	return strings.Contains(normalized, "TAKE_PROFIT") || strings.Contains(normalized, "TAKEPROFIT")
 }
 
+func trailingPositionCreatedTimeMs(pos map[string]interface{}) int64 {
+	if pos == nil {
+		return 0
+	}
+	for _, key := range []string{"createdTime", "created_at_ms", "entryTime"} {
+		if value, ok := pos[key]; ok {
+			if numeric, ok := floatValue(value); ok && numeric > 0 {
+				return int64(numeric)
+			}
+		}
+	}
+	return 0
+}
+
+func resolveTrailingUpdateUnrealizedPnL(pos map[string]interface{}, side string, entryPrice, markPrice, quantity float64) (float64, float64) {
+	unrealizedPnL := 0.0
+	found := false
+	if pos != nil {
+		for _, key := range []string{"unRealizedProfit", "unrealizedProfit", "unrealized_pnl", "unrealizedPnL"} {
+			if value, ok := pos[key]; ok {
+				if numeric, ok := floatValue(value); ok {
+					unrealizedPnL = numeric
+					found = true
+					break
+				}
+			}
+		}
+	}
+	if !found {
+		unrealizedPnL = calculateLinearUnrealizedPnL(side, entryPrice, markPrice, quantity)
+	}
+
+	notional := math.Abs(entryPrice * quantity)
+	if notional <= 0 {
+		return unrealizedPnL, 0
+	}
+	return unrealizedPnL, unrealizedPnL / notional * 100
+}
+
+func calculateLinearUnrealizedPnL(side string, entryPrice, markPrice, quantity float64) float64 {
+	if entryPrice <= 0 || markPrice <= 0 || quantity <= 0 {
+		return 0
+	}
+	if normalizeTrailingSide(side) == "long" {
+		return (markPrice - entryPrice) * quantity
+	}
+	return (entryPrice - markPrice) * quantity
+}
+
+func isTrailingStopMovedFavorably(side string, initialStopPrice, currentStopPrice float64) bool {
+	if initialStopPrice <= 0 || currentStopPrice <= 0 {
+		return false
+	}
+	const movedStopTolerance = 0.001 // 0.10%
+	switch normalizeTrailingSide(side) {
+	case "long":
+		return currentStopPrice > initialStopPrice &&
+			!nearlyEqualRelative(currentStopPrice, initialStopPrice, movedStopTolerance)
+	case "short":
+		return currentStopPrice < initialStopPrice &&
+			!nearlyEqualRelative(currentStopPrice, initialStopPrice, movedStopTolerance)
+	default:
+		return false
+	}
+}
+
+func trailingStopProtectsBreakeven(side string, entryPrice, stopPrice float64) bool {
+	if entryPrice <= 0 || stopPrice <= 0 {
+		return false
+	}
+	switch normalizeTrailingSide(side) {
+	case "long":
+		return stopPrice >= entryPrice
+	case "short":
+		return stopPrice <= entryPrice
+	default:
+		return false
+	}
+}
+
+func nearlyEqualRelative(left, right, tolerance float64) bool {
+	if left <= 0 || right <= 0 {
+		return false
+	}
+	diff := math.Abs(left - right)
+	base := math.Max(math.Abs(left), math.Abs(right))
+	if base == 0 {
+		return false
+	}
+	return diff/base <= tolerance
+}
+
 func floatValue(value any) (float64, bool) {
 	switch typed := value.(type) {
 	case float64:
@@ -466,6 +669,12 @@ func floatValue(value any) (float64, bool) {
 		return float64(typed), true
 	case int32:
 		return float64(typed), true
+	case string:
+		parsed, err := strconv.ParseFloat(strings.TrimSpace(typed), 64)
+		if err != nil {
+			return 0, false
+		}
+		return parsed, true
 	default:
 		return 0, false
 	}

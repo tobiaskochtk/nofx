@@ -241,6 +241,7 @@ func (s *AutonomousOptimizerStore) ListDueConfigs(now time.Time, limit int) ([]A
 			AutonomousOptimizerStatusScheduled,
 			AutonomousOptimizerStatusNoChange,
 			AutonomousOptimizerStatusInsufficientEvidence,
+			AutonomousOptimizerStatusBacklogOnly,
 			AutonomousOptimizerStatusBlockedByGate,
 			AutonomousOptimizerStatusDeferredForNextWindow,
 			AutonomousOptimizerStatusMonitoring,

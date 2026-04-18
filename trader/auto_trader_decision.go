@@ -171,15 +171,26 @@ func (at *AutoTrader) GetStatus() map[string]interface{} {
 		}
 
 		cfg := at.trailingStopConfig()
+		reentryCfg := at.adaptiveReentryGuardConfig()
 		at.trailingStopStateMu.RLock()
 		trackedPositions := len(at.trailingStopState)
 		at.trailingStopStateMu.RUnlock()
 		result["trailing_stop"] = map[string]interface{}{
-			"enabled":              cfg.Enabled,
-			"check_interval_sec":   cfg.CheckIntervalSec,
-			"update_threshold_pct": cfg.UpdateThresholdPct,
-			"tier_count":           len(cfg.Tiers),
-			"tracked_positions":    trackedPositions,
+			"enabled":                     cfg.Enabled,
+			"check_interval_sec":          cfg.CheckIntervalSec,
+			"update_threshold_pct":        cfg.UpdateThresholdPct,
+			"first_tighten_delay_sec":     cfg.FirstTightenDelaySec,
+			"min_first_update_profit_pct": cfg.MinFirstUpdateProfitPct,
+			"tier_count":                  len(cfg.Tiers),
+			"tracked_positions":           trackedPositions,
+		}
+		result["adaptive_reentry_guard"] = map[string]interface{}{
+			"enabled":                           reentryCfg.Enabled,
+			"require_weak_execution_regime":     reentryCfg.RequireWeakExecutionRegime,
+			"recent_trade_window":               reentryCfg.RecentTradeWindow,
+			"min_recent_trades":                 reentryCfg.MinRecentTrades,
+			"same_symbol_loss_cooldown_minutes": reentryCfg.SameSymbolLossCooldownMinutes,
+			"pair_loss_lookback_hours":          reentryCfg.PairLossLookbackHours,
 		}
 	}
 
@@ -420,18 +431,7 @@ func (at *AutoTrader) recordAndConfirmOrder(orderResult map[string]interface{}, 
 		return
 	}
 
-	// Get order ID (supports multiple types)
-	var orderID string
-	switch v := orderResult["orderId"].(type) {
-	case int64:
-		orderID = fmt.Sprintf("%d", v)
-	case float64:
-		orderID = fmt.Sprintf("%.0f", v)
-	case string:
-		orderID = v
-	default:
-		orderID = fmt.Sprintf("%v", v)
-	}
+	orderID := extractOrderIDFromResult(orderResult)
 
 	if orderID == "" || orderID == "0" {
 		logger.Infof("  ⚠️ Order ID is empty, skipping record")
@@ -441,6 +441,9 @@ func (at *AutoTrader) recordAndConfirmOrder(orderResult map[string]interface{}, 
 		reviewInput.ExchangeOrderID = orderID
 		if _, err := at.store.DealReview().CreatePendingDecisionEvent(reviewInput); err != nil {
 			logger.Infof("  ⚠️ Failed to create deal-review event: %v", err)
+		}
+		if action == "close_long" || action == "close_short" {
+			at.recordAICloseExitIntent(orderID, action, quantity, price, entryPrice, reviewInput)
 		}
 	}
 
@@ -507,6 +510,11 @@ func (at *AutoTrader) recordAndConfirmOrder(orderResult map[string]interface{}, 
 				if reviewInput != nil {
 					if err := at.store.DealReview().CancelPendingEvent(at.id, orderID, reviewInput.Stage); err != nil {
 						logger.Infof("  ⚠️ Failed to cancel pending deal-review event: %v", err)
+					}
+				}
+				if action == "close_long" || action == "close_short" {
+					if err := at.store.DealReview().CancelExitIntent(at.id, orderID); err != nil {
+						logger.Infof("  ⚠️ Failed to cancel exit intent: %v", err)
 					}
 				}
 				// Update order status

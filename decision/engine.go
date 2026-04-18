@@ -74,6 +74,16 @@ type PerformanceSummary struct {
 	MaxDrawdownPct float64 `json:"max_drawdown_pct"`
 }
 
+// RecentExecutionRegime captures whether recent closed trades show healthy follow-through or churn.
+type RecentExecutionRegime struct {
+	TradeCount         int     `json:"trade_count"`
+	WinRatePct         float64 `json:"win_rate_pct"`
+	AvgPnLPct          float64 `json:"avg_pnl_pct"`
+	ConsecutiveLosses  int     `json:"consecutive_losses"`
+	FollowThroughState string  `json:"follow_through_state"`
+	ChurnRisk          string  `json:"churn_risk"`
+}
+
 // RecentTrade captures a compact closed-trade memory sample for AI.
 type RecentTrade struct {
 	Symbol        string  `json:"symbol"`
@@ -156,38 +166,39 @@ type OITopData struct {
 
 // Context 交易上下文（传递给AI的完整信息）
 type Context struct {
-	CurrentTime      string                              `json:"current_time"`
-	RuntimeMinutes   int                                 `json:"runtime_minutes"`
-	CallCount        int                                 `json:"call_count"`
-	PayloadVersion   string                              `json:"payload_version,omitempty"`
-	ContextTF        string                              `json:"-"`
-	PriceType        string                              `json:"-"`
-	Exchange         string                              `json:"-"`
-	Account          AccountInfo                         `json:"account"`
-	Positions        []PositionInfo                      `json:"positions"`
-	CandidateCoins   []CandidateCoin                     `json:"candidate_coins"`
-	MarketDataMap    map[string]*market.Data             `json:"-"` // 不序列化，但内部使用
-	OITopDataMap     map[string]*OITopData               `json:"-"` // OI Top数据映射
-	Performance      *PerformanceSummary                 `json:"-"` // Compact performance context
-	RecentTrades     []RecentTrade                       `json:"-"` // Compact recent closed-trade memory
-	ExecutionQuality map[string]*ExecutionQualitySummary `json:"-"` // Compact order-book execution feasibility
-	VenueTradability map[string]*VenueTradabilitySummary `json:"-"` // Compact active-venue tradability state
-	QuantFlowMap     map[string]*QuantFlowSummary        `json:"-"` // Compact symbol-level quant flow context
-	MarketLeadership *MarketLeadershipSummary            `json:"-"` // Compact market-wide leadership context
-	BTCETHLeverage   int                                 `json:"-"` // BTC/ETH杠杆倍数（从配置读取）
-	AltcoinLeverage  int                                 `json:"-"` // 山寨币杠杆倍数（从配置读取）
-	BTCETHPosRatio   float64                             `json:"-"` // BTC/ETH 单仓位名义价值上限（账户净值倍数）
-	AltcoinPosRatio  float64                             `json:"-"` // 山寨币单仓位名义价值上限（账户净值倍数）
-	MinPositionSize  float64                             `json:"-"` // 最小开仓名义价值（USDT）
-	MinConfidence    int                                 `json:"-"` // 最低开仓信心度（0-100）
-	MaxPositions     int                                 `json:"-"` // 最大持仓数量（用于提示）
-	EMAPeriods       []int                               `json:"-"` // Strategy-configured EMA periods for compact payload
-	RSIPeriods       []int                               `json:"-"` // Strategy-configured RSI periods for compact payload
-	FeatureFlagsSet  bool                                `json:"-"` // Whether F4-F7 flags were explicitly configured
-	EnableF4         bool                                `json:"-"` // Feature gate for F4 orderflow block
-	EnableF5         bool                                `json:"-"` // Feature gate for F5 risk block
-	EnableF6         bool                                `json:"-"` // Feature gate for F6 levels block
-	EnableF7         bool                                `json:"-"` // Feature gate for F7 volatility block
+	CurrentTime           string                              `json:"current_time"`
+	RuntimeMinutes        int                                 `json:"runtime_minutes"`
+	CallCount             int                                 `json:"call_count"`
+	PayloadVersion        string                              `json:"payload_version,omitempty"`
+	ContextTF             string                              `json:"-"`
+	PriceType             string                              `json:"-"`
+	Exchange              string                              `json:"-"`
+	Account               AccountInfo                         `json:"account"`
+	Positions             []PositionInfo                      `json:"positions"`
+	CandidateCoins        []CandidateCoin                     `json:"candidate_coins"`
+	MarketDataMap         map[string]*market.Data             `json:"-"` // 不序列化，但内部使用
+	OITopDataMap          map[string]*OITopData               `json:"-"` // OI Top数据映射
+	Performance           *PerformanceSummary                 `json:"-"` // Compact performance context
+	RecentExecutionRegime *RecentExecutionRegime              `json:"-"` // Compact recent execution quality / churn context
+	RecentTrades          []RecentTrade                       `json:"-"` // Compact recent closed-trade memory
+	ExecutionQuality      map[string]*ExecutionQualitySummary `json:"-"` // Compact order-book execution feasibility
+	VenueTradability      map[string]*VenueTradabilitySummary `json:"-"` // Compact active-venue tradability state
+	QuantFlowMap          map[string]*QuantFlowSummary        `json:"-"` // Compact symbol-level quant flow context
+	MarketLeadership      *MarketLeadershipSummary            `json:"-"` // Compact market-wide leadership context
+	BTCETHLeverage        int                                 `json:"-"` // BTC/ETH杠杆倍数（从配置读取）
+	AltcoinLeverage       int                                 `json:"-"` // 山寨币杠杆倍数（从配置读取）
+	BTCETHPosRatio        float64                             `json:"-"` // BTC/ETH 单仓位名义价值上限（账户净值倍数）
+	AltcoinPosRatio       float64                             `json:"-"` // 山寨币单仓位名义价值上限（账户净值倍数）
+	MinPositionSize       float64                             `json:"-"` // 最小开仓名义价值（USDT）
+	MinConfidence         int                                 `json:"-"` // 最低开仓信心度（0-100）
+	MaxPositions          int                                 `json:"-"` // 最大持仓数量（用于提示）
+	EMAPeriods            []int                               `json:"-"` // Strategy-configured EMA periods for compact payload
+	RSIPeriods            []int                               `json:"-"` // Strategy-configured RSI periods for compact payload
+	FeatureFlagsSet       bool                                `json:"-"` // Whether F4-F7 flags were explicitly configured
+	EnableF4              bool                                `json:"-"` // Feature gate for F4 orderflow block
+	EnableF5              bool                                `json:"-"` // Feature gate for F5 risk block
+	EnableF6              bool                                `json:"-"` // Feature gate for F6 levels block
+	EnableF7              bool                                `json:"-"` // Feature gate for F7 volatility block
 }
 
 // Decision AI的交易决策

@@ -3,6 +3,7 @@ package store
 import (
 	"fmt"
 	"strconv"
+	"strings"
 	"time"
 
 	"gorm.io/gorm"
@@ -35,11 +36,14 @@ type TraderOrder struct {
 	ClosePosition     bool    `gorm:"column:close_position;default:false" json:"close_position"`
 	WorkingType       string  `gorm:"column:working_type;default:CONTRACT_PRICE" json:"working_type"`
 	PriceProtect      bool    `gorm:"column:price_protect;default:false" json:"price_protect"`
+	VenueOrderType    string  `gorm:"column:venue_order_type;default:''" json:"venue_order_type"`
+	TriggerSubtype    string  `gorm:"column:trigger_subtype;default:''" json:"trigger_subtype"`
+	TriggerSource     string  `gorm:"column:trigger_source;default:''" json:"trigger_source"`
 	OrderAction       string  `gorm:"column:order_action;default:''" json:"order_action"`
 	RelatedPositionID int64   `gorm:"column:related_position_id;default:0" json:"related_position_id"`
-	CreatedAt         int64   `gorm:"column:created_at" json:"created_at"`         // Unix milliseconds UTC
-	UpdatedAt         int64   `gorm:"column:updated_at" json:"updated_at"`         // Unix milliseconds UTC
-	FilledAt          int64   `gorm:"column:filled_at" json:"filled_at"`           // Unix milliseconds UTC
+	CreatedAt         int64   `gorm:"column:created_at" json:"created_at"` // Unix milliseconds UTC
+	UpdatedAt         int64   `gorm:"column:updated_at" json:"updated_at"` // Unix milliseconds UTC
+	FilledAt          int64   `gorm:"column:filled_at" json:"filled_at"`   // Unix milliseconds UTC
 }
 
 // TableName returns the table name for TraderOrder
@@ -162,7 +166,22 @@ func (s *OrderStore) CreateOrder(order *TraderOrder) error {
 		return nil
 	}
 
-	return s.db.Create(order).Error
+	if err := s.db.Create(order).Error; err != nil {
+		if isUniqueConstraintError(err) {
+			existing, lookupErr := s.GetOrderByExchangeID(order.ExchangeID, order.ExchangeOrderID)
+			if lookupErr != nil {
+				return fmt.Errorf("failed to resolve existing order after unique conflict: %w", lookupErr)
+			}
+			if existing != nil {
+				order.ID = existing.ID
+				order.CreatedAt = existing.CreatedAt
+				order.UpdatedAt = existing.UpdatedAt
+				return nil
+			}
+		}
+		return err
+	}
+	return nil
 }
 
 // UpsertOrder creates a new order or updates mutable fields on an existing one.
@@ -176,7 +195,20 @@ func (s *OrderStore) UpsertOrder(order *TraderOrder) error {
 		return fmt.Errorf("failed to check existing order: %w", err)
 	}
 	if existing == nil {
-		return s.db.Create(order).Error
+		if err := s.db.Create(order).Error; err != nil {
+			if !isUniqueConstraintError(err) {
+				return err
+			}
+			existing, err = s.GetOrderByExchangeID(order.ExchangeID, order.ExchangeOrderID)
+			if err != nil {
+				return fmt.Errorf("failed to resolve existing order after unique conflict: %w", err)
+			}
+			if existing == nil {
+				return err
+			}
+		} else {
+			return nil
+		}
 	}
 
 	existing.ClientOrderID = order.ClientOrderID
@@ -198,6 +230,9 @@ func (s *OrderStore) UpsertOrder(order *TraderOrder) error {
 	existing.ClosePosition = order.ClosePosition
 	existing.WorkingType = order.WorkingType
 	existing.PriceProtect = order.PriceProtect
+	existing.VenueOrderType = order.VenueOrderType
+	existing.TriggerSubtype = order.TriggerSubtype
+	existing.TriggerSource = order.TriggerSource
 	existing.OrderAction = order.OrderAction
 	if order.RelatedPositionID != 0 {
 		existing.RelatedPositionID = order.RelatedPositionID
@@ -246,7 +281,30 @@ func (s *OrderStore) CreateFill(fill *TraderFill) error {
 		return nil
 	}
 
-	return s.db.Create(fill).Error
+	if err := s.db.Create(fill).Error; err != nil {
+		if isUniqueConstraintError(err) {
+			existing, lookupErr := s.GetFillByExchangeTradeID(fill.ExchangeID, fill.ExchangeTradeID)
+			if lookupErr != nil {
+				return fmt.Errorf("failed to resolve existing fill after unique conflict: %w", lookupErr)
+			}
+			if existing != nil {
+				fill.ID = existing.ID
+				fill.CreatedAt = existing.CreatedAt
+				return nil
+			}
+		}
+		return err
+	}
+	return nil
+}
+
+func isUniqueConstraintError(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "unique constraint failed") ||
+		strings.Contains(msg, "duplicate key value violates unique constraint")
 }
 
 // GetFillByExchangeTradeID gets fill by exchange trade ID

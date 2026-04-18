@@ -20,6 +20,9 @@ func newPositionHistoryTestStore(t *testing.T, dbName string) *Store {
 		t.Fatalf("sql.Open() error = %v", err)
 	}
 	t.Cleanup(func() { _ = sqlDB.Close() })
+	if err := configureSQLiteSQLDB(sqlDB); err != nil {
+		t.Fatalf("configureSQLiteSQLDB() error = %v", err)
+	}
 
 	gdb, err := gorm.Open(gormsqlite.Dialector{Conn: sqlDB}, &gorm.Config{
 		Logger: gormlogger.Default.LogMode(gormlogger.Silent),

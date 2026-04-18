@@ -53,9 +53,22 @@ export interface DecisionAction {
   confidence?: number // AI confidence (0-100)
   reasoning?: string // Brief reasoning
   order_id: number
+  exchange_order_id?: string
   timestamp: string
   success: boolean
   error?: string
+  reject_reasons?: string[]
+  market_context?: DealReviewMarketContextSnapshot
+  execution?: DecisionExecutionTelemetry
+}
+
+export interface DecisionExecutionTelemetry {
+  handed_to_execution?: boolean
+  order_submitted?: boolean
+  exchange_order_id?: string
+  terminal_status?: string
+  failure_category?: string
+  status_detail?: string
 }
 
 export interface AccountSnapshot {
@@ -82,6 +95,8 @@ export interface CandidateDetail {
   symbol: string
   sources?: string[]
   selection_bucket?: string
+  reject_reasons?: string[]
+  market_context?: DealReviewMarketContextSnapshot
 }
 
 export interface DecisionRecord {
@@ -152,10 +167,59 @@ export interface TraderAI500BucketReview {
   cycles_with_open_decisions: number
   total_candidates: number
   total_open_decisions: number
+  rejected_candidate_count?: number
   first_record_at?: string
   last_record_at?: string
   buckets: TraderAI500BucketSummary[]
   recent_cycles: TraderAI500BucketCycle[]
+  reject_reasons?: TraderRejectReason[]
+  execution_statuses?: TraderExecutionStatus[]
+  recent_open_executions?: TraderOpenExecution[]
+  regime_summaries?: TraderRegimeSummary[]
+}
+
+export interface TraderRejectReason {
+  reason: string
+  count: number
+  share_pct?: number
+}
+
+export interface TraderExecutionStatus {
+  status: string
+  count: number
+  share_pct?: number
+}
+
+export interface TraderOpenExecution {
+  cycle_number: number
+  timestamp: string
+  symbol: string
+  side?: string
+  confidence?: number
+  terminal_status: string
+  failure_category?: string
+  exchange_order_id?: string
+  reasoning?: string
+  trend_regime?: string
+  volatility_regime?: string
+  oi_regime?: string
+  funding_regime?: string
+  session_bucket?: string
+  liquidity_tier?: string
+  spread_bucket?: string
+  slippage_bucket?: string
+}
+
+export interface TraderRegimeSummary {
+  key: string
+  trend_regime?: string
+  volatility_regime?: string
+  oi_regime?: string
+  funding_regime?: string
+  liquidity_tier?: string
+  session_bucket?: string
+  candidate_count: number
+  open_decision_count: number
 }
 
 export interface DealReviewCase {
@@ -230,6 +294,10 @@ export interface DealReviewCase {
   fee: number
   hold_duration_ms: number
   close_reason: string
+  exit_origin: string
+  exit_reason_quality: string
+  exit_evidence_summary: string
+  exit_evidence?: DealReviewExitEvidence
   created_at: string
   updated_at: string
 }
@@ -350,6 +418,46 @@ export interface DealReviewEventSnapshot {
   ai_request_duration_ms?: number
 }
 
+export interface DealReviewExitEvidence {
+  matched_by?: string
+  decision_cycle_number?: number
+  decision_action?: string
+  order_type?: string
+  venue_order_type?: string
+  trigger_subtype?: string
+  trigger_source?: string
+  order_action?: string
+  order_status?: string
+  client_order_id?: string
+  exchange_order_id?: string
+  trigger_price?: number
+  order_price?: number
+  fill_price?: number
+  fill_quantity?: number
+  reduce_only?: boolean
+  close_position?: boolean
+  target_stop_loss?: number
+  target_take_profit?: number
+  stop_loss_distance_bps?: number
+  take_profit_distance_bps?: number
+  trailing_update_id?: number
+  previous_stop_price?: number
+  new_stop_price?: number
+  trailing_mode?: string
+  trailing_tier_index?: number
+  trailing_trigger_profit_pct?: number
+  trailing_lock_profit_pct?: number
+  trailing_offset_pct?: number
+  trailing_updated_at_ms?: number
+  intent_id?: string
+  intent_type?: string
+  intent_source_module?: string
+  intent_summary?: string
+  intent_reasoning?: string
+  intent_confidence?: number
+  intent_created_at_ms?: number
+}
+
 export interface DealReviewEvent {
   id: string
   user_id: string
@@ -378,6 +486,10 @@ export interface DealReviewEvent {
   outcome_pnl: number
   outcome_pnl_pct: number
   close_reason: string
+  exit_origin: string
+  exit_reason_quality: string
+  exit_evidence_summary: string
+  exit_evidence?: DealReviewExitEvidence
   created_at: string
   updated_at: string
 }
@@ -790,6 +902,17 @@ export interface DealReviewAnomalyCloseReasonQuality {
   avg_give_back_pct: number
 }
 
+export interface DealReviewAnomalyExitUncertainty {
+  label: string
+  close_reason: string
+  exit_reason_quality: string
+  exit_origin: string
+  deals: number
+  net_pnl: number
+  avg_pnl: number
+  share_pct: number
+}
+
 export interface DealReviewAnomalySummary {
   closed_deals: number
   worst_symbols?: DealReviewAnomalySymbol[]
@@ -800,6 +923,7 @@ export interface DealReviewAnomalySummary {
   early_stop_out_hotspots?: DealReviewAnomalyStopOut[]
   oversized_loss_hotspots?: DealReviewAnomalySizing[]
   close_reason_quality?: DealReviewAnomalyCloseReasonQuality[]
+  exit_uncertainty?: DealReviewAnomalyExitUncertainty[]
   notes?: string[]
 }
 
@@ -1044,6 +1168,11 @@ export interface AutonomousOptimizerModelOutcome {
   kept_win_rate: number
   rollback_count: number
   rollback_rate: number
+  failed_count: number
+  stale_recovery_count: number
+  insufficient_evidence_count: number
+  failure_overlap_insufficient_evidence_count: number
+  operational_health_score: number
   backlog_item_count: number
   useful_backlog_count: number
   done_backlog_count: number
@@ -1052,6 +1181,77 @@ export interface AutonomousOptimizerModelOutcome {
   outcome_score: number
   last_used_at: string
   status_counts?: Record<string, number>
+}
+
+export interface AutonomousOptimizerTrailingStopTelemetry {
+  trailing_exit_count: number
+  trailing_profit_exit_count: number
+  trailing_loss_exit_count: number
+  initial_stop_loss_count: number
+  trailing_exit_avg_pnl_pct: number
+  initial_stop_loss_avg_pnl_pct: number
+  avg_minutes_to_first_update: number
+  avg_minutes_from_first_update_to_exit: number
+  early_tightening_count: number
+  early_tightening_loss_count: number
+  first_update_audit_count: number
+  breakeven_protected_count: number
+  sample_updates?: AutonomousOptimizerTrailingStopUpdateAuditItem[]
+}
+
+export interface AutonomousOptimizerTrailingStopUpdateAuditItem {
+  position_id?: number
+  symbol?: string
+  side?: string
+  close_reason?: string
+  trailing_mode?: string
+  update_time_ms?: number
+  minutes_to_first_update?: number
+  minutes_from_update_to_exit?: number
+  pre_update_unrealized_pnl?: number
+  pre_update_unrealized_pnl_pct?: number
+  stop_profit_pct?: number
+  protects_breakeven?: boolean
+  realized_pnl_pct?: number
+  previous_stop_price?: number
+  new_stop_price?: number
+  tier_trigger_profit_pct?: number
+}
+
+export interface AutonomousOptimizerAdaptiveCooldownConfig {
+  enabled: boolean
+  require_weak_execution_regime: boolean
+  recent_trade_window: number
+  min_recent_trades: number
+  same_symbol_loss_cooldown_minutes: number
+  pair_loss_lookback_hours: number
+}
+
+export interface AutonomousOptimizerAdaptiveCooldownSymbol {
+  symbol: string
+  reentry_count: number
+  repeat_after_loss_count: number
+  avg_pnl_pct: number
+  last_gap_minutes?: number
+}
+
+export interface AutonomousOptimizerAdaptiveCooldownRegime {
+  trend_regime?: string
+  volatility_regime?: string
+  oi_regime?: string
+  reentry_count: number
+  repeat_after_loss_count: number
+  avg_pnl_pct: number
+}
+
+export interface AutonomousOptimizerAdaptiveCooldownTelemetry {
+  config: AutonomousOptimizerAdaptiveCooldownConfig
+  cooldown_candidate_count: number
+  same_session_reentry_count: number
+  repeat_after_loss_count: number
+  regime_repeat_loss_count: number
+  top_symbols?: AutonomousOptimizerAdaptiveCooldownSymbol[]
+  top_regimes?: AutonomousOptimizerAdaptiveCooldownRegime[]
 }
 
 export interface AutonomousOptimizerRunDetail {

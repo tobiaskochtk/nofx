@@ -53,6 +53,17 @@ func buildDecisionPayloadPrompt(ctx *Context, maxPositions int) (string, error) 
 		}
 	}
 
+	if ctx.RecentExecutionRegime != nil {
+		dctx.RecentExecutionRegime = &decisionpkg.RecentExecutionRegime{
+			TradeCount:         ctx.RecentExecutionRegime.TradeCount,
+			WinRatePct:         ctx.RecentExecutionRegime.WinRatePct,
+			AvgPnLPct:          ctx.RecentExecutionRegime.AvgPnLPct,
+			ConsecutiveLosses:  ctx.RecentExecutionRegime.ConsecutiveLosses,
+			FollowThroughState: ctx.RecentExecutionRegime.FollowThroughState,
+			ChurnRisk:          ctx.RecentExecutionRegime.ChurnRisk,
+		}
+	}
+
 	if len(ctx.RecentOrders) > 0 {
 		dctx.RecentTrades = make([]decisionpkg.RecentTrade, 0, len(ctx.RecentOrders))
 		for _, order := range ctx.RecentOrders {

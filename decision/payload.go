@@ -65,22 +65,23 @@ var nullableOKFields = []string{
 }
 
 type livePayload struct {
-	Schema           string                   `json:"schema"`
-	TimestampUTC     string                   `json:"ts_utc"`
-	Run              runPayload               `json:"run"`
-	Account          accountPayload           `json:"account"`
-	Benchmark        *benchmarkPayload        `json:"benchmark,omitempty"`
-	MarketLeadership *marketLeadershipPayload `json:"market_leadership,omitempty"`
-	RelativeValue    *relativeValuePayload    `json:"relative_value,omitempty"`
-	Performance      *performancePayload      `json:"performance,omitempty"`
-	RecentTrades     []recentTradePayload     `json:"recent_trades,omitempty"`
-	Defs             defsPayload              `json:"defs"`
-	Enums            enumsPayload             `json:"enums"`
-	Req              reqPayload               `json:"req"`
-	Policy           policyPayload            `json:"pol"`
-	Positions        []positionPayload        `json:"positions"`
-	Candidates       []candidatePayload       `json:"candidates"`
-	OutputContract   outputContractPayload    `json:"output_contract"`
+	Schema                string                        `json:"schema"`
+	TimestampUTC          string                        `json:"ts_utc"`
+	Run                   runPayload                    `json:"run"`
+	Account               accountPayload                `json:"account"`
+	Benchmark             *benchmarkPayload             `json:"benchmark,omitempty"`
+	MarketLeadership      *marketLeadershipPayload      `json:"market_leadership,omitempty"`
+	RelativeValue         *relativeValuePayload         `json:"relative_value,omitempty"`
+	Performance           *performancePayload           `json:"performance,omitempty"`
+	RecentExecutionRegime *recentExecutionRegimePayload `json:"recent_execution_regime,omitempty"`
+	RecentTrades          []recentTradePayload          `json:"recent_trades,omitempty"`
+	Defs                  defsPayload                   `json:"defs"`
+	Enums                 enumsPayload                  `json:"enums"`
+	Req                   reqPayload                    `json:"req"`
+	Policy                policyPayload                 `json:"pol"`
+	Positions             []positionPayload             `json:"positions"`
+	Candidates            []candidatePayload            `json:"candidates"`
+	OutputContract        outputContractPayload         `json:"output_contract"`
 }
 
 type runPayload struct {
@@ -196,6 +197,15 @@ type performancePayload struct {
 	AvgWin         float64 `json:"avg_win"`
 	AvgLoss        float64 `json:"avg_loss"`
 	MaxDrawdownPct float64 `json:"max_drawdown_pct"`
+}
+
+type recentExecutionRegimePayload struct {
+	TradeCount         int     `json:"trade_count"`
+	WinRatePct         float64 `json:"win_rate_pct"`
+	AvgPnLPct          float64 `json:"avg_pnl_pct"`
+	ConsecutiveLosses  int     `json:"consecutive_losses"`
+	FollowThroughState string  `json:"follow_through_state"`
+	ChurnRisk          string  `json:"churn_risk"`
 }
 
 type marketLeadershipPayload struct {
@@ -680,6 +690,7 @@ func assembleLivePayload(ctx *Context) (*livePayload, *payloadDiagnostics, error
 	diag := &payloadDiagnostics{FeaturePass: make(map[string][]string)}
 	live.MarketLeadership = buildMarketLeadershipPayload(ctx.MarketLeadership)
 	live.Performance = buildPerformancePayload(ctx.Performance)
+	live.RecentExecutionRegime = buildRecentExecutionRegimePayload(ctx.RecentExecutionRegime)
 	live.RecentTrades = buildRecentTradesPayload(ctx.RecentTrades)
 	live.Benchmark = buildBenchmarkPayload(ctx, "BTCUSDT")
 
@@ -1602,6 +1613,20 @@ func buildRecentTradesPayload(trades []RecentTrade) []recentTradePayload {
 		})
 	}
 	return out
+}
+
+func buildRecentExecutionRegimePayload(regime *RecentExecutionRegime) *recentExecutionRegimePayload {
+	if regime == nil || regime.TradeCount <= 0 {
+		return nil
+	}
+	return &recentExecutionRegimePayload{
+		TradeCount:         regime.TradeCount,
+		WinRatePct:         roundTo(regime.WinRatePct, 2),
+		AvgPnLPct:          roundTo(regime.AvgPnLPct, 2),
+		ConsecutiveLosses:  regime.ConsecutiveLosses,
+		FollowThroughState: strings.TrimSpace(strings.ToLower(regime.FollowThroughState)),
+		ChurnRisk:          strings.TrimSpace(strings.ToLower(regime.ChurnRisk)),
+	}
 }
 
 func buildExecutionQualityPayload(summary *ExecutionQualitySummary) *executionQualityPayload {

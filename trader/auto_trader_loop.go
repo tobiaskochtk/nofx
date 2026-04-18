@@ -265,6 +265,22 @@ func (at *AutoTrader) runCycle() error {
 		for _, d := range sortedDecisions {
 			if d.Action == "open_long" || d.Action == "open_short" {
 				logger.Warnf("🛡️ [%s] Safe mode: BLOCKED %s %s (no new positions allowed)", at.name, d.Action, d.Symbol)
+				record.Decisions = append(record.Decisions, store.DecisionAction{
+					Action:     d.Action,
+					Symbol:     d.Symbol,
+					Leverage:   d.Leverage,
+					StopLoss:   d.StopLoss,
+					TakeProfit: d.TakeProfit,
+					Confidence: d.Confidence,
+					Reasoning:  d.Reasoning,
+					Timestamp:  time.Now().UTC(),
+					Success:    false,
+					Error:      "safe mode active: opening positions disabled",
+				})
+				record.ExecutionLog = append(
+					record.ExecutionLog,
+					fmt.Sprintf("⚠ %s %s blocked: safe mode active", d.Symbol, d.Action),
+				)
 				continue
 			}
 			filtered = append(filtered, d)
@@ -536,12 +552,17 @@ func (at *AutoTrader) buildTradingContext() (*kernel.Context, error) {
 
 	// 7. Add recent closed trades (if store is available)
 	if at.store != nil {
-		// Get recent 10 closed trades for AI context
-		recentTrades, err := at.store.Position().GetRecentTrades(at.id, 10)
+		reentryCfg := at.adaptiveReentryGuardConfig()
+		recentTradeLimit := reentryCfg.RecentTradeWindow
+		if recentTradeLimit < 10 {
+			recentTradeLimit = 10
+		}
+		recentTrades, err := at.store.Position().GetRecentTrades(at.id, recentTradeLimit)
 		if err != nil {
 			logger.Infof("⚠️ [%s] Failed to get recent trades: %v", at.name, err)
 		} else {
 			logger.Infof("📊 [%s] Found %d recent closed trades for AI context", at.name, len(recentTrades))
+			ctx.RecentExecutionRegime = buildRecentExecutionRegimeWithConfig(recentTrades, reentryCfg)
 			for _, trade := range recentTrades {
 				// Convert Unix timestamps to formatted strings for AI readability
 				entryTimeStr := ""
@@ -565,6 +586,15 @@ func (at *AutoTrader) buildTradingContext() (*kernel.Context, error) {
 					HoldDuration:  trade.HoldDuration,
 					ExitTimestamp: trade.ExitTime,
 				})
+			}
+			if ctx.RecentExecutionRegime != nil {
+				logger.Infof("📉 [%s] Recent execution regime: %s follow-through, churn=%s, win=%.1f%%, avg=%+.2f%%",
+					at.name,
+					ctx.RecentExecutionRegime.FollowThroughState,
+					ctx.RecentExecutionRegime.ChurnRisk,
+					ctx.RecentExecutionRegime.WinRatePct,
+					ctx.RecentExecutionRegime.AvgPnLPct,
+				)
 			}
 		}
 		// Get trading statistics for AI context
@@ -593,8 +623,9 @@ func (at *AutoTrader) buildTradingContext() (*kernel.Context, error) {
 		logger.Infof("⚠️ [%s] Store is nil, cannot get recent trades", at.name)
 	}
 
-	// 8. Get compact execution-quality data from the live order book.
-	ctx.ExecutionQualityMap, ctx.VenueTradabilityMap = at.collectExecutionSignals(positionInfos, candidateCoins)
+	// 8. Get compact execution-quality data from the live order book and drop venue-unsupported candidates.
+	ctx.ExecutionQualityMap, ctx.VenueTradabilityMap, candidateCoins = at.collectExecutionSignals(positionInfos, candidateCoins)
+	ctx.CandidateCoins = candidateCoins
 
 	// 9. Get quantitative data (if enabled in strategy config)
 	if strategyConfig.Indicators.EnableQuantData {

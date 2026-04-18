@@ -83,6 +83,8 @@ function normalizeTrailingStop(
     enabled: config?.enabled ?? false,
     check_interval_sec: config?.check_interval_sec ?? 30,
     update_threshold_pct: config?.update_threshold_pct ?? 0.3,
+    first_tighten_delay_sec: config?.first_tighten_delay_sec ?? 0,
+    min_first_update_profit_pct: config?.min_first_update_profit_pct ?? 0,
     tiers,
   }
 }

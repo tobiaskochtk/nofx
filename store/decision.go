@@ -74,40 +74,46 @@ const DecisionCandidateMetadataVersion = 1
 
 // CandidateDetail keeps per-cycle candidate metadata needed for later review.
 type CandidateDetail struct {
-	Symbol          string   `json:"symbol"`
-	Sources         []string `json:"sources,omitempty"`
-	SelectionBucket string   `json:"selection_bucket,omitempty"`
+	Symbol          string                           `json:"symbol"`
+	Sources         []string                         `json:"sources,omitempty"`
+	SelectionBucket string                           `json:"selection_bucket,omitempty"`
+	RejectReasons   []string                         `json:"reject_reasons,omitempty"`
+	MarketContext   *DealReviewMarketContextSnapshot `json:"market_context,omitempty"`
 }
 
 // TraderBucketReview is a live 24h-style review aggregated from stored decision records.
 type TraderBucketReview struct {
-	TraderID                string                 `json:"trader_id"`
-	WindowHours             int                    `json:"window_hours"`
-	WindowStart             time.Time              `json:"window_start"`
-	WindowEnd               time.Time              `json:"window_end"`
-	GeneratedAt             time.Time              `json:"generated_at"`
-	CandidateMetaVer        int                    `json:"candidate_metadata_version"`
-	HasFullWindow           bool                   `json:"has_full_window"`
-	CoverageHours           float64                `json:"coverage_hours"`
-	RecordCount             int                    `json:"record_count"`
-	LegacyRecordCount       int                    `json:"legacy_record_count"`
-	CyclesWithCandidates    int                    `json:"cycles_with_candidates"`
-	CyclesWithoutCandidates int                    `json:"cycles_without_candidates"`
-	CyclesWithOpenDecisions int                    `json:"cycles_with_open_decisions"`
-	TotalCandidates         int                    `json:"total_candidates"`
-	TotalOpenDecisions      int                    `json:"total_open_decisions"`
-	HoldDecisionCount       int                    `json:"hold_decision_count"`
-	WaitDecisionCount       int                    `json:"wait_decision_count"`
-	DecisionConversionRate  float64                `json:"decision_conversion_rate"`
-	AvgDecisionConfidence   float64                `json:"avg_decision_confidence"`
-	FirstRecordAt           *time.Time             `json:"first_record_at,omitempty"`
-	LastRecordAt            *time.Time             `json:"last_record_at,omitempty"`
-	Buckets                 []TraderBucketSummary  `json:"buckets"`
-	RecentCycles            []TraderBucketCycle    `json:"recent_cycles"`
-	RejectReasons           []TraderRejectReason   `json:"reject_reasons,omitempty"`
-	ConfidenceBands         []TraderConfidenceBand `json:"confidence_bands,omitempty"`
-	OpportunitySessions     []TraderSessionSummary `json:"opportunity_sessions,omitempty"`
-	OpportunitySymbols      []TraderSymbolSummary  `json:"opportunity_symbols,omitempty"`
+	TraderID                string                  `json:"trader_id"`
+	WindowHours             int                     `json:"window_hours"`
+	WindowStart             time.Time               `json:"window_start"`
+	WindowEnd               time.Time               `json:"window_end"`
+	GeneratedAt             time.Time               `json:"generated_at"`
+	CandidateMetaVer        int                     `json:"candidate_metadata_version"`
+	HasFullWindow           bool                    `json:"has_full_window"`
+	CoverageHours           float64                 `json:"coverage_hours"`
+	RecordCount             int                     `json:"record_count"`
+	LegacyRecordCount       int                     `json:"legacy_record_count"`
+	CyclesWithCandidates    int                     `json:"cycles_with_candidates"`
+	CyclesWithoutCandidates int                     `json:"cycles_without_candidates"`
+	CyclesWithOpenDecisions int                     `json:"cycles_with_open_decisions"`
+	TotalCandidates         int                     `json:"total_candidates"`
+	TotalOpenDecisions      int                     `json:"total_open_decisions"`
+	RejectedCandidateCount  int                     `json:"rejected_candidate_count"`
+	HoldDecisionCount       int                     `json:"hold_decision_count"`
+	WaitDecisionCount       int                     `json:"wait_decision_count"`
+	DecisionConversionRate  float64                 `json:"decision_conversion_rate"`
+	AvgDecisionConfidence   float64                 `json:"avg_decision_confidence"`
+	FirstRecordAt           *time.Time              `json:"first_record_at,omitempty"`
+	LastRecordAt            *time.Time              `json:"last_record_at,omitempty"`
+	Buckets                 []TraderBucketSummary   `json:"buckets"`
+	RecentCycles            []TraderBucketCycle     `json:"recent_cycles"`
+	RejectReasons           []TraderRejectReason    `json:"reject_reasons,omitempty"`
+	ConfidenceBands         []TraderConfidenceBand  `json:"confidence_bands,omitempty"`
+	OpportunitySessions     []TraderSessionSummary  `json:"opportunity_sessions,omitempty"`
+	OpportunitySymbols      []TraderSymbolSummary   `json:"opportunity_symbols,omitempty"`
+	ExecutionStatuses       []TraderExecutionStatus `json:"execution_statuses,omitempty"`
+	RecentOpenExecutions    []TraderOpenExecution   `json:"recent_open_executions,omitempty"`
+	RegimeSummaries         []TraderRegimeSummary   `json:"regime_summaries,omitempty"`
 }
 
 // TraderBucketSummary aggregates usage for a single selection bucket.
@@ -171,6 +177,44 @@ type TraderSymbolSummary struct {
 	SelectionBuckets  []string `json:"selection_buckets,omitempty"`
 }
 
+type TraderExecutionStatus struct {
+	Status   string  `json:"status"`
+	Count    int     `json:"count"`
+	SharePct float64 `json:"share_pct,omitempty"`
+}
+
+type TraderOpenExecution struct {
+	CycleNumber      int       `json:"cycle_number"`
+	Timestamp        time.Time `json:"timestamp"`
+	Symbol           string    `json:"symbol"`
+	Side             string    `json:"side,omitempty"`
+	Confidence       int       `json:"confidence,omitempty"`
+	TerminalStatus   string    `json:"terminal_status"`
+	FailureCategory  string    `json:"failure_category,omitempty"`
+	ExchangeOrderID  string    `json:"exchange_order_id,omitempty"`
+	Reasoning        string    `json:"reasoning,omitempty"`
+	TrendRegime      string    `json:"trend_regime,omitempty"`
+	VolatilityRegime string    `json:"volatility_regime,omitempty"`
+	OIRegime         string    `json:"oi_regime,omitempty"`
+	FundingRegime    string    `json:"funding_regime,omitempty"`
+	SessionBucket    string    `json:"session_bucket,omitempty"`
+	LiquidityTier    string    `json:"liquidity_tier,omitempty"`
+	SpreadBucket     string    `json:"spread_bucket,omitempty"`
+	SlippageBucket   string    `json:"slippage_bucket,omitempty"`
+}
+
+type TraderRegimeSummary struct {
+	Key               string `json:"key"`
+	TrendRegime       string `json:"trend_regime,omitempty"`
+	VolatilityRegime  string `json:"volatility_regime,omitempty"`
+	OIRegime          string `json:"oi_regime,omitempty"`
+	FundingRegime     string `json:"funding_regime,omitempty"`
+	LiquidityTier     string `json:"liquidity_tier,omitempty"`
+	SessionBucket     string `json:"session_bucket,omitempty"`
+	CandidateCount    int    `json:"candidate_count"`
+	OpenDecisionCount int    `json:"open_decision_count"`
+}
+
 // AccountSnapshot account state snapshot
 type AccountSnapshot struct {
 	TotalBalance          float64 `json:"total_balance"`
@@ -195,19 +239,32 @@ type PositionSnapshot struct {
 
 // DecisionAction decision action
 type DecisionAction struct {
-	Action     string    `json:"action"`
-	Symbol     string    `json:"symbol"`
-	Quantity   float64   `json:"quantity"`
-	Leverage   int       `json:"leverage"`
-	Price      float64   `json:"price"`
-	StopLoss   float64   `json:"stop_loss,omitempty"`   // Stop loss price
-	TakeProfit float64   `json:"take_profit,omitempty"` // Take profit price
-	Confidence int       `json:"confidence,omitempty"`  // AI confidence (0-100)
-	Reasoning  string    `json:"reasoning,omitempty"`   // Brief reasoning
-	OrderID    int64     `json:"order_id"`
-	Timestamp  time.Time `json:"timestamp"`
-	Success    bool      `json:"success"`
-	Error      string    `json:"error"`
+	Action          string                           `json:"action"`
+	Symbol          string                           `json:"symbol"`
+	Quantity        float64                          `json:"quantity"`
+	Leverage        int                              `json:"leverage"`
+	Price           float64                          `json:"price"`
+	StopLoss        float64                          `json:"stop_loss,omitempty"`   // Stop loss price
+	TakeProfit      float64                          `json:"take_profit,omitempty"` // Take profit price
+	Confidence      int                              `json:"confidence,omitempty"`  // AI confidence (0-100)
+	Reasoning       string                           `json:"reasoning,omitempty"`   // Brief reasoning
+	OrderID         int64                            `json:"order_id"`
+	ExchangeOrderID string                           `json:"exchange_order_id,omitempty"`
+	Timestamp       time.Time                        `json:"timestamp"`
+	Success         bool                             `json:"success"`
+	Error           string                           `json:"error"`
+	RejectReasons   []string                         `json:"reject_reasons,omitempty"`
+	MarketContext   *DealReviewMarketContextSnapshot `json:"market_context,omitempty"`
+	Execution       *DecisionExecutionTelemetry      `json:"execution,omitempty"`
+}
+
+type DecisionExecutionTelemetry struct {
+	HandedToExecution bool   `json:"handed_to_execution,omitempty"`
+	OrderSubmitted    bool   `json:"order_submitted,omitempty"`
+	ExchangeOrderID   string `json:"exchange_order_id,omitempty"`
+	TerminalStatus    string `json:"terminal_status,omitempty"`
+	FailureCategory   string `json:"failure_category,omitempty"`
+	StatusDetail      string `json:"status_detail,omitempty"`
 }
 
 // Statistics statistics information
@@ -290,6 +347,7 @@ func (db *DecisionRecordDB) toRecord() *DecisionRecord {
 	json.Unmarshal([]byte(db.Decisions), &record.Decisions)
 	json.Unmarshal([]byte(db.AccountStateJSON), &record.AccountState)
 	json.Unmarshal([]byte(db.PositionsJSON), &record.Positions)
+	enrichDecisionRecordTelemetry(record)
 	return record
 }
 
@@ -300,6 +358,7 @@ func (s *DecisionStore) LogDecision(record *DecisionRecord) error {
 	} else {
 		record.Timestamp = record.Timestamp.UTC()
 	}
+	enrichDecisionRecordTelemetry(record)
 
 	// Serialize arrays to JSON
 	candidateCoinsJSON, _ := json.Marshal(record.CandidateCoins)
@@ -564,7 +623,10 @@ func (s *DecisionStore) GetBucketReview(traderID string, window time.Duration, c
 	confidenceBands := make(map[string]*traderConfidenceAccumulator)
 	sessionAccumulators := make(map[string]*traderSessionAccumulator)
 	symbolAccumulators := make(map[string]*traderSymbolAccumulator)
+	executionStatuses := make(map[string]int)
+	regimeAccumulators := make(map[string]*traderRegimeAccumulator)
 	recentCycles := make([]TraderBucketCycle, 0, len(dbRecords))
+	recentOpenExecutions := make([]TraderOpenExecution, 0, len(dbRecords))
 	var firstRecordAt *time.Time
 	var lastRecordAt *time.Time
 	totalDecisionConfidence := 0
@@ -621,8 +683,10 @@ func (s *DecisionStore) GetBucketReview(traderID string, window time.Duration, c
 		sessionAcc.CandidateCount += len(record.CandidateDetails)
 
 		openDecisionSymbols := []string{}
+		openDecisionSet := make(map[string]struct{})
 		hasOpenDecision := false
-		for _, action := range record.Decisions {
+		for i := range record.Decisions {
+			action := &record.Decisions[i]
 			actionType := strings.ToLower(strings.TrimSpace(action.Action))
 			symbol := strings.ToUpper(strings.TrimSpace(action.Symbol))
 			isOpenDecision := strings.HasPrefix(actionType, "open_")
@@ -663,6 +727,7 @@ func (s *DecisionStore) GetBucketReview(traderID string, window time.Duration, c
 				report.TotalOpenDecisions++
 				sessionAcc.OpenDecisionCount++
 				openDecisionSymbols = appendUniqueSortedSymbol(openDecisionSymbols, symbol)
+				openDecisionSet[symbol] = struct{}{}
 
 				bucket := normalizeTraderBucket(symbolToBucket[symbol])
 				acc := ensureTraderBucketAccumulator(accumulators, bucket)
@@ -672,10 +737,16 @@ func (s *DecisionStore) GetBucketReview(traderID string, window time.Duration, c
 				symbolAcc.OpenDecisionCount++
 				symbolAcc.Sessions[sessionBucket] = struct{}{}
 				symbolAcc.SelectionBuckets[bucket] = struct{}{}
+				if action.Execution != nil {
+					status := strings.TrimSpace(action.Execution.TerminalStatus)
+					if status == "" {
+						status = "unknown"
+					}
+					executionStatuses[status]++
+					recentOpenExecutions = append(recentOpenExecutions, buildTraderOpenExecution(record, action))
+				}
 				continue
 			}
-
-			rejectReasons[normalizeTraderRejectReason(action.Reasoning)]++
 			if isHoldDecision {
 				report.HoldDecisionCount++
 				sessionAcc.HoldDecisionCount++
@@ -696,6 +767,28 @@ func (s *DecisionStore) GetBucketReview(traderID string, window time.Duration, c
 		}
 		if hasOpenDecision {
 			report.CyclesWithOpenDecisions++
+		}
+		for _, detail := range record.CandidateDetails {
+			symbol := strings.ToUpper(strings.TrimSpace(detail.Symbol))
+			if symbol == "" {
+				continue
+			}
+			if regimeAcc := ensureTraderRegimeAccumulator(regimeAccumulators, detail.MarketContext); regimeAcc != nil {
+				regimeAcc.Summary.CandidateCount++
+				if _, opened := openDecisionSet[symbol]; opened {
+					regimeAcc.Summary.OpenDecisionCount++
+				}
+			}
+			if _, opened := openDecisionSet[symbol]; opened {
+				continue
+			}
+			if len(detail.RejectReasons) == 0 {
+				continue
+			}
+			report.RejectedCandidateCount++
+			for _, reason := range detail.RejectReasons {
+				rejectReasons[normalizeTraderRejectReason(reason)]++
+			}
 		}
 
 		recentCycles = append(recentCycles, TraderBucketCycle{
@@ -726,10 +819,13 @@ func (s *DecisionStore) GetBucketReview(traderID string, window time.Duration, c
 	if totalDecisionConfidenceSamples > 0 {
 		report.AvgDecisionConfidence = roundFloat(float64(totalDecisionConfidence)/float64(totalDecisionConfidenceSamples), 1)
 	}
-	report.RejectReasons = buildTraderRejectReasons(rejectReasons, report.HoldDecisionCount+report.WaitDecisionCount, 6)
+	report.RejectReasons = buildTraderRejectReasons(rejectReasons, report.RejectedCandidateCount, 8)
 	report.ConfidenceBands = buildTraderConfidenceBands(confidenceBands)
 	report.OpportunitySessions = buildTraderSessionSummaries(sessionAccumulators, 4)
 	report.OpportunitySymbols = buildTraderSymbolSummaries(symbolAccumulators, 6)
+	report.ExecutionStatuses = buildTraderExecutionStatuses(executionStatuses, report.TotalOpenDecisions, 6)
+	report.RecentOpenExecutions = selectRecentTraderOpenExecutions(recentOpenExecutions, traderOpenExecutionSampleLimit)
+	report.RegimeSummaries = buildTraderRegimeSummaries(regimeAccumulators, 6)
 
 	return report, nil
 }
@@ -988,26 +1084,53 @@ func normalizeTraderRejectReason(reasoning string) string {
 	switch {
 	case value == "":
 		return "unspecified"
+	case value == "liquidity_concerns",
+		value == "spread_slippage_concerns",
+		value == "regime_mismatch",
+		value == "trend_conflict",
+		value == "missing_confirmation",
+		value == "venue_unsupported",
+		value == "risk_control",
+		value == "extended_setup",
+		value == "late_breakout",
+		value == "volume_not_confirming",
+		value == "oi_not_confirming",
+		value == "same_symbol_cooldown":
+		return value
 	case strings.Contains(value, "confidence"):
 		return "low_confidence"
 	case strings.Contains(value, "position") && strings.Contains(value, "limit"):
 		return "position_limit"
 	case strings.Contains(value, "risk"):
-		return "risk_budget"
-	case strings.Contains(value, "liquid"), strings.Contains(value, "spread"), strings.Contains(value, "slippage"):
-		return "execution_quality"
+		return "risk_control"
+	case strings.Contains(value, "cooldown"), strings.Contains(value, "loss streak"), strings.Contains(value, "same symbol"), strings.Contains(value, "same-symbol"):
+		return "same_symbol_cooldown"
+	case strings.Contains(value, "liquid"):
+		return "liquidity_concerns"
+	case strings.Contains(value, "spread"), strings.Contains(value, "slippage"):
+		return "spread_slippage_concerns"
+	case strings.Contains(value, "late breakout"), strings.Contains(value, "late entry"), strings.Contains(value, "already broke"), strings.Contains(value, "chased"):
+		return "late_breakout"
+	case strings.Contains(value, "extended"), strings.Contains(value, "overextend"), strings.Contains(value, "stretched"), strings.Contains(value, "exhausted"):
+		return "extended_setup"
+	case strings.Contains(value, "volume not"), strings.Contains(value, "weak volume"), strings.Contains(value, "no volume"), strings.Contains(value, "thin volume"):
+		return "volume_not_confirming"
 	case strings.Contains(value, "volatil"):
 		return "volatility"
 	case strings.Contains(value, "trend"), strings.Contains(value, "regime"):
 		return "regime_mismatch"
+	case strings.Contains(value, "confirm"):
+		return "missing_confirmation"
+	case strings.Contains(value, "venue"), strings.Contains(value, "unsupported"):
+		return "venue_unsupported"
 	case strings.Contains(value, "funding"):
 		return "funding_constraint"
 	case strings.Contains(value, "oi"), strings.Contains(value, "open interest"):
-		return "oi_constraint"
+		return "oi_not_confirming"
 	case strings.Contains(value, "btc"):
 		return "btc_relative_strength"
 	case strings.Contains(value, "conflict"), strings.Contains(value, "mixed"), strings.Contains(value, "unclear"):
-		return "signal_conflict"
+		return "trend_conflict"
 	default:
 		value = strings.Split(value, "\n")[0]
 		for _, splitter := range []string{";", ".", ","} {

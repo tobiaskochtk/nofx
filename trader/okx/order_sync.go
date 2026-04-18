@@ -31,6 +31,101 @@ type OKXTrade struct {
 	OrderAction string // open_long, open_short, close_long, close_short
 }
 
+type OKXAlgoOrder struct {
+	AlgoID         string
+	OrderID        string
+	AlgoClOrdID    string
+	Symbol         string
+	Side           string
+	PositionSide   string
+	OrderType      string
+	TriggerSubtype string
+	TriggerSource  string
+	TriggerPrice   float64
+	OrderPrice     float64
+	Quantity       float64
+	Status         string
+	ReduceOnly     bool
+	CreatedTime    time.Time
+	UpdatedTime    time.Time
+	OrderAction    string
+}
+
+func normalizeOKXAlgoOrderStatus(state string) string {
+	switch strings.ToLower(strings.TrimSpace(state)) {
+	case "filled":
+		return "FILLED"
+	case "effective", "live":
+		return "NEW"
+	case "canceled", "order_failed", "failed":
+		return "CANCELED"
+	default:
+		return strings.ToUpper(strings.TrimSpace(state))
+	}
+}
+
+func inferOKXTriggerOrderAction(side, posSide string) string {
+	switch {
+	case strings.EqualFold(strings.TrimSpace(side), "sell") && strings.EqualFold(strings.TrimSpace(posSide), "long"):
+		return "close_long"
+	case strings.EqualFold(strings.TrimSpace(side), "buy") && strings.EqualFold(strings.TrimSpace(posSide), "short"):
+		return "close_short"
+	default:
+		return ""
+	}
+}
+
+func normalizeOKXAlgoTriggerOrderType(subtype string) string {
+	switch strings.TrimSpace(subtype) {
+	case "stop_loss":
+		return "STOP_MARKET"
+	case "take_profit":
+		return "TAKE_PROFIT_MARKET"
+	default:
+		return "STOP_MARKET"
+	}
+}
+
+func parseOKXAlgoOrderKind(
+	slTriggerPx string,
+	tpTriggerPx string,
+	triggerPx string,
+	slOrdPx string,
+	tpOrdPx string,
+	triggerPxType string,
+	slTriggerPxType string,
+	tpTriggerPxType string,
+) (subtype string, triggerPrice float64, orderPrice float64, source string) {
+	if price, err := strconv.ParseFloat(strings.TrimSpace(slTriggerPx), 64); err == nil && price > 0 {
+		orderPrice, _ = strconv.ParseFloat(strings.TrimSpace(slOrdPx), 64)
+		return "stop_loss", price, orderPrice, strings.TrimSpace(slTriggerPxType)
+	}
+	if price, err := strconv.ParseFloat(strings.TrimSpace(tpTriggerPx), 64); err == nil && price > 0 {
+		orderPrice, _ = strconv.ParseFloat(strings.TrimSpace(tpOrdPx), 64)
+		return "take_profit", price, orderPrice, strings.TrimSpace(tpTriggerPxType)
+	}
+	if price, err := strconv.ParseFloat(strings.TrimSpace(triggerPx), 64); err == nil && price > 0 {
+		return "", price, 0, strings.TrimSpace(triggerPxType)
+	}
+	return "", 0, 0, ""
+}
+
+func parseOKXBoolField(value string) bool {
+	normalized := strings.ToLower(strings.TrimSpace(value))
+	return normalized == "true" || normalized == "1"
+}
+
+func parseOKXTimeField(value string) (time.Time, error) {
+	if strings.TrimSpace(value) == "" {
+		return time.Time{}, nil
+	}
+	ms, err := strconv.ParseInt(strings.TrimSpace(value), 10, 64)
+	if err != nil {
+		return time.Time{}, err
+	}
+	return time.UnixMilli(ms).UTC(), nil
+}
+
 // GetTrades retrieves trade/fill records from OKX
 func (t *OKXTrader) GetTrades(startTime time.Time, limit int) ([]OKXTrade, error) {
 	if limit <= 0 {
@@ -145,6 +240,216 @@ func (t *OKXTrader) GetTrades(startTime time.Time, limit int) ([]OKXTrade, error
 	return trades, nil
 }
 
+func (t *OKXTrader) getAlgoOrderHistoryByState(startTime time.Time, limit int, state string) ([]OKXAlgoOrder, error) {
+	if limit <= 0 {
+		limit = 100
+	}
+	if limit > 100 {
+		limit = 100
+	}
+
+	path := fmt.Sprintf("%s?ordType=conditional&state=%s&limit=%d", okxAlgoHistoryPath, state, limit)
+	if !startTime.IsZero() {
+		path += fmt.Sprintf("&begin=%d", startTime.UnixMilli())
+	}
+
+	data, err := t.doRequest("GET", path, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get algo order history: %w", err)
+	}
+
+	var history []struct {
+		AlgoID          string `json:"algoId"`
+		AlgoClOrdID     string `json:"algoClOrdId"`
+		OrdID           string `json:"ordId"`
+		InstID          string `json:"instId"`
+		Side            string `json:"side"`
+		PosSide         string `json:"posSide"`
+		OrdType         string `json:"ordType"`
+		State           string `json:"state"`
+		Sz              string `json:"sz"`
+		ReduceOnly      string `json:"reduceOnly"`
+		CTime           string `json:"cTime"`
+		UTime           string `json:"uTime"`
+		TriggerPx       string `json:"triggerPx"`
+		TriggerPxType   string `json:"triggerPxType"`
+		SlTriggerPx     string `json:"slTriggerPx"`
+		SlTriggerPxType string `json:"slTriggerPxType"`
+		SlOrdPx         string `json:"slOrdPx"`
+		TpTriggerPx     string `json:"tpTriggerPx"`
+		TpTriggerPxType string `json:"tpTriggerPxType"`
+		TpOrdPx         string `json:"tpOrdPx"`
+	}
+	if err := json.Unmarshal(data, &history); err != nil {
+		return nil, fmt.Errorf("failed to parse algo order history: %w", err)
+	}
+
+	result := make([]OKXAlgoOrder, 0, len(history))
+	for _, item := range history {
+		orderAction := inferOKXTriggerOrderAction(item.Side, item.PosSide)
+		if orderAction == "" || strings.TrimSpace(item.InstID) == "" {
+			continue
+		}
+
+		symbol := t.convertSymbolBack(item.InstID)
+		quantityContracts, _ := strconv.ParseFloat(strings.TrimSpace(item.Sz), 64)
+		quantity := quantityContracts
+		if inst, err := t.getInstrument(symbol); err == nil && inst != nil && inst.CtVal > 0 {
+			quantity = quantityContracts * inst.CtVal
+		}
+		subtype, triggerPrice, orderPrice, source := parseOKXAlgoOrderKind(
+			item.SlTriggerPx,
+			item.TpTriggerPx,
+			item.TriggerPx,
+			item.SlOrdPx,
+			item.TpOrdPx,
+			item.TriggerPxType,
+			item.SlTriggerPxType,
+			item.TpTriggerPxType,
+		)
+
+		orderID := strings.TrimSpace(item.OrdID)
+		if orderID == "" {
+			orderID = strings.TrimSpace(item.AlgoID)
+		}
+
+		createdTime, _ := parseOKXTimeField(item.CTime)
+		updatedTime, _ := parseOKXTimeField(item.UTime)
+		if updatedTime.IsZero() {
+			updatedTime = createdTime
+		}
+
+		positionSide := "LONG"
+		if strings.Contains(orderAction, "short") {
+			positionSide = "SHORT"
+		}
+
+		result = append(result, OKXAlgoOrder{
+			AlgoID:         strings.TrimSpace(item.AlgoID),
+			OrderID:        orderID,
+			AlgoClOrdID:    strings.TrimSpace(item.AlgoClOrdID),
+			Symbol:         market.Normalize(symbol),
+			Side:           strings.ToUpper(strings.TrimSpace(item.Side)),
+			PositionSide:   positionSide,
+			OrderType:      strings.TrimSpace(item.OrdType),
+			TriggerSubtype: subtype,
+			TriggerSource:  source,
+			TriggerPrice:   triggerPrice,
+			OrderPrice:     orderPrice,
+			Quantity:       quantity,
+			Status:         normalizeOKXAlgoOrderStatus(item.State),
+			ReduceOnly:     parseOKXBoolField(item.ReduceOnly),
+			CreatedTime:    createdTime,
+			UpdatedTime:    updatedTime,
+			OrderAction:    orderAction,
+		})
+	}
+
+	return result, nil
+}
+
+func (t *OKXTrader) GetAlgoOrderHistory(startTime time.Time, limit int) ([]OKXAlgoOrder, error) {
+	states := []string{"filled", "canceled"}
+	seen := make(map[string]struct{})
+	result := make([]OKXAlgoOrder, 0)
+
+	for _, state := range states {
+		orders, err := t.getAlgoOrderHistoryByState(startTime, limit, state)
+		if err != nil {
+			return nil, err
+		}
+		for _, order := range orders {
+			key := strings.TrimSpace(order.OrderID)
+			if key == "" {
+				key = strings.TrimSpace(order.AlgoID)
+			}
+			if key == "" {
+				continue
+			}
+			if _, exists := seen[key]; exists {
+				continue
+			}
+			seen[key] = struct{}{}
+			result = append(result, order)
+		}
+	}
+
+	return result, nil
+}
+
+func (t *OKXTrader) syncTriggerOrdersFromOKX(traderID string, exchangeID string, exchangeType string, st *store.Store, startTime time.Time) (int, error) {
+	triggerOrders, err := t.GetAlgoOrderHistory(startTime, 100)
+	if err != nil {
+		return 0, fmt.Errorf("failed to get OKX algo order history: %w", err)
+	}
+	if len(triggerOrders) == 0 {
+		return 0, nil
+	}
+
+	sort.Slice(triggerOrders, func(i, j int) bool {
+		return triggerOrders[i].UpdatedTime.UnixMilli() < triggerOrders[j].UpdatedTime.UnixMilli()
+	})
+
+	syncedCount := 0
+	for _, triggerOrder := range triggerOrders {
+		updatedAt := triggerOrder.UpdatedTime.UTC().UnixMilli()
+		if updatedAt == 0 {
+			updatedAt = triggerOrder.CreatedTime.UTC().UnixMilli()
+		}
+		createdAt := triggerOrder.CreatedTime.UTC().UnixMilli()
+		if createdAt == 0 {
+			createdAt = updatedAt
+		}
+
+		orderRecord := &store.TraderOrder{
+			TraderID:        traderID,
+			ExchangeID:      exchangeID,
+			ExchangeType:    exchangeType,
+			ExchangeOrderID: triggerOrder.OrderID,
+			ClientOrderID:   triggerOrder.AlgoClOrdID,
+			Symbol:          triggerOrder.Symbol,
+			Side:            triggerOrder.Side,
+			PositionSide:    triggerOrder.PositionSide,
+			Type:            normalizeOKXAlgoTriggerOrderType(triggerOrder.TriggerSubtype),
+			VenueOrderType:  triggerOrder.OrderType,
+			TriggerSubtype:  triggerOrder.TriggerSubtype,
+			TriggerSource:   triggerOrder.TriggerSource,
+			Quantity:        triggerOrder.Quantity,
+			Price:           triggerOrder.OrderPrice,
+			StopPrice:       triggerOrder.TriggerPrice,
+			Status:          triggerOrder.Status,
+			ReduceOnly:      triggerOrder.ReduceOnly,
+			ClosePosition:   true,
+			OrderAction:     triggerOrder.OrderAction,
+			CreatedAt:       createdAt,
+			UpdatedAt:       updatedAt,
+		}
+		if triggerOrder.Status == "FILLED" {
+			orderRecord.FilledQuantity = triggerOrder.Quantity
+			orderRecord.FilledAt = updatedAt
+		}
+
+		if err := st.Order().UpsertOrder(orderRecord); err != nil {
+			return syncedCount, fmt.Errorf("failed to upsert OKX algo order %s: %w", triggerOrder.OrderID, err)
+		}
+		syncedCount++
+
+		if triggerOrder.Status == "FILLED" {
+			positions, err := st.Position().GetByExitOrderID(exchangeID, triggerOrder.OrderID)
+			if err != nil {
+				return syncedCount, fmt.Errorf("failed to load positions for OKX algo order %s: %w", triggerOrder.OrderID, err)
+			}
+			for _, pos := range positions {
+				if err := st.DealReview().SyncPosition(pos); err != nil {
+					logger.Infof("  ⚠️ Failed to resync deal review for OKX algo order %s / position %d: %v", triggerOrder.OrderID, pos.ID, err)
+				}
+			}
+		}
+	}
+
+	return syncedCount, nil
+}
+
 // SyncOrdersFromOKX syncs OKX exchange order history to local database
 // Also creates/updates position records to ensure orders/fills/positions data consistency
 // exchangeID: Exchange account UUID (from exchanges.id)
@@ -158,6 +463,13 @@ func (t *OKXTrader) SyncOrdersFromOKX(traderID string, exchangeID string, exchan
 	startTime := time.Now().Add(-24 * time.Hour)
 
 	logger.Infof("🔄 Syncing OKX trades from: %s", startTime.Format(time.RFC3339))
+
+	triggerSyncedCount, err := t.syncTriggerOrdersFromOKX(traderID, exchangeID, exchangeType, st, startTime)
+	if err != nil {
+		logger.Infof("⚠️  OKX trigger-order sync failed: %v", err)
+	} else if triggerSyncedCount > 0 {
+		logger.Infof("📥 Synced %d OKX trigger orders", triggerSyncedCount)
+	}
 
 	// Use GetTrades method to fetch trade records
 	trades, err := t.GetTrades(startTime, 100)

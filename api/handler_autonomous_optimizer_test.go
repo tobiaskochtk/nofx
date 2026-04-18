@@ -435,6 +435,162 @@ func TestValidateAutonomousOptimizerPromptPatchSupportsBroaderPromptSurfaces(t *
 	}
 }
 
+func TestValidateAutonomousOptimizerPromptPatchAutoTrimsToTopPriorityFields(t *testing.T) {
+	cfg := &store.AutonomousOptimizerConfig{
+		ProposalPromptInstructions: "keep proposals narrow",
+		CriticPromptInstructions:   "block overreach",
+	}
+	traderCfg := &store.Trader{
+		ID:                   "trader-1",
+		AIModelID:            "model-1",
+		CustomPrompt:         "existing",
+		OverrideBasePrompt:   false,
+		SystemPromptTemplate: "v4_2026",
+	}
+	defaultCfg := store.GetDefaultStrategyConfig("en")
+	strategyCfg := &defaultCfg
+	patch := &autonomousOptimizerPromptPatch{
+		Strategy: &autonomousOptimizerStrategyPromptPatch{
+			PromptSections: &autonomousOptimizerPromptSectionsPatch{
+				RoleDefinition:   strPtr("New role"),
+				TradingFrequency: strPtr("New frequency"),
+				EntryStandards:   strPtr("New entry standards"),
+				MarketContext:    strPtr("New market context"),
+				DecisionProcess:  strPtr("New decision process"),
+				DecisionFormat:   strPtr("Keep XML output machine-parseable with <decision> tags."),
+			},
+		},
+		Optimizer: &autonomousOptimizerOptimizerPromptPatch{
+			ProposalInstructions: strPtr("Optimizer proposal overlay"),
+			CriticInstructions:   strPtr("Optimizer critic overlay"),
+		},
+	}
+	modelCfg := &store.AIModel{Provider: "openai"}
+
+	mergedOptimizer, _, mergedStrategy, validation, err := validateAutonomousOptimizerPromptPatch(cfg, traderCfg, strategyCfg, modelCfg, "gpt-5.4", patch)
+	if err != nil {
+		t.Fatalf("validateAutonomousOptimizerPromptPatch() error = %v", err)
+	}
+	if validation == nil {
+		t.Fatal("validation = nil, want prompt validation details")
+	}
+	if len(validation.BlockingIssues) > 0 {
+		t.Fatalf("validation blocking issues = %#v, want none", validation.BlockingIssues)
+	}
+	if !validation.AutoTrimmed {
+		t.Fatalf("AutoTrimmed = false, want true")
+	}
+	if validation.RequestedFieldCount != 8 {
+		t.Fatalf("RequestedFieldCount = %d, want 8", validation.RequestedFieldCount)
+	}
+	if validation.ChangedFieldCount != autonomousOptimizerMaxPromptPatchFields {
+		t.Fatalf("ChangedFieldCount = %d, want %d", validation.ChangedFieldCount, autonomousOptimizerMaxPromptPatchFields)
+	}
+	if len(validation.DeferredFields) != 2 {
+		t.Fatalf("DeferredFields = %#v, want 2 deferred prompt fields", validation.DeferredFields)
+	}
+
+	applied := map[string]struct{}{}
+	for _, field := range validation.ChangedFields {
+		applied[field] = struct{}{}
+	}
+	for _, field := range []string{
+		"strategy.prompt_sections.entry_standards",
+		"strategy.prompt_sections.market_context",
+		"strategy.prompt_sections.decision_process",
+		"strategy.prompt_sections.trading_frequency",
+		"strategy.prompt_sections.role_definition",
+		"strategy.prompt_sections.decision_format",
+	} {
+		if _, ok := applied[field]; !ok {
+			t.Fatalf("ChangedFields missing %q after trim: %#v", field, validation.ChangedFields)
+		}
+	}
+	deferred := map[string]struct{}{}
+	for _, field := range validation.DeferredFields {
+		deferred[field] = struct{}{}
+	}
+	for _, field := range []string{
+		"optimizer.proposal_instructions",
+		"optimizer.critic_instructions",
+	} {
+		if _, ok := deferred[field]; !ok {
+			t.Fatalf("DeferredFields missing %q: %#v", field, validation.DeferredFields)
+		}
+	}
+	if mergedStrategy == nil {
+		t.Fatal("mergedStrategy = nil, want trimmed strategy prompt changes")
+	}
+	if mergedStrategy.PromptSections.EntryStandards != "New entry standards" {
+		t.Fatalf("EntryStandards = %q, want trimmed strategy change applied", mergedStrategy.PromptSections.EntryStandards)
+	}
+	if mergedOptimizer == nil {
+		t.Fatal("mergedOptimizer = nil, want optimizer snapshot")
+	}
+	if mergedOptimizer.ProposalPromptInstructions != cfg.ProposalPromptInstructions {
+		t.Fatalf("ProposalPromptInstructions = %q, want original value retained after defer", mergedOptimizer.ProposalPromptInstructions)
+	}
+	if mergedOptimizer.CriticPromptInstructions != cfg.CriticPromptInstructions {
+		t.Fatalf("CriticPromptInstructions = %q, want original value retained after defer", mergedOptimizer.CriticPromptInstructions)
+	}
+}
+
+func TestValidateAutonomousOptimizerPromptPatchIgnoresBlankPlaceholders(t *testing.T) {
+	cfg := &store.AutonomousOptimizerConfig{
+		ProposalPromptInstructions: "keep proposals narrow",
+		CriticPromptInstructions:   "block overreach",
+	}
+	traderCfg := &store.Trader{
+		ID:                   "trader-1",
+		AIModelID:            "model-1",
+		CustomPrompt:         "existing trader prompt",
+		OverrideBasePrompt:   false,
+		SystemPromptTemplate: "v4_2026",
+	}
+	defaultCfg := store.GetDefaultStrategyConfig("en")
+	strategyCfg := &defaultCfg
+	patch := &autonomousOptimizerPromptPatch{
+		Strategy: &autonomousOptimizerStrategyPromptPatch{
+			PromptSections: &autonomousOptimizerPromptSectionsPatch{
+				EntryStandards:  strPtr(""),
+				DecisionProcess: strPtr(""),
+			},
+		},
+		Trader: &autonomousOptimizerTraderPromptPatch{
+			CustomPrompt:         strPtr(""),
+			SystemPromptTemplate: strPtr(""),
+		},
+		Optimizer: &autonomousOptimizerOptimizerPromptPatch{
+			ProposalInstructions: strPtr(""),
+			CriticInstructions:   strPtr(""),
+		},
+	}
+	modelCfg := &store.AIModel{Provider: "openai"}
+
+	mergedOptimizer, mergedTrader, mergedStrategy, validation, err := validateAutonomousOptimizerPromptPatch(cfg, traderCfg, strategyCfg, modelCfg, "gpt-5.4", patch)
+	if err != nil {
+		t.Fatalf("validateAutonomousOptimizerPromptPatch() error = %v", err)
+	}
+	if validation == nil {
+		t.Fatal("validation = nil, want prompt validation details")
+	}
+	if len(validation.ChangedFields) != 0 {
+		t.Fatalf("ChangedFields = %#v, want no-op for blank placeholders", validation.ChangedFields)
+	}
+	if len(validation.BlockingIssues) == 0 {
+		t.Fatalf("BlockingIssues = %#v, want empty-patch block after blank placeholders are ignored", validation.BlockingIssues)
+	}
+	if mergedStrategy.PromptSections.EntryStandards != strategyCfg.PromptSections.EntryStandards {
+		t.Fatalf("EntryStandards changed unexpectedly to %q", mergedStrategy.PromptSections.EntryStandards)
+	}
+	if mergedTrader.CustomPrompt != traderCfg.CustomPrompt {
+		t.Fatalf("CustomPrompt changed unexpectedly to %q", mergedTrader.CustomPrompt)
+	}
+	if mergedOptimizer.ProposalPromptInstructions != cfg.ProposalPromptInstructions {
+		t.Fatalf("ProposalPromptInstructions changed unexpectedly to %q", mergedOptimizer.ProposalPromptInstructions)
+	}
+}
+
 func TestBuildAutonomousOptimizerStarvationMetrics(t *testing.T) {
 	review := &store.TraderBucketReview{
 		RecordCount:             18,
@@ -462,6 +618,165 @@ func TestBuildAutonomousOptimizerStarvationMetrics(t *testing.T) {
 	reasons, ok := metrics["reject_reasons"].([]store.TraderRejectReason)
 	if !ok || len(reasons) != 1 || reasons[0].Reason != "low_confidence" {
 		t.Fatalf("reject_reasons = %#v, want low_confidence entry", metrics["reject_reasons"])
+	}
+}
+
+func TestBuildAutonomousOptimizerTrailingStopTelemetry(t *testing.T) {
+	base := time.Now().UTC().Add(-2 * time.Hour)
+	cases := []store.DealReviewCaseDetail{
+		{
+			Case: store.DealReviewCase{
+				Status:         store.DealReviewCaseStatusClosed,
+				PositionID:     1,
+				EntryTimeMs:    base.UnixMilli(),
+				ExitTimeMs:     base.Add(20 * time.Minute).UnixMilli(),
+				CloseReason:    "trailing_stop",
+				RealizedPnLPct: -0.8,
+			},
+		},
+		{
+			Case: store.DealReviewCase{
+				Status:         store.DealReviewCaseStatusClosed,
+				PositionID:     2,
+				EntryTimeMs:    base.Add(30 * time.Minute).UnixMilli(),
+				ExitTimeMs:     base.Add(70 * time.Minute).UnixMilli(),
+				CloseReason:    "trailing_stop",
+				RealizedPnLPct: 1.5,
+			},
+		},
+		{
+			Case: store.DealReviewCase{
+				Status:         store.DealReviewCaseStatusClosed,
+				PositionID:     3,
+				EntryTimeMs:    base.Add(90 * time.Minute).UnixMilli(),
+				ExitTimeMs:     base.Add(120 * time.Minute).UnixMilli(),
+				CloseReason:    "stop_loss",
+				RealizedPnLPct: -1.2,
+			},
+		},
+	}
+
+	updates := map[int64]store.DealReviewTrailingUpdateRecord{
+		1: {
+			PositionID:        1,
+			TimestampMs:       base.Add(5 * time.Minute).UnixMilli(),
+			UnrealizedPnL:     0.3,
+			UnrealizedPnLPct:  0.3,
+			StopProfitPct:     -0.2,
+			ProtectsBreakeven: false,
+		},
+		2: {
+			PositionID:        2,
+			TimestampMs:       base.Add(55 * time.Minute).UnixMilli(),
+			UnrealizedPnL:     1.1,
+			UnrealizedPnLPct:  1.1,
+			StopProfitPct:     0.5,
+			ProtectsBreakeven: true,
+		},
+	}
+
+	telemetry := buildAutonomousOptimizerTrailingStopTelemetry(cases, updates)
+	if telemetry == nil {
+		t.Fatal("telemetry = nil, want trailing-stop summary")
+	}
+	if telemetry.TrailingExitCount != 2 || telemetry.TrailingProfitExitCount != 1 || telemetry.TrailingLossExitCount != 1 {
+		t.Fatalf("telemetry = %#v, want 2 trailing exits split 1 profit / 1 loss", telemetry)
+	}
+	if telemetry.InitialStopLossCount != 1 {
+		t.Fatalf("InitialStopLossCount = %d, want 1", telemetry.InitialStopLossCount)
+	}
+	if telemetry.EarlyTighteningCount != 1 || telemetry.EarlyTighteningLossCount != 1 {
+		t.Fatalf("telemetry = %#v, want one early-tightening loss", telemetry)
+	}
+	if telemetry.FirstUpdateAuditCount != 2 || telemetry.BreakevenProtectedCount != 1 {
+		t.Fatalf("telemetry = %#v, want 2 audited first updates with 1 breakeven-protected stop", telemetry)
+	}
+	if telemetry.AvgMinutesToFirstUpdate != 15 {
+		t.Fatalf("AvgMinutesToFirstUpdate = %.1f, want 15.0", telemetry.AvgMinutesToFirstUpdate)
+	}
+	if telemetry.AvgMinutesFromFirstUpdateToExit != 15 {
+		t.Fatalf("AvgMinutesFromFirstUpdateToExit = %.1f, want 15.0", telemetry.AvgMinutesFromFirstUpdateToExit)
+	}
+	if telemetry.TrailingExitAvgPnLPct != 0.35 {
+		t.Fatalf("TrailingExitAvgPnLPct = %.2f, want 0.35", telemetry.TrailingExitAvgPnLPct)
+	}
+	if telemetry.InitialStopLossAvgPnLPct != -1.2 {
+		t.Fatalf("InitialStopLossAvgPnLPct = %.2f, want -1.20", telemetry.InitialStopLossAvgPnLPct)
+	}
+	if len(telemetry.SampleUpdates) != 2 {
+		t.Fatalf("SampleUpdates len = %d, want 2", len(telemetry.SampleUpdates))
+	}
+	if telemetry.SampleUpdates[0].PositionID != 1 || telemetry.SampleUpdates[0].PreUpdateUnrealizedPnLPct != 0.3 {
+		t.Fatalf("SampleUpdates[0] = %#v, want position 1 with pre-update uPnL pct 0.3", telemetry.SampleUpdates[0])
+	}
+}
+
+func TestBuildAutonomousOptimizerAdaptiveCooldownTelemetry(t *testing.T) {
+	strategyCfg := store.GetDefaultStrategyConfig("en")
+	base := time.Now().UTC().Add(-6 * time.Hour)
+	cases := []store.DealReviewCaseDetail{
+		{
+			Case: store.DealReviewCase{
+				Status:               store.DealReviewCaseStatusClosed,
+				Symbol:               "ENAUSDT",
+				EntryTimeMs:          base.UnixMilli(),
+				ExitTimeMs:           base.Add(30 * time.Minute).UnixMilli(),
+				OpenSessionBucket:    "us",
+				OpenTrendRegime:      "uptrend",
+				OpenVolatilityRegime: "high_vol",
+				OpenOIRegime:         "flat",
+				RealizedPnLPct:       -1.1,
+			},
+		},
+		{
+			Case: store.DealReviewCase{
+				Status:               store.DealReviewCaseStatusClosed,
+				Symbol:               "ENAUSDT",
+				EntryTimeMs:          base.Add(90 * time.Minute).UnixMilli(),
+				ExitTimeMs:           base.Add(120 * time.Minute).UnixMilli(),
+				OpenSessionBucket:    "us",
+				OpenTrendRegime:      "uptrend",
+				OpenVolatilityRegime: "high_vol",
+				OpenOIRegime:         "flat",
+				RealizedPnLPct:       -0.6,
+			},
+		},
+		{
+			Case: store.DealReviewCase{
+				Status:               store.DealReviewCaseStatusClosed,
+				Symbol:               "EDGEUSDT",
+				EntryTimeMs:          base.Add(150 * time.Minute).UnixMilli(),
+				ExitTimeMs:           base.Add(180 * time.Minute).UnixMilli(),
+				OpenSessionBucket:    "us",
+				OpenTrendRegime:      "uptrend",
+				OpenVolatilityRegime: "high_vol",
+				OpenOIRegime:         "flat",
+				RealizedPnLPct:       -0.4,
+			},
+		},
+	}
+
+	telemetry := buildAutonomousOptimizerAdaptiveCooldownTelemetry(&strategyCfg, cases)
+	if telemetry == nil {
+		t.Fatal("telemetry = nil, want cooldown summary")
+	}
+	if !telemetry.Config.Enabled || !telemetry.Config.RequireWeakExecutionRegime {
+		t.Fatalf("Config = %#v, want default adaptive guard snapshot", telemetry.Config)
+	}
+	if telemetry.CooldownCandidateCount != 1 {
+		t.Fatalf("CooldownCandidateCount = %d, want 1", telemetry.CooldownCandidateCount)
+	}
+	if telemetry.RepeatAfterLossCount != 1 || telemetry.SameSessionReentryCount != 1 {
+		t.Fatalf("telemetry = %#v, want one same-session repeat-after-loss reentry", telemetry)
+	}
+	if telemetry.RegimeRepeatLossCount != 2 {
+		t.Fatalf("RegimeRepeatLossCount = %d, want 2", telemetry.RegimeRepeatLossCount)
+	}
+	if len(telemetry.TopSymbols) == 0 || telemetry.TopSymbols[0].Symbol != "ENAUSDT" {
+		t.Fatalf("TopSymbols = %#v, want ENAUSDT first", telemetry.TopSymbols)
+	}
+	if len(telemetry.TopRegimes) == 0 || telemetry.TopRegimes[0].RepeatAfterLossCount != 2 {
+		t.Fatalf("TopRegimes = %#v, want repeated uptrend/high_vol/flat regime", telemetry.TopRegimes)
 	}
 }
 
@@ -753,6 +1068,25 @@ func TestBuildAutonomousOptimizerModelOutcomes(t *testing.T) {
 			CompletedAt:          now.Add(-2 * time.Hour),
 			MetadataJSON:         `{"rollback_source_run_id":"run-apply-b","rollback_analysis":{"observed_net_pnl":-0.75}}`,
 		},
+		{
+			ID:                   "run-failed-b",
+			PrimaryModelConfigID: "openai_b",
+			PrimaryModelName:     "gpt-5.4-mini",
+			CriticModelConfigID:  "openai_b",
+			CriticModelName:      "gpt-5.4",
+			Status:               store.AutonomousOptimizerStatusFailed,
+			CompletedAt:          now.Add(-90 * time.Minute),
+			MetadataJSON:         `{"recovered_stale_run":true}`,
+		},
+		{
+			ID:                   "run-evidence-b",
+			PrimaryModelConfigID: "openai_b",
+			PrimaryModelName:     "gpt-5.4-mini",
+			CriticModelConfigID:  "openai_b",
+			CriticModelName:      "gpt-5.4",
+			Status:               store.AutonomousOptimizerStatusInsufficientEvidence,
+			CompletedAt:          now.Add(-60 * time.Minute),
+		},
 	}
 	backlog := []*store.AutonomousOptimizerBacklogItem{
 		{RunID: "run-backlog-a", Status: store.AutonomousOptimizerBacklogStatusDone},
@@ -796,8 +1130,82 @@ func TestBuildAutonomousOptimizerModelOutcomes(t *testing.T) {
 	if second.RollbackRate < 99 {
 		t.Fatalf("second.RollbackRate = %.2f, want ~100", second.RollbackRate)
 	}
+	if second.FailedCount != 1 || second.StaleRecoveryCount != 1 {
+		t.Fatalf("second failure stats = %#v, want one failed stale-recovery run", second)
+	}
+	if second.InsufficientEvidence != 1 || second.FailureEvidenceGaps != 1 {
+		t.Fatalf("second evidence-gap stats = %#v, want one insufficient-evidence overlap", second)
+	}
+	if second.OperationalHealth >= 100 {
+		t.Fatalf("second.OperationalHealth = %.2f, want degraded score", second.OperationalHealth)
+	}
 	if second.BacklogItemCount != 1 || second.RejectedBacklogCount != 1 {
 		t.Fatalf("second backlog stats = %#v, want one rejected item", second)
+	}
+}
+
+func TestBuildAutonomousOptimizerLatestGateFeedback(t *testing.T) {
+	validation, _ := json.Marshal(map[string]any{
+		"gate_reasons": []string{
+			"Latest proposal repeated the same unsupported config patch.",
+			"Need a narrower subset than last run.",
+		},
+		"config_patch_paths": []string{
+			"risk_control.adaptive_reentry_guard.enabled",
+			"risk_control.adaptive_reentry_guard.same_symbol_loss_cooldown_minutes",
+		},
+		"critic": map[string]any{
+			"approved":           false,
+			"recommended_action": "block_apply",
+			"summary":            "The proposal is directionally valid but still too broad.",
+			"blocking_issues": []string{
+				"Evidence is still mixed across symbols.",
+			},
+		},
+		"prompt_validation": map[string]any{
+			"requested_field_count": 7,
+			"changed_field_count":   6,
+			"deferred_fields": []string{
+				"strategy.prompt_sections.market_context",
+			},
+		},
+	})
+	metadata, _ := json.Marshal(map[string]any{
+		"proposal": map[string]any{
+			"proposal_type":   "config_patch",
+			"expected_effect": "Reduce repeated same-symbol loss loops.",
+			"rationale": []string{
+				"Repeated losses cluster on the same symbols after prior exits.",
+			},
+		},
+	})
+	runs := []*store.AutonomousOptimizerRun{
+		{
+			ID:             "run-blocked",
+			Status:         store.AutonomousOptimizerStatusBlockedByGate,
+			Trigger:        store.AutonomousOptimizerRunTriggerSchedule,
+			Summary:        "Blocked run summary",
+			ValidationJSON: string(validation),
+			MetadataJSON:   string(metadata),
+			StartedAt:      time.Now().UTC().Add(-5 * time.Minute),
+			CompletedAt:    time.Now().UTC().Add(-4 * time.Minute),
+		},
+	}
+
+	feedback := buildAutonomousOptimizerLatestGateFeedback(runs)
+	if got := autonomousOptimizerString(feedback["run_id"]); got != "run-blocked" {
+		t.Fatalf("feedback.run_id = %q, want run-blocked", got)
+	}
+	if reasons := autonomousOptimizerStringSlice(feedback["gate_reasons"]); len(reasons) != 2 {
+		t.Fatalf("feedback.gate_reasons = %#v, want 2 items", reasons)
+	}
+	critic := parseAutonomousOptimizerNestedObject(feedback, "critic")
+	if got := autonomousOptimizerString(critic["recommended_action"]); got != "block_apply" {
+		t.Fatalf("feedback.critic.recommended_action = %q, want block_apply", got)
+	}
+	proposal := parseAutonomousOptimizerNestedObject(feedback, "proposal")
+	if got := autonomousOptimizerString(proposal["proposal_type"]); got != "config_patch" {
+		t.Fatalf("feedback.proposal.proposal_type = %q, want config_patch", got)
 	}
 }
 

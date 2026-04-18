@@ -685,6 +685,32 @@ function formatMarketContextToken(value?: string): string {
     .replace(/\b\w/g, (char) => char.toUpperCase())
 }
 
+function getDealReviewCloseExitOrigin(detail?: DealReviewCaseDetail | null): string {
+  return firstNonEmpty(detail?.close?.event?.exit_origin, detail?.case.exit_origin)
+}
+
+function getDealReviewCloseExitReasonQuality(
+  detail?: DealReviewCaseDetail | null
+): string {
+  return firstNonEmpty(
+    detail?.close?.event?.exit_reason_quality,
+    detail?.case.exit_reason_quality
+  )
+}
+
+function getDealReviewCloseExitEvidenceSummary(
+  detail?: DealReviewCaseDetail | null
+): string {
+  return firstNonEmpty(
+    detail?.close?.event?.exit_evidence_summary,
+    detail?.case.exit_evidence_summary
+  )
+}
+
+function getDealReviewCloseExitEvidence(detail?: DealReviewCaseDetail | null) {
+  return detail?.close?.event?.exit_evidence || detail?.case.exit_evidence
+}
+
 function formatMarketContextValue(
   value: number | undefined,
   mode: 'plain' | 'pct' | 'bps' = 'plain'
@@ -868,6 +894,13 @@ const executionBucketOptions = [
   { value: 'extreme', label: 'Extreme' },
 ]
 
+const exitReasonQualityOptions = [
+  { value: '', label: 'All exit evidence' },
+  { value: 'explicit', label: 'Explicit' },
+  { value: 'high_confidence_inferred', label: 'High-confidence inferred' },
+  { value: 'low_confidence_inferred', label: 'Low-confidence inferred' },
+]
+
 const reviewQueueOptions = [
   { value: '', label: 'All filtered deals' },
   { value: 'unlabeled_losses', label: 'Review queue: unlabeled losses' },
@@ -920,6 +953,7 @@ export function DealReviewPage({
   const [outcome, setOutcome] = useState('')
   const [openSelectionBucket, setOpenSelectionBucket] = useState('')
   const [closeReason, setCloseReason] = useState('')
+  const [exitReasonQuality, setExitReasonQuality] = useState('')
   const [openTrendRegime, setOpenTrendRegime] = useState('')
   const [openVolatilityRegime, setOpenVolatilityRegime] = useState('')
   const [openBTCStrengthRegime, setOpenBTCStrengthRegime] = useState('')
@@ -1050,6 +1084,7 @@ export function DealReviewPage({
       outcome: outcome || undefined,
       open_selection_bucket: openSelectionBucket.trim() || undefined,
       close_reason: closeReason.trim() || undefined,
+      exit_reason_quality: exitReasonQuality || undefined,
       open_trend_regime: openTrendRegime || undefined,
       open_volatility_regime: openVolatilityRegime || undefined,
       open_btc_strength_regime: openBTCStrengthRegime || undefined,
@@ -1097,6 +1132,7 @@ export function DealReviewPage({
     outcome,
     open_selection_bucket: openSelectionBucket.trim(),
     close_reason: closeReason.trim(),
+    exit_reason_quality: exitReasonQuality,
     open_trend_regime: openTrendRegime,
     open_volatility_regime: openVolatilityRegime,
     open_btc_strength_regime: openBTCStrengthRegime,
@@ -1126,6 +1162,7 @@ export function DealReviewPage({
     setOutcome(normalizePresetText(filters?.outcome))
     setOpenSelectionBucket(normalizePresetText(filters?.open_selection_bucket))
     setCloseReason(normalizePresetText(filters?.close_reason))
+    setExitReasonQuality(normalizePresetText(filters?.exit_reason_quality))
     setOpenTrendRegime(normalizePresetText(filters?.open_trend_regime))
     setOpenVolatilityRegime(normalizePresetText(filters?.open_volatility_regime))
     setOpenBTCStrengthRegime(normalizePresetText(filters?.open_btc_strength_regime))
@@ -1167,6 +1204,9 @@ export function DealReviewPage({
     }
     if (typeof patch.close_reason === 'string') {
       setCloseReason(patch.close_reason)
+    }
+    if (typeof patch.exit_reason_quality === 'string') {
+      setExitReasonQuality(patch.exit_reason_quality)
     }
     if (typeof patch.open_trend_regime === 'string') {
       setOpenTrendRegime(patch.open_trend_regime)
@@ -1492,6 +1532,7 @@ export function DealReviewPage({
     outcome,
     openSelectionBucket,
     closeReason,
+    exitReasonQuality,
     dateRange,
     customFromTime,
     customToTime,
@@ -1586,6 +1627,7 @@ export function DealReviewPage({
     outcome,
     openSelectionBucket,
     closeReason,
+    exitReasonQuality,
     dateRange,
     customFromTime,
     customToTime,
@@ -2481,6 +2523,13 @@ export function DealReviewPage({
                   placeholder="Close reason"
                   className="h-11 rounded-lg border border-white/10 bg-black/20 px-3 text-sm"
                 />
+                <div className="h-11 rounded-lg border border-white/10 px-3 flex items-center bg-black/20">
+                  <NofxSelect
+                    value={exitReasonQuality}
+                    onChange={setExitReasonQuality}
+                    options={exitReasonQualityOptions}
+                  />
+                </div>
                 <button
                   onClick={() => {
                     void loadCases()
@@ -3743,6 +3792,12 @@ export function DealReviewPage({
                     const showPromptBundle = Boolean(
                       systemPrompt || inputPrompt || decisionJson || rawResponse
                     )
+                    const closeExitOrigin = getDealReviewCloseExitOrigin(detail)
+                    const closeExitReasonQuality =
+                      getDealReviewCloseExitReasonQuality(detail)
+                    const closeExitEvidenceSummary =
+                      getDealReviewCloseExitEvidenceSummary(detail)
+                    const closeExitEvidence = getDealReviewCloseExitEvidence(detail)
 
                     return (
                       <div
@@ -3824,9 +3879,252 @@ export function DealReviewPage({
                                   '-'}
                               </span>
                             </div>
+                            <div>
+                              Exit origin:{' '}
+                              <span className="text-white">
+                                {formatMarketContextToken(closeExitOrigin)}
+                              </span>
+                            </div>
+                            <div>
+                              Evidence quality:{' '}
+                              <span className="text-white">
+                                {formatMarketContextToken(closeExitReasonQuality)}
+                              </span>
+                            </div>
                           </>
                         )}
                       </div>
+
+                      {section.label === 'Close' &&
+                        (closeExitEvidenceSummary || closeExitEvidence) && (
+                          <div className="rounded-lg border border-amber-400/20 bg-amber-500/5 p-3 space-y-3">
+                            <div className="text-xs uppercase tracking-[0.2em] text-amber-200/80">
+                              Exit evidence
+                            </div>
+                            <div className="text-sm text-nofx-text-muted whitespace-pre-wrap">
+                              {closeExitEvidenceSummary || 'No exit evidence summary stored.'}
+                            </div>
+                            {closeExitEvidence && (
+                              <div className="grid grid-cols-2 gap-3 text-xs">
+                                <div>
+                                  Matched by:{' '}
+                                  <span className="text-white">
+                                    {formatMarketContextToken(
+                                      closeExitEvidence.matched_by
+                                    )}
+                                  </span>
+                                </div>
+                                <div>
+                                  Exchange order:{' '}
+                                  <span className="text-white">
+                                    {closeExitEvidence.exchange_order_id || '-'}
+                                  </span>
+                                </div>
+                                <div>
+                                  Client order:{' '}
+                                  <span className="text-white">
+                                    {closeExitEvidence.client_order_id || '-'}
+                                  </span>
+                                </div>
+                                <div>
+                                  Order type:{' '}
+                                  <span className="text-white">
+                                    {closeExitEvidence.order_type || '-'}
+                                  </span>
+                                </div>
+                                <div>
+                                  Venue order:{' '}
+                                  <span className="text-white">
+                                    {closeExitEvidence.venue_order_type || '-'}
+                                  </span>
+                                </div>
+                                <div>
+                                  Trigger subtype:{' '}
+                                  <span className="text-white">
+                                    {closeExitEvidence.trigger_subtype || '-'}
+                                  </span>
+                                </div>
+                                <div>
+                                  Trigger source:{' '}
+                                  <span className="text-white">
+                                    {closeExitEvidence.trigger_source || '-'}
+                                  </span>
+                                </div>
+                                <div>
+                                  Order action:{' '}
+                                  <span className="text-white">
+                                    {closeExitEvidence.order_action || '-'}
+                                  </span>
+                                </div>
+                                <div>
+                                  Order status:{' '}
+                                  <span className="text-white">
+                                    {closeExitEvidence.order_status || '-'}
+                                  </span>
+                                </div>
+                                <div>
+                                  Trigger price:{' '}
+                                  <span className="text-white">
+                                    {closeExitEvidence.trigger_price || '-'}
+                                  </span>
+                                </div>
+                                <div>
+                                  Fill price:{' '}
+                                  <span className="text-white">
+                                    {closeExitEvidence.fill_price || '-'}
+                                  </span>
+                                </div>
+                                <div>
+                                  Fill qty:{' '}
+                                  <span className="text-white">
+                                    {closeExitEvidence.fill_quantity || '-'}
+                                  </span>
+                                </div>
+                                <div>
+                                  Decision cycle:{' '}
+                                  <span className="text-white">
+                                    {closeExitEvidence.decision_cycle_number || '-'}
+                                  </span>
+                                </div>
+                                <div>
+                                  Stop-loss distance:{' '}
+                                  <span className="text-white">
+                                    {formatMarketContextValue(
+                                      closeExitEvidence.stop_loss_distance_bps,
+                                      'bps'
+                                    )}
+                                  </span>
+                                </div>
+                                <div>
+                                  Take-profit distance:{' '}
+                                  <span className="text-white">
+                                    {formatMarketContextValue(
+                                      closeExitEvidence.take_profit_distance_bps,
+                                      'bps'
+                                    )}
+                                  </span>
+                                </div>
+                                <div>
+                                  Trailing update:{' '}
+                                  <span className="text-white">
+                                    {closeExitEvidence.trailing_update_id || '-'}
+                                  </span>
+                                </div>
+                                <div>
+                                  Previous stop:{' '}
+                                  <span className="text-white">
+                                    {closeExitEvidence.previous_stop_price || '-'}
+                                  </span>
+                                </div>
+                                <div>
+                                  New stop:{' '}
+                                  <span className="text-white">
+                                    {closeExitEvidence.new_stop_price || '-'}
+                                  </span>
+                                </div>
+                                <div>
+                                  Trailing mode:{' '}
+                                  <span className="text-white">
+                                    {formatMarketContextToken(
+                                      closeExitEvidence.trailing_mode
+                                    )}
+                                  </span>
+                                </div>
+                                <div>
+                                  Trailing tier:{' '}
+                                  <span className="text-white">
+                                    {closeExitEvidence.trailing_tier_index ?? '-'}
+                                  </span>
+                                </div>
+                                <div>
+                                  Trailing updated:{' '}
+                                  <span className="text-white">
+                                    {closeExitEvidence.trailing_updated_at_ms
+                                      ? formatDate(
+                                          closeExitEvidence.trailing_updated_at_ms
+                                        )
+                                      : '-'}
+                                  </span>
+                                </div>
+                                <div>
+                                  Tier trigger:{' '}
+                                  <span className="text-white">
+                                    {formatMarketContextValue(
+                                      closeExitEvidence.trailing_trigger_profit_pct,
+                                      'pct'
+                                    )}
+                                  </span>
+                                </div>
+                                <div>
+                                  Locked profit:{' '}
+                                  <span className="text-white">
+                                    {formatMarketContextValue(
+                                      closeExitEvidence.trailing_lock_profit_pct,
+                                      'pct'
+                                    )}
+                                  </span>
+                                </div>
+                                <div>
+                                  Trail offset:{' '}
+                                  <span className="text-white">
+                                    {formatMarketContextValue(
+                                      closeExitEvidence.trailing_offset_pct,
+                                      'pct'
+                                    )}
+                                  </span>
+                                </div>
+                                <div>
+                                  Intent ID:{' '}
+                                  <span className="text-white">
+                                    {closeExitEvidence.intent_id || '-'}
+                                  </span>
+                                </div>
+                                <div>
+                                  Intent type:{' '}
+                                  <span className="text-white">
+                                    {formatMarketContextToken(
+                                      closeExitEvidence.intent_type
+                                    )}
+                                  </span>
+                                </div>
+                                <div>
+                                  Intent source:{' '}
+                                  <span className="text-white">
+                                    {closeExitEvidence.intent_source_module || '-'}
+                                  </span>
+                                </div>
+                                <div>
+                                  Intent confidence:{' '}
+                                  <span className="text-white">
+                                    {closeExitEvidence.intent_confidence || '-'}
+                                  </span>
+                                </div>
+                                <div>
+                                  Intent created:{' '}
+                                  <span className="text-white">
+                                    {closeExitEvidence.intent_created_at_ms
+                                      ? formatDate(
+                                          closeExitEvidence.intent_created_at_ms
+                                        )
+                                      : '-'}
+                                  </span>
+                                </div>
+                                <div className="col-span-2">
+                                  Intent summary:{' '}
+                                  <span className="text-white">
+                                    {closeExitEvidence.intent_summary || '-'}
+                                  </span>
+                                </div>
+                                <div className="col-span-2">
+                                  Intent reasoning:{' '}
+                                  <span className="text-white whitespace-pre-wrap">
+                                    {closeExitEvidence.intent_reasoning || '-'}
+                                  </span>
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        )}
 
                       {section.data?.candidate_sources &&
                         section.data.candidate_sources.length > 0 && (
@@ -4294,6 +4592,23 @@ export function DealReviewPage({
                         },
                         filterNote: `Filtered deals to close-reason quality slice ${item.reason}.`,
                         scanNote: `AI scan started for close-reason quality slice ${item.reason}.`,
+                      })),
+                    },
+                    {
+                      title: 'Unknown / low-confidence exits',
+                      items: anomalies.exit_uncertainty?.map((item) => ({
+                        key: `${item.close_reason}:${item.exit_reason_quality}:${item.exit_origin}`,
+                        primary: item.label,
+                        secondary: `${item.deals} closes | ${item.exit_origin} | ${formatMoney(item.avg_pnl)} avg`,
+                        value: `${formatPct(item.share_pct)} share`,
+                        filterPatch: {
+                          close_reason: item.close_reason || undefined,
+                          exit_reason_quality:
+                            item.exit_reason_quality || undefined,
+                          status: 'CLOSED',
+                        },
+                        filterNote: `Filtered deals to uncertain exit cohort ${item.label}.`,
+                        scanNote: `AI scan started for uncertain exit cohort ${item.label}.`,
                       })),
                     },
                   ].map((section) => (

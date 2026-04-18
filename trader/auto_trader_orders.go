@@ -49,6 +49,9 @@ func (at *AutoTrader) executeOpenLongWithRecord(decision *kernel.Decision, actio
 			return fmt.Errorf("❌ %s already has long position, close it first", decision.Symbol)
 		}
 	}
+	if err := at.enforceAdaptiveSameSymbolReentry(decision.Symbol); err != nil {
+		return err
+	}
 
 	// Get current price
 	marketData, err := market.GetWithExchange(decision.Symbol, at.exchange)
@@ -119,6 +122,7 @@ func (at *AutoTrader) executeOpenLongWithRecord(decision *kernel.Decision, actio
 	if err != nil {
 		return err
 	}
+	actionRecord.ExchangeOrderID = extractOrderIDFromResult(order)
 
 	// Record order ID
 	if orderID, ok := order["orderId"].(int64); ok {
@@ -166,6 +170,9 @@ func (at *AutoTrader) executeOpenShortWithRecord(decision *kernel.Decision, acti
 		if pos["symbol"] == decision.Symbol && pos["side"] == "short" {
 			return fmt.Errorf("❌ %s already has short position, close it first", decision.Symbol)
 		}
+	}
+	if err := at.enforceAdaptiveSameSymbolReentry(decision.Symbol); err != nil {
+		return err
 	}
 
 	// Get current price
@@ -237,6 +244,7 @@ func (at *AutoTrader) executeOpenShortWithRecord(decision *kernel.Decision, acti
 	if err != nil {
 		return err
 	}
+	actionRecord.ExchangeOrderID = extractOrderIDFromResult(order)
 
 	// Record order ID
 	if orderID, ok := order["orderId"].(int64); ok {
@@ -315,6 +323,7 @@ func (at *AutoTrader) executeCloseLongWithRecord(decision *kernel.Decision, acti
 	if err != nil {
 		return err
 	}
+	actionRecord.ExchangeOrderID = extractOrderIDFromResult(order)
 
 	// Record order ID
 	if orderID, ok := order["orderId"].(int64); ok {
@@ -380,6 +389,7 @@ func (at *AutoTrader) executeCloseShortWithRecord(decision *kernel.Decision, act
 	if err != nil {
 		return err
 	}
+	actionRecord.ExchangeOrderID = extractOrderIDFromResult(order)
 
 	// Record order ID
 	if orderID, ok := order["orderId"].(int64); ok {

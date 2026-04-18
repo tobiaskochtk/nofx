@@ -267,6 +267,8 @@ func (s *Server) handleClosePosition(c *gin.Context) {
 
 	logger.Infof("✅ Position closed successfully: symbol=%s, side=%s, qty=%.6f, result=%v", req.Symbol, req.Side, posQty, result)
 
+	s.recordManualCloseExitIntent(userID, traderID, exchangeCfg.ID, req.Symbol, req.Side, posQty, entryPrice, result)
+
 	// Record order to database (for chart markers and history)
 	s.recordClosePositionOrder(traderID, exchangeCfg.ID, exchangeCfg.ExchangeType, req.Symbol, req.Side, posQty, entryPrice, result)
 
@@ -276,6 +278,48 @@ func (s *Server) handleClosePosition(c *gin.Context) {
 		"side":    req.Side,
 		"result":  result,
 	})
+}
+
+func (s *Server) recordManualCloseExitIntent(userID, traderID, exchangeID, symbol, side string, quantity, entryPrice float64, result map[string]interface{}) {
+	if s == nil || s.store == nil {
+		return
+	}
+
+	var orderID string
+	switch v := result["orderId"].(type) {
+	case int64:
+		orderID = fmt.Sprintf("%d", v)
+	case float64:
+		orderID = fmt.Sprintf("%.0f", v)
+	case string:
+		orderID = strings.TrimSpace(v)
+	default:
+		if v != nil {
+			orderID = strings.TrimSpace(fmt.Sprintf("%v", v))
+		}
+	}
+	if orderID == "" || orderID == "0" {
+		return
+	}
+
+	if err := s.store.DealReview().RecordExitIntent(&store.DealReviewExitIntentInput{
+		UserID:          userID,
+		TraderID:        traderID,
+		ExchangeID:      exchangeID,
+		ExchangeOrderID: orderID,
+		Symbol:          symbol,
+		Side:            side,
+		Action:          map[bool]string{true: "close_long", false: "close_short"}[strings.EqualFold(side, "LONG")],
+		IntentType:      store.DealReviewExitIntentTypeManualUIClose,
+		SourceModule:    "api.handleClosePosition",
+		Summary:         "Matched manual UI close request.",
+		Reasoning:       "User requested a direct close through the API/UI.",
+		Quantity:        quantity,
+		EntryPrice:      entryPrice,
+		Timestamp:       time.Now().UTC(),
+	}); err != nil {
+		logger.Infof("⚠️ Failed to persist manual close exit intent: %v", err)
+	}
 }
 
 // recordClosePositionOrder Record close position order to database (Lighter version - direct FILLED status)

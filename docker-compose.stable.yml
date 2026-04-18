@@ -2,6 +2,26 @@
 # Production-ready stable version
 
 services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: nofx-postgres
+    restart: unless-stopped
+    environment:
+      - POSTGRES_USER=${DB_USER:-nofx}
+      - POSTGRES_PASSWORD=${DB_PASSWORD:-nofx}
+      - POSTGRES_DB=${DB_NAME:-nofx}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - /etc/localtime:/etc/localtime:ro
+    networks:
+      - nofx-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-nofx} -d ${DB_NAME:-nofx}"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 20s
+
   nofx:
     image: ghcr.io/nofxaios/nofx/nofx-backend:stable
     container_name: nofx-trading
@@ -17,8 +37,19 @@ services:
     environment:
       - TZ=${TZ:-Asia/Shanghai}
       - AI_MAX_TOKENS=8000
+      - DB_TYPE=${DB_TYPE:-sqlite}
+      - DB_PATH=${DB_PATH:-/app/data/data.db}
+      - DB_HOST=${DB_HOST:-postgres}
+      - DB_PORT=${DB_PORT:-5432}
+      - DB_USER=${DB_USER:-nofx}
+      - DB_PASSWORD=${DB_PASSWORD:-nofx}
+      - DB_NAME=${DB_NAME:-nofx}
+      - DB_SSLMODE=${DB_SSLMODE:-disable}
     networks:
       - nofx-network
+    depends_on:
+      postgres:
+        condition: service_healthy
     healthcheck:
       test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8080/api/health"]
       interval: 30s
@@ -46,3 +77,6 @@ services:
 networks:
   nofx-network:
     driver: bridge
+
+volumes:
+  postgres_data:

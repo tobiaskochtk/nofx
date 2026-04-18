@@ -194,6 +194,7 @@ export interface RiskControlConfig {
   min_risk_reward_ratio: number // Min take_profit / stop_loss ratio (AI guided)
   min_confidence: number // Min AI confidence to open position (AI guided)
   trailing_stop?: TrailingStopConfig
+  adaptive_reentry_guard?: AdaptiveReentryGuardConfig
 }
 
 export type TrailingStopMode = 'lock_profit' | 'trail_offset'
@@ -209,5 +210,16 @@ export interface TrailingStopConfig {
   enabled: boolean
   check_interval_sec: number
   update_threshold_pct: number
+  first_tighten_delay_sec: number
+  min_first_update_profit_pct: number
   tiers: TrailingStopTier[]
+}
+
+export interface AdaptiveReentryGuardConfig {
+  enabled: boolean
+  require_weak_execution_regime: boolean
+  recent_trade_window: number
+  min_recent_trades: number
+  same_symbol_loss_cooldown_minutes: number
+  pair_loss_lookback_hours: number
 }

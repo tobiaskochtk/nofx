@@ -87,6 +87,11 @@ type autonomousOptimizerModelOutcomeEntry struct {
 	KeptWinRate          float64        `json:"kept_win_rate"`
 	RollbackCount        int            `json:"rollback_count"`
 	RollbackRate         float64        `json:"rollback_rate"`
+	FailedCount          int            `json:"failed_count"`
+	StaleRecoveryCount   int            `json:"stale_recovery_count"`
+	InsufficientEvidence int            `json:"insufficient_evidence_count"`
+	FailureEvidenceGaps  int            `json:"failure_overlap_insufficient_evidence_count"`
+	OperationalHealth    float64        `json:"operational_health_score"`
 	BacklogItemCount     int            `json:"backlog_item_count"`
 	UsefulBacklogCount   int            `json:"useful_backlog_count"`
 	DoneBacklogCount     int            `json:"done_backlog_count"`
@@ -238,6 +243,65 @@ func (s *Server) handleTraderAutonomousOptimizerRuns(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"items": items})
 }
 
+func (s *Server) handleTraderAutonomousOptimizerRunNow(c *gin.Context) {
+	userID := c.GetString("user_id")
+	traderID := c.Param("id")
+	if _, err := s.store.Trader().Get(userID, traderID); err != nil {
+		SafeNotFound(c, "Trader")
+		return
+	}
+
+	cfg, err := s.store.AutonomousOptimizer().GetOrCreateConfig(userID, traderID)
+	if err != nil {
+		SafeInternalError(c, "Failed to load autonomous optimizer config", err)
+		return
+	}
+	if err := s.ensureAutonomousOptimizerModelDefaults(userID, cfg); err != nil {
+		SafeInternalError(c, "Failed to resolve autonomous optimizer model defaults", err)
+		return
+	}
+	if !cfg.Enabled {
+		SafeBadRequest(c, "Autonomous optimizer is disabled for this trader")
+		return
+	}
+	if cfg.Status == store.AutonomousOptimizerStatusRunning {
+		c.JSON(http.StatusConflict, APIErrorResponse{
+			Error: "Autonomous optimizer is already running for this trader",
+		})
+		return
+	}
+
+	now := time.Now().UTC()
+	if err := s.recoverStaleAutonomousOptimizerState(now); err != nil {
+		SafeInternalError(c, "Failed to recover autonomous optimizer state before manual run", err)
+		return
+	}
+	if cfg.Status == store.AutonomousOptimizerStatusPaused {
+		cfg.Status = store.AutonomousOptimizerStatusScheduled
+	}
+	cfg.NextRunAt = now.Add(-1 * time.Second)
+	if err := s.store.AutonomousOptimizer().SaveConfig(cfg); err != nil {
+		SafeInternalError(c, "Failed to schedule immediate autonomous optimizer run", err)
+		return
+	}
+	if err := s.processAutonomousOptimizerConfig(cfg, now); err != nil {
+		SafeInternalError(c, "Failed to execute autonomous optimizer run", err)
+		return
+	}
+
+	run, err := s.store.AutonomousOptimizer().GetRun(userID, traderID, cfg.LastRunID)
+	if err != nil {
+		SafeInternalError(c, "Manual optimizer run completed but could not be reloaded", err)
+		return
+	}
+	detail, err := s.buildAutonomousOptimizerRunDetailResponse(userID, traderID, run)
+	if err != nil {
+		SafeInternalError(c, "Manual optimizer run completed but detail serialization failed", err)
+		return
+	}
+	c.JSON(http.StatusOK, detail)
+}
+
 func (s *Server) handleTraderAutonomousOptimizerModelOutcomes(c *gin.Context) {
 	userID := c.GetString("user_id")
 	traderID := c.Param("id")
@@ -282,6 +346,19 @@ func (s *Server) handleTraderAutonomousOptimizerRunDetail(c *gin.Context) {
 		return
 	}
 
+	detail, err := s.buildAutonomousOptimizerRunDetailResponse(userID, traderID, run)
+	if err != nil {
+		SafeInternalError(c, "Failed to build autonomous optimizer run detail", err)
+		return
+	}
+	c.JSON(http.StatusOK, detail)
+}
+
+func (s *Server) buildAutonomousOptimizerRunDetailResponse(userID, traderID string, run *store.AutonomousOptimizerRun) (*autonomousOptimizerRunDetailResponse, error) {
+	if run == nil {
+		return nil, gorm.ErrRecordNotFound
+	}
+
 	detail := &autonomousOptimizerRunDetailResponse{
 		Run:         run,
 		ConfigPatch: parseAutonomousOptimizerJSONObject(run.ConfigPatchJSON),
@@ -319,8 +396,7 @@ func (s *Server) handleTraderAutonomousOptimizerRunDetail(c *gin.Context) {
 			detail.LinkedStrategy = version
 		}
 	}
-
-	c.JSON(http.StatusOK, detail)
+	return detail, nil
 }
 
 func (s *Server) handleTraderAutonomousOptimizerBacklog(c *gin.Context) {
@@ -453,6 +529,7 @@ func mergeAutonomousOptimizerBacklogUpdate(existing *store.AutonomousOptimizerBa
 type autonomousOptimizerModelOutcomeAgg struct {
 	Entry            autonomousOptimizerModelOutcomeEntry
 	BacklogWeightSum float64
+	Runs             []*store.AutonomousOptimizerRun
 }
 
 type autonomousOptimizerApplyResolution struct {
@@ -498,12 +575,22 @@ func buildAutonomousOptimizerModelOutcomes(runs []*store.AutonomousOptimizerRun,
 		runModelKey[run.ID] = modelKey
 		entry := ensureAutonomousOptimizerModelOutcomeAgg(aggs, modelKey, run, label, primaryLabel, criticLabel)
 		entry.Entry.TotalRuns++
+		entry.Runs = append(entry.Runs, run)
 		if entry.Entry.StatusCounts == nil {
 			entry.Entry.StatusCounts = map[string]int{}
 		}
 		entry.Entry.StatusCounts[run.Status]++
 		if run.Status == store.AutonomousOptimizerStatusAutoApplied {
 			entry.Entry.ApplyCount++
+		}
+		if run.Status == store.AutonomousOptimizerStatusFailed {
+			entry.Entry.FailedCount++
+		}
+		if run.Status == store.AutonomousOptimizerStatusInsufficientEvidence {
+			entry.Entry.InsufficientEvidence++
+		}
+		if autonomousOptimizerRunRecoveredStale(run) {
+			entry.Entry.StaleRecoveryCount++
 		}
 		if ts := autonomousOptimizerRunEventTime(run); ts.After(entry.Entry.LastUsedAt) {
 			entry.Entry.LastUsedAt = ts
@@ -607,6 +694,8 @@ func buildAutonomousOptimizerModelOutcomes(runs []*store.AutonomousOptimizerRun,
 		if agg.Entry.BacklogItemCount > 0 {
 			agg.Entry.BacklogUsefulness = (agg.BacklogWeightSum / float64(agg.Entry.BacklogItemCount)) * 100
 		}
+		agg.Entry.FailureEvidenceGaps = autonomousOptimizerFailureEvidenceGapCount(agg.Runs)
+		agg.Entry.OperationalHealth = autonomousOptimizerOperationalHealthScore(agg.Entry)
 		agg.Entry.OutcomeScore = autonomousOptimizerOutcomeScore(agg.Entry)
 		items = append(items, agg.Entry)
 	}
@@ -759,6 +848,84 @@ func autonomousOptimizerBacklogUsefulnessWeight(status string) float64 {
 	default:
 		return 0.15
 	}
+}
+
+func autonomousOptimizerRunRecoveredStale(run *store.AutonomousOptimizerRun) bool {
+	if run == nil {
+		return false
+	}
+	metadata := parseAutonomousOptimizerJSONObject(run.MetadataJSON)
+	return autonomousOptimizerBool(metadata["recovered_stale_run"])
+}
+
+func autonomousOptimizerRunCountsAsFailure(run *store.AutonomousOptimizerRun) bool {
+	if run == nil {
+		return false
+	}
+	return run.Status == store.AutonomousOptimizerStatusFailed || autonomousOptimizerRunRecoveredStale(run)
+}
+
+func autonomousOptimizerFailureEvidenceGapCount(runs []*store.AutonomousOptimizerRun) int {
+	if len(runs) == 0 {
+		return 0
+	}
+	ordered := make([]*store.AutonomousOptimizerRun, 0, len(runs))
+	for _, run := range runs {
+		if run != nil {
+			ordered = append(ordered, run)
+		}
+	}
+	sort.Slice(ordered, func(i, j int) bool {
+		left := autonomousOptimizerRunEventTime(ordered[i])
+		right := autonomousOptimizerRunEventTime(ordered[j])
+		if left.Equal(right) {
+			return ordered[i].ID < ordered[j].ID
+		}
+		return left.Before(right)
+	})
+	count := 0
+	for i, run := range ordered {
+		if !autonomousOptimizerRunCountsAsFailure(run) {
+			continue
+		}
+		overlap := false
+		if i > 0 && ordered[i-1] != nil && ordered[i-1].Status == store.AutonomousOptimizerStatusInsufficientEvidence {
+			overlap = true
+		}
+		if i+1 < len(ordered) && ordered[i+1] != nil && ordered[i+1].Status == store.AutonomousOptimizerStatusInsufficientEvidence {
+			overlap = true
+		}
+		if overlap {
+			count++
+		}
+	}
+	return count
+}
+
+func autonomousOptimizerOperationalHealthScore(entry autonomousOptimizerModelOutcomeEntry) float64 {
+	if entry.TotalRuns <= 0 {
+		return 0
+	}
+	totalRuns := float64(entry.TotalRuns)
+	failedRate := float64(entry.FailedCount) / totalRuns
+	staleRate := float64(entry.StaleRecoveryCount) / totalRuns
+	insufficientRate := float64(entry.InsufficientEvidence) / totalRuns
+	overlapRate := 0.0
+	if entry.FailedCount > 0 {
+		overlapRate = float64(entry.FailureEvidenceGaps) / float64(entry.FailedCount)
+	}
+	score := 100.0 -
+		(failedRate * 45.0) -
+		(staleRate * 25.0) -
+		(insufficientRate * 15.0) -
+		(overlapRate * 15.0)
+	if score < 0 {
+		return 0
+	}
+	if score > 100 {
+		return 100
+	}
+	return score
 }
 
 func autonomousOptimizerOutcomeScore(entry autonomousOptimizerModelOutcomeEntry) float64 {

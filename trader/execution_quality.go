@@ -31,12 +31,14 @@ type minNotionalGetter interface {
 func (at *AutoTrader) collectExecutionSignals(
 	positionInfos []kernel.PositionInfo,
 	candidateCoins []kernel.CandidateCoin,
-) (map[string]*kernel.ExecutionQuality, map[string]*kernel.VenueTradability) {
+) (map[string]*kernel.ExecutionQuality, map[string]*kernel.VenueTradability, []kernel.CandidateCoin) {
 	fetcher, hasOrderBook := at.trader.(orderBookFetcher)
 	minGetter, hasMinNotional := at.trader.(minNotionalGetter)
 
-	symbols := make([]string, 0, len(positionInfos)+minInt(len(candidateCoins), executionQualityCandidateLimit))
+	filteredCandidateCoins, cachedUnsupported := at.filterCachedUnsupportedCandidateCoins(candidateCoins)
+	symbols := make([]string, 0, len(positionInfos)+minInt(len(filteredCandidateCoins), executionQualityCandidateLimit))
 	seen := make(map[string]struct{}, len(positionInfos)+len(candidateCoins))
+	candidateSymbolSet := make(map[string]struct{}, minInt(len(filteredCandidateCoins), executionQualityCandidateLimit))
 
 	appendSymbol := func(symbol string) {
 		symbol = strings.ToUpper(strings.TrimSpace(symbol))
@@ -53,21 +55,27 @@ func (at *AutoTrader) collectExecutionSignals(
 	for _, pos := range positionInfos {
 		appendSymbol(pos.Symbol)
 	}
-	for i, coin := range candidateCoins {
+	for i, coin := range filteredCandidateCoins {
 		if i >= executionQualityCandidateLimit {
 			break
 		}
-		appendSymbol(coin.Symbol)
+		symbol := strings.ToUpper(strings.TrimSpace(coin.Symbol))
+		if symbol == "" {
+			continue
+		}
+		candidateSymbolSet[symbol] = struct{}{}
+		appendSymbol(symbol)
 	}
 
 	if len(symbols) == 0 {
-		return nil, nil
+		return nil, nil, filteredCandidateCoins
 	}
 
 	logger.Infof("📚 [%s] Fetching execution signals for %d symbols...", at.name, len(symbols))
 
 	executionOut := make(map[string]*kernel.ExecutionQuality, len(symbols))
 	venueOut := make(map[string]*kernel.VenueTradability, len(symbols))
+	freshUnsupported := make(map[string]struct{})
 	for _, symbol := range symbols {
 		venue := &kernel.VenueTradability{
 			VenueSupported: false,
@@ -79,12 +87,20 @@ func (at *AutoTrader) collectExecutionSignals(
 		if err != nil {
 			venue.OrderBookState = classifyVenueError(err)
 			venueOut[symbol] = venue
+			if venue.OrderBookState == "venue_unsupported" {
+				if _, isCandidate := candidateSymbolSet[symbol]; isCandidate {
+					at.markUnsupportedCandidateSymbol(symbol)
+					freshUnsupported[symbol] = struct{}{}
+					continue
+				}
+			}
 			logger.Infof("⚠️ [%s] Venue unavailable for %s: %v", at.name, symbol, err)
 			continue
 		}
 		if price > 0 {
 			venue.PriceSource = "exchange"
 		}
+		at.clearUnsupportedCandidateSymbol(symbol)
 		venue.VenueSupported = true
 		venue.OrderBookState = "not_exposed"
 
@@ -125,6 +141,17 @@ func (at *AutoTrader) collectExecutionSignals(
 	if len(venueOut) > 0 {
 		logger.Infof("📚 [%s] Venue tradability ready for %d symbols", at.name, len(venueOut))
 	}
+	removedSymbols := make(map[string]struct{}, len(cachedUnsupported)+len(freshUnsupported))
+	for _, symbol := range cachedUnsupported {
+		removedSymbols[symbol] = struct{}{}
+	}
+	for symbol := range freshUnsupported {
+		removedSymbols[symbol] = struct{}{}
+	}
+	if len(removedSymbols) > 0 {
+		filteredCandidateCoins = filterUnsupportedCandidateCoins(filteredCandidateCoins, removedSymbols)
+		logger.Infof("🧹 [%s] Removed %d venue-unsupported candidate(s): %s", at.name, len(removedSymbols), strings.Join(sortedSymbolKeys(removedSymbols), ", "))
+	}
 
 	if len(executionOut) == 0 {
 		executionOut = nil
@@ -133,7 +160,7 @@ func (at *AutoTrader) collectExecutionSignals(
 		venueOut = nil
 	}
 
-	return executionOut, venueOut
+	return executionOut, venueOut, filteredCandidateCoins
 }
 
 func summarizeExecutionQuality(bids, asks [][]float64) *kernel.ExecutionQuality {
@@ -337,6 +364,7 @@ func classifyVenueError(err error) string {
 		strings.Contains(msg, "not found"),
 		strings.Contains(msg, "unknown symbol"),
 		strings.Contains(msg, "invalid symbol"),
+		strings.Contains(msg, "symbol invalid"),
 		strings.Contains(msg, "unsupported"),
 		strings.Contains(msg, "does not exist"),
 		strings.Contains(msg, "venue unavailable"):

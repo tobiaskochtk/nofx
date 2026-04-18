@@ -46,6 +46,34 @@ const (
 	DealReviewClassifierAIAssist        = "ai_review_assist"
 	DealReviewClassifierVerdictAccepted = "accepted"
 	DealReviewClassifierVerdictRejected = "rejected"
+
+	DealReviewExitOriginAIDecision           = "ai_decision"
+	DealReviewExitOriginSyncedTriggerOrder   = "synced_trigger_order"
+	DealReviewExitOriginSyncedMarketOrder    = "synced_market_order"
+	DealReviewExitOriginSyncedCloseFill      = "synced_close_fill"
+	DealReviewExitOriginTargetProximity      = "target_proximity"
+	DealReviewExitOriginTrailingEngine       = "trailing_engine"
+	DealReviewExitOriginManualUIClose        = "manual_ui_close"
+	DealReviewExitOriginRiskGuard            = "risk_guard"
+	DealReviewExitOriginInternalExitIntent   = "internal_exit_intent"
+	DealReviewExitOriginStoredPositionReason = "stored_position_reason"
+	DealReviewExitOriginExchangeSyncUnknown  = "exchange_sync_unknown"
+
+	DealReviewExitReasonQualityExplicit       = "explicit"
+	DealReviewExitReasonQualityHighConfidence = "high_confidence_inferred"
+	DealReviewExitReasonQualityLowConfidence  = "low_confidence_inferred"
+
+	DealReviewExitIntentStatusSubmitted = "submitted"
+	DealReviewExitIntentStatusLinked    = "linked"
+	DealReviewExitIntentStatusCanceled  = "canceled"
+
+	DealReviewExitIntentTypeAICloseDecision = "ai_close_decision"
+	DealReviewExitIntentTypeManualUIClose   = "manual_ui_close"
+	DealReviewExitIntentTypeDrawdownGuard   = "drawdown_guard_exit"
+	DealReviewExitIntentTypeGridEmergency   = "grid_emergency_exit"
+	DealReviewExitIntentTypeGridDecision    = "grid_decision_close"
+	DealReviewExitIntentTypeGridBreakout    = "grid_breakout_close_all"
+	DealReviewExitIntentTypeGridLevelStop   = "grid_level_stop_loss"
 )
 
 type DealReviewStore struct {
@@ -53,117 +81,127 @@ type DealReviewStore struct {
 }
 
 type DealReviewCase struct {
-	ID                       string    `gorm:"primaryKey" json:"id"`
-	UserID                   string    `gorm:"column:user_id;not null;index:idx_deal_review_cases_user_time" json:"user_id"`
-	TraderID                 string    `gorm:"column:trader_id;not null;index:idx_deal_review_cases_trader_time" json:"trader_id"`
-	PositionID               int64     `gorm:"column:position_id;not null;uniqueIndex:idx_deal_review_cases_position" json:"position_id"`
-	ExchangeID               string    `gorm:"column:exchange_id;default:''" json:"exchange_id"`
-	ExchangeType             string    `gorm:"column:exchange_type;default:''" json:"exchange_type"`
-	AIModelID                string    `gorm:"column:ai_model_id;default:''" json:"ai_model_id"`
-	StrategyID               string    `gorm:"column:strategy_id;default:''" json:"strategy_id"`
-	Symbol                   string    `gorm:"column:symbol;not null;index:idx_deal_review_cases_symbol" json:"symbol"`
-	Side                     string    `gorm:"column:side;not null;index:idx_deal_review_cases_side" json:"side"`
-	Status                   string    `gorm:"column:status;default:OPEN;index:idx_deal_review_cases_status" json:"status"`
-	Outcome                  string    `gorm:"column:outcome;default:open;index:idx_deal_review_cases_outcome" json:"outcome"`
-	OpenEventID              string    `gorm:"column:open_event_id;default:''" json:"open_event_id"`
-	CloseEventID             string    `gorm:"column:close_event_id;default:''" json:"close_event_id"`
-	OpenCycleNumber          int       `gorm:"column:open_cycle_number;default:0" json:"open_cycle_number"`
-	CloseCycleNumber         int       `gorm:"column:close_cycle_number;default:0" json:"close_cycle_number"`
-	EntryOrderID             string    `gorm:"column:entry_order_id;default:''" json:"entry_order_id"`
-	ExitOrderID              string    `gorm:"column:exit_order_id;default:''" json:"exit_order_id"`
-	EntryTimeMs              int64     `gorm:"column:entry_time_ms;default:0" json:"entry_time_ms"`
-	ExitTimeMs               int64     `gorm:"column:exit_time_ms;default:0" json:"exit_time_ms"`
-	EntryPrice               float64   `gorm:"column:entry_price;default:0" json:"entry_price"`
-	ExitPrice                float64   `gorm:"column:exit_price;default:0" json:"exit_price"`
-	EntryQuantity            float64   `gorm:"column:entry_quantity;default:0" json:"entry_quantity"`
-	ExitQuantity             float64   `gorm:"column:exit_quantity;default:0" json:"exit_quantity"`
-	Leverage                 int       `gorm:"column:leverage;default:1" json:"leverage"`
-	OpenStopLoss             float64   `gorm:"column:open_stop_loss;default:0" json:"open_stop_loss"`
-	OpenTakeProfit           float64   `gorm:"column:open_take_profit;default:0" json:"open_take_profit"`
-	OpenConfidence           int       `gorm:"column:open_confidence;default:0" json:"open_confidence"`
-	CloseConfidence          int       `gorm:"column:close_confidence;default:0" json:"close_confidence"`
-	OpenSelectionBucket      string    `gorm:"column:open_selection_bucket;default:''" json:"open_selection_bucket"`
-	OpenTrendRegime          string    `gorm:"column:open_trend_regime;default:''" json:"open_trend_regime"`
-	OpenVolatilityRegime     string    `gorm:"column:open_volatility_regime;default:''" json:"open_volatility_regime"`
-	OpenBTCStrengthRegime    string    `gorm:"column:open_btc_strength_regime;default:''" json:"open_btc_strength_regime"`
-	OpenFundingRegime        string    `gorm:"column:open_funding_regime;default:''" json:"open_funding_regime"`
-	OpenOIRegime             string    `gorm:"column:open_oi_regime;default:''" json:"open_oi_regime"`
-	OpenSessionBucket        string    `gorm:"column:open_session_bucket;default:''" json:"open_session_bucket"`
-	OpenWeekdayBucket        string    `gorm:"column:open_weekday_bucket;default:''" json:"open_weekday_bucket"`
-	OpenVenueTier            string    `gorm:"column:open_venue_tier;default:''" json:"open_venue_tier"`
-	OpenLiquidityTier        string    `gorm:"column:open_liquidity_tier;default:''" json:"open_liquidity_tier"`
-	OpenSpreadBucket         string    `gorm:"column:open_spread_bucket;default:''" json:"open_spread_bucket"`
-	OpenSlippageBucket       string    `gorm:"column:open_slippage_bucket;default:''" json:"open_slippage_bucket"`
-	CloseTrendRegime         string    `gorm:"column:close_trend_regime;default:''" json:"close_trend_regime"`
-	CloseVolatilityRegime    string    `gorm:"column:close_volatility_regime;default:''" json:"close_volatility_regime"`
-	CloseBTCStrengthRegime   string    `gorm:"column:close_btc_strength_regime;default:''" json:"close_btc_strength_regime"`
-	CloseFundingRegime       string    `gorm:"column:close_funding_regime;default:''" json:"close_funding_regime"`
-	CloseOIRegime            string    `gorm:"column:close_oi_regime;default:''" json:"close_oi_regime"`
-	CloseSessionBucket       string    `gorm:"column:close_session_bucket;default:''" json:"close_session_bucket"`
-	CloseWeekdayBucket       string    `gorm:"column:close_weekday_bucket;default:''" json:"close_weekday_bucket"`
-	CloseVenueTier           string    `gorm:"column:close_venue_tier;default:''" json:"close_venue_tier"`
-	CloseLiquidityTier       string    `gorm:"column:close_liquidity_tier;default:''" json:"close_liquidity_tier"`
-	CloseSpreadBucket        string    `gorm:"column:close_spread_bucket;default:''" json:"close_spread_bucket"`
-	CloseSlippageBucket      string    `gorm:"column:close_slippage_bucket;default:''" json:"close_slippage_bucket"`
-	OpenCandidateSourcesJSON string    `gorm:"column:open_candidate_sources_json;type:text;default:'[]'" json:"-"`
-	LabelsJSON               string    `gorm:"column:labels_json;type:text;default:'[]'" json:"-"`
-	AnalystNote              string    `gorm:"column:analyst_note;type:text;default:''" json:"analyst_note"`
-	MaxFavorableExcursion    float64   `gorm:"column:max_favorable_excursion;default:0" json:"max_favorable_excursion"`
-	MaxFavorableExcursionPct float64   `gorm:"column:max_favorable_excursion_pct;default:0" json:"max_favorable_excursion_pct"`
-	MaxAdverseExcursion      float64   `gorm:"column:max_adverse_excursion;default:0" json:"max_adverse_excursion"`
-	MaxAdverseExcursionPct   float64   `gorm:"column:max_adverse_excursion_pct;default:0" json:"max_adverse_excursion_pct"`
-	MFECapturedPct           float64   `gorm:"column:mfe_captured_pct;default:0" json:"mfe_captured_pct"`
-	ProfitGivenBack          float64   `gorm:"column:profit_given_back;default:0" json:"profit_given_back"`
-	ProfitGivenBackPct       float64   `gorm:"column:profit_given_back_pct;default:0" json:"profit_given_back_pct"`
-	TimeToFirstProfitMs      int64     `gorm:"column:time_to_first_profit_ms;default:0" json:"time_to_first_profit_ms"`
-	TimeToMaxDrawdownMs      int64     `gorm:"column:time_to_max_drawdown_ms;default:0" json:"time_to_max_drawdown_ms"`
-	PlannedRiskPct           float64   `gorm:"column:planned_risk_pct;default:0" json:"planned_risk_pct"`
-	ExitEfficiencyScore      float64   `gorm:"column:exit_efficiency_score;default:0" json:"exit_efficiency_score"`
-	EntryTimingScore         float64   `gorm:"column:entry_timing_score;default:0" json:"entry_timing_score"`
-	RiskSizingScore          float64   `gorm:"column:risk_sizing_score;default:0" json:"risk_sizing_score"`
-	RealizedPnL              float64   `gorm:"column:realized_pnl;default:0" json:"realized_pnl"`
-	RealizedPnLPct           float64   `gorm:"column:realized_pnl_pct;default:0" json:"realized_pnl_pct"`
-	Fee                      float64   `gorm:"column:fee;default:0" json:"fee"`
-	HoldDurationMs           int64     `gorm:"column:hold_duration_ms;default:0" json:"hold_duration_ms"`
-	CloseReason              string    `gorm:"column:close_reason;default:''" json:"close_reason"`
-	CreatedAt                time.Time `json:"created_at"`
-	UpdatedAt                time.Time `json:"updated_at"`
+	ID                       string                  `gorm:"primaryKey" json:"id"`
+	UserID                   string                  `gorm:"column:user_id;not null;index:idx_deal_review_cases_user_time" json:"user_id"`
+	TraderID                 string                  `gorm:"column:trader_id;not null;index:idx_deal_review_cases_trader_time" json:"trader_id"`
+	PositionID               int64                   `gorm:"column:position_id;not null;uniqueIndex:idx_deal_review_cases_position" json:"position_id"`
+	ExchangeID               string                  `gorm:"column:exchange_id;default:''" json:"exchange_id"`
+	ExchangeType             string                  `gorm:"column:exchange_type;default:''" json:"exchange_type"`
+	AIModelID                string                  `gorm:"column:ai_model_id;default:''" json:"ai_model_id"`
+	StrategyID               string                  `gorm:"column:strategy_id;default:''" json:"strategy_id"`
+	Symbol                   string                  `gorm:"column:symbol;not null;index:idx_deal_review_cases_symbol" json:"symbol"`
+	Side                     string                  `gorm:"column:side;not null;index:idx_deal_review_cases_side" json:"side"`
+	Status                   string                  `gorm:"column:status;default:OPEN;index:idx_deal_review_cases_status" json:"status"`
+	Outcome                  string                  `gorm:"column:outcome;default:open;index:idx_deal_review_cases_outcome" json:"outcome"`
+	OpenEventID              string                  `gorm:"column:open_event_id;default:''" json:"open_event_id"`
+	CloseEventID             string                  `gorm:"column:close_event_id;default:''" json:"close_event_id"`
+	OpenCycleNumber          int                     `gorm:"column:open_cycle_number;default:0" json:"open_cycle_number"`
+	CloseCycleNumber         int                     `gorm:"column:close_cycle_number;default:0" json:"close_cycle_number"`
+	EntryOrderID             string                  `gorm:"column:entry_order_id;default:''" json:"entry_order_id"`
+	ExitOrderID              string                  `gorm:"column:exit_order_id;default:''" json:"exit_order_id"`
+	EntryTimeMs              int64                   `gorm:"column:entry_time_ms;default:0" json:"entry_time_ms"`
+	ExitTimeMs               int64                   `gorm:"column:exit_time_ms;default:0" json:"exit_time_ms"`
+	EntryPrice               float64                 `gorm:"column:entry_price;default:0" json:"entry_price"`
+	ExitPrice                float64                 `gorm:"column:exit_price;default:0" json:"exit_price"`
+	EntryQuantity            float64                 `gorm:"column:entry_quantity;default:0" json:"entry_quantity"`
+	ExitQuantity             float64                 `gorm:"column:exit_quantity;default:0" json:"exit_quantity"`
+	Leverage                 int                     `gorm:"column:leverage;default:1" json:"leverage"`
+	OpenStopLoss             float64                 `gorm:"column:open_stop_loss;default:0" json:"open_stop_loss"`
+	OpenTakeProfit           float64                 `gorm:"column:open_take_profit;default:0" json:"open_take_profit"`
+	OpenConfidence           int                     `gorm:"column:open_confidence;default:0" json:"open_confidence"`
+	CloseConfidence          int                     `gorm:"column:close_confidence;default:0" json:"close_confidence"`
+	OpenSelectionBucket      string                  `gorm:"column:open_selection_bucket;default:''" json:"open_selection_bucket"`
+	OpenTrendRegime          string                  `gorm:"column:open_trend_regime;default:''" json:"open_trend_regime"`
+	OpenVolatilityRegime     string                  `gorm:"column:open_volatility_regime;default:''" json:"open_volatility_regime"`
+	OpenBTCStrengthRegime    string                  `gorm:"column:open_btc_strength_regime;default:''" json:"open_btc_strength_regime"`
+	OpenFundingRegime        string                  `gorm:"column:open_funding_regime;default:''" json:"open_funding_regime"`
+	OpenOIRegime             string                  `gorm:"column:open_oi_regime;default:''" json:"open_oi_regime"`
+	OpenSessionBucket        string                  `gorm:"column:open_session_bucket;default:''" json:"open_session_bucket"`
+	OpenWeekdayBucket        string                  `gorm:"column:open_weekday_bucket;default:''" json:"open_weekday_bucket"`
+	OpenVenueTier            string                  `gorm:"column:open_venue_tier;default:''" json:"open_venue_tier"`
+	OpenLiquidityTier        string                  `gorm:"column:open_liquidity_tier;default:''" json:"open_liquidity_tier"`
+	OpenSpreadBucket         string                  `gorm:"column:open_spread_bucket;default:''" json:"open_spread_bucket"`
+	OpenSlippageBucket       string                  `gorm:"column:open_slippage_bucket;default:''" json:"open_slippage_bucket"`
+	CloseTrendRegime         string                  `gorm:"column:close_trend_regime;default:''" json:"close_trend_regime"`
+	CloseVolatilityRegime    string                  `gorm:"column:close_volatility_regime;default:''" json:"close_volatility_regime"`
+	CloseBTCStrengthRegime   string                  `gorm:"column:close_btc_strength_regime;default:''" json:"close_btc_strength_regime"`
+	CloseFundingRegime       string                  `gorm:"column:close_funding_regime;default:''" json:"close_funding_regime"`
+	CloseOIRegime            string                  `gorm:"column:close_oi_regime;default:''" json:"close_oi_regime"`
+	CloseSessionBucket       string                  `gorm:"column:close_session_bucket;default:''" json:"close_session_bucket"`
+	CloseWeekdayBucket       string                  `gorm:"column:close_weekday_bucket;default:''" json:"close_weekday_bucket"`
+	CloseVenueTier           string                  `gorm:"column:close_venue_tier;default:''" json:"close_venue_tier"`
+	CloseLiquidityTier       string                  `gorm:"column:close_liquidity_tier;default:''" json:"close_liquidity_tier"`
+	CloseSpreadBucket        string                  `gorm:"column:close_spread_bucket;default:''" json:"close_spread_bucket"`
+	CloseSlippageBucket      string                  `gorm:"column:close_slippage_bucket;default:''" json:"close_slippage_bucket"`
+	OpenCandidateSourcesJSON string                  `gorm:"column:open_candidate_sources_json;type:text;default:'[]'" json:"-"`
+	LabelsJSON               string                  `gorm:"column:labels_json;type:text;default:'[]'" json:"-"`
+	AnalystNote              string                  `gorm:"column:analyst_note;type:text;default:''" json:"analyst_note"`
+	MaxFavorableExcursion    float64                 `gorm:"column:max_favorable_excursion;default:0" json:"max_favorable_excursion"`
+	MaxFavorableExcursionPct float64                 `gorm:"column:max_favorable_excursion_pct;default:0" json:"max_favorable_excursion_pct"`
+	MaxAdverseExcursion      float64                 `gorm:"column:max_adverse_excursion;default:0" json:"max_adverse_excursion"`
+	MaxAdverseExcursionPct   float64                 `gorm:"column:max_adverse_excursion_pct;default:0" json:"max_adverse_excursion_pct"`
+	MFECapturedPct           float64                 `gorm:"column:mfe_captured_pct;default:0" json:"mfe_captured_pct"`
+	ProfitGivenBack          float64                 `gorm:"column:profit_given_back;default:0" json:"profit_given_back"`
+	ProfitGivenBackPct       float64                 `gorm:"column:profit_given_back_pct;default:0" json:"profit_given_back_pct"`
+	TimeToFirstProfitMs      int64                   `gorm:"column:time_to_first_profit_ms;default:0" json:"time_to_first_profit_ms"`
+	TimeToMaxDrawdownMs      int64                   `gorm:"column:time_to_max_drawdown_ms;default:0" json:"time_to_max_drawdown_ms"`
+	PlannedRiskPct           float64                 `gorm:"column:planned_risk_pct;default:0" json:"planned_risk_pct"`
+	ExitEfficiencyScore      float64                 `gorm:"column:exit_efficiency_score;default:0" json:"exit_efficiency_score"`
+	EntryTimingScore         float64                 `gorm:"column:entry_timing_score;default:0" json:"entry_timing_score"`
+	RiskSizingScore          float64                 `gorm:"column:risk_sizing_score;default:0" json:"risk_sizing_score"`
+	RealizedPnL              float64                 `gorm:"column:realized_pnl;default:0" json:"realized_pnl"`
+	RealizedPnLPct           float64                 `gorm:"column:realized_pnl_pct;default:0" json:"realized_pnl_pct"`
+	Fee                      float64                 `gorm:"column:fee;default:0" json:"fee"`
+	HoldDurationMs           int64                   `gorm:"column:hold_duration_ms;default:0" json:"hold_duration_ms"`
+	CloseReason              string                  `gorm:"column:close_reason;default:''" json:"close_reason"`
+	ExitOrigin               string                  `gorm:"column:exit_origin;default:''" json:"exit_origin"`
+	ExitReasonQuality        string                  `gorm:"column:exit_reason_quality;default:''" json:"exit_reason_quality"`
+	ExitEvidenceSummary      string                  `gorm:"column:exit_evidence_summary;type:text;default:''" json:"exit_evidence_summary"`
+	ExitEvidenceJSON         string                  `gorm:"column:exit_evidence_json;type:text;default:'{}'" json:"-"`
+	ExitEvidence             *DealReviewExitEvidence `gorm:"-" json:"exit_evidence,omitempty"`
+	CreatedAt                time.Time               `json:"created_at"`
+	UpdatedAt                time.Time               `json:"updated_at"`
 }
 
 func (DealReviewCase) TableName() string { return "deal_review_cases" }
 
 type DealReviewEvent struct {
-	ID                   string    `gorm:"primaryKey" json:"id"`
-	UserID               string    `gorm:"column:user_id;not null;index:idx_deal_review_events_user_time" json:"user_id"`
-	TraderID             string    `gorm:"column:trader_id;not null;index:idx_deal_review_events_trader_time" json:"trader_id"`
-	DealID               string    `gorm:"column:deal_id;default:'';index:idx_deal_review_events_deal" json:"deal_id"`
-	PositionID           int64     `gorm:"column:position_id;default:0;index:idx_deal_review_events_position" json:"position_id"`
-	Stage                string    `gorm:"column:stage;not null;index:idx_deal_review_events_stage" json:"stage"`
-	Source               string    `gorm:"column:source;default:ai_decision" json:"source"`
-	Status               string    `gorm:"column:status;default:pending;index:idx_deal_review_events_status" json:"status"`
-	DecisionCycleNumber  int       `gorm:"column:decision_cycle_number;default:0" json:"decision_cycle_number"`
-	DecisionTimestamp    time.Time `gorm:"column:decision_timestamp" json:"decision_timestamp"`
-	ExchangeID           string    `gorm:"column:exchange_id;default:''" json:"exchange_id"`
-	ExchangeOrderID      string    `gorm:"column:exchange_order_id;default:'';index:idx_deal_review_events_order" json:"exchange_order_id"`
-	Symbol               string    `gorm:"column:symbol;not null;index:idx_deal_review_events_symbol" json:"symbol"`
-	Side                 string    `gorm:"column:side;not null" json:"side"`
-	Action               string    `gorm:"column:action;default:''" json:"action"`
-	Quantity             float64   `gorm:"column:quantity;default:0" json:"quantity"`
-	PositionSizeUSD      float64   `gorm:"column:position_size_usd;default:0" json:"position_size_usd"`
-	Price                float64   `gorm:"column:price;default:0" json:"price"`
-	Leverage             int       `gorm:"column:leverage;default:0" json:"leverage"`
-	StopLoss             float64   `gorm:"column:stop_loss;default:0" json:"stop_loss"`
-	TakeProfit           float64   `gorm:"column:take_profit;default:0" json:"take_profit"`
-	Confidence           int       `gorm:"column:confidence;default:0" json:"confidence"`
-	Reasoning            string    `gorm:"column:reasoning;type:text;default:''" json:"reasoning"`
-	SelectionBucket      string    `gorm:"column:selection_bucket;default:''" json:"selection_bucket"`
-	CandidateSourcesJSON string    `gorm:"column:candidate_sources_json;type:text;default:'[]'" json:"-"`
-	SnapshotJSON         string    `gorm:"column:snapshot_json;type:text;default:'{}'" json:"-"`
-	OutcomePnL           float64   `gorm:"column:outcome_pnl;default:0" json:"outcome_pnl"`
-	OutcomePnLPct        float64   `gorm:"column:outcome_pnl_pct;default:0" json:"outcome_pnl_pct"`
-	CloseReason          string    `gorm:"column:close_reason;default:''" json:"close_reason"`
-	CreatedAt            time.Time `json:"created_at"`
-	UpdatedAt            time.Time `json:"updated_at"`
+	ID                   string                  `gorm:"primaryKey" json:"id"`
+	UserID               string                  `gorm:"column:user_id;not null;index:idx_deal_review_events_user_time" json:"user_id"`
+	TraderID             string                  `gorm:"column:trader_id;not null;index:idx_deal_review_events_trader_time" json:"trader_id"`
+	DealID               string                  `gorm:"column:deal_id;default:'';index:idx_deal_review_events_deal" json:"deal_id"`
+	PositionID           int64                   `gorm:"column:position_id;default:0;index:idx_deal_review_events_position" json:"position_id"`
+	Stage                string                  `gorm:"column:stage;not null;index:idx_deal_review_events_stage" json:"stage"`
+	Source               string                  `gorm:"column:source;default:ai_decision" json:"source"`
+	Status               string                  `gorm:"column:status;default:pending;index:idx_deal_review_events_status" json:"status"`
+	DecisionCycleNumber  int                     `gorm:"column:decision_cycle_number;default:0" json:"decision_cycle_number"`
+	DecisionTimestamp    time.Time               `gorm:"column:decision_timestamp" json:"decision_timestamp"`
+	ExchangeID           string                  `gorm:"column:exchange_id;default:''" json:"exchange_id"`
+	ExchangeOrderID      string                  `gorm:"column:exchange_order_id;default:'';index:idx_deal_review_events_order" json:"exchange_order_id"`
+	Symbol               string                  `gorm:"column:symbol;not null;index:idx_deal_review_events_symbol" json:"symbol"`
+	Side                 string                  `gorm:"column:side;not null" json:"side"`
+	Action               string                  `gorm:"column:action;default:''" json:"action"`
+	Quantity             float64                 `gorm:"column:quantity;default:0" json:"quantity"`
+	PositionSizeUSD      float64                 `gorm:"column:position_size_usd;default:0" json:"position_size_usd"`
+	Price                float64                 `gorm:"column:price;default:0" json:"price"`
+	Leverage             int                     `gorm:"column:leverage;default:0" json:"leverage"`
+	StopLoss             float64                 `gorm:"column:stop_loss;default:0" json:"stop_loss"`
+	TakeProfit           float64                 `gorm:"column:take_profit;default:0" json:"take_profit"`
+	Confidence           int                     `gorm:"column:confidence;default:0" json:"confidence"`
+	Reasoning            string                  `gorm:"column:reasoning;type:text;default:''" json:"reasoning"`
+	SelectionBucket      string                  `gorm:"column:selection_bucket;default:''" json:"selection_bucket"`
+	CandidateSourcesJSON string                  `gorm:"column:candidate_sources_json;type:text;default:'[]'" json:"-"`
+	SnapshotJSON         string                  `gorm:"column:snapshot_json;type:text;default:'{}'" json:"-"`
+	OutcomePnL           float64                 `gorm:"column:outcome_pnl;default:0" json:"outcome_pnl"`
+	OutcomePnLPct        float64                 `gorm:"column:outcome_pnl_pct;default:0" json:"outcome_pnl_pct"`
+	CloseReason          string                  `gorm:"column:close_reason;default:''" json:"close_reason"`
+	ExitOrigin           string                  `gorm:"column:exit_origin;default:''" json:"exit_origin"`
+	ExitReasonQuality    string                  `gorm:"column:exit_reason_quality;default:''" json:"exit_reason_quality"`
+	ExitEvidenceSummary  string                  `gorm:"column:exit_evidence_summary;type:text;default:''" json:"exit_evidence_summary"`
+	ExitEvidenceJSON     string                  `gorm:"column:exit_evidence_json;type:text;default:'{}'" json:"-"`
+	ExitEvidence         *DealReviewExitEvidence `gorm:"-" json:"exit_evidence,omitempty"`
+	CreatedAt            time.Time               `json:"created_at"`
+	UpdatedAt            time.Time               `json:"updated_at"`
 }
 
 func (DealReviewEvent) TableName() string { return "deal_review_events" }
@@ -266,6 +304,69 @@ type DealReviewCyclePointRecord struct {
 }
 
 func (DealReviewCyclePointRecord) TableName() string { return "deal_review_cycle_points" }
+
+type DealReviewTrailingUpdateRecord struct {
+	ID                   int64     `gorm:"primaryKey;autoIncrement" json:"id"`
+	UserID               string    `gorm:"column:user_id;not null;index:idx_deal_review_trailing_updates_user_time" json:"user_id"`
+	TraderID             string    `gorm:"column:trader_id;not null;index:idx_deal_review_trailing_updates_trader_time" json:"trader_id"`
+	DealID               string    `gorm:"column:deal_id;default:'';index:idx_deal_review_trailing_updates_deal" json:"deal_id"`
+	PositionID           int64     `gorm:"column:position_id;default:0;index:idx_deal_review_trailing_updates_position" json:"position_id"`
+	ExchangeID           string    `gorm:"column:exchange_id;default:''" json:"exchange_id"`
+	Symbol               string    `gorm:"column:symbol;not null;index:idx_deal_review_trailing_updates_symbol" json:"symbol"`
+	Side                 string    `gorm:"column:side;not null" json:"side"`
+	TimestampMs          int64     `gorm:"column:timestamp_ms;not null;index:idx_deal_review_trailing_updates_time" json:"timestamp_ms"`
+	PreviousStopPrice    float64   `gorm:"column:previous_stop_price;default:0" json:"previous_stop_price"`
+	NewStopPrice         float64   `gorm:"column:new_stop_price;default:0" json:"new_stop_price"`
+	TakeProfitPrice      float64   `gorm:"column:take_profit_price;default:0" json:"take_profit_price"`
+	Quantity             float64   `gorm:"column:quantity;default:0" json:"quantity"`
+	EntryPrice           float64   `gorm:"column:entry_price;default:0" json:"entry_price"`
+	MarkPrice            float64   `gorm:"column:mark_price;default:0" json:"mark_price"`
+	Leverage             int       `gorm:"column:leverage;default:0" json:"leverage"`
+	ProfitPct            float64   `gorm:"column:profit_pct;default:0" json:"profit_pct"`
+	UnrealizedPnL        float64   `gorm:"column:unrealized_pnl;default:0" json:"unrealized_pnl"`
+	UnrealizedPnLPct     float64   `gorm:"column:unrealized_pnl_pct;default:0" json:"unrealized_pnl_pct"`
+	StopProfitPct        float64   `gorm:"column:stop_profit_pct;default:0" json:"stop_profit_pct"`
+	ProtectsBreakeven    bool      `gorm:"column:protects_breakeven;default:false" json:"protects_breakeven"`
+	TierIndex            int       `gorm:"column:tier_index;default:-1" json:"tier_index"`
+	TierTriggerProfitPct float64   `gorm:"column:tier_trigger_profit_pct;default:0" json:"tier_trigger_profit_pct"`
+	TrailingMode         string    `gorm:"column:trailing_mode;default:''" json:"trailing_mode"`
+	LockProfitPct        float64   `gorm:"column:lock_profit_pct;default:0" json:"lock_profit_pct"`
+	TrailOffsetPct       float64   `gorm:"column:trail_offset_pct;default:0" json:"trail_offset_pct"`
+	CreatedAt            time.Time `json:"created_at"`
+	UpdatedAt            time.Time `json:"updated_at"`
+}
+
+func (DealReviewTrailingUpdateRecord) TableName() string { return "deal_review_trailing_updates" }
+
+type DealReviewExitIntentRecord struct {
+	ID                  string    `gorm:"primaryKey" json:"id"`
+	UserID              string    `gorm:"column:user_id;not null;index:idx_deal_review_exit_intents_user_time" json:"user_id"`
+	TraderID            string    `gorm:"column:trader_id;not null;index:idx_deal_review_exit_intents_trader_time" json:"trader_id"`
+	DealID              string    `gorm:"column:deal_id;default:'';index:idx_deal_review_exit_intents_deal" json:"deal_id"`
+	PositionID          int64     `gorm:"column:position_id;default:0;index:idx_deal_review_exit_intents_position" json:"position_id"`
+	ExchangeID          string    `gorm:"column:exchange_id;default:''" json:"exchange_id"`
+	ExchangeOrderID     string    `gorm:"column:exchange_order_id;default:'';index:idx_deal_review_exit_intents_order" json:"exchange_order_id"`
+	Symbol              string    `gorm:"column:symbol;not null;index:idx_deal_review_exit_intents_symbol" json:"symbol"`
+	Side                string    `gorm:"column:side;not null" json:"side"`
+	Action              string    `gorm:"column:action;default:''" json:"action"`
+	IntentType          string    `gorm:"column:intent_type;not null;index:idx_deal_review_exit_intents_type" json:"intent_type"`
+	SourceModule        string    `gorm:"column:source_module;default:''" json:"source_module"`
+	Status              string    `gorm:"column:status;default:submitted;index:idx_deal_review_exit_intents_status" json:"status"`
+	Summary             string    `gorm:"column:summary;type:text;default:''" json:"summary"`
+	Reasoning           string    `gorm:"column:reasoning;type:text;default:''" json:"reasoning"`
+	DecisionCycleNumber int       `gorm:"column:decision_cycle_number;default:0" json:"decision_cycle_number"`
+	Confidence          int       `gorm:"column:confidence;default:0" json:"confidence"`
+	Quantity            float64   `gorm:"column:quantity;default:0" json:"quantity"`
+	Price               float64   `gorm:"column:price;default:0" json:"price"`
+	EntryPrice          float64   `gorm:"column:entry_price;default:0" json:"entry_price"`
+	TimestampMs         int64     `gorm:"column:timestamp_ms;not null;index:idx_deal_review_exit_intents_time" json:"timestamp_ms"`
+	LinkedDealID        string    `gorm:"column:linked_deal_id;default:''" json:"linked_deal_id"`
+	LinkedEventID       string    `gorm:"column:linked_event_id;default:''" json:"linked_event_id"`
+	CreatedAt           time.Time `json:"created_at"`
+	UpdatedAt           time.Time `json:"updated_at"`
+}
+
+func (DealReviewExitIntentRecord) TableName() string { return "deal_review_exit_intents" }
 
 type DealReviewMarketPointRecord struct {
 	ID               int64     `gorm:"primaryKey;autoIncrement" json:"id"`
@@ -381,6 +482,109 @@ type dealReviewExitExecutionContext struct {
 	Fill  *TraderFill
 }
 
+type DealReviewExitEvidence struct {
+	MatchedBy                 string  `json:"matched_by,omitempty"`
+	DecisionCycleNumber       int     `json:"decision_cycle_number,omitempty"`
+	DecisionAction            string  `json:"decision_action,omitempty"`
+	OrderType                 string  `json:"order_type,omitempty"`
+	VenueOrderType            string  `json:"venue_order_type,omitempty"`
+	TriggerSubtype            string  `json:"trigger_subtype,omitempty"`
+	TriggerSource             string  `json:"trigger_source,omitempty"`
+	OrderAction               string  `json:"order_action,omitempty"`
+	OrderStatus               string  `json:"order_status,omitempty"`
+	ClientOrderID             string  `json:"client_order_id,omitempty"`
+	ExchangeOrderID           string  `json:"exchange_order_id,omitempty"`
+	TriggerPrice              float64 `json:"trigger_price,omitempty"`
+	OrderPrice                float64 `json:"order_price,omitempty"`
+	FillPrice                 float64 `json:"fill_price,omitempty"`
+	FillQuantity              float64 `json:"fill_quantity,omitempty"`
+	ReduceOnly                bool    `json:"reduce_only,omitempty"`
+	ClosePosition             bool    `json:"close_position,omitempty"`
+	TargetStopLoss            float64 `json:"target_stop_loss,omitempty"`
+	TargetTakeProfit          float64 `json:"target_take_profit,omitempty"`
+	StopLossDistanceBps       float64 `json:"stop_loss_distance_bps,omitempty"`
+	TakeProfitDistanceBps     float64 `json:"take_profit_distance_bps,omitempty"`
+	TrailingUpdateID          int64   `json:"trailing_update_id,omitempty"`
+	PreviousStopPrice         float64 `json:"previous_stop_price,omitempty"`
+	NewStopPrice              float64 `json:"new_stop_price,omitempty"`
+	TrailingMode              string  `json:"trailing_mode,omitempty"`
+	TrailingTierIndex         int     `json:"trailing_tier_index,omitempty"`
+	TrailingTriggerProfitPct  float64 `json:"trailing_trigger_profit_pct,omitempty"`
+	TrailingLockProfitPct     float64 `json:"trailing_lock_profit_pct,omitempty"`
+	TrailingOffsetPct         float64 `json:"trailing_offset_pct,omitempty"`
+	TrailingUpdatedAtMs       int64   `json:"trailing_updated_at_ms,omitempty"`
+	TrailingUnrealizedPnL     float64 `json:"trailing_unrealized_pnl,omitempty"`
+	TrailingUnrealizedPnLPct  float64 `json:"trailing_unrealized_pnl_pct,omitempty"`
+	TrailingStopProfitPct     float64 `json:"trailing_stop_profit_pct,omitempty"`
+	TrailingProtectsBreakeven bool    `json:"trailing_protects_breakeven,omitempty"`
+	IntentID                  string  `json:"intent_id,omitempty"`
+	IntentType                string  `json:"intent_type,omitempty"`
+	IntentSourceModule        string  `json:"intent_source_module,omitempty"`
+	IntentSummary             string  `json:"intent_summary,omitempty"`
+	IntentReasoning           string  `json:"intent_reasoning,omitempty"`
+	IntentConfidence          int     `json:"intent_confidence,omitempty"`
+	IntentCreatedAtMs         int64   `json:"intent_created_at_ms,omitempty"`
+}
+
+type DealReviewTrailingUpdateInput struct {
+	UserID               string
+	TraderID             string
+	PositionID           int64
+	DealID               string
+	ExchangeID           string
+	Symbol               string
+	Side                 string
+	Timestamp            time.Time
+	PreviousStopPrice    float64
+	NewStopPrice         float64
+	TakeProfitPrice      float64
+	Quantity             float64
+	EntryPrice           float64
+	MarkPrice            float64
+	Leverage             int
+	ProfitPct            float64
+	UnrealizedPnL        float64
+	UnrealizedPnLPct     float64
+	StopProfitPct        float64
+	ProtectsBreakeven    bool
+	TierIndex            int
+	TierTriggerProfitPct float64
+	TrailingMode         string
+	LockProfitPct        float64
+	TrailOffsetPct       float64
+}
+
+type DealReviewExitIntentInput struct {
+	UserID              string
+	TraderID            string
+	PositionID          int64
+	DealID              string
+	ExchangeID          string
+	ExchangeOrderID     string
+	Symbol              string
+	Side                string
+	Action              string
+	IntentType          string
+	SourceModule        string
+	Summary             string
+	Reasoning           string
+	DecisionCycleNumber int
+	Confidence          int
+	Quantity            float64
+	Price               float64
+	EntryPrice          float64
+	Timestamp           time.Time
+}
+
+type dealReviewCloseInferenceResult struct {
+	Reason              string
+	InferredBy          string
+	ExitOrigin          string
+	ExitReasonQuality   string
+	ExitEvidenceSummary string
+	ExitEvidence        *DealReviewExitEvidence
+}
+
 type DealReviewListFilter struct {
 	TraderID               string
 	Symbol                 string
@@ -389,6 +593,7 @@ type DealReviewListFilter struct {
 	Outcome                string
 	OpenSelectionBucket    string
 	CloseReason            string
+	ExitReasonQuality      string
 	OpenTrendRegime        string
 	OpenVolatilityRegime   string
 	OpenBTCStrengthRegime  string
@@ -729,6 +934,17 @@ type DealReviewAnomalyCloseReasonQuality struct {
 	AvgGiveBackPct         float64 `json:"avg_give_back_pct"`
 }
 
+type DealReviewAnomalyExitUncertainty struct {
+	Label             string  `json:"label"`
+	CloseReason       string  `json:"close_reason"`
+	ExitReasonQuality string  `json:"exit_reason_quality"`
+	ExitOrigin        string  `json:"exit_origin"`
+	Deals             int64   `json:"deals"`
+	NetPnL            float64 `json:"net_pnl"`
+	AvgPnL            float64 `json:"avg_pnl"`
+	SharePct          float64 `json:"share_pct"`
+}
+
 type DealReviewAnomalySummary struct {
 	ClosedDeals            int64                                 `json:"closed_deals"`
 	WorstSymbols           []DealReviewAnomalySymbol             `json:"worst_symbols,omitempty"`
@@ -739,6 +955,7 @@ type DealReviewAnomalySummary struct {
 	EarlyStopOutHotspots   []DealReviewAnomalyStopOut            `json:"early_stop_out_hotspots,omitempty"`
 	OversizedLossHotspots  []DealReviewAnomalySizing             `json:"oversized_loss_hotspots,omitempty"`
 	CloseReasonQuality     []DealReviewAnomalyCloseReasonQuality `json:"close_reason_quality,omitempty"`
+	ExitUncertainty        []DealReviewAnomalyExitUncertainty    `json:"exit_uncertainty,omitempty"`
 	Notes                  []string                              `json:"notes,omitempty"`
 }
 
@@ -747,8 +964,13 @@ func NewDealReviewStore(db *gorm.DB) *DealReviewStore {
 }
 
 func (s *DealReviewStore) initTables() error {
-	if err := s.db.AutoMigrate(&DealReviewCase{}, &DealReviewEvent{}, &DealReviewAIScan{}, &DealReviewStrategyVersion{}, &DealReviewChallengerCompare{}, &DealReviewCyclePointRecord{}, &DealReviewMarketPointRecord{}, &DealReviewClassifierFeedback{}, &DealReviewFilterPreset{}); err != nil {
+	if err := s.db.AutoMigrate(&DealReviewCase{}, &DealReviewEvent{}, &DealReviewAIScan{}, &DealReviewStrategyVersion{}, &DealReviewChallengerCompare{}, &DealReviewCyclePointRecord{}, &DealReviewMarketPointRecord{}, &DealReviewTrailingUpdateRecord{}, &DealReviewExitIntentRecord{}, &DealReviewClassifierFeedback{}, &DealReviewFilterPreset{}); err != nil {
 		return fmt.Errorf("failed to migrate deal review tables: %w", err)
+	}
+	if !s.db.Migrator().HasTable(&DealReviewExitIntentRecord{}) {
+		if err := s.db.AutoMigrate(&DealReviewExitIntentRecord{}); err != nil {
+			return fmt.Errorf("failed to migrate deal review exit intent table: %w", err)
+		}
 	}
 	return nil
 }
@@ -900,6 +1122,10 @@ func (s *DealReviewStore) BackfillExistingPositions() error {
 	return s.backfillExistingPositions()
 }
 
+func (s *DealReviewStore) BackfillExitAttribution() error {
+	return s.backfillExitAttribution()
+}
+
 func (s *DealReviewStore) BackfillQualityMetrics() error {
 	return s.backfillQualityMetrics()
 }
@@ -908,6 +1134,22 @@ func (s *DealReviewStore) backfillExistingPositions() error {
 	var positions []TraderPosition
 	return s.db.
 		Model(&TraderPosition{}).
+		Order("id ASC").
+		FindInBatches(&positions, 200, func(tx *gorm.DB, _ int) error {
+			for i := range positions {
+				if err := s.syncPositionTx(tx, &positions[i], false); err != nil {
+					return err
+				}
+			}
+			return nil
+		}).Error
+}
+
+func (s *DealReviewStore) backfillExitAttribution() error {
+	var positions []TraderPosition
+	return s.db.
+		Model(&TraderPosition{}).
+		Where("status = ? OR exit_time > 0", DealReviewCaseStatusClosed).
 		Order("id ASC").
 		FindInBatches(&positions, 200, func(tx *gorm.DB, _ int) error {
 			for i := range positions {
@@ -986,6 +1228,7 @@ func (s *DealReviewStore) GetCaseDetail(userID, traderID, caseID string) (*DealR
 	if err != nil {
 		return nil, err
 	}
+	hydrateDealReviewCaseJSONFields(&caseRec)
 
 	detail := &DealReviewCaseDetail{Case: caseRec}
 	var trader Trader
@@ -1043,6 +1286,164 @@ func (s *DealReviewStore) GetLatestOpenCaseBySymbol(userID, traderID, symbol, si
 	return &caseRec, nil
 }
 
+func (s *DealReviewStore) RecordTrailingStopUpdate(input *DealReviewTrailingUpdateInput) error {
+	if input == nil {
+		return fmt.Errorf("trailing stop update input cannot be nil")
+	}
+	symbol := strings.ToUpper(strings.TrimSpace(input.Symbol))
+	side := normalizeDealReviewSide(input.Side)
+	if symbol == "" || side == "" {
+		return fmt.Errorf("trailing stop update requires symbol and side")
+	}
+	if input.NewStopPrice <= 0 {
+		return fmt.Errorf("trailing stop update requires new stop price")
+	}
+	record := &DealReviewTrailingUpdateRecord{
+		UserID:               strings.TrimSpace(input.UserID),
+		TraderID:             strings.TrimSpace(input.TraderID),
+		PositionID:           input.PositionID,
+		DealID:               strings.TrimSpace(input.DealID),
+		ExchangeID:           strings.TrimSpace(input.ExchangeID),
+		Symbol:               symbol,
+		Side:                 side,
+		PreviousStopPrice:    input.PreviousStopPrice,
+		NewStopPrice:         input.NewStopPrice,
+		TakeProfitPrice:      input.TakeProfitPrice,
+		Quantity:             input.Quantity,
+		EntryPrice:           input.EntryPrice,
+		MarkPrice:            input.MarkPrice,
+		Leverage:             input.Leverage,
+		ProfitPct:            input.ProfitPct,
+		UnrealizedPnL:        input.UnrealizedPnL,
+		UnrealizedPnLPct:     input.UnrealizedPnLPct,
+		StopProfitPct:        input.StopProfitPct,
+		ProtectsBreakeven:    input.ProtectsBreakeven,
+		TierIndex:            input.TierIndex,
+		TierTriggerProfitPct: input.TierTriggerProfitPct,
+		TrailingMode:         strings.TrimSpace(input.TrailingMode),
+		LockProfitPct:        input.LockProfitPct,
+		TrailOffsetPct:       input.TrailOffsetPct,
+	}
+	if record.UserID == "" || record.TraderID == "" {
+		return fmt.Errorf("trailing stop update requires user_id and trader_id")
+	}
+	if input.Timestamp.IsZero() {
+		record.TimestampMs = time.Now().UTC().UnixMilli()
+	} else {
+		record.TimestampMs = input.Timestamp.UTC().UnixMilli()
+	}
+
+	if record.PositionID == 0 {
+		if pos, err := NewPositionStore(s.db).GetOpenPositionBySymbol(record.TraderID, symbol, side); err == nil && pos != nil {
+			record.PositionID = pos.ID
+			if record.ExchangeID == "" {
+				record.ExchangeID = pos.ExchangeID
+			}
+		} else if err != nil {
+			return err
+		}
+	}
+	if record.DealID == "" {
+		if caseRec, err := s.GetLatestOpenCaseBySymbol(record.UserID, record.TraderID, symbol, side); err == nil && caseRec != nil {
+			record.DealID = caseRec.ID
+			if record.PositionID == 0 {
+				record.PositionID = caseRec.PositionID
+			}
+			if record.ExchangeID == "" {
+				record.ExchangeID = caseRec.ExchangeID
+			}
+		} else if err != nil {
+			return err
+		}
+	}
+
+	return s.db.Create(record).Error
+}
+
+func (s *DealReviewStore) RecordExitIntent(input *DealReviewExitIntentInput) error {
+	if input == nil {
+		return fmt.Errorf("exit intent input cannot be nil")
+	}
+
+	symbol := strings.ToUpper(strings.TrimSpace(input.Symbol))
+	side := normalizeDealReviewSide(input.Side)
+	intentType := strings.TrimSpace(input.IntentType)
+	if symbol == "" || side == "" || intentType == "" {
+		return fmt.Errorf("exit intent requires symbol, side, and intent type")
+	}
+
+	record := &DealReviewExitIntentRecord{
+		ID:                  uuid.NewString(),
+		UserID:              strings.TrimSpace(input.UserID),
+		TraderID:            strings.TrimSpace(input.TraderID),
+		PositionID:          input.PositionID,
+		DealID:              strings.TrimSpace(input.DealID),
+		ExchangeID:          strings.TrimSpace(input.ExchangeID),
+		ExchangeOrderID:     strings.TrimSpace(input.ExchangeOrderID),
+		Symbol:              symbol,
+		Side:                side,
+		Action:              strings.TrimSpace(input.Action),
+		IntentType:          intentType,
+		SourceModule:        strings.TrimSpace(input.SourceModule),
+		Status:              DealReviewExitIntentStatusSubmitted,
+		Summary:             strings.TrimSpace(input.Summary),
+		Reasoning:           strings.TrimSpace(input.Reasoning),
+		DecisionCycleNumber: input.DecisionCycleNumber,
+		Confidence:          input.Confidence,
+		Quantity:            input.Quantity,
+		Price:               input.Price,
+		EntryPrice:          input.EntryPrice,
+	}
+	if record.UserID == "" || record.TraderID == "" {
+		return fmt.Errorf("exit intent requires user_id and trader_id")
+	}
+	if input.Timestamp.IsZero() {
+		record.TimestampMs = time.Now().UTC().UnixMilli()
+	} else {
+		record.TimestampMs = input.Timestamp.UTC().UnixMilli()
+	}
+
+	if record.PositionID == 0 {
+		if pos, err := NewPositionStore(s.db).GetOpenPositionBySymbol(record.TraderID, symbol, side); err == nil && pos != nil {
+			record.PositionID = pos.ID
+			if record.ExchangeID == "" {
+				record.ExchangeID = pos.ExchangeID
+			}
+		} else if err != nil {
+			return err
+		}
+	}
+	if record.DealID == "" {
+		if caseRec, err := s.GetLatestOpenCaseBySymbol(record.UserID, record.TraderID, symbol, side); err == nil && caseRec != nil {
+			record.DealID = caseRec.ID
+			if record.PositionID == 0 {
+				record.PositionID = caseRec.PositionID
+			}
+			if record.ExchangeID == "" {
+				record.ExchangeID = caseRec.ExchangeID
+			}
+		} else if err != nil {
+			return err
+		}
+	}
+
+	return s.db.Create(record).Error
+}
+
+func (s *DealReviewStore) CancelExitIntent(traderID, exchangeOrderID string) error {
+	traderID = strings.TrimSpace(traderID)
+	exchangeOrderID = strings.TrimSpace(exchangeOrderID)
+	if traderID == "" || exchangeOrderID == "" {
+		return nil
+	}
+	return s.db.Model(&DealReviewExitIntentRecord{}).
+		Where("trader_id = ? AND exchange_order_id = ? AND status = ?", traderID, exchangeOrderID, DealReviewExitIntentStatusSubmitted).
+		Updates(map[string]any{
+			"status":     DealReviewExitIntentStatusCanceled,
+			"updated_at": time.Now().UTC(),
+		}).Error
+}
+
 func (s *DealReviewStore) ListAnalysisCases(userID string, filter DealReviewListFilter, limit int) ([]DealReviewCaseDetail, *DealReviewDatasetSummary, error) {
 	if limit <= 0 {
 		limit = 200
@@ -1062,6 +1463,50 @@ func (s *DealReviewStore) ListAnalysisCases(userID string, filter DealReviewList
 		details = append(details, *detail)
 	}
 	return details, summary, nil
+}
+
+// GetFirstTrailingUpdatesByPosition returns the earliest persisted trailing-stop
+// update for each requested position inside the requested trader scope.
+func (s *DealReviewStore) GetFirstTrailingUpdatesByPosition(userID, traderID string, positionIDs []int64) (map[int64]DealReviewTrailingUpdateRecord, error) {
+	result := make(map[int64]DealReviewTrailingUpdateRecord)
+	if len(positionIDs) == 0 {
+		return result, nil
+	}
+
+	queryIDs := make([]int64, 0, len(positionIDs))
+	seen := make(map[int64]struct{}, len(positionIDs))
+	for _, positionID := range positionIDs {
+		if positionID <= 0 {
+			continue
+		}
+		if _, exists := seen[positionID]; exists {
+			continue
+		}
+		seen[positionID] = struct{}{}
+		queryIDs = append(queryIDs, positionID)
+	}
+	if len(queryIDs) == 0 {
+		return result, nil
+	}
+
+	var rows []DealReviewTrailingUpdateRecord
+	if err := s.db.
+		Where("user_id = ? AND trader_id = ? AND position_id IN ?", userID, traderID, queryIDs).
+		Order("position_id ASC, timestamp_ms ASC, id ASC").
+		Find(&rows).Error; err != nil {
+		return nil, err
+	}
+
+	for _, row := range rows {
+		if row.PositionID <= 0 {
+			continue
+		}
+		if _, exists := result[row.PositionID]; exists {
+			continue
+		}
+		result[row.PositionID] = row
+	}
+	return result, nil
 }
 
 func (s *DealReviewStore) SaveAIScan(scan *DealReviewAIScan) error {
@@ -2547,6 +2992,10 @@ func (s *DealReviewStore) GetAnomalySummary(userID string, filter DealReviewList
 		MFECapturedPctSum      float64
 		GiveBackPctSum         float64
 	}
+	type exitUncertaintyAgg struct {
+		Deals  int64
+		NetPnL float64
+	}
 
 	symbols := map[string]*symbolAgg{}
 	buckets := map[string]*bucketAgg{}
@@ -2555,6 +3004,7 @@ func (s *DealReviewStore) GetAnomalySummary(userID string, filter DealReviewList
 	stopOutSymbols := map[string]*stopOutAgg{}
 	sizingSymbols := map[string]*sizingAgg{}
 	closeReasonQuality := map[string]*closeReasonQualityAgg{}
+	exitUncertainty := map[string]*exitUncertaintyAgg{}
 
 	for _, c := range cases {
 		symbol := strings.TrimSpace(strings.ToUpper(c.Symbol))
@@ -2613,6 +3063,25 @@ func (s *DealReviewStore) GetAnomalySummary(userID string, filter DealReviewList
 		qr.ExitEfficiencyScoreSum += c.ExitEfficiencyScore
 		qr.MFECapturedPctSum += c.MFECapturedPct
 		qr.GiveBackPctSum += c.ProfitGivenBackPct
+
+		if isDealReviewExitUncertainty(c) {
+			quality := strings.TrimSpace(c.ExitReasonQuality)
+			if quality == "" {
+				quality = "unspecified"
+			}
+			origin := strings.TrimSpace(c.ExitOrigin)
+			if origin == "" {
+				origin = "unspecified"
+			}
+			key := strings.Join([]string{reason, quality, origin}, "|")
+			item := exitUncertainty[key]
+			if item == nil {
+				item = &exitUncertaintyAgg{}
+				exitUncertainty[key] = item
+			}
+			item.Deals++
+			item.NetPnL += c.RealizedPnL
+		}
 
 		if isDealReviewProfitGiveBackHotspot(c) {
 			gb := giveBackSymbols[symbol]
@@ -2802,6 +3271,44 @@ func (s *DealReviewStore) GetAnomalySummary(userID string, filter DealReviewList
 		return closeReasonQualityItems[i].AvgExitEfficiencyScore < closeReasonQualityItems[j].AvgExitEfficiencyScore
 	})
 
+	exitUncertaintyItems := make([]DealReviewAnomalyExitUncertainty, 0, len(exitUncertainty))
+	for key, agg := range exitUncertainty {
+		parts := strings.SplitN(key, "|", 3)
+		reason := "unspecified"
+		quality := "unspecified"
+		origin := "unspecified"
+		if len(parts) > 0 && strings.TrimSpace(parts[0]) != "" {
+			reason = strings.TrimSpace(parts[0])
+		}
+		if len(parts) > 1 && strings.TrimSpace(parts[1]) != "" {
+			quality = strings.TrimSpace(parts[1])
+		}
+		if len(parts) > 2 && strings.TrimSpace(parts[2]) != "" {
+			origin = strings.TrimSpace(parts[2])
+		}
+		item := DealReviewAnomalyExitUncertainty{
+			Label:             fmt.Sprintf("%s | %s", reason, quality),
+			CloseReason:       reason,
+			ExitReasonQuality: quality,
+			ExitOrigin:        origin,
+			Deals:             agg.Deals,
+			NetPnL:            agg.NetPnL,
+		}
+		if agg.Deals > 0 {
+			item.AvgPnL = agg.NetPnL / float64(agg.Deals)
+		}
+		if len(cases) > 0 {
+			item.SharePct = float64(agg.Deals) / float64(len(cases)) * 100
+		}
+		exitUncertaintyItems = append(exitUncertaintyItems, item)
+	}
+	sort.Slice(exitUncertaintyItems, func(i, j int) bool {
+		if exitUncertaintyItems[i].Deals == exitUncertaintyItems[j].Deals {
+			return exitUncertaintyItems[i].NetPnL < exitUncertaintyItems[j].NetPnL
+		}
+		return exitUncertaintyItems[i].Deals > exitUncertaintyItems[j].Deals
+	})
+
 	summary.WorstSymbols = truncateAnomalySymbols(worstSymbols, 5)
 	summary.OvertradedSymbols = truncateAnomalySymbols(overtraded, 5)
 	summary.WeakBuckets = truncateAnomalyBuckets(weakBuckets, 5)
@@ -2810,6 +3317,7 @@ func (s *DealReviewStore) GetAnomalySummary(userID string, filter DealReviewList
 	summary.EarlyStopOutHotspots = truncateAnomalyStopOuts(stopOutHotspots, 5)
 	summary.OversizedLossHotspots = truncateAnomalySizings(oversizedLossHotspots, 5)
 	summary.CloseReasonQuality = truncateAnomalyCloseReasonQualities(closeReasonQualityItems, 5)
+	summary.ExitUncertainty = truncateAnomalyExitUncertainties(exitUncertaintyItems, 5)
 	summary.Notes = buildAnomalyNotes(summary)
 	return summary, nil
 }
@@ -2836,6 +3344,9 @@ func (s *DealReviewStore) buildCaseFilterQuery(userID string, filter DealReviewL
 	}
 	if closeReason := strings.TrimSpace(filter.CloseReason); closeReason != "" {
 		query = query.Where("close_reason = ?", closeReason)
+	}
+	if exitReasonQuality := strings.TrimSpace(filter.ExitReasonQuality); exitReasonQuality != "" {
+		query = query.Where("exit_reason_quality = ?", exitReasonQuality)
 	}
 	stringFilters := map[string]string{
 		"open_trend_regime":         filter.OpenTrendRegime,
@@ -2960,6 +3471,7 @@ func (s *DealReviewStore) enrichCaseList(cases []DealReviewCase) ([]DealReviewCa
 			OpenCandidateSources: parseJSONStringSlice(c.OpenCandidateSourcesJSON),
 			PriceTimelineSummary: timelineSummaries[c.PositionID],
 		}
+		hydrateDealReviewCaseJSONFields(&item.Case)
 		if event, ok := eventMap[c.OpenEventID]; ok {
 			item.OpenReasoning = event.Reasoning
 		}
@@ -3228,23 +3740,27 @@ func (s *DealReviewStore) linkEventForPositionTx(tx *gorm.DB, stage, orderID str
 		event.Leverage = position.Leverage
 		event.OutcomePnL = caseRec.RealizedPnL
 		event.OutcomePnLPct = caseRec.RealizedPnLPct
-		closeReason, inferredBy, err := s.inferCloseReasonTx(tx, caseRec, position, event)
+		closeInference, err := s.inferCloseReasonTx(tx, caseRec, position, event)
 		if err != nil {
 			return err
 		}
-		if closeReason != "" {
-			caseRec.CloseReason = closeReason
-			event.CloseReason = closeReason
-			if shouldReplaceCloseReason(position.CloseReason, closeReason) {
-				position.CloseReason = closeReason
+		if closeInference.Reason != "" {
+			caseRec.CloseReason = closeInference.Reason
+			event.CloseReason = closeInference.Reason
+			if shouldReplaceCloseReason(position.CloseReason, closeInference.Reason) {
+				position.CloseReason = closeInference.Reason
 				if err := tx.Model(&TraderPosition{}).
 					Where("id = ?", position.ID).
-					Update("close_reason", closeReason).Error; err != nil {
+					Update("close_reason", closeInference.Reason).Error; err != nil {
 					return err
 				}
 			}
-			if inferredBy != "" && shouldReplaceSyntheticCloseReasoning(event.Reasoning) {
-				event.Reasoning = buildInferredCloseReasoning(closeReason, inferredBy)
+		}
+		applyDealReviewCloseInferenceToCase(caseRec, closeInference)
+		applyDealReviewCloseInferenceToEvent(event, closeInference)
+		if shouldReplaceSyntheticCloseReasoning(event.Reasoning) {
+			if reasoning := buildInferredCloseReasoning(closeInference); reasoning != "" {
+				event.Reasoning = reasoning
 			}
 		}
 	}
@@ -3271,35 +3787,73 @@ func (s *DealReviewStore) linkEventForPositionTx(tx *gorm.DB, stage, orderID str
 	return tx.Save(caseRec).Error
 }
 
-func (s *DealReviewStore) inferCloseReasonTx(tx *gorm.DB, caseRec *DealReviewCase, position *TraderPosition, event *DealReviewEvent) (string, string, error) {
+func (s *DealReviewStore) inferCloseReasonTx(tx *gorm.DB, caseRec *DealReviewCase, position *TraderPosition, event *DealReviewEvent) (dealReviewCloseInferenceResult, error) {
 	currentReason := normalizeCloseReason(caseRec.CloseReason)
-	if !closeReasonCanBeRefined(currentReason) {
-		return currentReason, "", nil
-	}
-
-	fallbackReason := currentReason
-	fallbackSource := ""
-
-	if reason := inferCloseReasonFromDecision(event); reason != "" {
-		return reason, "matched AI close decision context", nil
-	}
+	decisionReason := inferCloseReasonFromDecision(event)
 
 	execContext, err := s.findExitExecutionContextTx(tx, position)
 	if err != nil {
-		return currentReason, "", err
+		return dealReviewCloseInferenceResult{}, err
 	}
-	if reason := inferCloseReasonFromOrderContext(caseRec, execContext); reason != "" {
-		if normalizeCloseReason(reason) != "manual_exit" {
-			return reason, "matched synced close fill / order", nil
+	intentReason, err := s.inferCloseReasonFromExitIntentTx(tx, caseRec, position, event, execContext)
+	if err != nil {
+		return dealReviewCloseInferenceResult{}, err
+	}
+	trailingReason, err := s.inferCloseReasonFromTrailingUpdateTx(tx, caseRec, position, execContext)
+	if err != nil {
+		return dealReviewCloseInferenceResult{}, err
+	}
+	orderReason := inferCloseReasonFromOrderContext(caseRec, execContext)
+	targetReason := inferCloseReasonFromTargets(caseRec, position)
+
+	if !closeReasonCanBeRefined(currentReason) {
+		switch {
+		case currentReason != "" && currentReason == decisionReason.Reason:
+			return decisionReason, nil
+		case currentReason != "" && currentReason == intentReason.Reason:
+			return intentReason, nil
+		case currentReason != "" && currentReason == trailingReason.Reason:
+			return trailingReason, nil
+		case currentReason != "" && currentReason == orderReason.Reason:
+			return orderReason, nil
+		case currentReason != "" && currentReason == targetReason.Reason:
+			return targetReason, nil
+		case currentReason != "":
+			return buildStoredCloseInference(currentReason, event, execContext), nil
+		default:
+			return dealReviewCloseInferenceResult{}, nil
 		}
-		fallbackReason = reason
-		fallbackSource = "matched synced close fill / order"
-	}
-	if reason := inferCloseReasonFromTargets(caseRec, position); reason != "" {
-		return reason, "target proximity to stored stop-loss / take-profit", nil
 	}
 
-	return fallbackReason, fallbackSource, nil
+	if decisionReason.Reason != "" {
+		return decisionReason, nil
+	}
+	if trailingReason.Reason != "" {
+		return trailingReason, nil
+	}
+	if intentReason.Reason != "" && (orderReason.Reason == "" || normalizeCloseReason(orderReason.Reason) == "manual_exit") {
+		return intentReason, nil
+	}
+	if orderReason.Reason != "" && normalizeCloseReason(orderReason.Reason) != "manual_exit" {
+		return orderReason, nil
+	}
+	if targetReason.Reason != "" {
+		return targetReason, nil
+	}
+	if intentReason.Reason != "" {
+		return intentReason, nil
+	}
+	if orderReason.Reason != "" {
+		return orderReason, nil
+	}
+	if currentReason != "" {
+		return buildStoredCloseInference(currentReason, event, execContext), nil
+	}
+	if event != nil && event.Source == DealReviewEventSourceSync {
+		return buildExchangeSyncUnknownInference(execContext, "sync_position_without_exit_evidence"), nil
+	}
+
+	return dealReviewCloseInferenceResult{}, nil
 }
 
 func (s *DealReviewStore) findStageEventForCaseTx(tx *gorm.DB, caseRec *DealReviewCase, stage string) (*DealReviewEvent, error) {
@@ -3432,6 +3986,262 @@ func (s *DealReviewStore) findExitExecutionContextTx(tx *gorm.DB, position *Trad
 		return nil, nil
 	}
 	return ctx, nil
+}
+
+func (s *DealReviewStore) findLatestExitIntentTx(tx *gorm.DB, position *TraderPosition) (*DealReviewExitIntentRecord, string, error) {
+	if position == nil {
+		return nil, "", nil
+	}
+
+	symbol := strings.ToUpper(strings.TrimSpace(position.Symbol))
+	side := normalizeDealReviewSide(position.Side)
+
+	if exitOrderID := strings.TrimSpace(position.ExitOrderID); exitOrderID != "" {
+		var record DealReviewExitIntentRecord
+		err := tx.Model(&DealReviewExitIntentRecord{}).
+			Where("trader_id = ? AND exchange_order_id = ? AND status != ?", position.TraderID, exitOrderID, DealReviewExitIntentStatusCanceled).
+			Order("timestamp_ms DESC, created_at DESC").
+			First(&record).Error
+		switch {
+		case err == nil:
+			return &record, "exit_intent_order_match", nil
+		case err != nil && err != gorm.ErrRecordNotFound:
+			return nil, "", err
+		}
+	}
+
+	windowStart := position.EntryTime
+	if windowStart <= 0 {
+		windowStart = time.Now().UTC().Add(-24 * time.Hour).UnixMilli()
+	}
+	windowEnd := position.ExitTime
+	if windowEnd <= 0 {
+		windowEnd = time.Now().UTC().UnixMilli()
+	}
+
+	query := tx.Model(&DealReviewExitIntentRecord{}).
+		Where("trader_id = ? AND symbol = ? AND side = ? AND status != ? AND timestamp_ms >= ? AND timestamp_ms <= ?",
+			position.TraderID,
+			symbol,
+			side,
+			DealReviewExitIntentStatusCanceled,
+			windowStart,
+			windowEnd+int64(10*time.Minute/time.Millisecond),
+		)
+	if position.ID > 0 {
+		query = query.Where("(position_id = ? OR position_id = 0)", position.ID)
+	}
+
+	var record DealReviewExitIntentRecord
+	err := query.
+		Order("timestamp_ms DESC, created_at DESC").
+		First(&record).Error
+	if err == gorm.ErrRecordNotFound {
+		return nil, "", nil
+	}
+	if err != nil {
+		return nil, "", err
+	}
+	return &record, "exit_intent_time_match", nil
+}
+
+func (s *DealReviewStore) linkExitIntentTx(tx *gorm.DB, intent *DealReviewExitIntentRecord, caseRec *DealReviewCase, event *DealReviewEvent) error {
+	if tx == nil || intent == nil {
+		return nil
+	}
+	updates := map[string]any{
+		"status":     DealReviewExitIntentStatusLinked,
+		"updated_at": time.Now().UTC(),
+	}
+	if caseRec != nil {
+		updates["linked_deal_id"] = strings.TrimSpace(caseRec.ID)
+	}
+	if event != nil {
+		updates["linked_event_id"] = strings.TrimSpace(event.ID)
+	}
+	return tx.Model(&DealReviewExitIntentRecord{}).
+		Where("id = ?", intent.ID).
+		Updates(updates).Error
+}
+
+func (s *DealReviewStore) findLatestTrailingUpdateTx(tx *gorm.DB, position *TraderPosition) (*DealReviewTrailingUpdateRecord, error) {
+	if position == nil {
+		return nil, nil
+	}
+
+	query := tx.Model(&DealReviewTrailingUpdateRecord{}).
+		Where("trader_id = ? AND symbol = ? AND side = ? AND timestamp_ms >= ?",
+			position.TraderID,
+			strings.ToUpper(strings.TrimSpace(position.Symbol)),
+			normalizeDealReviewSide(position.Side),
+			position.EntryTime,
+		)
+	if position.ExitTime > 0 {
+		query = query.Where("timestamp_ms <= ?", position.ExitTime)
+	}
+
+	var record DealReviewTrailingUpdateRecord
+	err := query.
+		Order("timestamp_ms DESC, id DESC").
+		First(&record).Error
+	if err == gorm.ErrRecordNotFound {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &record, nil
+}
+
+func (s *DealReviewStore) inferCloseReasonFromExitIntentTx(tx *gorm.DB, caseRec *DealReviewCase, position *TraderPosition, event *DealReviewEvent, ctx *dealReviewExitExecutionContext) (dealReviewCloseInferenceResult, error) {
+	if position == nil || position.ExitTime <= 0 {
+		return dealReviewCloseInferenceResult{}, nil
+	}
+
+	intent, matchedBy, err := s.findLatestExitIntentTx(tx, position)
+	if err != nil || intent == nil {
+		return dealReviewCloseInferenceResult{}, err
+	}
+
+	quality := DealReviewExitReasonQualityHighConfidence
+	if matchedBy == "exit_intent_order_match" || intent.PositionID == position.ID {
+		quality = DealReviewExitReasonQualityExplicit
+	}
+
+	reason := "manual_exit"
+	origin := DealReviewExitOriginInternalExitIntent
+	switch strings.TrimSpace(intent.IntentType) {
+	case DealReviewExitIntentTypeAICloseDecision:
+		reason = "ai_exit"
+		origin = DealReviewExitOriginAIDecision
+	case DealReviewExitIntentTypeGridDecision:
+		reason = "ai_exit"
+		origin = DealReviewExitOriginAIDecision
+	case DealReviewExitIntentTypeManualUIClose:
+		origin = DealReviewExitOriginManualUIClose
+	case DealReviewExitIntentTypeDrawdownGuard, DealReviewExitIntentTypeGridEmergency, DealReviewExitIntentTypeGridBreakout:
+		origin = DealReviewExitOriginRiskGuard
+	case DealReviewExitIntentTypeGridLevelStop:
+		reason = "stop_loss"
+		origin = DealReviewExitOriginRiskGuard
+	}
+
+	evidence := buildDealReviewOrderExitEvidence(nil, nil, matchedBy)
+	if ctx != nil {
+		evidence = buildDealReviewOrderExitEvidence(ctx.Order, ctx.Fill, matchedBy)
+	}
+	evidence.IntentID = intent.ID
+	evidence.IntentType = intent.IntentType
+	evidence.IntentSourceModule = intent.SourceModule
+	evidence.IntentSummary = intent.Summary
+	evidence.IntentReasoning = intent.Reasoning
+	evidence.IntentConfidence = intent.Confidence
+	evidence.IntentCreatedAtMs = intent.TimestampMs
+	if reason == "ai_exit" {
+		evidence.DecisionCycleNumber = intent.DecisionCycleNumber
+		evidence.DecisionAction = strings.TrimSpace(intent.Action)
+	}
+	if caseRec != nil {
+		evidence.TargetStopLoss = caseRec.OpenStopLoss
+		evidence.TargetTakeProfit = caseRec.OpenTakeProfit
+	}
+
+	durationText := "shortly"
+	if position.ExitTime > intent.TimestampMs && intent.TimestampMs > 0 {
+		durationText = formatDurationMs(position.ExitTime - intent.TimestampMs)
+	}
+	summary := strings.TrimSpace(intent.Summary)
+	if summary == "" {
+		summary = fmt.Sprintf("Matched %s intent from %s before exit.", strings.ReplaceAll(intent.IntentType, "_", " "), durationText)
+	} else {
+		summary = fmt.Sprintf("%s Issued %s before exit.", summary, durationText)
+	}
+
+	if err := s.linkExitIntentTx(tx, intent, caseRec, event); err != nil {
+		return dealReviewCloseInferenceResult{}, err
+	}
+
+	return dealReviewCloseInferenceResult{
+		Reason:              reason,
+		InferredBy:          "matched persisted internal exit intent",
+		ExitOrigin:          origin,
+		ExitReasonQuality:   quality,
+		ExitEvidenceSummary: summary,
+		ExitEvidence:        evidence,
+	}, nil
+}
+
+func (s *DealReviewStore) inferCloseReasonFromTrailingUpdateTx(tx *gorm.DB, caseRec *DealReviewCase, position *TraderPosition, ctx *dealReviewExitExecutionContext) (dealReviewCloseInferenceResult, error) {
+	if position == nil || position.ExitTime <= 0 {
+		return dealReviewCloseInferenceResult{}, nil
+	}
+
+	trailingUpdate, err := s.findLatestTrailingUpdateTx(tx, position)
+	if err != nil || trailingUpdate == nil || trailingUpdate.NewStopPrice <= 0 {
+		return dealReviewCloseInferenceResult{}, err
+	}
+
+	matchPrice := position.ExitPrice
+	if ctx != nil && ctx.Order != nil && ctx.Order.StopPrice > 0 {
+		matchPrice = ctx.Order.StopPrice
+	} else if ctx != nil && ctx.Fill != nil && ctx.Fill.Price > 0 {
+		matchPrice = ctx.Fill.Price
+	}
+	if matchPrice <= 0 {
+		return dealReviewCloseInferenceResult{}, nil
+	}
+
+	if !nearlyEqualRelative(matchPrice, trailingUpdate.NewStopPrice, 0.004) {
+		return dealReviewCloseInferenceResult{}, nil
+	}
+
+	quality := DealReviewExitReasonQualityHighConfidence
+	if ctx != nil && ctx.Order != nil {
+		normalizedType := normalizeReasoningHint(ctx.Order.Type)
+		if strings.Contains(normalizedType, "stop") || ctx.Order.StopPrice > 0 {
+			quality = DealReviewExitReasonQualityExplicit
+		}
+	}
+
+	evidence := buildDealReviewOrderExitEvidence(nil, nil, "trailing_stop_update_match")
+	if ctx != nil {
+		evidence = buildDealReviewOrderExitEvidence(ctx.Order, ctx.Fill, "trailing_stop_update_match")
+	}
+	evidence.TrailingUpdateID = trailingUpdate.ID
+	evidence.PreviousStopPrice = trailingUpdate.PreviousStopPrice
+	evidence.NewStopPrice = trailingUpdate.NewStopPrice
+	evidence.TrailingMode = trailingUpdate.TrailingMode
+	evidence.TrailingTierIndex = trailingUpdate.TierIndex
+	evidence.TrailingTriggerProfitPct = trailingUpdate.TierTriggerProfitPct
+	evidence.TrailingLockProfitPct = trailingUpdate.LockProfitPct
+	evidence.TrailingOffsetPct = trailingUpdate.TrailOffsetPct
+	evidence.TrailingUpdatedAtMs = trailingUpdate.TimestampMs
+	evidence.TrailingUnrealizedPnL = trailingUpdate.UnrealizedPnL
+	evidence.TrailingUnrealizedPnLPct = trailingUpdate.UnrealizedPnLPct
+	evidence.TrailingStopProfitPct = trailingUpdate.StopProfitPct
+	evidence.TrailingProtectsBreakeven = trailingUpdate.ProtectsBreakeven
+	evidence.TargetStopLoss = caseRec.OpenStopLoss
+	evidence.TargetTakeProfit = caseRec.OpenTakeProfit
+	evidence.StopLossDistanceBps = relativeDistanceBps(matchPrice, caseRec.OpenStopLoss)
+	evidence.TakeProfitDistanceBps = relativeDistanceBps(matchPrice, caseRec.OpenTakeProfit)
+
+	summary := fmt.Sprintf(
+		"Matched close against trailing-stop update to %.8f set %s before exit.",
+		trailingUpdate.NewStopPrice,
+		formatDurationMs(position.ExitTime-trailingUpdate.TimestampMs),
+	)
+	if trailingUpdate.PreviousStopPrice > 0 {
+		summary += fmt.Sprintf(" Previous stop was %.8f.", trailingUpdate.PreviousStopPrice)
+	}
+
+	return dealReviewCloseInferenceResult{
+		Reason:              "trailing_stop",
+		InferredBy:          "matched persisted trailing-stop update",
+		ExitOrigin:          DealReviewExitOriginTrailingEngine,
+		ExitReasonQuality:   quality,
+		ExitEvidenceSummary: summary,
+		ExitEvidence:        evidence,
+	}, nil
 }
 
 func (s *DealReviewStore) createSyntheticEventTx(tx *gorm.DB, stage string, caseRec *DealReviewCase, position *TraderPosition) (*DealReviewEvent, error) {
@@ -3615,6 +4425,7 @@ func (s *DealReviewStore) buildEventDetail(traderID, eventID string) (*DealRevie
 	if err := s.db.Where("id = ? AND trader_id = ?", eventID, traderID).First(&event).Error; err != nil {
 		return nil, err
 	}
+	hydrateDealReviewEventJSONFields(&event)
 	detail := &DealReviewEventDetail{
 		Event:            &event,
 		CandidateSources: parseJSONStringSlice(event.CandidateSourcesJSON),
@@ -4541,6 +5352,13 @@ func truncateAnomalyCloseReasonQualities(items []DealReviewAnomalyCloseReasonQua
 	return items[:n]
 }
 
+func truncateAnomalyExitUncertainties(items []DealReviewAnomalyExitUncertainty, n int) []DealReviewAnomalyExitUncertainty {
+	if len(items) <= n {
+		return items
+	}
+	return items[:n]
+}
+
 func buildAnomalyNotes(summary *DealReviewAnomalySummary) []string {
 	notes := []string{}
 	if summary == nil {
@@ -4583,6 +5401,12 @@ func buildAnomalyNotes(summary *DealReviewAnomalySummary) []string {
 		notes = append(notes, fmt.Sprintf("Weakest close-quality cohort: %s exits average %.1f exit-efficiency score.",
 			summary.CloseReasonQuality[0].Reason,
 			summary.CloseReasonQuality[0].AvgExitEfficiencyScore))
+	}
+	if len(summary.ExitUncertainty) > 0 {
+		notes = append(notes, fmt.Sprintf("Largest uncertain exit cohort: %s via %s accounts for %.1f%% of closed deals.",
+			summary.ExitUncertainty[0].Label,
+			summary.ExitUncertainty[0].ExitOrigin,
+			summary.ExitUncertainty[0].SharePct))
 	}
 	return notes
 }
@@ -4627,6 +5451,17 @@ func isDealReviewEarlyStopOut(caseRec DealReviewCase) bool {
 
 func isDealReviewOversizedLoss(caseRec DealReviewCase) bool {
 	return caseRec.RealizedPnL < 0 && (caseRec.RiskSizingScore > 0 && caseRec.RiskSizingScore <= 35 || caseRec.PlannedRiskPct >= 5)
+}
+
+func isDealReviewExitUncertainty(caseRec DealReviewCase) bool {
+	reason := strings.TrimSpace(strings.ToLower(caseRec.CloseReason))
+	quality := strings.TrimSpace(caseRec.ExitReasonQuality)
+	origin := strings.TrimSpace(caseRec.ExitOrigin)
+
+	return reason == "unknown" ||
+		quality == DealReviewExitReasonQualityLowConfidence ||
+		origin == DealReviewExitOriginExchangeSyncUnknown ||
+		origin == DealReviewExitOriginSyncedCloseFill
 }
 
 func normalizeDealReviewSide(side string) string {
@@ -4818,6 +5653,9 @@ func shouldReplaceCloseReason(existing, candidate string) bool {
 	}
 
 	normalizedExisting := normalizeCloseReason(existing)
+	if normalizedExisting == "manual_exit" && normalizedCandidate == "unknown" {
+		return true
+	}
 	if normalizedExisting == normalizedCandidate {
 		return true
 	}
@@ -4851,9 +5689,9 @@ func decisionMatchesDealReview(action DecisionAction, symbol, expectedAction str
 	}
 }
 
-func inferCloseReasonFromTargets(caseRec *DealReviewCase, position *TraderPosition) string {
+func inferCloseReasonFromTargets(caseRec *DealReviewCase, position *TraderPosition) dealReviewCloseInferenceResult {
 	if caseRec == nil || position == nil || position.EntryPrice <= 0 || position.ExitPrice <= 0 {
-		return ""
+		return dealReviewCloseInferenceResult{}
 	}
 
 	const targetTolerance = 0.0075 // 0.75%
@@ -4867,76 +5705,205 @@ func inferCloseReasonFromTargets(caseRec *DealReviewCase, position *TraderPositi
 	switch side {
 	case "LONG":
 		if stopLoss > 0 && stopLoss < entryPrice && exitPrice <= stopLoss*(1+targetTolerance) {
-			return "stop_loss"
+			distanceBps := relativeDistanceBps(exitPrice, stopLoss)
+			return dealReviewCloseInferenceResult{
+				Reason:              "stop_loss",
+				InferredBy:          "target proximity to stored stop-loss / take-profit",
+				ExitOrigin:          DealReviewExitOriginTargetProximity,
+				ExitReasonQuality:   DealReviewExitReasonQualityHighConfidence,
+				ExitEvidenceSummary: fmt.Sprintf("Exit price landed %.1f bps from the stored stop loss target.", distanceBps),
+				ExitEvidence: &DealReviewExitEvidence{
+					MatchedBy:             "target_proximity",
+					TargetStopLoss:        stopLoss,
+					TargetTakeProfit:      takeProfit,
+					StopLossDistanceBps:   distanceBps,
+					TakeProfitDistanceBps: relativeDistanceBps(exitPrice, takeProfit),
+				},
+			}
 		}
 		if takeProfit > 0 && takeProfit > entryPrice && exitPrice >= takeProfit*(1-targetTolerance) {
-			return "take_profit"
+			distanceBps := relativeDistanceBps(exitPrice, takeProfit)
+			return dealReviewCloseInferenceResult{
+				Reason:              "take_profit",
+				InferredBy:          "target proximity to stored stop-loss / take-profit",
+				ExitOrigin:          DealReviewExitOriginTargetProximity,
+				ExitReasonQuality:   DealReviewExitReasonQualityHighConfidence,
+				ExitEvidenceSummary: fmt.Sprintf("Exit price landed %.1f bps from the stored take profit target.", distanceBps),
+				ExitEvidence: &DealReviewExitEvidence{
+					MatchedBy:             "target_proximity",
+					TargetStopLoss:        stopLoss,
+					TargetTakeProfit:      takeProfit,
+					StopLossDistanceBps:   relativeDistanceBps(exitPrice, stopLoss),
+					TakeProfitDistanceBps: distanceBps,
+				},
+			}
 		}
 	case "SHORT":
 		if stopLoss > 0 && stopLoss > entryPrice && exitPrice >= stopLoss*(1-targetTolerance) {
-			return "stop_loss"
+			distanceBps := relativeDistanceBps(exitPrice, stopLoss)
+			return dealReviewCloseInferenceResult{
+				Reason:              "stop_loss",
+				InferredBy:          "target proximity to stored stop-loss / take-profit",
+				ExitOrigin:          DealReviewExitOriginTargetProximity,
+				ExitReasonQuality:   DealReviewExitReasonQualityHighConfidence,
+				ExitEvidenceSummary: fmt.Sprintf("Exit price landed %.1f bps from the stored stop loss target.", distanceBps),
+				ExitEvidence: &DealReviewExitEvidence{
+					MatchedBy:             "target_proximity",
+					TargetStopLoss:        stopLoss,
+					TargetTakeProfit:      takeProfit,
+					StopLossDistanceBps:   distanceBps,
+					TakeProfitDistanceBps: relativeDistanceBps(exitPrice, takeProfit),
+				},
+			}
 		}
 		if takeProfit > 0 && takeProfit < entryPrice && exitPrice <= takeProfit*(1+targetTolerance) {
-			return "take_profit"
+			distanceBps := relativeDistanceBps(exitPrice, takeProfit)
+			return dealReviewCloseInferenceResult{
+				Reason:              "take_profit",
+				InferredBy:          "target proximity to stored stop-loss / take-profit",
+				ExitOrigin:          DealReviewExitOriginTargetProximity,
+				ExitReasonQuality:   DealReviewExitReasonQualityHighConfidence,
+				ExitEvidenceSummary: fmt.Sprintf("Exit price landed %.1f bps from the stored take profit target.", distanceBps),
+				ExitEvidence: &DealReviewExitEvidence{
+					MatchedBy:             "target_proximity",
+					TargetStopLoss:        stopLoss,
+					TargetTakeProfit:      takeProfit,
+					StopLossDistanceBps:   relativeDistanceBps(exitPrice, stopLoss),
+					TakeProfitDistanceBps: distanceBps,
+				},
+			}
 		}
 	}
 
-	return ""
+	return dealReviewCloseInferenceResult{}
 }
 
-func inferCloseReasonFromDecision(event *DealReviewEvent) string {
+func inferCloseReasonFromDecision(event *DealReviewEvent) dealReviewCloseInferenceResult {
 	if event == nil {
-		return ""
+		return dealReviewCloseInferenceResult{}
 	}
 	if event.DecisionCycleNumber <= 0 && event.Source != DealReviewEventSourceAIDecision {
-		return ""
+		return dealReviewCloseInferenceResult{}
 	}
 
 	reasoning := strings.TrimSpace(event.Reasoning)
 	if reasoning == "" || strings.HasPrefix(reasoning, "Position closed via synced exchange event") {
-		return ""
+		return dealReviewCloseInferenceResult{}
 	}
 
+	result := dealReviewCloseInferenceResult{
+		Reason:            "ai_exit",
+		InferredBy:        "matched AI close decision context",
+		ExitOrigin:        DealReviewExitOriginAIDecision,
+		ExitReasonQuality: DealReviewExitReasonQualityExplicit,
+		ExitEvidence: &DealReviewExitEvidence{
+			MatchedBy:           "ai_close_decision",
+			DecisionCycleNumber: event.DecisionCycleNumber,
+			DecisionAction:      strings.TrimSpace(event.Action),
+		},
+	}
 	normalized := normalizeReasoningHint(reasoning + " " + event.Action)
 	switch {
 	case strings.Contains(normalized, "trailing stop"):
-		return "trailing_stop"
+		result.Reason = "trailing_stop"
 	case strings.Contains(normalized, "stop loss"), strings.Contains(normalized, "stop hit"):
-		return "stop_loss"
+		result.Reason = "stop_loss"
 	case strings.Contains(normalized, "take profit"), strings.Contains(normalized, "profit take"):
-		return "take_profit"
-	default:
-		return "ai_exit"
+		result.Reason = "take_profit"
 	}
+	if result.ExitEvidence != nil && result.ExitEvidence.DecisionAction == "" {
+		result.ExitEvidence.DecisionAction = strings.TrimSpace(event.Action)
+	}
+	result.ExitEvidenceSummary = fmt.Sprintf(
+		"Matched AI close decision cycle %d (%s).",
+		event.DecisionCycleNumber,
+		strings.TrimSpace(event.Action),
+	)
+	return result
 }
 
-func inferCloseReasonFromOrderContext(caseRec *DealReviewCase, ctx *dealReviewExitExecutionContext) string {
+func inferCloseReasonFromOrderContext(caseRec *DealReviewCase, ctx *dealReviewExitExecutionContext) dealReviewCloseInferenceResult {
 	if ctx == nil {
-		return ""
+		return dealReviewCloseInferenceResult{}
 	}
 
 	if ctx.Order != nil {
-		if priceReason := inferCloseReasonFromTriggerPrice(caseRec, ctx.Order.StopPrice); priceReason != "" {
-			return priceReason
+		typeHint := dealReviewOrderTypeHint(ctx.Order)
+		orderTypeLabel := strings.TrimSpace(ctx.Order.Type)
+		if orderTypeLabel == "" {
+			orderTypeLabel = "trigger"
 		}
-		typeHint := normalizeReasoningHint(ctx.Order.Type + " " + ctx.Order.ClientOrderID)
-		switch {
-		case strings.Contains(typeHint, "trailing stop"), strings.Contains(typeHint, "trailingstop"):
-			return "trailing_stop"
-		case strings.Contains(typeHint, "take profit"), strings.Contains(typeHint, "takeprofit"):
-			return "take_profit"
-		case strings.Contains(typeHint, "stop loss"), strings.Contains(typeHint, "stoploss"), strings.Contains(typeHint, "stop market"), strings.Contains(typeHint, "stop order"):
-			return "stop_loss"
-		case strings.HasPrefix(strings.ToLower(strings.TrimSpace(ctx.Order.OrderAction)), "close_"):
-			return "manual_exit"
+		explicitReason := classifyDealReviewTriggerOrderSubtype(ctx.Order)
+		triggerOrderLike := explicitReason != "" ||
+			strings.Contains(typeHint, "stop") ||
+			strings.Contains(typeHint, "take profit") ||
+			strings.Contains(typeHint, "takeprofit") ||
+			strings.Contains(typeHint, "trigger") ||
+			ctx.Order.StopPrice > 0
+
+		if explicitReason != "" {
+			return dealReviewCloseInferenceResult{
+				Reason:              explicitReason,
+				InferredBy:          "matched synced close fill / order",
+				ExitOrigin:          DealReviewExitOriginSyncedTriggerOrder,
+				ExitReasonQuality:   DealReviewExitReasonQualityExplicit,
+				ExitEvidenceSummary: fmt.Sprintf("Matched filled %s trigger order.", orderTypeLabel),
+				ExitEvidence:        buildDealReviewOrderExitEvidence(ctx.Order, ctx.Fill, "matched_exit_order"),
+			}
+		}
+		if triggerOrderLike {
+			triggerMatchPrice := resolveDealReviewStopMatchPrice(ctx)
+			if priceReason := inferCloseReasonFromTriggerPrice(caseRec, triggerMatchPrice); priceReason != "" {
+				return dealReviewCloseInferenceResult{
+					Reason:              priceReason,
+					InferredBy:          "matched synced close fill / order",
+					ExitOrigin:          DealReviewExitOriginSyncedTriggerOrder,
+					ExitReasonQuality:   DealReviewExitReasonQualityHighConfidence,
+					ExitEvidenceSummary: fmt.Sprintf("Matched filled %s trigger order at %.8f near the stored %s target.", orderTypeLabel, triggerMatchPrice, formatDealReviewTargetName(priceReason)),
+					ExitEvidence:        buildDealReviewOrderExitEvidence(ctx.Order, ctx.Fill, "matched_trigger_price"),
+				}
+			}
+			if trailingReason := inferCloseReasonFromMovedStopOrder(caseRec, ctx, orderTypeLabel); trailingReason.Reason != "" {
+				return trailingReason
+			}
+			if genericStopReason := inferCloseReasonFromGenericStopOrder(caseRec, ctx, orderTypeLabel); genericStopReason.Reason != "" {
+				return genericStopReason
+			}
+			if strings.Contains(typeHint, "stop order") || strings.EqualFold(strings.TrimSpace(ctx.Order.Type), "Stop") || ctx.Order.StopPrice > 0 {
+				return dealReviewCloseInferenceResult{
+					Reason:              "unknown",
+					InferredBy:          "matched synced close fill / order",
+					ExitOrigin:          DealReviewExitOriginSyncedTriggerOrder,
+					ExitReasonQuality:   DealReviewExitReasonQualityLowConfidence,
+					ExitEvidenceSummary: fmt.Sprintf("Matched filled generic %s trigger order, but the exchange subtype could not be tied to a stored stop loss / take profit target or trailing-stop update.", orderTypeLabel),
+					ExitEvidence:        buildDealReviewOrderExitEvidence(ctx.Order, ctx.Fill, "matched_exit_order"),
+				}
+			}
+		}
+		if strings.Contains(typeHint, "market") || strings.EqualFold(strings.TrimSpace(ctx.Order.Type), "Market") || strings.HasPrefix(strings.ToLower(strings.TrimSpace(ctx.Order.OrderAction)), "close_") {
+			return dealReviewCloseInferenceResult{
+				Reason:              "manual_exit",
+				InferredBy:          "matched synced close fill / order",
+				ExitOrigin:          DealReviewExitOriginSyncedMarketOrder,
+				ExitReasonQuality:   DealReviewExitReasonQualityHighConfidence,
+				ExitEvidenceSummary: fmt.Sprintf("Matched filled %s close order.", orderTypeLabel),
+				ExitEvidence:        buildDealReviewOrderExitEvidence(ctx.Order, ctx.Fill, "matched_exit_order"),
+			}
 		}
 	}
 
 	if ctx.Fill != nil && strings.TrimSpace(ctx.Fill.ExchangeOrderID) != "" {
-		return "manual_exit"
+		return dealReviewCloseInferenceResult{
+			Reason:              "unknown",
+			InferredBy:          "matched synced close fill / order",
+			ExitOrigin:          DealReviewExitOriginSyncedCloseFill,
+			ExitReasonQuality:   DealReviewExitReasonQualityLowConfidence,
+			ExitEvidenceSummary: "Matched synced close fill without a typed trigger order.",
+			ExitEvidence:        buildDealReviewOrderExitEvidence(nil, ctx.Fill, "matched_close_fill"),
+		}
 	}
 
-	return ""
+	return dealReviewCloseInferenceResult{}
 }
 
 func inferCloseReasonFromTriggerPrice(caseRec *DealReviewCase, triggerPrice float64) string {
@@ -4955,6 +5922,188 @@ func inferCloseReasonFromTriggerPrice(caseRec *DealReviewCase, triggerPrice floa
 	return ""
 }
 
+func inferCloseReasonFromMovedStopOrder(caseRec *DealReviewCase, ctx *dealReviewExitExecutionContext, orderTypeLabel string) dealReviewCloseInferenceResult {
+	matchPrice := resolveDealReviewStopMatchPrice(ctx)
+	if caseRec == nil || ctx == nil || ctx.Order == nil || matchPrice <= 0 {
+		return dealReviewCloseInferenceResult{}
+	}
+	if !isMovedTrailingStopPrice(caseRec, matchPrice) {
+		return dealReviewCloseInferenceResult{}
+	}
+
+	evidence := buildDealReviewOrderExitEvidence(ctx.Order, ctx.Fill, "matched_moved_stop_order")
+	evidence.TargetStopLoss = caseRec.OpenStopLoss
+	evidence.TargetTakeProfit = caseRec.OpenTakeProfit
+	evidence.PreviousStopPrice = caseRec.OpenStopLoss
+	evidence.NewStopPrice = matchPrice
+	evidence.StopLossDistanceBps = relativeDistanceBps(matchPrice, caseRec.OpenStopLoss)
+	evidence.TakeProfitDistanceBps = relativeDistanceBps(matchPrice, caseRec.OpenTakeProfit)
+
+	summary := fmt.Sprintf(
+		"Matched filled %s trigger order at %.8f after the stored stop moved favorably from %.8f; classifying the exit as trailing stop.",
+		orderTypeLabel,
+		matchPrice,
+		caseRec.OpenStopLoss,
+	)
+	if !stopPriceProtectsProfit(caseRec, matchPrice) {
+		summary += " The tightened stop was still on the loss side of entry."
+	}
+
+	return dealReviewCloseInferenceResult{
+		Reason:              "trailing_stop",
+		InferredBy:          "matched synced close fill / order",
+		ExitOrigin:          DealReviewExitOriginTrailingEngine,
+		ExitReasonQuality:   DealReviewExitReasonQualityHighConfidence,
+		ExitEvidenceSummary: summary,
+		ExitEvidence:        evidence,
+	}
+}
+
+func inferCloseReasonFromGenericStopOrder(caseRec *DealReviewCase, ctx *dealReviewExitExecutionContext, orderTypeLabel string) dealReviewCloseInferenceResult {
+	matchPrice := resolveDealReviewStopMatchPrice(ctx)
+	if caseRec == nil || ctx == nil || ctx.Order == nil || matchPrice <= 0 {
+		return dealReviewCloseInferenceResult{}
+	}
+
+	evidence := buildDealReviewOrderExitEvidence(ctx.Order, ctx.Fill, "matched_generic_stop_heuristic")
+	evidence.TargetStopLoss = caseRec.OpenStopLoss
+	evidence.TargetTakeProfit = caseRec.OpenTakeProfit
+	evidence.StopLossDistanceBps = relativeDistanceBps(matchPrice, caseRec.OpenStopLoss)
+	evidence.TakeProfitDistanceBps = relativeDistanceBps(matchPrice, caseRec.OpenTakeProfit)
+
+	switch {
+	case stopPriceOnLossSide(caseRec, matchPrice):
+		summary := fmt.Sprintf(
+			"Matched generic %s trigger order at %.8f on the loss side of entry; classifying the exit as stop loss.",
+			orderTypeLabel,
+			matchPrice,
+		)
+		if caseRec.OpenStopLoss > 0 {
+			summary += fmt.Sprintf(" Stored initial stop was %.8f.", caseRec.OpenStopLoss)
+		}
+		return dealReviewCloseInferenceResult{
+			Reason:              "stop_loss",
+			InferredBy:          "matched synced close fill / order",
+			ExitOrigin:          DealReviewExitOriginSyncedTriggerOrder,
+			ExitReasonQuality:   DealReviewExitReasonQualityHighConfidence,
+			ExitEvidenceSummary: summary,
+			ExitEvidence:        evidence,
+		}
+	case stopPriceProtectsProfit(caseRec, matchPrice):
+		return dealReviewCloseInferenceResult{
+			Reason:              "trailing_stop",
+			InferredBy:          "matched synced close fill / order",
+			ExitOrigin:          DealReviewExitOriginTrailingEngine,
+			ExitReasonQuality:   DealReviewExitReasonQualityHighConfidence,
+			ExitEvidenceSummary: fmt.Sprintf("Matched generic %s trigger order at %.8f on the profit side of entry; classifying the exit as trailing protection.", orderTypeLabel, matchPrice),
+			ExitEvidence:        evidence,
+		}
+	default:
+		return dealReviewCloseInferenceResult{}
+	}
+}
+
+func isMovedTrailingStopPrice(caseRec *DealReviewCase, stopPrice float64) bool {
+	if caseRec == nil || stopPrice <= 0 || caseRec.OpenStopLoss <= 0 || caseRec.EntryPrice <= 0 {
+		return false
+	}
+
+	switch normalizeDealReviewSide(caseRec.Side) {
+	case "LONG":
+		return stopPrice > caseRec.OpenStopLoss &&
+			!nearlyEqualRelative(stopPrice, caseRec.OpenStopLoss, 0.001)
+	case "SHORT":
+		return stopPrice < caseRec.OpenStopLoss &&
+			!nearlyEqualRelative(stopPrice, caseRec.OpenStopLoss, 0.001)
+	default:
+		return false
+	}
+}
+
+func resolveDealReviewStopMatchPrice(ctx *dealReviewExitExecutionContext) float64 {
+	if ctx == nil {
+		return 0
+	}
+	if ctx.Order != nil {
+		if ctx.Order.StopPrice > 0 {
+			return ctx.Order.StopPrice
+		}
+		if ctx.Order.AvgFillPrice > 0 {
+			return ctx.Order.AvgFillPrice
+		}
+	}
+	if ctx.Fill != nil && ctx.Fill.Price > 0 {
+		return ctx.Fill.Price
+	}
+	return 0
+}
+
+func stopPriceOnLossSide(caseRec *DealReviewCase, stopPrice float64) bool {
+	if caseRec == nil || stopPrice <= 0 || caseRec.EntryPrice <= 0 {
+		return false
+	}
+	switch normalizeDealReviewSide(caseRec.Side) {
+	case "LONG":
+		return stopPrice <= caseRec.EntryPrice
+	case "SHORT":
+		return stopPrice >= caseRec.EntryPrice
+	default:
+		return false
+	}
+}
+
+func stopPriceProtectsProfit(caseRec *DealReviewCase, stopPrice float64) bool {
+	if caseRec == nil || stopPrice <= 0 || caseRec.EntryPrice <= 0 {
+		return false
+	}
+	switch normalizeDealReviewSide(caseRec.Side) {
+	case "LONG":
+		return stopPrice > caseRec.EntryPrice
+	case "SHORT":
+		return stopPrice < caseRec.EntryPrice
+	default:
+		return false
+	}
+}
+
+func buildDealReviewOrderExitEvidence(order *TraderOrder, fill *TraderFill, matchedBy string) *DealReviewExitEvidence {
+	evidence := &DealReviewExitEvidence{
+		MatchedBy: matchedBy,
+	}
+	if order != nil {
+		evidence.OrderType = strings.TrimSpace(order.Type)
+		evidence.VenueOrderType = strings.TrimSpace(order.VenueOrderType)
+		evidence.TriggerSubtype = strings.TrimSpace(order.TriggerSubtype)
+		evidence.TriggerSource = strings.TrimSpace(order.TriggerSource)
+		evidence.OrderAction = strings.TrimSpace(order.OrderAction)
+		evidence.OrderStatus = strings.TrimSpace(order.Status)
+		evidence.ClientOrderID = strings.TrimSpace(order.ClientOrderID)
+		evidence.ExchangeOrderID = strings.TrimSpace(order.ExchangeOrderID)
+		evidence.TriggerPrice = order.StopPrice
+		evidence.OrderPrice = order.Price
+		evidence.ReduceOnly = order.ReduceOnly
+		evidence.ClosePosition = order.ClosePosition
+		if order.AvgFillPrice > 0 {
+			evidence.FillPrice = order.AvgFillPrice
+		}
+		if order.FilledQuantity > 0 {
+			evidence.FillQuantity = order.FilledQuantity
+		}
+	}
+	if fill != nil {
+		if evidence.ExchangeOrderID == "" {
+			evidence.ExchangeOrderID = strings.TrimSpace(fill.ExchangeOrderID)
+		}
+		if fill.Price > 0 {
+			evidence.FillPrice = fill.Price
+		}
+		if fill.Quantity > 0 {
+			evidence.FillQuantity = fill.Quantity
+		}
+	}
+	return evidence
+}
+
 func nearlyEqualRelative(left, right, tolerance float64) bool {
 	if left <= 0 || right <= 0 {
 		return false
@@ -4967,10 +6116,81 @@ func nearlyEqualRelative(left, right, tolerance float64) bool {
 	return diff/base <= tolerance
 }
 
+func relativeDistanceBps(left, right float64) float64 {
+	if left <= 0 || right <= 0 {
+		return 0
+	}
+	return math.Abs(left-right) / math.Max(math.Abs(left), math.Abs(right)) * 10000
+}
+
 func normalizeReasoningHint(value string) string {
 	normalized := strings.ToLower(strings.TrimSpace(value))
 	replacer := strings.NewReplacer("_", " ", "-", " ", ",", " ", ";", " ", ".", " ", ":", " ", "(", " ", ")", " ")
 	return replacer.Replace(normalized)
+}
+
+func dealReviewOrderTypeHint(order *TraderOrder) string {
+	if order == nil {
+		return ""
+	}
+	parts := []string{
+		strings.TrimSpace(order.Type),
+		strings.TrimSpace(order.VenueOrderType),
+		strings.TrimSpace(order.TriggerSubtype),
+		strings.TrimSpace(order.TriggerSource),
+		strings.TrimSpace(order.ClientOrderID),
+	}
+	return normalizeReasoningHint(strings.Join(parts, " "))
+}
+
+func classifyDealReviewTriggerOrderSubtype(order *TraderOrder) string {
+	typeHint := dealReviewOrderTypeHint(order)
+	switch {
+	case strings.Contains(typeHint, "trailing stop"), strings.Contains(typeHint, "trailingstop"):
+		return "trailing_stop"
+	case strings.Contains(typeHint, "take profit"), strings.Contains(typeHint, "takeprofit"), strings.Contains(typeHint, "partialtakeprofit"):
+		return "take_profit"
+	case strings.Contains(typeHint, "stop loss"), strings.Contains(typeHint, "stoploss"):
+		return "stop_loss"
+	default:
+		return ""
+	}
+}
+
+func buildExchangeSyncUnknownInference(ctx *dealReviewExitExecutionContext, matchedBy string) dealReviewCloseInferenceResult {
+	summary := "Position closed via synced exchange event, but no linked order, fill, trigger subtype, target match, or internal exit intent could identify the exit condition."
+	if ctx != nil {
+		switch {
+		case ctx.Order != nil && ctx.Fill != nil:
+			summary = "Matched synced close order/fill, but the exchange data still does not reveal whether the exit was stop loss, take profit, trailing protection, or a manual close."
+		case ctx.Order != nil:
+			summary = "Matched synced close order, but the exchange data still does not reveal the actual exit condition."
+		case ctx.Fill != nil:
+			summary = "Matched synced close fill, but there is no typed trigger order or internal exit intent linked to it."
+		}
+	}
+	return dealReviewCloseInferenceResult{
+		Reason:              "unknown",
+		InferredBy:          "synced exchange event without decisive exit evidence",
+		ExitOrigin:          DealReviewExitOriginExchangeSyncUnknown,
+		ExitReasonQuality:   DealReviewExitReasonQualityLowConfidence,
+		ExitEvidenceSummary: summary,
+		ExitEvidence:        buildDealReviewOrderExitEvidence(nilIfNoOrder(ctx), nilIfNoFill(ctx), matchedBy),
+	}
+}
+
+func nilIfNoOrder(ctx *dealReviewExitExecutionContext) *TraderOrder {
+	if ctx == nil {
+		return nil
+	}
+	return ctx.Order
+}
+
+func nilIfNoFill(ctx *dealReviewExitExecutionContext) *TraderFill {
+	if ctx == nil {
+		return nil
+	}
+	return ctx.Fill
 }
 
 func shouldReplaceSyntheticCloseReasoning(reasoning string) bool {
@@ -4978,11 +6198,158 @@ func shouldReplaceSyntheticCloseReasoning(reasoning string) bool {
 	return trimmed == "" || strings.HasPrefix(trimmed, "Position closed via synced exchange event")
 }
 
-func buildInferredCloseReasoning(reason, detail string) string {
-	if detail == "" {
-		return fmt.Sprintf("Position closed via synced exchange event (%s).", reason)
+func buildStoredCloseInference(currentReason string, event *DealReviewEvent, ctx *dealReviewExitExecutionContext) dealReviewCloseInferenceResult {
+	if event != nil && event.Source == DealReviewEventSourceAIDecision && event.DecisionCycleNumber > 0 && normalizeCloseReason(currentReason) == "ai_exit" {
+		return dealReviewCloseInferenceResult{
+			Reason:              currentReason,
+			InferredBy:          "stored close reason from matched AI close decision",
+			ExitOrigin:          DealReviewExitOriginAIDecision,
+			ExitReasonQuality:   DealReviewExitReasonQualityExplicit,
+			ExitEvidenceSummary: fmt.Sprintf("Using stored close reason from AI close decision cycle %d.", event.DecisionCycleNumber),
+			ExitEvidence: &DealReviewExitEvidence{
+				MatchedBy:           "stored_close_reason",
+				DecisionCycleNumber: event.DecisionCycleNumber,
+				DecisionAction:      strings.TrimSpace(event.Action),
+			},
+		}
 	}
-	return fmt.Sprintf("Position closed via synced exchange event (%s, inferred from %s).", reason, detail)
+
+	if normalized := normalizeCloseReason(currentReason); normalized == "" || normalized == "unknown" || normalized == "sync" || normalized == "manual_exit" {
+		return buildExchangeSyncUnknownInference(ctx, "stored_close_reason_fallback")
+	}
+
+	result := dealReviewCloseInferenceResult{
+		Reason:              currentReason,
+		ExitOrigin:          DealReviewExitOriginStoredPositionReason,
+		ExitReasonQuality:   DealReviewExitReasonQualityLowConfidence,
+		ExitEvidenceSummary: "Using the stored position close reason because no stronger linked exit evidence was found yet.",
+	}
+	if ctx != nil {
+		if ctx.Order != nil || ctx.Fill != nil {
+			result.ExitEvidenceSummary = "Using the stored position close reason; a synced exit order/fill exists but does not identify the trigger type clearly."
+			result.ExitEvidence = buildDealReviewOrderExitEvidence(ctx.Order, ctx.Fill, "stored_close_reason_fallback")
+		}
+	}
+	return result
+}
+
+func applyDealReviewCloseInferenceToCase(caseRec *DealReviewCase, inference dealReviewCloseInferenceResult) {
+	if caseRec == nil {
+		return
+	}
+	caseRec.ExitOrigin = strings.TrimSpace(inference.ExitOrigin)
+	caseRec.ExitReasonQuality = strings.TrimSpace(inference.ExitReasonQuality)
+	caseRec.ExitEvidenceSummary = strings.TrimSpace(inference.ExitEvidenceSummary)
+	caseRec.ExitEvidence = inference.ExitEvidence
+	caseRec.ExitEvidenceJSON = marshalDealReviewExitEvidence(inference.ExitEvidence)
+}
+
+func applyDealReviewCloseInferenceToEvent(event *DealReviewEvent, inference dealReviewCloseInferenceResult) {
+	if event == nil {
+		return
+	}
+	event.ExitOrigin = strings.TrimSpace(inference.ExitOrigin)
+	event.ExitReasonQuality = strings.TrimSpace(inference.ExitReasonQuality)
+	event.ExitEvidenceSummary = strings.TrimSpace(inference.ExitEvidenceSummary)
+	event.ExitEvidence = inference.ExitEvidence
+	event.ExitEvidenceJSON = marshalDealReviewExitEvidence(inference.ExitEvidence)
+}
+
+func marshalDealReviewExitEvidence(evidence *DealReviewExitEvidence) string {
+	if evidence == nil {
+		return "{}"
+	}
+	raw, err := json.Marshal(evidence)
+	if err != nil || len(raw) == 0 || string(raw) == "null" {
+		return "{}"
+	}
+	return string(raw)
+}
+
+func parseDealReviewExitEvidence(raw string) *DealReviewExitEvidence {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" || trimmed == "{}" {
+		return nil
+	}
+	var evidence DealReviewExitEvidence
+	if err := json.Unmarshal([]byte(trimmed), &evidence); err != nil {
+		return nil
+	}
+	return &evidence
+}
+
+func hydrateDealReviewCaseJSONFields(caseRec *DealReviewCase) {
+	if caseRec == nil {
+		return
+	}
+	caseRec.ExitEvidence = parseDealReviewExitEvidence(caseRec.ExitEvidenceJSON)
+}
+
+func hydrateDealReviewEventJSONFields(event *DealReviewEvent) {
+	if event == nil {
+		return
+	}
+	event.ExitEvidence = parseDealReviewExitEvidence(event.ExitEvidenceJSON)
+}
+
+func formatDealReviewTargetName(reason string) string {
+	switch normalizeCloseReason(reason) {
+	case "stop_loss":
+		return "stop loss"
+	case "take_profit":
+		return "take profit"
+	case "trailing_stop":
+		return "trailing stop"
+	default:
+		return strings.ReplaceAll(normalizeCloseReason(reason), "_", " ")
+	}
+}
+
+func humanizeDealReviewExitOrigin(origin string) string {
+	switch strings.TrimSpace(origin) {
+	case DealReviewExitOriginAIDecision:
+		return "AI decision"
+	case DealReviewExitOriginSyncedTriggerOrder:
+		return "synced trigger order"
+	case DealReviewExitOriginSyncedMarketOrder:
+		return "synced market order"
+	case DealReviewExitOriginSyncedCloseFill:
+		return "synced close fill"
+	case DealReviewExitOriginTargetProximity:
+		return "target proximity"
+	case DealReviewExitOriginTrailingEngine:
+		return "trailing engine"
+	case DealReviewExitOriginManualUIClose:
+		return "manual UI close"
+	case DealReviewExitOriginRiskGuard:
+		return "risk guard"
+	case DealReviewExitOriginInternalExitIntent:
+		return "internal exit intent"
+	case DealReviewExitOriginStoredPositionReason:
+		return "stored position reason"
+	case DealReviewExitOriginExchangeSyncUnknown:
+		return "synced exchange event"
+	default:
+		return "synced exchange event"
+	}
+}
+
+func buildInferredCloseReasoning(inference dealReviewCloseInferenceResult) string {
+	reason := normalizeCloseReason(inference.Reason)
+	if reason == "" {
+		return ""
+	}
+	base := fmt.Sprintf("Position closed via %s (%s).", humanizeDealReviewExitOrigin(inference.ExitOrigin), reason)
+	if quality := strings.TrimSpace(inference.ExitReasonQuality); quality != "" {
+		base = strings.TrimSuffix(base, ".") + fmt.Sprintf(" Confidence: %s.", quality)
+	}
+	if summary := strings.TrimSpace(inference.ExitEvidenceSummary); summary != "" {
+		return base + " Evidence: " + strings.TrimSpace(summary)
+	}
+	if detail := strings.TrimSpace(inference.InferredBy); detail != "" {
+		return strings.TrimSuffix(base, ".") + fmt.Sprintf(" Evidence: inferred from %s.", detail)
+	}
+	return base
 }
 
 func classifyDealOutcome(realizedPnL float64) string {

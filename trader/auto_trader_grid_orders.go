@@ -5,6 +5,7 @@ import (
 	"math"
 	"nofx/kernel"
 	"nofx/logger"
+	"nofx/store"
 	"time"
 )
 
@@ -342,11 +343,25 @@ func (at *AutoTrader) closeAllPositions() error {
 		if size == 0 {
 			continue
 		}
+		entryPrice, _ := pos["entryPrice"].(float64)
+		markPrice, _ := pos["markPrice"].(float64)
 
 		if size > 0 {
-			_, err = at.trader.CloseLong(symbol, size)
+			order, closeErr := at.trader.CloseLong(symbol, size)
+			if closeErr == nil {
+				summary := "Matched grid breakout close-all after confirmed long-box breakout."
+				reasoning := "Confirmed long-box breakout paused the grid, canceled orders, and flattened the remaining long position."
+				at.recordSystemExitIntent(order, symbol, "LONG", store.DealReviewExitIntentTypeGridBreakout, "trader.auto_trader_grid_regime", summary, reasoning, size, markPrice, entryPrice)
+			}
+			err = closeErr
 		} else {
-			_, err = at.trader.CloseShort(symbol, -size)
+			order, closeErr := at.trader.CloseShort(symbol, -size)
+			if closeErr == nil {
+				summary := "Matched grid breakout close-all after confirmed long-box breakout."
+				reasoning := "Confirmed long-box breakout paused the grid, canceled orders, and flattened the remaining short position."
+				at.recordSystemExitIntent(order, symbol, "SHORT", store.DealReviewExitIntentTypeGridBreakout, "trader.auto_trader_grid_regime", summary, reasoning, -size, markPrice, entryPrice)
+			}
+			err = closeErr
 		}
 		if err != nil {
 			logger.Infof("Failed to close position: %v", err)
@@ -396,9 +411,21 @@ func (at *AutoTrader) checkAndExecuteStopLoss() {
 			// Close the position
 			var closeErr error
 			if level.Side == "buy" {
-				_, closeErr = at.trader.CloseLong(gridConfig.Symbol, level.PositionSize)
+				order, orderErr := at.trader.CloseLong(gridConfig.Symbol, level.PositionSize)
+				closeErr = orderErr
+				if closeErr == nil {
+					summary := fmt.Sprintf("Matched grid level stop-loss for level %d after %.2f%% loss.", i, lossPct)
+					reasoning := fmt.Sprintf("Grid stop-loss checker closed the long level after entry %.8f moved to %.8f (loss %.2f%%).", level.PositionEntry, currentPrice, lossPct)
+					at.recordSystemExitIntent(order, gridConfig.Symbol, "LONG", store.DealReviewExitIntentTypeGridLevelStop, "trader.auto_trader_grid_orders", summary, reasoning, level.PositionSize, currentPrice, level.PositionEntry)
+				}
 			} else {
-				_, closeErr = at.trader.CloseShort(gridConfig.Symbol, level.PositionSize)
+				order, orderErr := at.trader.CloseShort(gridConfig.Symbol, level.PositionSize)
+				closeErr = orderErr
+				if closeErr == nil {
+					summary := fmt.Sprintf("Matched grid level stop-loss for level %d after %.2f%% loss.", i, lossPct)
+					reasoning := fmt.Sprintf("Grid stop-loss checker closed the short level after entry %.8f moved to %.8f (loss %.2f%%).", level.PositionEntry, currentPrice, lossPct)
+					at.recordSystemExitIntent(order, gridConfig.Symbol, "SHORT", store.DealReviewExitIntentTypeGridLevelStop, "trader.auto_trader_grid_orders", summary, reasoning, level.PositionSize, currentPrice, level.PositionEntry)
+				}
 			}
 
 			if closeErr != nil {

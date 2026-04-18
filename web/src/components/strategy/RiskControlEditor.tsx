@@ -1,5 +1,6 @@
 import { Shield, AlertTriangle, Plus, Trash2 } from 'lucide-react'
 import type {
+  AdaptiveReentryGuardConfig,
   RiskControlConfig,
   TrailingStopConfig,
   TrailingStopMode,
@@ -24,6 +25,8 @@ export function RiskControlEditor({
     enabled: false,
     check_interval_sec: 30,
     update_threshold_pct: 0.3,
+    first_tighten_delay_sec: 0,
+    min_first_update_profit_pct: 0,
     tiers: [
       { trigger_profit_pct: 0.5, mode: 'lock_profit', lock_profit_pct: 0.2 },
       { trigger_profit_pct: 1.0, mode: 'trail_offset', trail_offset_pct: 0.5 },
@@ -31,6 +34,15 @@ export function RiskControlEditor({
       { trigger_profit_pct: 10.0, mode: 'trail_offset', trail_offset_pct: 3.0 },
     ],
   }
+  const adaptiveReentryGuard: AdaptiveReentryGuardConfig =
+    config.adaptive_reentry_guard ?? {
+      enabled: true,
+      require_weak_execution_regime: true,
+      recent_trade_window: 8,
+      min_recent_trades: 4,
+      same_symbol_loss_cooldown_minutes: 180,
+      pair_loss_lookback_hours: 12,
+    }
 
   const updateField = <K extends keyof RiskControlConfig>(
     key: K,
@@ -45,11 +57,24 @@ export function RiskControlEditor({
     updateField('trailing_stop', value)
   }
 
+  const updateAdaptiveReentryGuard = (value: AdaptiveReentryGuardConfig) => {
+    updateField('adaptive_reentry_guard', value)
+  }
+
   const updateTrailingStopField = <K extends keyof TrailingStopConfig>(
     key: K,
     value: TrailingStopConfig[K]
   ) => {
     updateTrailingStop({ ...trailingStop, [key]: value })
+  }
+
+  const updateAdaptiveReentryField = <
+    K extends keyof AdaptiveReentryGuardConfig,
+  >(
+    key: K,
+    value: AdaptiveReentryGuardConfig[K]
+  ) => {
+    updateAdaptiveReentryGuard({ ...adaptiveReentryGuard, [key]: value })
   }
 
   const updateTrailingTier = (
@@ -489,6 +514,81 @@ export function RiskControlEditor({
             </div>
           </div>
 
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label
+                className="block text-sm mb-1"
+                style={{ color: '#EAECEF' }}
+              >
+                {ts(riskControl.trailingStopFirstTightenDelay, language)}
+              </label>
+              <p className="text-xs mb-2" style={{ color: '#848E9C' }}>
+                {ts(riskControl.trailingStopFirstTightenDelayDesc, language)}
+              </p>
+              <div className="flex items-center">
+                <input
+                  type="number"
+                  value={trailingStop.first_tighten_delay_sec}
+                  onChange={(e) =>
+                    updateTrailingStopField(
+                      'first_tighten_delay_sec',
+                      Math.max(0, parseInt(e.target.value) || 0)
+                    )
+                  }
+                  disabled={disabled}
+                  min={0}
+                  max={86400}
+                  className="w-24 px-3 py-2 rounded"
+                  style={{
+                    background: '#1E2329',
+                    border: '1px solid #2B3139',
+                    color: '#EAECEF',
+                  }}
+                />
+                <span className="ml-2" style={{ color: '#848E9C' }}>
+                  s
+                </span>
+              </div>
+            </div>
+
+            <div>
+              <label
+                className="block text-sm mb-1"
+                style={{ color: '#EAECEF' }}
+              >
+                {ts(riskControl.trailingStopMinFirstUpdateProfit, language)}
+              </label>
+              <p className="text-xs mb-2" style={{ color: '#848E9C' }}>
+                {ts(riskControl.trailingStopMinFirstUpdateProfitDesc, language)}
+              </p>
+              <div className="flex items-center">
+                <input
+                  type="number"
+                  value={trailingStop.min_first_update_profit_pct}
+                  onChange={(e) =>
+                    updateTrailingStopField(
+                      'min_first_update_profit_pct',
+                      Math.max(0, parseFloat(e.target.value) || 0)
+                    )
+                  }
+                  disabled={disabled}
+                  min={0}
+                  max={500}
+                  step={0.01}
+                  className="w-24 px-3 py-2 rounded"
+                  style={{
+                    background: '#1E2329',
+                    border: '1px solid #2B3139',
+                    color: '#EAECEF',
+                  }}
+                />
+                <span className="ml-2" style={{ color: '#848E9C' }}>
+                  %
+                </span>
+              </div>
+            </div>
+          </div>
+
           <div className="space-y-3">
             <div className="flex items-center justify-between gap-3">
               <div>
@@ -669,6 +769,224 @@ export function RiskControlEditor({
                 </div>
               )
             })}
+          </div>
+        </div>
+      </div>
+
+      {/* Adaptive Re-entry Guard */}
+      <div>
+        <div className="flex items-center gap-2 mb-4">
+          <Shield className="w-5 h-5" style={{ color: '#F0B90B' }} />
+          <h3 className="font-medium" style={{ color: '#EAECEF' }}>
+            {ts(riskControl.adaptiveReentryGuard, language)}
+          </h3>
+        </div>
+
+        <div
+          className="p-4 rounded-lg space-y-4"
+          style={{ background: '#0B0E11', border: '1px solid #2B3139' }}
+        >
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <label
+                className="block text-sm mb-1"
+                style={{ color: '#EAECEF' }}
+              >
+                {ts(riskControl.adaptiveReentryGuardEnable, language)}
+              </label>
+              <p className="text-xs" style={{ color: '#848E9C' }}>
+                {ts(riskControl.adaptiveReentryGuardDesc, language)}
+              </p>
+            </div>
+            <label className="inline-flex items-center gap-2 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={adaptiveReentryGuard.enabled}
+                onChange={(e) =>
+                  updateAdaptiveReentryField('enabled', e.target.checked)
+                }
+                disabled={disabled}
+                className="accent-yellow-500"
+              />
+              <span className="text-sm" style={{ color: '#EAECEF' }}>
+                {adaptiveReentryGuard.enabled
+                  ? ts(riskControl.adaptiveReentryGuardOn, language)
+                  : ts(riskControl.adaptiveReentryGuardOff, language)}
+              </span>
+            </label>
+          </div>
+
+          <div
+            className="p-3 rounded-lg"
+            style={{ background: '#11151B', border: '1px solid #2B3139' }}
+          >
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <label
+                  className="block text-sm mb-1"
+                  style={{ color: '#EAECEF' }}
+                >
+                  {ts(riskControl.adaptiveReentryRequireWeak, language)}
+                </label>
+                <p className="text-xs" style={{ color: '#848E9C' }}>
+                  {ts(riskControl.adaptiveReentryRequireWeakDesc, language)}
+                </p>
+              </div>
+              <input
+                type="checkbox"
+                checked={adaptiveReentryGuard.require_weak_execution_regime}
+                onChange={(e) =>
+                  updateAdaptiveReentryField(
+                    'require_weak_execution_regime',
+                    e.target.checked
+                  )
+                }
+                disabled={disabled}
+                className="accent-yellow-500 mt-1"
+              />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label
+                className="block text-sm mb-1"
+                style={{ color: '#EAECEF' }}
+              >
+                {ts(riskControl.adaptiveReentryRecentWindow, language)}
+              </label>
+              <p className="text-xs mb-2" style={{ color: '#848E9C' }}>
+                {ts(riskControl.adaptiveReentryRecentWindowDesc, language)}
+              </p>
+              <input
+                type="number"
+                value={adaptiveReentryGuard.recent_trade_window}
+                onChange={(e) =>
+                  updateAdaptiveReentryField(
+                    'recent_trade_window',
+                    Math.max(1, parseInt(e.target.value) || 8)
+                  )
+                }
+                disabled={disabled}
+                min={1}
+                max={50}
+                className="w-24 px-3 py-2 rounded"
+                style={{
+                  background: '#1E2329',
+                  border: '1px solid #2B3139',
+                  color: '#EAECEF',
+                }}
+              />
+            </div>
+
+            <div>
+              <label
+                className="block text-sm mb-1"
+                style={{ color: '#EAECEF' }}
+              >
+                {ts(riskControl.adaptiveReentryMinTrades, language)}
+              </label>
+              <p className="text-xs mb-2" style={{ color: '#848E9C' }}>
+                {ts(riskControl.adaptiveReentryMinTradesDesc, language)}
+              </p>
+              <input
+                type="number"
+                value={adaptiveReentryGuard.min_recent_trades}
+                onChange={(e) =>
+                  updateAdaptiveReentryField(
+                    'min_recent_trades',
+                    Math.max(
+                      1,
+                      Math.min(
+                        adaptiveReentryGuard.recent_trade_window,
+                        parseInt(e.target.value) || 4
+                      )
+                    )
+                  )
+                }
+                disabled={disabled}
+                min={1}
+                max={adaptiveReentryGuard.recent_trade_window}
+                className="w-24 px-3 py-2 rounded"
+                style={{
+                  background: '#1E2329',
+                  border: '1px solid #2B3139',
+                  color: '#EAECEF',
+                }}
+              />
+            </div>
+
+            <div>
+              <label
+                className="block text-sm mb-1"
+                style={{ color: '#EAECEF' }}
+              >
+                {ts(riskControl.adaptiveReentryLossCooldown, language)}
+              </label>
+              <p className="text-xs mb-2" style={{ color: '#848E9C' }}>
+                {ts(riskControl.adaptiveReentryLossCooldownDesc, language)}
+              </p>
+              <div className="flex items-center">
+                <input
+                  type="number"
+                  value={adaptiveReentryGuard.same_symbol_loss_cooldown_minutes}
+                  onChange={(e) =>
+                    updateAdaptiveReentryField(
+                      'same_symbol_loss_cooldown_minutes',
+                      Math.max(1, parseInt(e.target.value) || 180)
+                    )
+                  }
+                  disabled={disabled}
+                  min={1}
+                  max={10080}
+                  className="w-24 px-3 py-2 rounded"
+                  style={{
+                    background: '#1E2329',
+                    border: '1px solid #2B3139',
+                    color: '#EAECEF',
+                  }}
+                />
+                <span className="ml-2" style={{ color: '#848E9C' }}>
+                  min
+                </span>
+              </div>
+            </div>
+
+            <div>
+              <label
+                className="block text-sm mb-1"
+                style={{ color: '#EAECEF' }}
+              >
+                {ts(riskControl.adaptiveReentryPairLookback, language)}
+              </label>
+              <p className="text-xs mb-2" style={{ color: '#848E9C' }}>
+                {ts(riskControl.adaptiveReentryPairLookbackDesc, language)}
+              </p>
+              <div className="flex items-center">
+                <input
+                  type="number"
+                  value={adaptiveReentryGuard.pair_loss_lookback_hours}
+                  onChange={(e) =>
+                    updateAdaptiveReentryField(
+                      'pair_loss_lookback_hours',
+                      Math.max(1, parseInt(e.target.value) || 12)
+                    )
+                  }
+                  disabled={disabled}
+                  min={1}
+                  max={336}
+                  className="w-24 px-3 py-2 rounded"
+                  style={{
+                    background: '#1E2329',
+                    border: '1px solid #2B3139',
+                    color: '#EAECEF',
+                  }}
+                />
+                <span className="ml-2" style={{ color: '#848E9C' }}>
+                  h
+                </span>
+              </div>
+            </div>
           </div>
         </div>
       </div>

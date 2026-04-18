@@ -9,8 +9,8 @@ import (
 )
 
 type APIErrorResponse struct {
-	Error      string            `json:"error"`
-	ErrorKey   string            `json:"error_key,omitempty"`
+	Error       string            `json:"error"`
+	ErrorKey    string            `json:"error_key,omitempty"`
 	ErrorParams map[string]string `json:"error_params,omitempty"`
 }
 
@@ -75,6 +75,11 @@ func SafeUnauthorized(c *gin.Context) {
 // SafeForbidden returns forbidden error
 func SafeForbidden(c *gin.Context, msg string) {
 	writeAPIError(c, http.StatusForbidden, msg, "", nil)
+}
+
+// SafeConflict returns a conflict error for concurrent or incompatible actions.
+func SafeConflict(c *gin.Context, msg string) {
+	writeAPIError(c, http.StatusConflict, msg, "", nil)
 }
 
 // IsSensitiveError checks if an error message contains sensitive information

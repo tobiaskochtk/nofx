@@ -7,9 +7,11 @@ func TestParseBybitTriggerOrdersResult(t *testing.T) {
 		{
 			"symbol":         "RAVEUSDT",
 			"orderId":        "stop-order-1",
+			"orderLinkId":    "sl-rave-1",
 			"side":           "Sell",
 			"orderType":      "Market",
 			"stopOrderType":  "StopLoss",
+			"triggerBy":      "LastPrice",
 			"triggerPrice":   "3.674",
 			"price":          "0",
 			"qty":            "3",
@@ -58,6 +60,12 @@ func TestParseBybitTriggerOrdersResult(t *testing.T) {
 	}
 	if orders[0].StopOrderType != "StopLoss" {
 		t.Fatalf("orders[0].StopOrderType = %q, want StopLoss", orders[0].StopOrderType)
+	}
+	if orders[0].OrderLinkID != "sl-rave-1" {
+		t.Fatalf("orders[0].OrderLinkID = %q, want sl-rave-1", orders[0].OrderLinkID)
+	}
+	if orders[0].TriggerBy != "LastPrice" {
+		t.Fatalf("orders[0].TriggerBy = %q, want LastPrice", orders[0].TriggerBy)
 	}
 	if orders[1].OrderAction != "close_short" {
 		t.Fatalf("orders[1].OrderAction = %q, want close_short", orders[1].OrderAction)

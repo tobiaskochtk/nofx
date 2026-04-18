@@ -226,6 +226,21 @@ export const dataApi = {
     return result.data!
   },
 
+  async runTraderAutonomousOptimizerNow(
+    traderId: string
+  ): Promise<AutonomousOptimizerRunDetail> {
+    const result = await httpClient.post<AutonomousOptimizerRunDetail>(
+      `${API_BASE}/traders/${traderId}/autonomous-optimizer/run-now`,
+      {}
+    )
+    if (!result.success) {
+      throw new Error(
+        result.message || 'Failed to execute autonomous optimizer run'
+      )
+    }
+    return result.data!
+  },
+
   async getTraderAutonomousOptimizerBacklog(
     traderId: string,
     limit: number = 50

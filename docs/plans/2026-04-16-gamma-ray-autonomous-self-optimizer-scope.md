@@ -492,3 +492,7 @@ This first slice would already prove the core loop without yet requiring the ful
   - degrading monitoring first marks rollback as pending
   - the next due optimizer window executes the actual rollback
   - run history and current state now show the intermediate governance step explicitly
+- [x] Oversized prompt patches are now auto-sliced instead of hard-blocked on field count:
+  - if a prompt proposal touches more than 6 fields, the highest-priority 6 prompt surfaces are applied first
+  - deferred prompt fields are stored in run validation and visible in the optimizer UI
+  - recent optimizer context now carries prompt requested/applied/deferred counts forward into later runs

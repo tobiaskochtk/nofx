@@ -32,11 +32,23 @@ func validateTrailingStop(config *store.StrategyConfig) error {
 	if raw.UpdateThresholdPct < 0 {
 		return fmt.Errorf("risk_control.trailing_stop.update_threshold_pct must be >= 0")
 	}
+	if raw.FirstTightenDelaySec < 0 {
+		return fmt.Errorf("risk_control.trailing_stop.first_tighten_delay_sec must be >= 0")
+	}
+	if raw.MinFirstUpdateProfitPct < 0 {
+		return fmt.Errorf("risk_control.trailing_stop.min_first_update_profit_pct must be >= 0")
+	}
 	if effective.CheckIntervalSec < 1 || effective.CheckIntervalSec > 3600 {
 		return fmt.Errorf("risk_control.trailing_stop.check_interval_sec must be between 1 and 3600 seconds")
 	}
 	if effective.UpdateThresholdPct <= 0 || effective.UpdateThresholdPct > 100 {
 		return fmt.Errorf("risk_control.trailing_stop.update_threshold_pct must be > 0 and <= 100")
+	}
+	if effective.FirstTightenDelaySec < 0 || effective.FirstTightenDelaySec > 24*60*60 {
+		return fmt.Errorf("risk_control.trailing_stop.first_tighten_delay_sec must be between 0 and 86400 seconds")
+	}
+	if effective.MinFirstUpdateProfitPct < 0 || effective.MinFirstUpdateProfitPct > 500 {
+		return fmt.Errorf("risk_control.trailing_stop.min_first_update_profit_pct must be between 0 and 500")
 	}
 
 	tiers := raw.Tiers
@@ -85,6 +97,42 @@ func validateTrailingStop(config *store.StrategyConfig) error {
 	return nil
 }
 
+func validateAdaptiveReentryGuard(config *store.StrategyConfig) error {
+	if config == nil {
+		return nil
+	}
+
+	raw := config.RiskControl.AdaptiveReentryGuard
+	effective := config.RiskControl.EffectiveAdaptiveReentryGuard()
+
+	if raw.RecentTradeWindow < 0 {
+		return fmt.Errorf("risk_control.adaptive_reentry_guard.recent_trade_window must be >= 0")
+	}
+	if raw.MinRecentTrades < 0 {
+		return fmt.Errorf("risk_control.adaptive_reentry_guard.min_recent_trades must be >= 0")
+	}
+	if raw.SameSymbolLossCooldownMinutes < 0 {
+		return fmt.Errorf("risk_control.adaptive_reentry_guard.same_symbol_loss_cooldown_minutes must be >= 0")
+	}
+	if raw.PairLossLookbackHours < 0 {
+		return fmt.Errorf("risk_control.adaptive_reentry_guard.pair_loss_lookback_hours must be >= 0")
+	}
+	if effective.RecentTradeWindow < 1 || effective.RecentTradeWindow > 50 {
+		return fmt.Errorf("risk_control.adaptive_reentry_guard.recent_trade_window must be between 1 and 50")
+	}
+	if effective.MinRecentTrades < 1 || effective.MinRecentTrades > effective.RecentTradeWindow {
+		return fmt.Errorf("risk_control.adaptive_reentry_guard.min_recent_trades must be between 1 and recent_trade_window")
+	}
+	if effective.SameSymbolLossCooldownMinutes < 1 || effective.SameSymbolLossCooldownMinutes > 7*24*60 {
+		return fmt.Errorf("risk_control.adaptive_reentry_guard.same_symbol_loss_cooldown_minutes must be between 1 and 10080")
+	}
+	if effective.PairLossLookbackHours < 1 || effective.PairLossLookbackHours > 14*24 {
+		return fmt.Errorf("risk_control.adaptive_reentry_guard.pair_loss_lookback_hours must be between 1 and 336")
+	}
+
+	return nil
+}
+
 func validateSignalProvider(config *store.StrategyConfig) error {
 	rawProvider := config.SignalProvider
 	if strings.TrimSpace(rawProvider.Type) == "" && strings.TrimSpace(rawProvider.BaseURL) == "" && strings.TrimSpace(rawProvider.APIKey) == "" {
@@ -106,6 +154,9 @@ func validateStrategyConfig(config *store.StrategyConfig) ([]string, error) {
 	var warnings []string
 
 	if err := validateTrailingStop(config); err != nil {
+		return nil, err
+	}
+	if err := validateAdaptiveReentryGuard(config); err != nil {
 		return nil, err
 	}
 

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"math"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -835,7 +836,9 @@ func TestDealReviewCaseAnnotationsAndAnomalies(t *testing.T) {
 			RealizedPnL:         -20,
 			HoldDurationMs:      int64((35 * time.Minute) / time.Millisecond),
 			OpenSelectionBucket: "breakout",
-			CloseReason:         "manual_exit",
+			CloseReason:         "unknown",
+			ExitReasonQuality:   DealReviewExitReasonQualityLowConfidence,
+			ExitOrigin:          DealReviewExitOriginSyncedCloseFill,
 		},
 		{
 			ID:                  "case-4",
@@ -896,8 +899,23 @@ func TestDealReviewCaseAnnotationsAndAnomalies(t *testing.T) {
 	if len(summary.WeakCloseReasons) == 0 || summary.WeakCloseReasons[0].Reason != "stop_loss" {
 		t.Fatalf("WeakCloseReasons = %#v, want stop_loss first", summary.WeakCloseReasons)
 	}
+	if len(summary.ExitUncertainty) == 0 || summary.ExitUncertainty[0].CloseReason != "unknown" {
+		t.Fatalf("ExitUncertainty = %#v, want unknown cohort", summary.ExitUncertainty)
+	}
 	if len(summary.Notes) == 0 {
 		t.Fatal("expected anomaly notes to be generated")
+	}
+
+	filtered, _, _, err := root.DealReview().ListCases(trader.UserID, DealReviewListFilter{
+		TraderID:          trader.ID,
+		ExitReasonQuality: DealReviewExitReasonQualityLowConfidence,
+		Limit:             10,
+	})
+	if err != nil {
+		t.Fatalf("ListCases() with exit_reason_quality filter error = %v", err)
+	}
+	if len(filtered) != 1 || filtered[0].Case.ID != "case-3" {
+		t.Fatalf("filtered low-confidence cases = %#v, want case-3 only", filtered)
 	}
 }
 
@@ -2036,8 +2054,23 @@ func TestCreateFromClosedPnLInfersManualExitFromCloseFill(t *testing.T) {
 	if detail.Case.CloseReason != "manual_exit" {
 		t.Fatalf("close reason = %q, want manual_exit", detail.Case.CloseReason)
 	}
+	if detail.Case.ExitOrigin != DealReviewExitOriginSyncedMarketOrder {
+		t.Fatalf("exit origin = %q, want %q", detail.Case.ExitOrigin, DealReviewExitOriginSyncedMarketOrder)
+	}
+	if detail.Case.ExitReasonQuality != DealReviewExitReasonQualityHighConfidence {
+		t.Fatalf("exit reason quality = %q, want %q", detail.Case.ExitReasonQuality, DealReviewExitReasonQualityHighConfidence)
+	}
+	if !strings.Contains(detail.Case.ExitEvidenceSummary, "Market close order") {
+		t.Fatalf("exit evidence summary = %q, want Market close order evidence", detail.Case.ExitEvidenceSummary)
+	}
 	if detail.Close == nil || detail.Close.Event == nil || detail.Close.Event.CloseReason != "manual_exit" {
 		t.Fatalf("close event = %#v, want close_reason=manual_exit", detail.Close)
+	}
+	if detail.Close.Event.ExitOrigin != DealReviewExitOriginSyncedMarketOrder {
+		t.Fatalf("close event exit origin = %q, want %q", detail.Close.Event.ExitOrigin, DealReviewExitOriginSyncedMarketOrder)
+	}
+	if detail.Close.Event.ExitEvidence == nil || detail.Close.Event.ExitEvidence.OrderType != "Market" {
+		t.Fatalf("close event exit evidence = %#v, want Market order evidence", detail.Close.Event.ExitEvidence)
 	}
 }
 
@@ -2174,6 +2207,15 @@ func TestCreateFromClosedPnLInfersTakeProfitFromTargets(t *testing.T) {
 	if items[0].Case.CloseReason != "take_profit" {
 		t.Fatalf("close reason = %q, want take_profit", items[0].Case.CloseReason)
 	}
+	if items[0].Case.ExitOrigin != DealReviewExitOriginTargetProximity {
+		t.Fatalf("exit origin = %q, want %q", items[0].Case.ExitOrigin, DealReviewExitOriginTargetProximity)
+	}
+	if items[0].Case.ExitReasonQuality != DealReviewExitReasonQualityHighConfidence {
+		t.Fatalf("exit reason quality = %q, want %q", items[0].Case.ExitReasonQuality, DealReviewExitReasonQualityHighConfidence)
+	}
+	if !strings.Contains(items[0].Case.ExitEvidenceSummary, "take profit target") {
+		t.Fatalf("exit evidence summary = %q, want take profit target evidence", items[0].Case.ExitEvidenceSummary)
+	}
 }
 
 func TestCreateFromClosedPnLInfersStopLossFromMatchedTriggerOrder(t *testing.T) {
@@ -2287,6 +2329,15 @@ func TestCreateFromClosedPnLInfersStopLossFromMatchedTriggerOrder(t *testing.T) 
 	}
 	if items[0].Case.CloseReason != "stop_loss" {
 		t.Fatalf("close reason = %q, want stop_loss", items[0].Case.CloseReason)
+	}
+	if items[0].Case.ExitOrigin != DealReviewExitOriginSyncedTriggerOrder {
+		t.Fatalf("exit origin = %q, want %q", items[0].Case.ExitOrigin, DealReviewExitOriginSyncedTriggerOrder)
+	}
+	if items[0].Case.ExitReasonQuality != DealReviewExitReasonQualityExplicit {
+		t.Fatalf("exit reason quality = %q, want %q", items[0].Case.ExitReasonQuality, DealReviewExitReasonQualityExplicit)
+	}
+	if !strings.Contains(items[0].Case.ExitEvidenceSummary, "StopLoss") {
+		t.Fatalf("exit evidence summary = %q, want StopLoss trigger evidence", items[0].Case.ExitEvidenceSummary)
 	}
 }
 
@@ -2404,6 +2455,15 @@ func TestCreateFromClosedPnLInfersTakeProfitFromGenericStopOrderTriggerPrice(t *
 	if items[0].Case.CloseReason != "take_profit" {
 		t.Fatalf("close reason = %q, want take_profit", items[0].Case.CloseReason)
 	}
+	if items[0].Case.ExitOrigin != DealReviewExitOriginSyncedTriggerOrder {
+		t.Fatalf("exit origin = %q, want %q", items[0].Case.ExitOrigin, DealReviewExitOriginSyncedTriggerOrder)
+	}
+	if items[0].Case.ExitReasonQuality != DealReviewExitReasonQualityHighConfidence {
+		t.Fatalf("exit reason quality = %q, want %q", items[0].Case.ExitReasonQuality, DealReviewExitReasonQualityHighConfidence)
+	}
+	if !strings.Contains(items[0].Case.ExitEvidenceSummary, "stored take profit target") {
+		t.Fatalf("exit evidence summary = %q, want stored take profit target evidence", items[0].Case.ExitEvidenceSummary)
+	}
 }
 
 func TestSyncPositionReclassifiesManualExitWhenTriggerOrderArrives(t *testing.T) {
@@ -2497,8 +2557,8 @@ func TestSyncPositionReclassifiesManualExitWhenTriggerOrderArrives(t *testing.T)
 	if total != 1 || len(items) != 1 {
 		t.Fatalf("initial total/items = %d/%d, want 1/1", total, len(items))
 	}
-	if items[0].Case.CloseReason != "manual_exit" {
-		t.Fatalf("initial close reason = %q, want manual_exit", items[0].Case.CloseReason)
+	if items[0].Case.CloseReason != "unknown" {
+		t.Fatalf("initial close reason = %q, want unknown", items[0].Case.CloseReason)
 	}
 
 	triggerOrder := &TraderOrder{
@@ -2561,6 +2621,1252 @@ func TestSyncPositionReclassifiesManualExitWhenTriggerOrderArrives(t *testing.T)
 	}
 	if refreshedPosition.CloseReason != "take_profit" {
 		t.Fatalf("position close reason = %q, want take_profit", refreshedPosition.CloseReason)
+	}
+}
+
+func TestSyncPositionClassifiesGenericTriggerOrderAsTrailingStopWhenStopHasTightened(t *testing.T) {
+	sqlDB, err := sql.Open("sqlite", filepath.Join(t.TempDir(), "deal-review-trigger-unknown.db"))
+	if err != nil {
+		t.Fatalf("sql.Open() error = %v", err)
+	}
+	t.Cleanup(func() { _ = sqlDB.Close() })
+
+	gdb, err := gorm.Open(gormsqlite.Dialector{Conn: sqlDB}, &gorm.Config{
+		Logger: gormlogger.Default.LogMode(gormlogger.Silent),
+		NowFunc: func() time.Time {
+			return time.Now().UTC()
+		},
+	})
+	if err != nil {
+		t.Fatalf("gorm.Open() error = %v", err)
+	}
+
+	root := &Store{gdb: gdb, db: sqlDB}
+	if err := root.initTables(); err != nil {
+		t.Fatalf("initTables() error = %v", err)
+	}
+
+	trader := &Trader{
+		ID:             "trader-trigger-unknown",
+		UserID:         "user-trigger-unknown",
+		Name:           "Trigger Unknown Trader",
+		AIModelID:      "model-trigger-unknown",
+		ExchangeID:     "exchange-trigger-unknown",
+		InitialBalance: 1000,
+	}
+	if err := root.Trader().Create(trader); err != nil {
+		t.Fatalf("Trader().Create() error = %v", err)
+	}
+
+	entryTime := time.Now().UTC().Add(-50 * time.Minute).UnixMilli()
+	exitTime := time.Now().UTC().Add(-4 * time.Minute).UnixMilli()
+
+	openRecord := &DecisionRecord{
+		TraderID:         trader.ID,
+		CycleNumber:      901,
+		Timestamp:        time.UnixMilli(entryTime).Add(-30 * time.Second).UTC(),
+		CandidateMetaVer: DecisionCandidateMetadataVersion,
+		Decisions: []DecisionAction{
+			{
+				Action:     "open_long",
+				Symbol:     "SPACEUSDT",
+				Quantity:   5,
+				Leverage:   3,
+				Price:      3.4,
+				StopLoss:   3.0,
+				TakeProfit: 3.9,
+				Confidence: 71,
+				Reasoning:  "momentum continuation",
+			},
+		},
+		Success: true,
+	}
+	if err := root.Decision().LogDecision(openRecord); err != nil {
+		t.Fatalf("Decision().LogDecision(open) error = %v", err)
+	}
+
+	position := &TraderPosition{
+		TraderID:      trader.ID,
+		ExchangeID:    trader.ExchangeID,
+		ExchangeType:  "bybit",
+		Symbol:        "SPACEUSDT",
+		Side:          "LONG",
+		EntryQuantity: 5,
+		Quantity:      5,
+		EntryPrice:    3.4,
+		EntryOrderID:  "entry-space-1",
+		EntryTime:     entryTime,
+		Leverage:      3,
+		CreatedAt:     entryTime,
+		UpdatedAt:     entryTime,
+	}
+	if err := root.Position().Create(position); err != nil {
+		t.Fatalf("Position().Create() error = %v", err)
+	}
+	if err := root.Position().ClosePositionWithAccurateData(position.ID, 3.22, "trigger-space-generic-1", exitTime, -0.8, 0.04, "manual_exit"); err != nil {
+		t.Fatalf("ClosePositionWithAccurateData() error = %v", err)
+	}
+
+	triggerOrder := &TraderOrder{
+		TraderID:        trader.ID,
+		ExchangeID:      trader.ExchangeID,
+		ExchangeType:    "bybit",
+		ExchangeOrderID: "trigger-space-generic-1",
+		ClientOrderID:   "space-stop-generic",
+		Symbol:          "SPACEUSDT",
+		Side:            "SELL",
+		PositionSide:    "LONG",
+		Type:            "Stop",
+		VenueOrderType:  "Market",
+		TriggerSubtype:  "Stop",
+		TriggerSource:   "LastPrice",
+		Status:          "FILLED",
+		Quantity:        5,
+		StopPrice:       3.22,
+		AvgFillPrice:    3.22,
+		FilledQuantity:  5,
+		ReduceOnly:      true,
+		OrderAction:     "close_long",
+		CreatedAt:       exitTime,
+		UpdatedAt:       exitTime,
+		FilledAt:        exitTime,
+	}
+	if err := root.Order().UpsertOrder(triggerOrder); err != nil {
+		t.Fatalf("Order().UpsertOrder() error = %v", err)
+	}
+
+	closedPosition, err := root.Position().GetByID(position.ID)
+	if err != nil {
+		t.Fatalf("Position().GetByID() error = %v", err)
+	}
+	if err := root.DealReview().SyncPosition(closedPosition); err != nil {
+		t.Fatalf("DealReview().SyncPosition() error = %v", err)
+	}
+
+	items, _, total, err := root.DealReview().ListCases(trader.UserID, DealReviewListFilter{TraderID: trader.ID})
+	if err != nil {
+		t.Fatalf("DealReview().ListCases() error = %v", err)
+	}
+	if total != 1 || len(items) != 1 {
+		t.Fatalf("total/items = %d/%d, want 1/1", total, len(items))
+	}
+	if items[0].Case.CloseReason != "trailing_stop" {
+		t.Fatalf("close reason = %q, want trailing_stop", items[0].Case.CloseReason)
+	}
+	if items[0].Case.ExitOrigin != DealReviewExitOriginTrailingEngine {
+		t.Fatalf("exit origin = %q, want %q", items[0].Case.ExitOrigin, DealReviewExitOriginTrailingEngine)
+	}
+	if items[0].Case.ExitReasonQuality != DealReviewExitReasonQualityHighConfidence {
+		t.Fatalf("exit reason quality = %q, want %q", items[0].Case.ExitReasonQuality, DealReviewExitReasonQualityHighConfidence)
+	}
+	if items[0].Case.ExitEvidence == nil {
+		t.Fatal("expected exit evidence")
+	}
+	if items[0].Case.ExitEvidence.TriggerSubtype != "Stop" {
+		t.Fatalf("trigger subtype = %q, want Stop", items[0].Case.ExitEvidence.TriggerSubtype)
+	}
+	if items[0].Case.ExitEvidence.TriggerSource != "LastPrice" {
+		t.Fatalf("trigger source = %q, want LastPrice", items[0].Case.ExitEvidence.TriggerSource)
+	}
+	if items[0].Case.ExitEvidence.ExchangeOrderID != "trigger-space-generic-1" {
+		t.Fatalf("exchange order id = %q, want trigger-space-generic-1", items[0].Case.ExitEvidence.ExchangeOrderID)
+	}
+
+	refreshedPosition, err := root.Position().GetByID(position.ID)
+	if err != nil {
+		t.Fatalf("Position().GetByID(refresh) error = %v", err)
+	}
+	if refreshedPosition.CloseReason != "trailing_stop" {
+		t.Fatalf("position close reason = %q, want trailing_stop", refreshedPosition.CloseReason)
+	}
+}
+
+func TestSyncPositionClassifiesGenericTriggerOrderAsStopLossOnLossSideOfEntry(t *testing.T) {
+	sqlDB, err := sql.Open("sqlite", filepath.Join(t.TempDir(), "deal-review-trigger-stop-loss.db"))
+	if err != nil {
+		t.Fatalf("sql.Open() error = %v", err)
+	}
+	t.Cleanup(func() { _ = sqlDB.Close() })
+
+	gdb, err := gorm.Open(gormsqlite.Dialector{Conn: sqlDB}, &gorm.Config{
+		Logger: gormlogger.Default.LogMode(gormlogger.Silent),
+		NowFunc: func() time.Time {
+			return time.Now().UTC()
+		},
+	})
+	if err != nil {
+		t.Fatalf("gorm.Open() error = %v", err)
+	}
+
+	root := &Store{gdb: gdb, db: sqlDB}
+	if err := root.initTables(); err != nil {
+		t.Fatalf("initTables() error = %v", err)
+	}
+
+	trader := &Trader{
+		ID:             "trader-trigger-stop-loss",
+		UserID:         "user-trigger-stop-loss",
+		Name:           "Trigger Stop Loss Trader",
+		AIModelID:      "model-trigger-stop-loss",
+		ExchangeID:     "exchange-trigger-stop-loss",
+		InitialBalance: 1000,
+	}
+	if err := root.Trader().Create(trader); err != nil {
+		t.Fatalf("Trader().Create() error = %v", err)
+	}
+
+	entryTime := time.Now().UTC().Add(-50 * time.Minute).UnixMilli()
+	exitTime := time.Now().UTC().Add(-4 * time.Minute).UnixMilli()
+
+	openRecord := &DecisionRecord{
+		TraderID:         trader.ID,
+		CycleNumber:      902,
+		Timestamp:        time.UnixMilli(entryTime).Add(-30 * time.Second).UTC(),
+		CandidateMetaVer: DecisionCandidateMetadataVersion,
+		Decisions: []DecisionAction{
+			{
+				Action:     "open_long",
+				Symbol:     "IPUSDT",
+				Quantity:   5,
+				Leverage:   3,
+				Price:      3.4,
+				StopLoss:   3.0,
+				TakeProfit: 3.9,
+				Confidence: 71,
+				Reasoning:  "momentum continuation",
+			},
+		},
+		Success: true,
+	}
+	if err := root.Decision().LogDecision(openRecord); err != nil {
+		t.Fatalf("Decision().LogDecision(open) error = %v", err)
+	}
+
+	position := &TraderPosition{
+		TraderID:      trader.ID,
+		ExchangeID:    trader.ExchangeID,
+		ExchangeType:  "bybit",
+		Symbol:        "IPUSDT",
+		Side:          "LONG",
+		EntryQuantity: 5,
+		Quantity:      5,
+		EntryPrice:    3.4,
+		EntryOrderID:  "entry-ip-1",
+		EntryTime:     entryTime,
+		Leverage:      3,
+		CreatedAt:     entryTime,
+		UpdatedAt:     entryTime,
+	}
+	if err := root.Position().Create(position); err != nil {
+		t.Fatalf("Position().Create() error = %v", err)
+	}
+	if err := root.Position().ClosePositionWithAccurateData(position.ID, 2.98, "trigger-ip-generic-1", exitTime, -0.9, 0.04, "manual_exit"); err != nil {
+		t.Fatalf("ClosePositionWithAccurateData() error = %v", err)
+	}
+
+	triggerOrder := &TraderOrder{
+		TraderID:        trader.ID,
+		ExchangeID:      trader.ExchangeID,
+		ExchangeType:    "bybit",
+		ExchangeOrderID: "trigger-ip-generic-1",
+		ClientOrderID:   "ip-stop-generic",
+		Symbol:          "IPUSDT",
+		Side:            "SELL",
+		PositionSide:    "LONG",
+		Type:            "Stop",
+		VenueOrderType:  "Market",
+		TriggerSubtype:  "Stop",
+		TriggerSource:   "LastPrice",
+		Status:          "FILLED",
+		Quantity:        5,
+		StopPrice:       2.98,
+		AvgFillPrice:    2.98,
+		FilledQuantity:  5,
+		ReduceOnly:      true,
+		OrderAction:     "close_long",
+		CreatedAt:       exitTime,
+		UpdatedAt:       exitTime,
+		FilledAt:        exitTime,
+	}
+	if err := root.Order().UpsertOrder(triggerOrder); err != nil {
+		t.Fatalf("Order().UpsertOrder() error = %v", err)
+	}
+
+	closedPosition, err := root.Position().GetByID(position.ID)
+	if err != nil {
+		t.Fatalf("Position().GetByID() error = %v", err)
+	}
+	if err := root.DealReview().SyncPosition(closedPosition); err != nil {
+		t.Fatalf("DealReview().SyncPosition() error = %v", err)
+	}
+
+	items, _, total, err := root.DealReview().ListCases(trader.UserID, DealReviewListFilter{TraderID: trader.ID})
+	if err != nil {
+		t.Fatalf("DealReview().ListCases() error = %v", err)
+	}
+	if total != 1 || len(items) != 1 {
+		t.Fatalf("total/items = %d/%d, want 1/1", total, len(items))
+	}
+	if items[0].Case.CloseReason != "stop_loss" {
+		t.Fatalf("close reason = %q, want stop_loss", items[0].Case.CloseReason)
+	}
+	if items[0].Case.ExitOrigin != DealReviewExitOriginSyncedTriggerOrder {
+		t.Fatalf("exit origin = %q, want %q", items[0].Case.ExitOrigin, DealReviewExitOriginSyncedTriggerOrder)
+	}
+	if items[0].Case.ExitReasonQuality != DealReviewExitReasonQualityHighConfidence {
+		t.Fatalf("exit reason quality = %q, want %q", items[0].Case.ExitReasonQuality, DealReviewExitReasonQualityHighConfidence)
+	}
+}
+
+func TestSyncPositionFallsBackToExchangeSyncUnknownWithoutOrderOrFill(t *testing.T) {
+	sqlDB, err := sql.Open("sqlite", filepath.Join(t.TempDir(), "deal-review-sync-unknown.db"))
+	if err != nil {
+		t.Fatalf("sql.Open() error = %v", err)
+	}
+	t.Cleanup(func() { _ = sqlDB.Close() })
+
+	gdb, err := gorm.Open(gormsqlite.Dialector{Conn: sqlDB}, &gorm.Config{
+		Logger: gormlogger.Default.LogMode(gormlogger.Silent),
+		NowFunc: func() time.Time {
+			return time.Now().UTC()
+		},
+	})
+	if err != nil {
+		t.Fatalf("gorm.Open() error = %v", err)
+	}
+
+	root := &Store{gdb: gdb, db: sqlDB}
+	if err := root.initTables(); err != nil {
+		t.Fatalf("initTables() error = %v", err)
+	}
+
+	trader := &Trader{
+		ID:             "trader-sync-unknown",
+		UserID:         "user-sync-unknown",
+		Name:           "Sync Unknown Trader",
+		AIModelID:      "model-sync-unknown",
+		ExchangeID:     "exchange-sync-unknown",
+		InitialBalance: 1000,
+	}
+	if err := root.Trader().Create(trader); err != nil {
+		t.Fatalf("Trader().Create() error = %v", err)
+	}
+
+	entryTime := time.Now().UTC().Add(-35 * time.Minute).UnixMilli()
+	exitTime := time.Now().UTC().Add(-2 * time.Minute).UnixMilli()
+
+	openRecord := &DecisionRecord{
+		TraderID:         trader.ID,
+		CycleNumber:      902,
+		Timestamp:        time.UnixMilli(entryTime).Add(-15 * time.Second).UTC(),
+		CandidateMetaVer: DecisionCandidateMetadataVersion,
+		Decisions: []DecisionAction{
+			{
+				Action:     "open_short",
+				Symbol:     "TONUSDT",
+				Quantity:   7,
+				Leverage:   2,
+				Price:      1.55,
+				StopLoss:   1.61,
+				TakeProfit: 1.47,
+				Confidence: 67,
+				Reasoning:  "mean reversion fade",
+			},
+		},
+		Success: true,
+	}
+	if err := root.Decision().LogDecision(openRecord); err != nil {
+		t.Fatalf("Decision().LogDecision(open) error = %v", err)
+	}
+
+	position := &TraderPosition{
+		TraderID:      trader.ID,
+		ExchangeID:    trader.ExchangeID,
+		ExchangeType:  "bybit",
+		Symbol:        "TONUSDT",
+		Side:          "SHORT",
+		EntryQuantity: 7,
+		Quantity:      7,
+		EntryPrice:    1.55,
+		EntryOrderID:  "entry-ton-1",
+		EntryTime:     entryTime,
+		Leverage:      2,
+		CreatedAt:     entryTime,
+		UpdatedAt:     entryTime,
+	}
+	if err := root.Position().Create(position); err != nil {
+		t.Fatalf("Position().Create() error = %v", err)
+	}
+	if err := root.Position().ClosePositionWithAccurateData(position.ID, 1.53, "missing-exit-order-1", exitTime, 0.25, 0.02, "manual_exit"); err != nil {
+		t.Fatalf("ClosePositionWithAccurateData() error = %v", err)
+	}
+
+	items, _, total, err := root.DealReview().ListCases(trader.UserID, DealReviewListFilter{TraderID: trader.ID})
+	if err != nil {
+		t.Fatalf("DealReview().ListCases() error = %v", err)
+	}
+	if total != 1 || len(items) != 1 {
+		t.Fatalf("total/items = %d/%d, want 1/1", total, len(items))
+	}
+	if items[0].Case.CloseReason != "unknown" {
+		t.Fatalf("close reason = %q, want unknown", items[0].Case.CloseReason)
+	}
+	if items[0].Case.ExitOrigin != DealReviewExitOriginExchangeSyncUnknown {
+		t.Fatalf("exit origin = %q, want %q", items[0].Case.ExitOrigin, DealReviewExitOriginExchangeSyncUnknown)
+	}
+	if items[0].Case.ExitReasonQuality != DealReviewExitReasonQualityLowConfidence {
+		t.Fatalf("exit reason quality = %q, want %q", items[0].Case.ExitReasonQuality, DealReviewExitReasonQualityLowConfidence)
+	}
+	if !strings.Contains(items[0].Case.ExitEvidenceSummary, "no linked order") {
+		t.Fatalf("exit evidence summary = %q, want exchange-sync-unknown summary", items[0].Case.ExitEvidenceSummary)
+	}
+
+	refreshedPosition, err := root.Position().GetByID(position.ID)
+	if err != nil {
+		t.Fatalf("Position().GetByID(refresh) error = %v", err)
+	}
+	if refreshedPosition.CloseReason != "unknown" {
+		t.Fatalf("position close reason = %q, want unknown", refreshedPosition.CloseReason)
+	}
+}
+
+func TestSyncPositionClassifiesTrailingStopFromPersistedTrailingUpdate(t *testing.T) {
+	sqlDB, err := sql.Open("sqlite", filepath.Join(t.TempDir(), "deal-review-trailing-exit.db"))
+	if err != nil {
+		t.Fatalf("sql.Open() error = %v", err)
+	}
+	t.Cleanup(func() { _ = sqlDB.Close() })
+
+	gdb, err := gorm.Open(gormsqlite.Dialector{Conn: sqlDB}, &gorm.Config{
+		Logger: gormlogger.Default.LogMode(gormlogger.Silent),
+		NowFunc: func() time.Time {
+			return time.Now().UTC()
+		},
+	})
+	if err != nil {
+		t.Fatalf("gorm.Open() error = %v", err)
+	}
+
+	root := &Store{gdb: gdb, db: sqlDB}
+	if err := root.initTables(); err != nil {
+		t.Fatalf("initTables() error = %v", err)
+	}
+
+	trader := &Trader{
+		ID:             "trader-trailing-exit",
+		UserID:         "user-trailing-exit",
+		Name:           "Trailing Exit Trader",
+		AIModelID:      "model-trailing-exit",
+		ExchangeID:     "exchange-trailing-exit",
+		InitialBalance: 1000,
+	}
+	if err := root.Trader().Create(trader); err != nil {
+		t.Fatalf("Trader().Create() error = %v", err)
+	}
+
+	entryTime := time.Now().UTC().Add(-40 * time.Minute).UnixMilli()
+	trailingUpdateTime := time.Now().UTC().Add(-6 * time.Minute)
+	exitTime := time.Now().UTC().Add(-5 * time.Minute).UnixMilli()
+
+	openRecord := &DecisionRecord{
+		TraderID:         trader.ID,
+		CycleNumber:      881,
+		Timestamp:        time.UnixMilli(entryTime).Add(-30 * time.Second).UTC(),
+		CandidateMetaVer: DecisionCandidateMetadataVersion,
+		Decisions: []DecisionAction{
+			{
+				Action:     "open_long",
+				Symbol:     "AVAXUSDT",
+				Quantity:   2,
+				Leverage:   4,
+				Price:      20.0,
+				StopLoss:   19.2,
+				TakeProfit: 21.5,
+				Confidence: 78,
+				Reasoning:  "trend continuation setup",
+			},
+		},
+		Success: true,
+	}
+	if err := root.Decision().LogDecision(openRecord); err != nil {
+		t.Fatalf("Decision().LogDecision(open) error = %v", err)
+	}
+
+	position := &TraderPosition{
+		TraderID:      trader.ID,
+		ExchangeID:    trader.ExchangeID,
+		ExchangeType:  "bybit",
+		Symbol:        "AVAXUSDT",
+		Side:          "LONG",
+		EntryQuantity: 2,
+		Quantity:      2,
+		EntryPrice:    20.0,
+		EntryOrderID:  "entry-avax-trailing-1",
+		EntryTime:     entryTime,
+		Leverage:      4,
+		CreatedAt:     entryTime,
+		UpdatedAt:     entryTime,
+	}
+	if err := root.Position().Create(position); err != nil {
+		t.Fatalf("Position().Create() error = %v", err)
+	}
+
+	if err := root.DealReview().RecordTrailingStopUpdate(&DealReviewTrailingUpdateInput{
+		UserID:               trader.UserID,
+		TraderID:             trader.ID,
+		ExchangeID:           trader.ExchangeID,
+		Symbol:               "AVAXUSDT",
+		Side:                 "LONG",
+		Timestamp:            trailingUpdateTime,
+		PreviousStopPrice:    20.4,
+		NewStopPrice:         20.95,
+		TakeProfitPrice:      21.5,
+		Quantity:             2,
+		EntryPrice:           20.0,
+		MarkPrice:            21.1,
+		Leverage:             4,
+		ProfitPct:            22,
+		UnrealizedPnL:        2.2,
+		UnrealizedPnLPct:     5.5,
+		StopProfitPct:        4,
+		ProtectsBreakeven:    true,
+		TierIndex:            1,
+		TierTriggerProfitPct: 10,
+		TrailingMode:         TrailingStopModeLockProfit,
+		LockProfitPct:        4,
+	}); err != nil {
+		t.Fatalf("RecordTrailingStopUpdate() error = %v", err)
+	}
+
+	triggerOrder := &TraderOrder{
+		TraderID:        trader.ID,
+		ExchangeID:      trader.ExchangeID,
+		ExchangeType:    "bybit",
+		ExchangeOrderID: "exit-avax-trailing-1",
+		Symbol:          "AVAXUSDT",
+		Side:            "SELL",
+		PositionSide:    "LONG",
+		Type:            "Stop",
+		Status:          "FILLED",
+		Quantity:        2,
+		StopPrice:       20.95,
+		AvgFillPrice:    20.95,
+		FilledQuantity:  2,
+		ReduceOnly:      true,
+		OrderAction:     "close_long",
+		CreatedAt:       exitTime,
+		UpdatedAt:       exitTime,
+		FilledAt:        exitTime,
+	}
+	if err := root.Order().UpsertOrder(triggerOrder); err != nil {
+		t.Fatalf("Order().UpsertOrder() error = %v", err)
+	}
+
+	if err := root.Position().ClosePositionWithAccurateData(position.ID, 20.95, "exit-avax-trailing-1", exitTime, 1.9, 0.05, "manual_exit"); err != nil {
+		t.Fatalf("ClosePositionWithAccurateData() error = %v", err)
+	}
+
+	items, _, total, err := root.DealReview().ListCases(trader.UserID, DealReviewListFilter{TraderID: trader.ID})
+	if err != nil {
+		t.Fatalf("DealReview().ListCases() error = %v", err)
+	}
+	if total != 1 || len(items) != 1 {
+		t.Fatalf("total/items = %d/%d, want 1/1", total, len(items))
+	}
+	if items[0].Case.CloseReason != "trailing_stop" {
+		t.Fatalf("close reason = %q, want trailing_stop", items[0].Case.CloseReason)
+	}
+	if items[0].Case.ExitOrigin != DealReviewExitOriginTrailingEngine {
+		t.Fatalf("exit origin = %q, want %q", items[0].Case.ExitOrigin, DealReviewExitOriginTrailingEngine)
+	}
+	if items[0].Case.ExitReasonQuality != DealReviewExitReasonQualityExplicit {
+		t.Fatalf("exit reason quality = %q, want %q", items[0].Case.ExitReasonQuality, DealReviewExitReasonQualityExplicit)
+	}
+	if !strings.Contains(items[0].Case.ExitEvidenceSummary, "Matched close against trailing-stop update to 20.95000000") {
+		t.Fatalf("exit evidence summary = %q, want trailing update evidence", items[0].Case.ExitEvidenceSummary)
+	}
+
+	detail, err := root.DealReview().GetCaseDetail(trader.UserID, trader.ID, items[0].Case.ID)
+	if err != nil {
+		t.Fatalf("DealReview().GetCaseDetail() error = %v", err)
+	}
+	if detail.Close == nil || detail.Close.Event == nil {
+		t.Fatal("expected close event detail to be present")
+	}
+	if detail.Close.Event.CloseReason != "trailing_stop" {
+		t.Fatalf("close event reason = %q, want trailing_stop", detail.Close.Event.CloseReason)
+	}
+	if detail.Case.ExitEvidence == nil {
+		t.Fatal("expected case exit evidence to be present")
+	}
+	if detail.Case.ExitEvidence.TrailingUpdateID == 0 {
+		t.Fatalf("trailing update id = %d, want non-zero", detail.Case.ExitEvidence.TrailingUpdateID)
+	}
+	if detail.Case.ExitEvidence.PreviousStopPrice != 20.4 {
+		t.Fatalf("previous stop price = %.2f, want 20.40", detail.Case.ExitEvidence.PreviousStopPrice)
+	}
+	if detail.Case.ExitEvidence.NewStopPrice != 20.95 {
+		t.Fatalf("new stop price = %.2f, want 20.95", detail.Case.ExitEvidence.NewStopPrice)
+	}
+	if detail.Case.ExitEvidence.TrailingMode != TrailingStopModeLockProfit {
+		t.Fatalf("trailing mode = %q, want %q", detail.Case.ExitEvidence.TrailingMode, TrailingStopModeLockProfit)
+	}
+	if detail.Case.ExitEvidence.TrailingUnrealizedPnL != 2.2 {
+		t.Fatalf("trailing unrealized pnl = %.2f, want 2.20", detail.Case.ExitEvidence.TrailingUnrealizedPnL)
+	}
+	if detail.Case.ExitEvidence.TrailingUnrealizedPnLPct != 5.5 {
+		t.Fatalf("trailing unrealized pnl pct = %.2f, want 5.50", detail.Case.ExitEvidence.TrailingUnrealizedPnLPct)
+	}
+	if detail.Case.ExitEvidence.TrailingStopProfitPct != 4 {
+		t.Fatalf("trailing stop profit pct = %.2f, want 4.00", detail.Case.ExitEvidence.TrailingStopProfitPct)
+	}
+	if !detail.Case.ExitEvidence.TrailingProtectsBreakeven {
+		t.Fatal("expected trailing exit evidence to report breakeven protection")
+	}
+	if detail.Close.Event.ExitEvidence == nil || detail.Close.Event.ExitEvidence.TrailingUpdatedAtMs != trailingUpdateTime.UnixMilli() {
+		t.Fatalf("close event exit evidence = %#v, want trailing update timestamp %d", detail.Close.Event.ExitEvidence, trailingUpdateTime.UnixMilli())
+	}
+
+	refreshedPosition, err := root.Position().GetByID(position.ID)
+	if err != nil {
+		t.Fatalf("Position().GetByID() error = %v", err)
+	}
+	if refreshedPosition.CloseReason != "trailing_stop" {
+		t.Fatalf("position close reason = %q, want trailing_stop", refreshedPosition.CloseReason)
+	}
+}
+
+func TestSyncPositionClassifiesTrailingStopFromMovedStopOrderWithoutPersistedUpdate(t *testing.T) {
+	sqlDB, err := sql.Open("sqlite", filepath.Join(t.TempDir(), "deal-review-moved-stop-exit.db"))
+	if err != nil {
+		t.Fatalf("sql.Open() error = %v", err)
+	}
+	t.Cleanup(func() { _ = sqlDB.Close() })
+
+	gdb, err := gorm.Open(gormsqlite.Dialector{Conn: sqlDB}, &gorm.Config{
+		Logger: gormlogger.Default.LogMode(gormlogger.Silent),
+		NowFunc: func() time.Time {
+			return time.Now().UTC()
+		},
+	})
+	if err != nil {
+		t.Fatalf("gorm.Open() error = %v", err)
+	}
+
+	root := &Store{gdb: gdb, db: sqlDB}
+	if err := root.initTables(); err != nil {
+		t.Fatalf("initTables() error = %v", err)
+	}
+
+	trader := &Trader{
+		ID:             "trader-moved-stop-exit",
+		UserID:         "user-moved-stop-exit",
+		Name:           "Moved Stop Exit Trader",
+		AIModelID:      "model-moved-stop-exit",
+		ExchangeID:     "exchange-moved-stop-exit",
+		InitialBalance: 1000,
+	}
+	if err := root.Trader().Create(trader); err != nil {
+		t.Fatalf("Trader().Create() error = %v", err)
+	}
+
+	entryTime := time.Now().UTC().Add(-15 * time.Minute).UnixMilli()
+	exitTime := time.Now().UTC().Add(-2 * time.Minute).UnixMilli()
+
+	openRecord := &DecisionRecord{
+		TraderID:         trader.ID,
+		CycleNumber:      882,
+		Timestamp:        time.UnixMilli(entryTime).Add(-20 * time.Second).UTC(),
+		CandidateMetaVer: DecisionCandidateMetadataVersion,
+		Decisions: []DecisionAction{
+			{
+				Action:     "open_long",
+				Symbol:     "SUIUSDT",
+				Quantity:   50,
+				Leverage:   3,
+				Price:      1.0047,
+				StopLoss:   0.9986,
+				TakeProfit: 1.0147,
+				Confidence: 74,
+				Reasoning:  "continuation setup",
+			},
+		},
+		Success: true,
+	}
+	if err := root.Decision().LogDecision(openRecord); err != nil {
+		t.Fatalf("Decision().LogDecision(open) error = %v", err)
+	}
+
+	position := &TraderPosition{
+		TraderID:      trader.ID,
+		ExchangeID:    trader.ExchangeID,
+		ExchangeType:  "bybit",
+		Symbol:        "SUIUSDT",
+		Side:          "LONG",
+		EntryQuantity: 50,
+		Quantity:      50,
+		EntryPrice:    1.0047,
+		EntryOrderID:  "entry-sui-moved-stop-1",
+		EntryTime:     entryTime,
+		Leverage:      3,
+		CreatedAt:     entryTime,
+		UpdatedAt:     entryTime,
+	}
+	if err := root.Position().Create(position); err != nil {
+		t.Fatalf("Position().Create() error = %v", err)
+	}
+
+	triggerOrder := &TraderOrder{
+		TraderID:        trader.ID,
+		ExchangeID:      trader.ExchangeID,
+		ExchangeType:    "bybit",
+		ExchangeOrderID: "exit-sui-moved-stop-1",
+		Symbol:          "SUIUSDT",
+		Side:            "SELL",
+		PositionSide:    "LONG",
+		Type:            "Stop",
+		Status:          "FILLED",
+		Quantity:        50,
+		StopPrice:       1.0053,
+		AvgFillPrice:    1.0052,
+		FilledQuantity:  50,
+		ReduceOnly:      true,
+		OrderAction:     "close_long",
+		CreatedAt:       exitTime,
+		UpdatedAt:       exitTime,
+		FilledAt:        exitTime,
+	}
+	if err := root.Order().UpsertOrder(triggerOrder); err != nil {
+		t.Fatalf("Order().UpsertOrder() error = %v", err)
+	}
+
+	if err := root.Position().ClosePositionWithAccurateData(position.ID, 1.0052, "exit-sui-moved-stop-1", exitTime, 0.03, 0.02, "manual_exit"); err != nil {
+		t.Fatalf("ClosePositionWithAccurateData() error = %v", err)
+	}
+
+	items, _, total, err := root.DealReview().ListCases(trader.UserID, DealReviewListFilter{TraderID: trader.ID})
+	if err != nil {
+		t.Fatalf("DealReview().ListCases() error = %v", err)
+	}
+	if total != 1 || len(items) != 1 {
+		t.Fatalf("total/items = %d/%d, want 1/1", total, len(items))
+	}
+	if items[0].Case.CloseReason != "trailing_stop" {
+		t.Fatalf("close reason = %q, want trailing_stop", items[0].Case.CloseReason)
+	}
+	if items[0].Case.ExitOrigin != DealReviewExitOriginTrailingEngine {
+		t.Fatalf("exit origin = %q, want %q", items[0].Case.ExitOrigin, DealReviewExitOriginTrailingEngine)
+	}
+	if items[0].Case.ExitReasonQuality != DealReviewExitReasonQualityHighConfidence {
+		t.Fatalf("exit reason quality = %q, want %q", items[0].Case.ExitReasonQuality, DealReviewExitReasonQualityHighConfidence)
+	}
+	if !strings.Contains(items[0].Case.ExitEvidenceSummary, "stored stop moved favorably from 0.99860000") {
+		t.Fatalf("exit evidence summary = %q, want moved-stop trailing evidence", items[0].Case.ExitEvidenceSummary)
+	}
+
+	detail, err := root.DealReview().GetCaseDetail(trader.UserID, trader.ID, items[0].Case.ID)
+	if err != nil {
+		t.Fatalf("DealReview().GetCaseDetail() error = %v", err)
+	}
+	if detail.Case.ExitEvidence == nil {
+		t.Fatal("expected case exit evidence to be present")
+	}
+	if detail.Case.ExitEvidence.MatchedBy != "matched_moved_stop_order" {
+		t.Fatalf("matched by = %q, want matched_moved_stop_order", detail.Case.ExitEvidence.MatchedBy)
+	}
+	if detail.Case.ExitEvidence.PreviousStopPrice != 0.9986 {
+		t.Fatalf("previous stop price = %.4f, want 0.9986", detail.Case.ExitEvidence.PreviousStopPrice)
+	}
+	if detail.Case.ExitEvidence.NewStopPrice != 1.0053 {
+		t.Fatalf("new stop price = %.4f, want 1.0053", detail.Case.ExitEvidence.NewStopPrice)
+	}
+	if detail.Case.ExitEvidence.TrailingUpdateID != 0 {
+		t.Fatalf("trailing update id = %d, want 0 without persisted update", detail.Case.ExitEvidence.TrailingUpdateID)
+	}
+
+	refreshedPosition, err := root.Position().GetByID(position.ID)
+	if err != nil {
+		t.Fatalf("Position().GetByID() error = %v", err)
+	}
+	if refreshedPosition.CloseReason != "trailing_stop" {
+		t.Fatalf("position close reason = %q, want trailing_stop", refreshedPosition.CloseReason)
+	}
+}
+
+func TestSyncPositionUsesManualUICloseIntent(t *testing.T) {
+	sqlDB, err := sql.Open("sqlite", filepath.Join(t.TempDir(), "deal-review-manual-ui-exit.db"))
+	if err != nil {
+		t.Fatalf("sql.Open() error = %v", err)
+	}
+	t.Cleanup(func() { _ = sqlDB.Close() })
+
+	gdb, err := gorm.Open(gormsqlite.Dialector{Conn: sqlDB}, &gorm.Config{
+		Logger: gormlogger.Default.LogMode(gormlogger.Silent),
+		NowFunc: func() time.Time {
+			return time.Now().UTC()
+		},
+	})
+	if err != nil {
+		t.Fatalf("gorm.Open() error = %v", err)
+	}
+
+	root := &Store{gdb: gdb, db: sqlDB}
+	if err := root.initTables(); err != nil {
+		t.Fatalf("initTables() error = %v", err)
+	}
+
+	trader := &Trader{
+		ID:             "trader-manual-ui-exit",
+		UserID:         "user-manual-ui-exit",
+		Name:           "Manual UI Exit Trader",
+		AIModelID:      "model-manual-ui-exit",
+		ExchangeID:     "exchange-manual-ui-exit",
+		InitialBalance: 1000,
+	}
+	if err := root.Trader().Create(trader); err != nil {
+		t.Fatalf("Trader().Create() error = %v", err)
+	}
+
+	entryTime := time.Now().UTC().Add(-25 * time.Minute).UnixMilli()
+	exitIntentTime := time.Now().UTC().Add(-4 * time.Second)
+	exitTime := time.Now().UTC().Add(-2 * time.Second).UnixMilli()
+
+	position := &TraderPosition{
+		TraderID:      trader.ID,
+		ExchangeID:    trader.ExchangeID,
+		ExchangeType:  "bybit",
+		Symbol:        "OPUSDT",
+		Side:          "LONG",
+		EntryQuantity: 6,
+		Quantity:      6,
+		EntryPrice:    2.12,
+		EntryOrderID:  "entry-op-ui-1",
+		EntryTime:     entryTime,
+		Leverage:      3,
+		CreatedAt:     entryTime,
+		UpdatedAt:     entryTime,
+	}
+	if err := root.Position().Create(position); err != nil {
+		t.Fatalf("Position().Create() error = %v", err)
+	}
+
+	if err := root.DealReview().RecordExitIntent(&DealReviewExitIntentInput{
+		UserID:          trader.UserID,
+		TraderID:        trader.ID,
+		ExchangeID:      trader.ExchangeID,
+		ExchangeOrderID: "manual-ui-op-1",
+		Symbol:          "OPUSDT",
+		Side:            "LONG",
+		Action:          "close_long",
+		IntentType:      DealReviewExitIntentTypeManualUIClose,
+		SourceModule:    "api.handleClosePosition",
+		Summary:         "Matched manual UI close request.",
+		Reasoning:       "User requested a direct close through the API/UI.",
+		Quantity:        6,
+		EntryPrice:      2.12,
+		Timestamp:       exitIntentTime,
+	}); err != nil {
+		t.Fatalf("RecordExitIntent() error = %v", err)
+	}
+
+	if err := root.Position().ClosePositionWithAccurateData(position.ID, 2.08, "manual-ui-op-1", exitTime, -0.72, 0.04, "manual_exit"); err != nil {
+		t.Fatalf("ClosePositionWithAccurateData() error = %v", err)
+	}
+
+	items, _, total, err := root.DealReview().ListCases(trader.UserID, DealReviewListFilter{TraderID: trader.ID})
+	if err != nil {
+		t.Fatalf("DealReview().ListCases() error = %v", err)
+	}
+	if total != 1 || len(items) != 1 {
+		t.Fatalf("total/items = %d/%d, want 1/1", total, len(items))
+	}
+	if items[0].Case.CloseReason != "manual_exit" {
+		t.Fatalf("close reason = %q, want manual_exit", items[0].Case.CloseReason)
+	}
+	if items[0].Case.ExitOrigin != DealReviewExitOriginManualUIClose {
+		t.Fatalf("exit origin = %q, want %q", items[0].Case.ExitOrigin, DealReviewExitOriginManualUIClose)
+	}
+	if items[0].Case.ExitReasonQuality != DealReviewExitReasonQualityExplicit {
+		t.Fatalf("exit reason quality = %q, want %q", items[0].Case.ExitReasonQuality, DealReviewExitReasonQualityExplicit)
+	}
+	if !strings.Contains(items[0].Case.ExitEvidenceSummary, "Matched manual UI close request.") {
+		t.Fatalf("exit evidence summary = %q, want manual UI summary", items[0].Case.ExitEvidenceSummary)
+	}
+
+	detail, err := root.DealReview().GetCaseDetail(trader.UserID, trader.ID, items[0].Case.ID)
+	if err != nil {
+		t.Fatalf("DealReview().GetCaseDetail() error = %v", err)
+	}
+	if detail.Case.ExitEvidence == nil {
+		t.Fatal("expected case exit evidence")
+	}
+	if detail.Case.ExitEvidence.IntentType != DealReviewExitIntentTypeManualUIClose {
+		t.Fatalf("intent type = %q, want %q", detail.Case.ExitEvidence.IntentType, DealReviewExitIntentTypeManualUIClose)
+	}
+	if detail.Case.ExitEvidence.IntentSourceModule != "api.handleClosePosition" {
+		t.Fatalf("intent source module = %q", detail.Case.ExitEvidence.IntentSourceModule)
+	}
+	if detail.Case.ExitEvidence.IntentCreatedAtMs != exitIntentTime.UnixMilli() {
+		t.Fatalf("intent created at = %d, want %d", detail.Case.ExitEvidence.IntentCreatedAtMs, exitIntentTime.UnixMilli())
+	}
+}
+
+func TestSyncPositionUsesDrawdownGuardExitIntent(t *testing.T) {
+	sqlDB, err := sql.Open("sqlite", filepath.Join(t.TempDir(), "deal-review-drawdown-exit.db"))
+	if err != nil {
+		t.Fatalf("sql.Open() error = %v", err)
+	}
+	t.Cleanup(func() { _ = sqlDB.Close() })
+
+	gdb, err := gorm.Open(gormsqlite.Dialector{Conn: sqlDB}, &gorm.Config{
+		Logger: gormlogger.Default.LogMode(gormlogger.Silent),
+		NowFunc: func() time.Time {
+			return time.Now().UTC()
+		},
+	})
+	if err != nil {
+		t.Fatalf("gorm.Open() error = %v", err)
+	}
+
+	root := &Store{gdb: gdb, db: sqlDB}
+	if err := root.initTables(); err != nil {
+		t.Fatalf("initTables() error = %v", err)
+	}
+
+	trader := &Trader{
+		ID:             "trader-drawdown-exit",
+		UserID:         "user-drawdown-exit",
+		Name:           "Drawdown Exit Trader",
+		AIModelID:      "model-drawdown-exit",
+		ExchangeID:     "exchange-drawdown-exit",
+		InitialBalance: 1000,
+	}
+	if err := root.Trader().Create(trader); err != nil {
+		t.Fatalf("Trader().Create() error = %v", err)
+	}
+
+	entryTime := time.Now().UTC().Add(-50 * time.Minute).UnixMilli()
+	exitIntentTime := time.Now().UTC().Add(-12 * time.Second)
+	exitTime := time.Now().UTC().Add(-5 * time.Second).UnixMilli()
+
+	position := &TraderPosition{
+		TraderID:      trader.ID,
+		ExchangeID:    trader.ExchangeID,
+		ExchangeType:  "bybit",
+		Symbol:        "TIAUSDT",
+		Side:          "SHORT",
+		EntryQuantity: 3,
+		Quantity:      3,
+		EntryPrice:    8.4,
+		EntryOrderID:  "entry-tia-risk-1",
+		EntryTime:     entryTime,
+		Leverage:      5,
+		CreatedAt:     entryTime,
+		UpdatedAt:     entryTime,
+	}
+	if err := root.Position().Create(position); err != nil {
+		t.Fatalf("Position().Create() error = %v", err)
+	}
+
+	if err := root.DealReview().RecordExitIntent(&DealReviewExitIntentInput{
+		UserID:          trader.UserID,
+		TraderID:        trader.ID,
+		ExchangeID:      trader.ExchangeID,
+		ExchangeOrderID: "risk-drawdown-tia-1",
+		Symbol:          "TIAUSDT",
+		Side:            "SHORT",
+		Action:          "close_short",
+		IntentType:      DealReviewExitIntentTypeDrawdownGuard,
+		SourceModule:    "trader.auto_trader_risk",
+		Summary:         "Matched drawdown-guard exit at current profit 7.20% after peak 14.80% with 51.35% drawdown.",
+		Reasoning:       "Matched drawdown-guard exit at current profit 7.20% after peak 14.80% with 51.35% drawdown.",
+		Quantity:        3,
+		EntryPrice:      8.4,
+		Timestamp:       exitIntentTime,
+	}); err != nil {
+		t.Fatalf("RecordExitIntent() error = %v", err)
+	}
+
+	if err := root.Position().ClosePositionWithAccurateData(position.ID, 8.28, "risk-drawdown-tia-1", exitTime, 1.8, 0.03, "manual_exit"); err != nil {
+		t.Fatalf("ClosePositionWithAccurateData() error = %v", err)
+	}
+
+	items, _, total, err := root.DealReview().ListCases(trader.UserID, DealReviewListFilter{TraderID: trader.ID})
+	if err != nil {
+		t.Fatalf("DealReview().ListCases() error = %v", err)
+	}
+	if total != 1 || len(items) != 1 {
+		t.Fatalf("total/items = %d/%d, want 1/1", total, len(items))
+	}
+	if items[0].Case.CloseReason != "manual_exit" {
+		t.Fatalf("close reason = %q, want manual_exit", items[0].Case.CloseReason)
+	}
+	if items[0].Case.ExitOrigin != DealReviewExitOriginRiskGuard {
+		t.Fatalf("exit origin = %q, want %q", items[0].Case.ExitOrigin, DealReviewExitOriginRiskGuard)
+	}
+	if items[0].Case.ExitReasonQuality != DealReviewExitReasonQualityExplicit {
+		t.Fatalf("exit reason quality = %q, want %q", items[0].Case.ExitReasonQuality, DealReviewExitReasonQualityExplicit)
+	}
+	if !strings.Contains(items[0].Case.ExitEvidenceSummary, "drawdown-guard exit") {
+		t.Fatalf("exit evidence summary = %q, want drawdown-guard summary", items[0].Case.ExitEvidenceSummary)
+	}
+
+	detail, err := root.DealReview().GetCaseDetail(trader.UserID, trader.ID, items[0].Case.ID)
+	if err != nil {
+		t.Fatalf("DealReview().GetCaseDetail() error = %v", err)
+	}
+	if detail.Case.ExitEvidence == nil {
+		t.Fatal("expected case exit evidence")
+	}
+	if detail.Case.ExitEvidence.IntentType != DealReviewExitIntentTypeDrawdownGuard {
+		t.Fatalf("intent type = %q, want %q", detail.Case.ExitEvidence.IntentType, DealReviewExitIntentTypeDrawdownGuard)
+	}
+	if detail.Case.ExitEvidence.IntentSourceModule != "trader.auto_trader_risk" {
+		t.Fatalf("intent source module = %q", detail.Case.ExitEvidence.IntentSourceModule)
+	}
+}
+
+func TestSyncPositionUsesGridDecisionExitIntent(t *testing.T) {
+	sqlDB, err := sql.Open("sqlite", filepath.Join(t.TempDir(), "deal-review-grid-decision-exit.db"))
+	if err != nil {
+		t.Fatalf("sql.Open() error = %v", err)
+	}
+	t.Cleanup(func() { _ = sqlDB.Close() })
+
+	gdb, err := gorm.Open(gormsqlite.Dialector{Conn: sqlDB}, &gorm.Config{
+		Logger: gormlogger.Default.LogMode(gormlogger.Silent),
+		NowFunc: func() time.Time {
+			return time.Now().UTC()
+		},
+	})
+	if err != nil {
+		t.Fatalf("gorm.Open() error = %v", err)
+	}
+
+	root := &Store{gdb: gdb, db: sqlDB}
+	if err := root.initTables(); err != nil {
+		t.Fatalf("initTables() error = %v", err)
+	}
+
+	trader := &Trader{
+		ID:             "trader-grid-decision-exit",
+		UserID:         "user-grid-decision-exit",
+		Name:           "Grid Decision Exit Trader",
+		AIModelID:      "model-grid-decision-exit",
+		ExchangeID:     "exchange-grid-decision-exit",
+		InitialBalance: 1000,
+	}
+	if err := root.Trader().Create(trader); err != nil {
+		t.Fatalf("Trader().Create() error = %v", err)
+	}
+
+	entryTime := time.Now().UTC().Add(-22 * time.Minute).UnixMilli()
+	exitIntentTime := time.Now().UTC().Add(-4 * time.Minute)
+	exitTime := time.Now().UTC().Add(-3 * time.Minute).UnixMilli()
+
+	openRecord := &DecisionRecord{
+		TraderID:         trader.ID,
+		CycleNumber:      930,
+		Timestamp:        time.UnixMilli(entryTime).Add(-20 * time.Second).UTC(),
+		CandidateMetaVer: DecisionCandidateMetadataVersion,
+		Decisions: []DecisionAction{
+			{
+				Action:     "open_long",
+				Symbol:     "DOGEUSDT",
+				Quantity:   200,
+				Leverage:   2,
+				Price:      0.121,
+				StopLoss:   0.118,
+				TakeProfit: 0.127,
+				Confidence: 68,
+				Reasoning:  "grid accumulation",
+			},
+		},
+		Success: true,
+	}
+	if err := root.Decision().LogDecision(openRecord); err != nil {
+		t.Fatalf("Decision().LogDecision(open) error = %v", err)
+	}
+
+	position := &TraderPosition{
+		TraderID:      trader.ID,
+		ExchangeID:    trader.ExchangeID,
+		ExchangeType:  "bybit",
+		Symbol:        "DOGEUSDT",
+		Side:          "LONG",
+		EntryQuantity: 200,
+		Quantity:      200,
+		EntryPrice:    0.121,
+		EntryOrderID:  "entry-doge-grid-1",
+		EntryTime:     entryTime,
+		Leverage:      2,
+		CreatedAt:     entryTime,
+		UpdatedAt:     entryTime,
+	}
+	if err := root.Position().Create(position); err != nil {
+		t.Fatalf("Position().Create() error = %v", err)
+	}
+
+	if err := root.DealReview().RecordExitIntent(&DealReviewExitIntentInput{
+		UserID:          trader.UserID,
+		TraderID:        trader.ID,
+		ExchangeID:      trader.ExchangeID,
+		ExchangeOrderID: "grid-ai-close-doge-1",
+		Symbol:          "DOGEUSDT",
+		Side:            "LONG",
+		Action:          "close_long",
+		IntentType:      DealReviewExitIntentTypeGridDecision,
+		SourceModule:    "trader.auto_trader_grid",
+		Summary:         "Matched grid AI close decision.",
+		Reasoning:       "Reduce directional exposure after grid regime shifted bearish.",
+		Quantity:        200,
+		EntryPrice:      0.121,
+		Timestamp:       exitIntentTime,
+	}); err != nil {
+		t.Fatalf("RecordExitIntent() error = %v", err)
+	}
+
+	if err := root.Position().ClosePositionWithAccurateData(position.ID, 0.123, "grid-ai-close-doge-1", exitTime, 0.4, 0.02, "manual_exit"); err != nil {
+		t.Fatalf("ClosePositionWithAccurateData() error = %v", err)
+	}
+
+	items, _, total, err := root.DealReview().ListCases(trader.UserID, DealReviewListFilter{TraderID: trader.ID})
+	if err != nil {
+		t.Fatalf("DealReview().ListCases() error = %v", err)
+	}
+	if total != 1 || len(items) != 1 {
+		t.Fatalf("total/items = %d/%d, want 1/1", total, len(items))
+	}
+	if items[0].Case.CloseReason != "ai_exit" {
+		t.Fatalf("close reason = %q, want ai_exit", items[0].Case.CloseReason)
+	}
+	if items[0].Case.ExitOrigin != DealReviewExitOriginAIDecision {
+		t.Fatalf("exit origin = %q, want %q", items[0].Case.ExitOrigin, DealReviewExitOriginAIDecision)
+	}
+	if items[0].Case.ExitEvidence == nil || items[0].Case.ExitEvidence.IntentType != DealReviewExitIntentTypeGridDecision {
+		t.Fatalf("exit evidence = %#v, want grid decision intent", items[0].Case.ExitEvidence)
+	}
+}
+
+func TestSyncPositionUsesGridLevelStopLossIntent(t *testing.T) {
+	sqlDB, err := sql.Open("sqlite", filepath.Join(t.TempDir(), "deal-review-grid-stoploss-exit.db"))
+	if err != nil {
+		t.Fatalf("sql.Open() error = %v", err)
+	}
+	t.Cleanup(func() { _ = sqlDB.Close() })
+
+	gdb, err := gorm.Open(gormsqlite.Dialector{Conn: sqlDB}, &gorm.Config{
+		Logger: gormlogger.Default.LogMode(gormlogger.Silent),
+		NowFunc: func() time.Time {
+			return time.Now().UTC()
+		},
+	})
+	if err != nil {
+		t.Fatalf("gorm.Open() error = %v", err)
+	}
+
+	root := &Store{gdb: gdb, db: sqlDB}
+	if err := root.initTables(); err != nil {
+		t.Fatalf("initTables() error = %v", err)
+	}
+
+	trader := &Trader{
+		ID:             "trader-grid-stoploss-exit",
+		UserID:         "user-grid-stoploss-exit",
+		Name:           "Grid Stop Loss Exit Trader",
+		AIModelID:      "model-grid-stoploss-exit",
+		ExchangeID:     "exchange-grid-stoploss-exit",
+		InitialBalance: 1000,
+	}
+	if err := root.Trader().Create(trader); err != nil {
+		t.Fatalf("Trader().Create() error = %v", err)
+	}
+
+	entryTime := time.Now().UTC().Add(-28 * time.Minute).UnixMilli()
+	exitIntentTime := time.Now().UTC().Add(-5 * time.Minute)
+	exitTime := time.Now().UTC().Add(-4 * time.Minute).UnixMilli()
+
+	openRecord := &DecisionRecord{
+		TraderID:         trader.ID,
+		CycleNumber:      931,
+		Timestamp:        time.UnixMilli(entryTime).Add(-20 * time.Second).UTC(),
+		CandidateMetaVer: DecisionCandidateMetadataVersion,
+		Decisions: []DecisionAction{
+			{
+				Action:     "open_short",
+				Symbol:     "TIAUSDT",
+				Quantity:   4,
+				Leverage:   3,
+				Price:      8.4,
+				StopLoss:   8.62,
+				TakeProfit: 8.1,
+				Confidence: 65,
+				Reasoning:  "grid fade",
+			},
+		},
+		Success: true,
+	}
+	if err := root.Decision().LogDecision(openRecord); err != nil {
+		t.Fatalf("Decision().LogDecision(open) error = %v", err)
+	}
+
+	position := &TraderPosition{
+		TraderID:      trader.ID,
+		ExchangeID:    trader.ExchangeID,
+		ExchangeType:  "bybit",
+		Symbol:        "TIAUSDT",
+		Side:          "SHORT",
+		EntryQuantity: 4,
+		Quantity:      4,
+		EntryPrice:    8.4,
+		EntryOrderID:  "entry-tia-grid-1",
+		EntryTime:     entryTime,
+		Leverage:      3,
+		CreatedAt:     entryTime,
+		UpdatedAt:     entryTime,
+	}
+	if err := root.Position().Create(position); err != nil {
+		t.Fatalf("Position().Create() error = %v", err)
+	}
+
+	if err := root.DealReview().RecordExitIntent(&DealReviewExitIntentInput{
+		UserID:          trader.UserID,
+		TraderID:        trader.ID,
+		ExchangeID:      trader.ExchangeID,
+		ExchangeOrderID: "grid-stoploss-tia-1",
+		Symbol:          "TIAUSDT",
+		Side:            "SHORT",
+		Action:          "close_short",
+		IntentType:      DealReviewExitIntentTypeGridLevelStop,
+		SourceModule:    "trader.auto_trader_grid_orders",
+		Summary:         "Matched grid level stop-loss for level 2 after 3.40% loss.",
+		Reasoning:       "Grid stop-loss checker closed the short level after price exceeded the configured loss threshold.",
+		Quantity:        4,
+		EntryPrice:      8.4,
+		Timestamp:       exitIntentTime,
+	}); err != nil {
+		t.Fatalf("RecordExitIntent() error = %v", err)
+	}
+
+	if err := root.Position().ClosePositionWithAccurateData(position.ID, 8.55, "grid-stoploss-tia-1", exitTime, -0.6, 0.03, "manual_exit"); err != nil {
+		t.Fatalf("ClosePositionWithAccurateData() error = %v", err)
+	}
+
+	items, _, total, err := root.DealReview().ListCases(trader.UserID, DealReviewListFilter{TraderID: trader.ID})
+	if err != nil {
+		t.Fatalf("DealReview().ListCases() error = %v", err)
+	}
+	if total != 1 || len(items) != 1 {
+		t.Fatalf("total/items = %d/%d, want 1/1", total, len(items))
+	}
+	if items[0].Case.CloseReason != "stop_loss" {
+		t.Fatalf("close reason = %q, want stop_loss", items[0].Case.CloseReason)
+	}
+	if items[0].Case.ExitOrigin != DealReviewExitOriginRiskGuard {
+		t.Fatalf("exit origin = %q, want %q", items[0].Case.ExitOrigin, DealReviewExitOriginRiskGuard)
+	}
+	if items[0].Case.ExitEvidence == nil || items[0].Case.ExitEvidence.IntentType != DealReviewExitIntentTypeGridLevelStop {
+		t.Fatalf("exit evidence = %#v, want grid stop-loss intent", items[0].Case.ExitEvidence)
 	}
 }
 
@@ -2678,11 +3984,23 @@ func TestCreateFromClosedPnLInfersAIExitFromMatchedCloseDecision(t *testing.T) {
 	if detail.Case.CloseReason != "ai_exit" {
 		t.Fatalf("close reason = %q, want ai_exit", detail.Case.CloseReason)
 	}
+	if detail.Case.ExitOrigin != DealReviewExitOriginAIDecision {
+		t.Fatalf("exit origin = %q, want %q", detail.Case.ExitOrigin, DealReviewExitOriginAIDecision)
+	}
+	if detail.Case.ExitReasonQuality != DealReviewExitReasonQualityExplicit {
+		t.Fatalf("exit reason quality = %q, want %q", detail.Case.ExitReasonQuality, DealReviewExitReasonQualityExplicit)
+	}
+	if !strings.Contains(detail.Case.ExitEvidenceSummary, "AI close decision cycle 802") {
+		t.Fatalf("exit evidence summary = %q, want AI decision evidence", detail.Case.ExitEvidenceSummary)
+	}
 	if detail.Close == nil || detail.Close.Event == nil || detail.Close.Event.DecisionCycleNumber != 802 {
 		t.Fatalf("close event = %#v, want decision cycle 802", detail.Close)
 	}
 	if detail.Close.Event.Reasoning != "loss_cut, momentum_failure, manage_positions_first" {
 		t.Fatalf("close reasoning = %q", detail.Close.Event.Reasoning)
+	}
+	if detail.Close.Event.ExitEvidence == nil || detail.Close.Event.ExitEvidence.DecisionCycleNumber != 802 {
+		t.Fatalf("close event exit evidence = %#v, want decision cycle 802", detail.Close.Event.ExitEvidence)
 	}
 }
 

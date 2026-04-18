@@ -22,42 +22,119 @@ const (
 )
 
 type autonomousOptimizerRunMetadata struct {
-	WindowStartMs            int64                        `json:"window_start_ms"`
-	WindowEndMs              int64                        `json:"window_end_ms"`
-	ReviewIntervalHours      int                          `json:"review_interval_hours"`
-	ClosedDeals              int64                        `json:"closed_deals"`
-	OpenDeals                int64                        `json:"open_deals"`
-	WinningDeals             int64                        `json:"winning_deals"`
-	LosingDeals              int64                        `json:"losing_deals"`
-	NetPnL                   float64                      `json:"net_pnl"`
-	AvgPnL                   float64                      `json:"avg_pnl"`
-	Expectancy               float64                      `json:"expectancy"`
-	WinRate                  float64                      `json:"win_rate"`
-	ProfitFactor             float64                      `json:"profit_factor"`
-	MaxDrawdownPct           float64                      `json:"max_drawdown_pct"`
-	DecisionRecordCount      int                          `json:"decision_record_count"`
-	DecisionCandidateCount   int                          `json:"decision_candidate_count"`
-	OpenDecisionCount        int                          `json:"open_decision_count"`
-	CyclesWithCandidates     int                          `json:"cycles_with_candidates"`
-	CyclesWithOpenDecisions  int                          `json:"cycles_with_open_decisions"`
-	HoldDecisionCount        int                          `json:"hold_decision_count"`
-	WaitDecisionCount        int                          `json:"wait_decision_count"`
-	DecisionConversionRate   float64                      `json:"decision_conversion_rate"`
-	AvgDecisionConfidence    float64                      `json:"avg_decision_confidence"`
-	AvgMFECapturedPct        float64                      `json:"avg_mfe_captured_pct"`
-	AvgProfitGivenBackPct    float64                      `json:"avg_profit_given_back_pct"`
-	AvgExitEfficiencyScore   float64                      `json:"avg_exit_efficiency_score"`
-	AvgEntryTimingScore      float64                      `json:"avg_entry_timing_score"`
-	AvgRiskSizingScore       float64                      `json:"avg_risk_sizing_score"`
-	BadEntryDeals            int64                        `json:"bad_entry_deals"`
-	BadExitDeals             int64                        `json:"bad_exit_deals"`
-	AvoidableLossDeals       int64                        `json:"avoidable_loss_deals"`
-	StrongEntryWeakExitDeals int64                        `json:"strong_entry_weak_exit_deals"`
-	RejectReasons            []store.TraderRejectReason   `json:"reject_reasons,omitempty"`
-	ConfidenceBands          []store.TraderConfidenceBand `json:"confidence_bands,omitempty"`
-	OpportunitySessions      []store.TraderSessionSummary `json:"opportunity_sessions,omitempty"`
-	OpportunitySymbols       []store.TraderSymbolSummary  `json:"opportunity_symbols,omitempty"`
-	SelfPaused               bool                         `json:"self_paused,omitempty"`
+	WindowStartMs             int64                                         `json:"window_start_ms"`
+	WindowEndMs               int64                                         `json:"window_end_ms"`
+	ReviewIntervalHours       int                                           `json:"review_interval_hours"`
+	ClosedDeals               int64                                         `json:"closed_deals"`
+	OpenDeals                 int64                                         `json:"open_deals"`
+	WinningDeals              int64                                         `json:"winning_deals"`
+	LosingDeals               int64                                         `json:"losing_deals"`
+	NetPnL                    float64                                       `json:"net_pnl"`
+	AvgPnL                    float64                                       `json:"avg_pnl"`
+	Expectancy                float64                                       `json:"expectancy"`
+	WinRate                   float64                                       `json:"win_rate"`
+	ProfitFactor              float64                                       `json:"profit_factor"`
+	MaxDrawdownPct            float64                                       `json:"max_drawdown_pct"`
+	DecisionRecordCount       int                                           `json:"decision_record_count"`
+	DecisionCandidateCount    int                                           `json:"decision_candidate_count"`
+	OpenDecisionCount         int                                           `json:"open_decision_count"`
+	RejectedCandidateCount    int                                           `json:"rejected_candidate_count"`
+	CyclesWithCandidates      int                                           `json:"cycles_with_candidates"`
+	CyclesWithOpenDecisions   int                                           `json:"cycles_with_open_decisions"`
+	HoldDecisionCount         int                                           `json:"hold_decision_count"`
+	WaitDecisionCount         int                                           `json:"wait_decision_count"`
+	DecisionConversionRate    float64                                       `json:"decision_conversion_rate"`
+	AvgDecisionConfidence     float64                                       `json:"avg_decision_confidence"`
+	AvgMFECapturedPct         float64                                       `json:"avg_mfe_captured_pct"`
+	AvgProfitGivenBackPct     float64                                       `json:"avg_profit_given_back_pct"`
+	AvgExitEfficiencyScore    float64                                       `json:"avg_exit_efficiency_score"`
+	AvgEntryTimingScore       float64                                       `json:"avg_entry_timing_score"`
+	AvgRiskSizingScore        float64                                       `json:"avg_risk_sizing_score"`
+	BadEntryDeals             int64                                         `json:"bad_entry_deals"`
+	BadExitDeals              int64                                         `json:"bad_exit_deals"`
+	AvoidableLossDeals        int64                                         `json:"avoidable_loss_deals"`
+	StrongEntryWeakExitDeals  int64                                         `json:"strong_entry_weak_exit_deals"`
+	RejectReasons             []store.TraderRejectReason                    `json:"reject_reasons,omitempty"`
+	ConfidenceBands           []store.TraderConfidenceBand                  `json:"confidence_bands,omitempty"`
+	OpportunitySessions       []store.TraderSessionSummary                  `json:"opportunity_sessions,omitempty"`
+	OpportunitySymbols        []store.TraderSymbolSummary                   `json:"opportunity_symbols,omitempty"`
+	ExecutionStatuses         []store.TraderExecutionStatus                 `json:"execution_statuses,omitempty"`
+	RecentOpenExecutions      []store.TraderOpenExecution                   `json:"recent_open_executions,omitempty"`
+	RegimeSummaries           []store.TraderRegimeSummary                   `json:"regime_summaries,omitempty"`
+	TrailingStopTelemetry     *autonomousOptimizerTrailingStopTelemetry     `json:"trailing_stop_telemetry,omitempty"`
+	AdaptiveCooldownTelemetry *autonomousOptimizerAdaptiveCooldownTelemetry `json:"adaptive_cooldown_telemetry,omitempty"`
+	SelfPaused                bool                                          `json:"self_paused,omitempty"`
+}
+
+type autonomousOptimizerTrailingStopTelemetry struct {
+	TrailingExitCount               int                                              `json:"trailing_exit_count"`
+	TrailingProfitExitCount         int                                              `json:"trailing_profit_exit_count"`
+	TrailingLossExitCount           int                                              `json:"trailing_loss_exit_count"`
+	InitialStopLossCount            int                                              `json:"initial_stop_loss_count"`
+	TrailingExitAvgPnLPct           float64                                          `json:"trailing_exit_avg_pnl_pct"`
+	InitialStopLossAvgPnLPct        float64                                          `json:"initial_stop_loss_avg_pnl_pct"`
+	AvgMinutesToFirstUpdate         float64                                          `json:"avg_minutes_to_first_update"`
+	AvgMinutesFromFirstUpdateToExit float64                                          `json:"avg_minutes_from_first_update_to_exit"`
+	EarlyTighteningCount            int                                              `json:"early_tightening_count"`
+	EarlyTighteningLossCount        int                                              `json:"early_tightening_loss_count"`
+	FirstUpdateAuditCount           int                                              `json:"first_update_audit_count"`
+	BreakevenProtectedCount         int                                              `json:"breakeven_protected_count"`
+	SampleUpdates                   []autonomousOptimizerTrailingStopUpdateAuditItem `json:"sample_updates,omitempty"`
+}
+
+type autonomousOptimizerTrailingStopUpdateAuditItem struct {
+	PositionID                int64   `json:"position_id,omitempty"`
+	Symbol                    string  `json:"symbol,omitempty"`
+	Side                      string  `json:"side,omitempty"`
+	CloseReason               string  `json:"close_reason,omitempty"`
+	TrailingMode              string  `json:"trailing_mode,omitempty"`
+	UpdateTimeMs              int64   `json:"update_time_ms,omitempty"`
+	MinutesToFirstUpdate      float64 `json:"minutes_to_first_update,omitempty"`
+	MinutesFromUpdateToExit   float64 `json:"minutes_from_update_to_exit,omitempty"`
+	PreUpdateUnrealizedPnL    float64 `json:"pre_update_unrealized_pnl,omitempty"`
+	PreUpdateUnrealizedPnLPct float64 `json:"pre_update_unrealized_pnl_pct,omitempty"`
+	StopProfitPct             float64 `json:"stop_profit_pct,omitempty"`
+	ProtectsBreakeven         bool    `json:"protects_breakeven,omitempty"`
+	RealizedPnLPct            float64 `json:"realized_pnl_pct,omitempty"`
+	PreviousStopPrice         float64 `json:"previous_stop_price,omitempty"`
+	NewStopPrice              float64 `json:"new_stop_price,omitempty"`
+	TierTriggerProfitPct      float64 `json:"tier_trigger_profit_pct,omitempty"`
+}
+
+type autonomousOptimizerAdaptiveCooldownConfigSnapshot struct {
+	Enabled                       bool `json:"enabled"`
+	RequireWeakExecutionRegime    bool `json:"require_weak_execution_regime"`
+	RecentTradeWindow             int  `json:"recent_trade_window"`
+	MinRecentTrades               int  `json:"min_recent_trades"`
+	SameSymbolLossCooldownMinutes int  `json:"same_symbol_loss_cooldown_minutes"`
+	PairLossLookbackHours         int  `json:"pair_loss_lookback_hours"`
+}
+
+type autonomousOptimizerAdaptiveCooldownSymbol struct {
+	Symbol               string  `json:"symbol"`
+	ReentryCount         int     `json:"reentry_count"`
+	RepeatAfterLossCount int     `json:"repeat_after_loss_count"`
+	AvgPnLPct            float64 `json:"avg_pnl_pct"`
+	LastGapMinutes       float64 `json:"last_gap_minutes,omitempty"`
+}
+
+type autonomousOptimizerAdaptiveCooldownRegime struct {
+	TrendRegime          string  `json:"trend_regime,omitempty"`
+	VolatilityRegime     string  `json:"volatility_regime,omitempty"`
+	OIRegime             string  `json:"oi_regime,omitempty"`
+	ReentryCount         int     `json:"reentry_count"`
+	RepeatAfterLossCount int     `json:"repeat_after_loss_count"`
+	AvgPnLPct            float64 `json:"avg_pnl_pct"`
+}
+
+type autonomousOptimizerAdaptiveCooldownTelemetry struct {
+	Config                  autonomousOptimizerAdaptiveCooldownConfigSnapshot `json:"config"`
+	CooldownCandidateCount  int                                               `json:"cooldown_candidate_count"`
+	SameSessionReentryCount int                                               `json:"same_session_reentry_count"`
+	RepeatAfterLossCount    int                                               `json:"repeat_after_loss_count"`
+	RegimeRepeatLossCount   int                                               `json:"regime_repeat_loss_count"`
+	TopSymbols              []autonomousOptimizerAdaptiveCooldownSymbol       `json:"top_symbols,omitempty"`
+	TopRegimes              []autonomousOptimizerAdaptiveCooldownRegime       `json:"top_regimes,omitempty"`
 }
 
 type autonomousOptimizerMonitoringSnapshot struct {
@@ -370,8 +447,6 @@ func (s *Server) runAutonomousOptimizerCycle(cfg *store.AutonomousOptimizerConfi
 	if err != nil {
 		return nil, err
 	}
-	metadata := buildAutonomousOptimizerMetadataMap(bundle.Metadata)
-	metadata["monitoring_snapshot"] = buildAutonomousOptimizerMonitoringSnapshot(bundle)
 
 	traderCfg, err := s.store.Trader().Get(cfg.UserID, cfg.TraderID)
 	if err != nil {
@@ -381,6 +456,13 @@ func (s *Server) runAutonomousOptimizerCycle(cfg *store.AutonomousOptimizerConfi
 	if err != nil {
 		return nil, err
 	}
+
+	if err := s.attachAutonomousOptimizerTelemetry(cfg, strategyCfg, bundle); err != nil {
+		return nil, err
+	}
+
+	metadata := buildAutonomousOptimizerMetadataMap(bundle.Metadata)
+	metadata["monitoring_snapshot"] = buildAutonomousOptimizerMonitoringSnapshot(bundle)
 	metadata["current_prompt_bundle"] = buildAutonomousOptimizerPromptBundle(cfg, traderCfg, strategyCfg)
 
 	if previousRun, err := s.loadAutonomousOptimizerRunIfAny(cfg.UserID, cfg.TraderID, cfg.LastRunID); err == nil && previousRun != nil {
@@ -412,6 +494,9 @@ func (s *Server) runAutonomousOptimizerCycle(cfg *store.AutonomousOptimizerConfi
 		return nil, err
 	}
 	metadata["recent_optimizer_runs"] = summarizeAutonomousOptimizerRuns(recentRuns)
+	if latestGateFeedback, ok := payload["latest_gate_feedback"]; ok {
+		metadata["latest_gate_feedback"] = latestGateFeedback
+	}
 
 	proposerCfg, proposerModelName, err := s.resolveAIScanModel(cfg.UserID, cfg.PrimaryModelConfigID, cfg.PrimaryModelName)
 	if err != nil {

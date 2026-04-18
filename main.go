@@ -166,6 +166,11 @@ func main() {
 			return
 		}
 		logger.Info("✅ Background deal review price timeline backfill completed")
+		if err := st.DealReview().BackfillExitAttribution(); err != nil {
+			logger.Warnf("⚠️ Background deal review exit attribution backfill failed: %v", err)
+			return
+		}
+		logger.Info("✅ Background deal review exit attribution backfill completed")
 		if err := st.DealReview().BackfillQualityMetrics(); err != nil {
 			logger.Warnf("⚠️ Background deal review quality backfill failed: %v", err)
 			return

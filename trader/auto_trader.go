@@ -128,44 +128,46 @@ type AutoTraderConfig struct {
 
 // AutoTrader automatic trader
 type AutoTrader struct {
-	id                    string // Trader unique identifier
-	name                  string // Trader display name
-	aiModel               string // AI model name
-	exchange              string // Trading platform type (binance/bybit/etc)
-	exchangeID            string // Exchange account UUID
-	showInCompetition     bool   // Whether to show in competition page
-	config                AutoTraderConfig
-	trader                Trader // Use Trader interface (supports multiple platforms)
-	mcpClient             mcp.AIClient
-	store                 *store.Store           // Data storage (decision records, etc.)
-	strategyEngine        *kernel.StrategyEngine // Strategy engine (uses strategy configuration)
-	baseStrategyConfig    *store.StrategyConfig  // Immutable base strategy definition from store
-	cycleNumber           int                    // Current cycle number
-	initialBalance        float64
-	dailyPnL              float64
-	customPrompt          string // Custom trading strategy prompt
-	overrideBasePrompt    bool   // Whether to override base prompt
-	systemPromptTemplate  string // Trader-level prompt template overlay
-	lastResetTime         time.Time
-	stopUntil             time.Time
-	isRunning             bool
-	isRunningMutex        sync.RWMutex       // Mutex to protect isRunning flag
-	startTime             time.Time          // System start time
-	callCount             int                // AI call count
-	positionFirstSeenTime map[string]int64   // Position first seen time (symbol_side -> timestamp in milliseconds)
-	stopMonitorCh         chan struct{}      // Used to stop monitoring goroutine
-	monitorWg             sync.WaitGroup     // Used to wait for monitoring goroutine to finish
-	peakPnLCache          map[string]float64 // Peak profit cache (symbol -> peak P&L percentage)
-	peakPnLCacheMutex     sync.RWMutex       // Cache read-write lock
-	trailingStopState     map[string]*trailingStopPositionState
-	trailingStopStateMu   sync.RWMutex
-	lastBalanceSyncTime   time.Time  // Last balance sync time
-	userID                string     // User ID
-	gridState             *GridState // Grid trading state (only used when StrategyType == "grid_trading")
-	claw402WalletAddr     string     // Claw402 wallet address (derived from private key at start)
-	consecutiveAIFailures int        // Consecutive AI call failures
-	safeMode              bool       // Safe mode: no new positions, protect existing ones
-	safeModeReason        string     // Why safe mode was activated
+	id                            string // Trader unique identifier
+	name                          string // Trader display name
+	aiModel                       string // AI model name
+	exchange                      string // Trading platform type (binance/bybit/etc)
+	exchangeID                    string // Exchange account UUID
+	showInCompetition             bool   // Whether to show in competition page
+	config                        AutoTraderConfig
+	trader                        Trader // Use Trader interface (supports multiple platforms)
+	mcpClient                     mcp.AIClient
+	store                         *store.Store           // Data storage (decision records, etc.)
+	strategyEngine                *kernel.StrategyEngine // Strategy engine (uses strategy configuration)
+	baseStrategyConfig            *store.StrategyConfig  // Immutable base strategy definition from store
+	cycleNumber                   int                    // Current cycle number
+	initialBalance                float64
+	dailyPnL                      float64
+	customPrompt                  string // Custom trading strategy prompt
+	overrideBasePrompt            bool   // Whether to override base prompt
+	systemPromptTemplate          string // Trader-level prompt template overlay
+	lastResetTime                 time.Time
+	stopUntil                     time.Time
+	isRunning                     bool
+	isRunningMutex                sync.RWMutex       // Mutex to protect isRunning flag
+	startTime                     time.Time          // System start time
+	callCount                     int                // AI call count
+	positionFirstSeenTime         map[string]int64   // Position first seen time (symbol_side -> timestamp in milliseconds)
+	stopMonitorCh                 chan struct{}      // Used to stop monitoring goroutine
+	monitorWg                     sync.WaitGroup     // Used to wait for monitoring goroutine to finish
+	peakPnLCache                  map[string]float64 // Peak profit cache (symbol -> peak P&L percentage)
+	peakPnLCacheMutex             sync.RWMutex       // Cache read-write lock
+	trailingStopState             map[string]*trailingStopPositionState
+	trailingStopStateMu           sync.RWMutex
+	unsupportedCandidateSymbols   map[string]int64
+	unsupportedCandidateSymbolsMu sync.RWMutex
+	lastBalanceSyncTime           time.Time  // Last balance sync time
+	userID                        string     // User ID
+	gridState                     *GridState // Grid trading state (only used when StrategyType == "grid_trading")
+	claw402WalletAddr             string     // Claw402 wallet address (derived from private key at start)
+	consecutiveAIFailures         int        // Consecutive AI call failures
+	safeMode                      bool       // Safe mode: no new positions, protect existing ones
+	safeModeReason                string     // Why safe mode was activated
 }
 
 // NewAutoTrader creates an automatic trader
@@ -376,36 +378,38 @@ func NewAutoTrader(config AutoTraderConfig, st *store.Store, userID string) (*Au
 	logger.Infof("✓ [%s] Using strategy engine (strategy configuration loaded)", config.Name)
 
 	return &AutoTrader{
-		id:                    config.ID,
-		name:                  config.Name,
-		aiModel:               config.AIModel,
-		exchange:              config.Exchange,
-		exchangeID:            config.ExchangeID,
-		showInCompetition:     config.ShowInCompetition,
-		config:                config,
-		trader:                trader,
-		mcpClient:             mcpClient,
-		store:                 st,
-		strategyEngine:        strategyEngine,
-		baseStrategyConfig:    baseStrategyConfig,
-		cycleNumber:           cycleNumber,
-		initialBalance:        config.InitialBalance,
-		customPrompt:          config.CustomPrompt,
-		overrideBasePrompt:    config.OverrideBasePrompt,
-		systemPromptTemplate:  strings.TrimSpace(config.SystemPromptTemplate),
-		lastResetTime:         time.Now(),
-		startTime:             time.Now(),
-		callCount:             0,
-		isRunning:             false,
-		positionFirstSeenTime: make(map[string]int64),
-		stopMonitorCh:         make(chan struct{}),
-		monitorWg:             sync.WaitGroup{},
-		peakPnLCache:          make(map[string]float64),
-		peakPnLCacheMutex:     sync.RWMutex{},
-		trailingStopState:     make(map[string]*trailingStopPositionState),
-		trailingStopStateMu:   sync.RWMutex{},
-		lastBalanceSyncTime:   time.Now(),
-		userID:                userID,
+		id:                            config.ID,
+		name:                          config.Name,
+		aiModel:                       config.AIModel,
+		exchange:                      config.Exchange,
+		exchangeID:                    config.ExchangeID,
+		showInCompetition:             config.ShowInCompetition,
+		config:                        config,
+		trader:                        trader,
+		mcpClient:                     mcpClient,
+		store:                         st,
+		strategyEngine:                strategyEngine,
+		baseStrategyConfig:            baseStrategyConfig,
+		cycleNumber:                   cycleNumber,
+		initialBalance:                config.InitialBalance,
+		customPrompt:                  config.CustomPrompt,
+		overrideBasePrompt:            config.OverrideBasePrompt,
+		systemPromptTemplate:          strings.TrimSpace(config.SystemPromptTemplate),
+		lastResetTime:                 time.Now(),
+		startTime:                     time.Now(),
+		callCount:                     0,
+		isRunning:                     false,
+		positionFirstSeenTime:         make(map[string]int64),
+		stopMonitorCh:                 make(chan struct{}),
+		monitorWg:                     sync.WaitGroup{},
+		peakPnLCache:                  make(map[string]float64),
+		peakPnLCacheMutex:             sync.RWMutex{},
+		trailingStopState:             make(map[string]*trailingStopPositionState),
+		trailingStopStateMu:           sync.RWMutex{},
+		unsupportedCandidateSymbols:   make(map[string]int64),
+		unsupportedCandidateSymbolsMu: sync.RWMutex{},
+		lastBalanceSyncTime:           time.Now(),
+		userID:                        userID,
 	}, nil
 }
 

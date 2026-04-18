@@ -37,9 +37,11 @@ type BybitTrade struct {
 type BybitTriggerOrder struct {
 	Symbol         string
 	OrderID        string
+	OrderLinkID    string
 	Side           string
 	OrderType      string
 	StopOrderType  string
+	TriggerBy      string
 	TriggerPrice   float64
 	OrderPrice     float64
 	Quantity       float64
@@ -268,6 +270,7 @@ func parseBybitTriggerOrdersResult(list []map[string]interface{}) ([]BybitTrigge
 		stopOrderType, _ := item["stopOrderType"].(string)
 		orderStatus, _ := item["orderStatus"].(string)
 		orderLinkID, _ := item["orderLinkId"].(string)
+		triggerBy, _ := item["triggerBy"].(string)
 
 		triggerPrice, _ := parseBybitFloatField(item["triggerPrice"])
 		orderPrice, _ := parseBybitFloatField(item["price"])
@@ -292,9 +295,11 @@ func parseBybitTriggerOrdersResult(list []map[string]interface{}) ([]BybitTrigge
 		orders = append(orders, BybitTriggerOrder{
 			Symbol:         symbol,
 			OrderID:        orderID,
+			OrderLinkID:    orderLinkID,
 			Side:           side,
 			OrderType:      orderType,
 			StopOrderType:  stopOrderType,
+			TriggerBy:      triggerBy,
 			TriggerPrice:   triggerPrice,
 			OrderPrice:     orderPrice,
 			Quantity:       quantity,
@@ -442,10 +447,14 @@ func (t *BybitTrader) syncTriggerOrdersFromBybit(traderID string, exchangeID str
 			ExchangeID:      exchangeID,
 			ExchangeType:    exchangeType,
 			ExchangeOrderID: triggerOrder.OrderID,
+			ClientOrderID:   triggerOrder.OrderLinkID,
 			Symbol:          symbol,
 			Side:            side,
 			PositionSide:    positionSide,
 			Type:            normalizeBybitTriggerOrderType(triggerOrder.OrderType, triggerOrder.StopOrderType),
+			VenueOrderType:  strings.TrimSpace(triggerOrder.OrderType),
+			TriggerSubtype:  strings.TrimSpace(triggerOrder.StopOrderType),
+			TriggerSource:   strings.TrimSpace(triggerOrder.TriggerBy),
 			Quantity:        triggerOrder.Quantity,
 			Price:           triggerOrder.OrderPrice,
 			StopPrice:       triggerOrder.TriggerPrice,

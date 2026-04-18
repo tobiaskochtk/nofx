@@ -726,6 +726,38 @@ func TestAssembleLivePayload_IncludesMarketLeadership(t *testing.T) {
 	}
 }
 
+func TestAssembleLivePayload_IncludesRecentExecutionRegime(t *testing.T) {
+	ctx := &Context{
+		PayloadVersion: PayloadSchemaVersion,
+		CurrentTime:    "2026-04-17 18:00:00",
+		RuntimeMinutes: 9,
+		CallCount:      14,
+		Account:        AccountInfo{TotalEquity: 100, AvailableBalance: 84},
+		RecentExecutionRegime: &RecentExecutionRegime{
+			TradeCount:         8,
+			WinRatePct:         37.5,
+			AvgPnLPct:          -0.84,
+			ConsecutiveLosses:  3,
+			FollowThroughState: "weak",
+			ChurnRisk:          "high",
+		},
+	}
+
+	payload, _, err := assembleLivePayload(ctx)
+	if err != nil {
+		t.Fatalf("assembleLivePayload failed: %v", err)
+	}
+	if payload.RecentExecutionRegime == nil {
+		t.Fatalf("recent execution regime should be included")
+	}
+	if payload.RecentExecutionRegime.TradeCount != 8 || payload.RecentExecutionRegime.FollowThroughState != "weak" {
+		t.Fatalf("recent execution regime should preserve trade_count and follow_through_state")
+	}
+	if payload.RecentExecutionRegime.ChurnRisk != "high" || payload.RecentExecutionRegime.ConsecutiveLosses != 3 {
+		t.Fatalf("recent execution regime should preserve churn risk and consecutive losses")
+	}
+}
+
 func TestBuildContextBlock_IncludesBaseDerivsSignals(t *testing.T) {
 	data := &market.Data{
 		CurrentEMA20: 100,

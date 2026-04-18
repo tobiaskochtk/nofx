@@ -430,6 +430,9 @@ type RiskControlConfig struct {
 
 	// Strategy-configurable trailing stop monitor (CODE ENFORCED)
 	TrailingStop TrailingStopConfig `json:"trailing_stop,omitempty"`
+
+	// Strategy-configurable adaptive same-symbol re-entry guard (CODE ENFORCED)
+	AdaptiveReentryGuard AdaptiveReentryGuardConfig `json:"adaptive_reentry_guard,omitempty"`
 }
 
 const (
@@ -438,14 +441,23 @@ const (
 
 	DefaultTrailingStopCheckIntervalSec   = 30
 	DefaultTrailingStopUpdateThresholdPct = 0.3
+	DefaultTrailingStopFirstTightenDelay  = 0
+	DefaultTrailingStopMinFirstUpdatePct  = 0.0
+
+	DefaultAdaptiveReentryRecentTradeWindow             = 8
+	DefaultAdaptiveReentryMinRecentTrades               = 4
+	DefaultAdaptiveReentrySameSymbolLossCooldownMinutes = 180
+	DefaultAdaptiveReentryPairLossLookbackHours         = 12
 )
 
 // TrailingStopConfig controls the runtime trailing-stop monitor for a strategy.
 type TrailingStopConfig struct {
-	Enabled            bool               `json:"enabled"`
-	CheckIntervalSec   int                `json:"check_interval_sec,omitempty"`
-	UpdateThresholdPct float64            `json:"update_threshold_pct,omitempty"`
-	Tiers              []TrailingStopTier `json:"tiers,omitempty"`
+	Enabled                 bool               `json:"enabled"`
+	CheckIntervalSec        int                `json:"check_interval_sec,omitempty"`
+	UpdateThresholdPct      float64            `json:"update_threshold_pct,omitempty"`
+	FirstTightenDelaySec    int                `json:"first_tighten_delay_sec,omitempty"`
+	MinFirstUpdateProfitPct float64            `json:"min_first_update_profit_pct,omitempty"`
+	Tiers                   []TrailingStopTier `json:"tiers,omitempty"`
 }
 
 // TrailingStopTier defines a single trailing-stop activation level.
@@ -454,6 +466,17 @@ type TrailingStopTier struct {
 	Mode             string  `json:"mode,omitempty"`
 	LockProfitPct    float64 `json:"lock_profit_pct,omitempty"`
 	TrailOffsetPct   float64 `json:"trail_offset_pct,omitempty"`
+}
+
+// AdaptiveReentryGuardConfig controls how aggressively the trader blocks
+// same-symbol re-entries once recent execution quality weakens.
+type AdaptiveReentryGuardConfig struct {
+	Enabled                       bool `json:"enabled"`
+	RequireWeakExecutionRegime    bool `json:"require_weak_execution_regime,omitempty"`
+	RecentTradeWindow             int  `json:"recent_trade_window,omitempty"`
+	MinRecentTrades               int  `json:"min_recent_trades,omitempty"`
+	SameSymbolLossCooldownMinutes int  `json:"same_symbol_loss_cooldown_minutes,omitempty"`
+	PairLossLookbackHours         int  `json:"pair_loss_lookback_hours,omitempty"`
 }
 
 // DefaultTrailingStopTiers returns the default stepped trailing levels.
@@ -469,10 +492,24 @@ func DefaultTrailingStopTiers() []TrailingStopTier {
 // DefaultTrailingStopConfig returns a safe default configuration for new strategies.
 func DefaultTrailingStopConfig() TrailingStopConfig {
 	return TrailingStopConfig{
-		Enabled:            false,
-		CheckIntervalSec:   DefaultTrailingStopCheckIntervalSec,
-		UpdateThresholdPct: DefaultTrailingStopUpdateThresholdPct,
-		Tiers:              DefaultTrailingStopTiers(),
+		Enabled:                 false,
+		CheckIntervalSec:        DefaultTrailingStopCheckIntervalSec,
+		UpdateThresholdPct:      DefaultTrailingStopUpdateThresholdPct,
+		FirstTightenDelaySec:    DefaultTrailingStopFirstTightenDelay,
+		MinFirstUpdateProfitPct: DefaultTrailingStopMinFirstUpdatePct,
+		Tiers:                   DefaultTrailingStopTiers(),
+	}
+}
+
+// DefaultAdaptiveReentryGuardConfig returns the default re-entry guard settings.
+func DefaultAdaptiveReentryGuardConfig() AdaptiveReentryGuardConfig {
+	return AdaptiveReentryGuardConfig{
+		Enabled:                       true,
+		RequireWeakExecutionRegime:    true,
+		RecentTradeWindow:             DefaultAdaptiveReentryRecentTradeWindow,
+		MinRecentTrades:               DefaultAdaptiveReentryMinRecentTrades,
+		SameSymbolLossCooldownMinutes: DefaultAdaptiveReentrySameSymbolLossCooldownMinutes,
+		PairLossLookbackHours:         DefaultAdaptiveReentryPairLossLookbackHours,
 	}
 }
 
@@ -494,6 +531,12 @@ func normalizeTrailingStopConfig(cfg TrailingStopConfig) TrailingStopConfig {
 	}
 	if normalized.UpdateThresholdPct <= 0 {
 		normalized.UpdateThresholdPct = DefaultTrailingStopUpdateThresholdPct
+	}
+	if normalized.FirstTightenDelaySec < 0 {
+		normalized.FirstTightenDelaySec = DefaultTrailingStopFirstTightenDelay
+	}
+	if normalized.MinFirstUpdateProfitPct < 0 {
+		normalized.MinFirstUpdateProfitPct = DefaultTrailingStopMinFirstUpdatePct
 	}
 
 	if len(normalized.Tiers) == 0 {
@@ -523,9 +566,34 @@ func normalizeTrailingStopConfig(cfg TrailingStopConfig) TrailingStopConfig {
 	return normalized
 }
 
+func normalizeAdaptiveReentryGuardConfig(cfg AdaptiveReentryGuardConfig) AdaptiveReentryGuardConfig {
+	normalized := cfg
+	if normalized.RecentTradeWindow <= 0 {
+		normalized.RecentTradeWindow = DefaultAdaptiveReentryRecentTradeWindow
+	}
+	if normalized.MinRecentTrades <= 0 {
+		normalized.MinRecentTrades = DefaultAdaptiveReentryMinRecentTrades
+	}
+	if normalized.MinRecentTrades > normalized.RecentTradeWindow {
+		normalized.MinRecentTrades = normalized.RecentTradeWindow
+	}
+	if normalized.SameSymbolLossCooldownMinutes <= 0 {
+		normalized.SameSymbolLossCooldownMinutes = DefaultAdaptiveReentrySameSymbolLossCooldownMinutes
+	}
+	if normalized.PairLossLookbackHours <= 0 {
+		normalized.PairLossLookbackHours = DefaultAdaptiveReentryPairLossLookbackHours
+	}
+	return normalized
+}
+
 // EffectiveTrailingStop returns the trailing-stop config with defaults applied.
 func (c RiskControlConfig) EffectiveTrailingStop() TrailingStopConfig {
 	return normalizeTrailingStopConfig(c.TrailingStop)
+}
+
+// EffectiveAdaptiveReentryGuard returns the re-entry guard config with defaults applied.
+func (c RiskControlConfig) EffectiveAdaptiveReentryGuard() AdaptiveReentryGuardConfig {
+	return normalizeAdaptiveReentryGuardConfig(c.AdaptiveReentryGuard)
 }
 
 // NewStrategyStore creates a new StrategyStore
@@ -623,6 +691,7 @@ func GetDefaultStrategyConfig(lang string) StrategyConfig {
 			MinRiskRewardRatio:           3.0, // Min 3:1 profit/loss ratio (AI guided)
 			MinConfidence:                75,  // Min 75% confidence (AI guided)
 			TrailingStop:                 DefaultTrailingStopConfig(),
+			AdaptiveReentryGuard:         DefaultAdaptiveReentryGuardConfig(),
 		},
 	}
 

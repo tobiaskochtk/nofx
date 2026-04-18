@@ -307,6 +307,10 @@ Body fields are partial and optional, e.g. {"enabled":true,"review_interval_hour
 Body: {"source_trader_id":"<another trader_id from GET /api/my-traders>"}.
 Duplicates the source strategy, applies source prompt defaults to the target trader, persists optimizer baseline metadata, and schedules the first review window.`,
 				s.handleTraderAutonomousOptimizerBootstrap)
+			s.routeWithSchema(protected, "POST", "/traders/:id/autonomous-optimizer/run-now", "Force an immediate autonomous optimizer run for a trader",
+				`:id = trader_id from GET /api/my-traders.
+No request body needed. Runs the same optimizer pipeline immediately and returns the newest run detail.`,
+				s.handleTraderAutonomousOptimizerRunNow)
 			s.routeWithSchema(protected, "GET", "/traders/:id/autonomous-optimizer/runs", "List autonomous optimizer run history for a trader",
 				`:id = trader_id from GET /api/my-traders.
 Query params:

@@ -1367,6 +1367,7 @@ func parseDealReviewFilter(c *gin.Context) store.DealReviewListFilter {
 		Outcome:                c.Query("outcome"),
 		OpenSelectionBucket:    c.Query("open_selection_bucket"),
 		CloseReason:            c.Query("close_reason"),
+		ExitReasonQuality:      c.Query("exit_reason_quality"),
 		OpenTrendRegime:        c.Query("open_trend_regime"),
 		OpenVolatilityRegime:   c.Query("open_volatility_regime"),
 		OpenBTCStrengthRegime:  c.Query("open_btc_strength_regime"),
@@ -3351,6 +3352,9 @@ func buildDealReviewAnalysisPayload(traderCfg *store.Trader, strategyRecord *sto
 		OpenReasoning            string   `json:"open_reasoning,omitempty"`
 		CloseReasoning           string   `json:"close_reasoning,omitempty"`
 		CloseReason              string   `json:"close_reason,omitempty"`
+		ExitOrigin               string   `json:"exit_origin,omitempty"`
+		ExitReasonQuality        string   `json:"exit_reason_quality,omitempty"`
+		ExitEvidenceSummary      string   `json:"exit_evidence_summary,omitempty"`
 		OpenStopLoss             float64  `json:"open_stop_loss,omitempty"`
 		OpenTakeProfit           float64  `json:"open_take_profit,omitempty"`
 		OpenConfidence           int      `json:"open_confidence,omitempty"`
@@ -3404,6 +3408,9 @@ func buildDealReviewAnalysisPayload(traderCfg *store.Trader, strategyRecord *sto
 			CloseSlippageBucket:      item.Case.CloseSlippageBucket,
 			OpenCandidateSources:     item.OpenCandidateSources,
 			CloseReason:              item.Case.CloseReason,
+			ExitOrigin:               item.Case.ExitOrigin,
+			ExitReasonQuality:        item.Case.ExitReasonQuality,
+			ExitEvidenceSummary:      item.Case.ExitEvidenceSummary,
 			OpenStopLoss:             item.Case.OpenStopLoss,
 			OpenTakeProfit:           item.Case.OpenTakeProfit,
 			OpenConfidence:           item.Case.OpenConfidence,
@@ -3449,6 +3456,7 @@ func buildDealReviewAnalysisPayload(traderCfg *store.Trader, strategyRecord *sto
 		"outcome":                   filter.Outcome,
 		"open_selection_bucket":     filter.OpenSelectionBucket,
 		"close_reason":              filter.CloseReason,
+		"exit_reason_quality":       filter.ExitReasonQuality,
 		"open_trend_regime":         filter.OpenTrendRegime,
 		"open_volatility_regime":    filter.OpenVolatilityRegime,
 		"open_btc_strength_regime":  filter.OpenBTCStrengthRegime,
@@ -3559,6 +3567,10 @@ func buildDealReviewCaseClassifierPayload(traderCfg *store.Trader, detail *store
 			"open_selection_bucket":        detail.Case.OpenSelectionBucket,
 			"open_candidate_sources":       detail.OpenCandidateSources,
 			"close_reason":                 detail.Case.CloseReason,
+			"exit_origin":                  detail.Case.ExitOrigin,
+			"exit_reason_quality":          detail.Case.ExitReasonQuality,
+			"exit_evidence_summary":        detail.Case.ExitEvidenceSummary,
+			"exit_evidence":                detail.Case.ExitEvidence,
 			"open_trend_regime":            detail.Case.OpenTrendRegime,
 			"open_volatility_regime":       detail.Case.OpenVolatilityRegime,
 			"open_btc_strength_regime":     detail.Case.OpenBTCStrengthRegime,
@@ -3645,14 +3657,18 @@ func buildDealReviewAIScanCaseContexts(cases []store.DealReviewCaseDetail, limit
 	result := make([]map[string]any, 0, len(selected))
 	for _, item := range selected {
 		entry := map[string]any{
-			"case_id":          item.Case.ID,
-			"symbol":           item.Case.Symbol,
-			"side":             item.Case.Side,
-			"outcome":          item.Case.Outcome,
-			"realized_pnl":     item.Case.RealizedPnL,
-			"realized_pnl_pct": item.Case.RealizedPnLPct,
-			"hold_minutes":     float64(item.Case.HoldDurationMs) / 60000,
-			"close_reason":     item.Case.CloseReason,
+			"case_id":               item.Case.ID,
+			"symbol":                item.Case.Symbol,
+			"side":                  item.Case.Side,
+			"outcome":               item.Case.Outcome,
+			"realized_pnl":          item.Case.RealizedPnL,
+			"realized_pnl_pct":      item.Case.RealizedPnLPct,
+			"hold_minutes":          float64(item.Case.HoldDurationMs) / 60000,
+			"close_reason":          item.Case.CloseReason,
+			"exit_origin":           item.Case.ExitOrigin,
+			"exit_reason_quality":   item.Case.ExitReasonQuality,
+			"exit_evidence_summary": item.Case.ExitEvidenceSummary,
+			"exit_evidence":         item.Case.ExitEvidence,
 			"quality_metrics": map[string]any{
 				"max_favorable_excursion":      item.Case.MaxFavorableExcursion,
 				"max_favorable_excursion_pct":  item.Case.MaxFavorableExcursionPct,
@@ -3741,6 +3757,18 @@ func buildDealReviewAIScanEventContext(detail *store.DealReviewEventDetail) map[
 	}
 	if detail.Event.CloseReason != "" {
 		context["close_reason"] = detail.Event.CloseReason
+	}
+	if detail.Event.ExitOrigin != "" {
+		context["exit_origin"] = detail.Event.ExitOrigin
+	}
+	if detail.Event.ExitReasonQuality != "" {
+		context["exit_reason_quality"] = detail.Event.ExitReasonQuality
+	}
+	if detail.Event.ExitEvidenceSummary != "" {
+		context["exit_evidence_summary"] = detail.Event.ExitEvidenceSummary
+	}
+	if detail.Event.ExitEvidence != nil {
+		context["exit_evidence"] = detail.Event.ExitEvidence
 	}
 	if len(detail.CandidateSources) > 0 {
 		context["candidate_sources"] = detail.CandidateSources

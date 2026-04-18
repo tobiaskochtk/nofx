@@ -76,6 +76,16 @@ type TradingStats struct {
 	MaxDrawdownPct float64 `json:"max_drawdown_pct"` // Maximum drawdown (%)
 }
 
+// RecentExecutionRegime captures whether the last few closed trades show healthy follow-through or churn.
+type RecentExecutionRegime struct {
+	TradeCount         int     `json:"trade_count"`
+	WinRatePct         float64 `json:"win_rate_pct"`
+	AvgPnLPct          float64 `json:"avg_pnl_pct"`
+	ConsecutiveLosses  int     `json:"consecutive_losses"`
+	FollowThroughState string  `json:"follow_through_state"`
+	ChurnRisk          string  `json:"churn_risk"`
+}
+
 // RecentOrder recently completed order (for AI input)
 type RecentOrder struct {
 	Symbol        string  `json:"symbol"`        // Trading pair
@@ -111,39 +121,40 @@ type VenueTradability struct {
 
 // Context trading context (complete information passed to AI)
 type Context struct {
-	CurrentTime         string                             `json:"current_time"`
-	RuntimeMinutes      int                                `json:"runtime_minutes"`
-	CallCount           int                                `json:"call_count"`
-	Exchange            string                             `json:"-"`
-	Account             AccountInfo                        `json:"account"`
-	Positions           []PositionInfo                     `json:"positions"`
-	CandidateCoins      []CandidateCoin                    `json:"candidate_coins"`
-	PromptVariant       string                             `json:"prompt_variant,omitempty"`
-	TradingStats        *TradingStats                      `json:"trading_stats,omitempty"`
-	RecentOrders        []RecentOrder                      `json:"recent_orders,omitempty"`
-	ExecutionQualityMap map[string]*ExecutionQuality       `json:"-"`
-	VenueTradabilityMap map[string]*VenueTradability       `json:"-"`
-	MarketDataMap       map[string]*market.Data            `json:"-"`
-	MultiTFMarket       map[string]map[string]*market.Data `json:"-"`
-	OITopDataMap        map[string]*OITopData              `json:"-"`
-	QuantDataMap        map[string]*QuantData              `json:"-"`
-	OIRankingData       *nofxos.OIRankingData              `json:"-"` // Market-wide OI ranking data
-	NetFlowRankingData  *nofxos.NetFlowRankingData         `json:"-"` // Market-wide fund flow ranking data
-	PriceRankingData    *nofxos.PriceRankingData           `json:"-"` // Market-wide price gainers/losers
-	BTCETHLeverage      int                                `json:"-"`
-	AltcoinLeverage     int                                `json:"-"`
-	BTCETHPosRatio      float64                            `json:"-"`
-	AltcoinPosRatio     float64                            `json:"-"`
-	MinPositionSize     float64                            `json:"-"`
-	MinConfidence       int                                `json:"-"`
-	Timeframes          []string                           `json:"-"`
-	EMAPeriods          []int                              `json:"-"`
-	RSIPeriods          []int                              `json:"-"`
-	FeatureFlagsSet     bool                               `json:"-"`
-	EnableF4            bool                               `json:"-"`
-	EnableF5            bool                               `json:"-"`
-	EnableF6            bool                               `json:"-"`
-	EnableF7            bool                               `json:"-"`
+	CurrentTime           string                             `json:"current_time"`
+	RuntimeMinutes        int                                `json:"runtime_minutes"`
+	CallCount             int                                `json:"call_count"`
+	Exchange              string                             `json:"-"`
+	Account               AccountInfo                        `json:"account"`
+	Positions             []PositionInfo                     `json:"positions"`
+	CandidateCoins        []CandidateCoin                    `json:"candidate_coins"`
+	PromptVariant         string                             `json:"prompt_variant,omitempty"`
+	TradingStats          *TradingStats                      `json:"trading_stats,omitempty"`
+	RecentExecutionRegime *RecentExecutionRegime             `json:"recent_execution_regime,omitempty"`
+	RecentOrders          []RecentOrder                      `json:"recent_orders,omitempty"`
+	ExecutionQualityMap   map[string]*ExecutionQuality       `json:"-"`
+	VenueTradabilityMap   map[string]*VenueTradability       `json:"-"`
+	MarketDataMap         map[string]*market.Data            `json:"-"`
+	MultiTFMarket         map[string]map[string]*market.Data `json:"-"`
+	OITopDataMap          map[string]*OITopData              `json:"-"`
+	QuantDataMap          map[string]*QuantData              `json:"-"`
+	OIRankingData         *nofxos.OIRankingData              `json:"-"` // Market-wide OI ranking data
+	NetFlowRankingData    *nofxos.NetFlowRankingData         `json:"-"` // Market-wide fund flow ranking data
+	PriceRankingData      *nofxos.PriceRankingData           `json:"-"` // Market-wide price gainers/losers
+	BTCETHLeverage        int                                `json:"-"`
+	AltcoinLeverage       int                                `json:"-"`
+	BTCETHPosRatio        float64                            `json:"-"`
+	AltcoinPosRatio       float64                            `json:"-"`
+	MinPositionSize       float64                            `json:"-"`
+	MinConfidence         int                                `json:"-"`
+	Timeframes            []string                           `json:"-"`
+	EMAPeriods            []int                              `json:"-"`
+	RSIPeriods            []int                              `json:"-"`
+	FeatureFlagsSet       bool                               `json:"-"`
+	EnableF4              bool                               `json:"-"`
+	EnableF5              bool                               `json:"-"`
+	EnableF6              bool                               `json:"-"`
+	EnableF7              bool                               `json:"-"`
 }
 
 // Decision AI trading decision

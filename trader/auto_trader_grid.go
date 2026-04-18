@@ -7,6 +7,7 @@ import (
 	"nofx/logger"
 	"nofx/market"
 	"nofx/store"
+	"strings"
 	"sync"
 	"time"
 )
@@ -233,10 +234,16 @@ func (at *AutoTrader) emergencyExit(reason string) error {
 		for _, pos := range positions {
 			if sym, ok := pos["symbol"].(string); ok && sym == gridConfig.Symbol {
 				if size, ok := pos["positionAmt"].(float64); ok && size != 0 {
+					entryPrice, _ := pos["entryPrice"].(float64)
+					markPrice, _ := pos["markPrice"].(float64)
 					if size > 0 {
-						at.trader.CloseLong(gridConfig.Symbol, size)
+						if order, closeErr := at.trader.CloseLong(gridConfig.Symbol, size); closeErr == nil {
+							at.recordSystemExitIntent(order, gridConfig.Symbol, "long", store.DealReviewExitIntentTypeGridEmergency, "trader.auto_trader_grid", reason, reason, size, markPrice, entryPrice)
+						}
 					} else {
-						at.trader.CloseShort(gridConfig.Symbol, -size)
+						if order, closeErr := at.trader.CloseShort(gridConfig.Symbol, -size); closeErr == nil {
+							at.recordSystemExitIntent(order, gridConfig.Symbol, "short", store.DealReviewExitIntentTypeGridEmergency, "trader.auto_trader_grid", reason, reason, -size, markPrice, entryPrice)
+						}
 					}
 				}
 			}
@@ -537,10 +544,32 @@ func (at *AutoTrader) executeGridDecision(d *kernel.Decision) error {
 		return nil
 	// Support standard actions for closing positions
 	case "close_long":
-		_, err := at.trader.CloseLong(d.Symbol, d.Quantity)
+		order, err := at.trader.CloseLong(d.Symbol, d.Quantity)
+		if err == nil {
+			side, quantity, entryPrice, markPrice := at.findOpenPositionIntentContext(d.Symbol, "LONG")
+			if quantity <= 0 {
+				quantity = d.Quantity
+			}
+			summary := "Matched grid AI close decision."
+			if strings.TrimSpace(d.Reasoning) != "" {
+				summary = fmt.Sprintf("Matched grid AI close decision: %s", strings.TrimSpace(d.Reasoning))
+			}
+			at.recordSystemExitIntent(order, d.Symbol, side, store.DealReviewExitIntentTypeGridDecision, "trader.auto_trader_grid", summary, d.Reasoning, quantity, markPrice, entryPrice)
+		}
 		return err
 	case "close_short":
-		_, err := at.trader.CloseShort(d.Symbol, d.Quantity)
+		order, err := at.trader.CloseShort(d.Symbol, d.Quantity)
+		if err == nil {
+			side, quantity, entryPrice, markPrice := at.findOpenPositionIntentContext(d.Symbol, "SHORT")
+			if quantity <= 0 {
+				quantity = d.Quantity
+			}
+			summary := "Matched grid AI close decision."
+			if strings.TrimSpace(d.Reasoning) != "" {
+				summary = fmt.Sprintf("Matched grid AI close decision: %s", strings.TrimSpace(d.Reasoning))
+			}
+			at.recordSystemExitIntent(order, d.Symbol, side, store.DealReviewExitIntentTypeGridDecision, "trader.auto_trader_grid", summary, d.Reasoning, quantity, markPrice, entryPrice)
+		}
 		return err
 	default:
 		logger.Warnf("[Grid] Unknown action: %s", d.Action)

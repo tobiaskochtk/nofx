@@ -616,26 +616,27 @@ func (t *GateTrader) GetOpenOrders(symbol string) ([]types.OpenOrder, error) {
 			triggerPrice, _ := strconv.ParseFloat(order.Trigger.Price, 64)
 
 			side := "BUY"
+			positionSide := "SHORT"
 			if order.Initial.Size < 0 {
 				side = "SELL"
+				positionSide = "LONG"
 			}
 
-			orderType := "STOP_MARKET"
-			if order.Trigger.Rule == 2 {
-				orderType = "TAKE_PROFIT_MARKET"
-			}
+			triggerSubtype := inferGateTriggerSubtype(order.Initial.Size, order.Trigger.Rule)
+			orderType := normalizeGateTriggerOrderType(triggerSubtype)
 
 			// Convert contract count to actual token quantity
 			quantity := math.Abs(float64(order.Initial.Size)) * quantoMultiplier
 
 			result = append(result, types.OpenOrder{
-				OrderID:   fmt.Sprintf("%d", order.Id),
-				Symbol:    t.revertSymbol(order.Initial.Contract),
-				Side:      side,
-				Type:      orderType,
-				StopPrice: triggerPrice,
-				Quantity:  quantity,
-				Status:    "NEW",
+				OrderID:      fmt.Sprintf("%d", order.Id),
+				Symbol:       t.revertSymbol(order.Initial.Contract),
+				Side:         side,
+				PositionSide: positionSide,
+				Type:         orderType,
+				StopPrice:    triggerPrice,
+				Quantity:     quantity,
+				Status:       "NEW",
 			})
 		}
 	}

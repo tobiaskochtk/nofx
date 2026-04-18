@@ -137,6 +137,7 @@ func (e *StrategyEngine) BuildSystemPrompt(accountEquity float64, variant string
 		sb.WriteString("Before taking any trade, judge whether the broader market context actually supports acting now.\n")
 		sb.WriteString("- Start with the BTC benchmark regime and whether the candidate is outperforming or lagging BTC\n")
 		sb.WriteString("- Use execution-quality, liquidity, spread, and venue-tradability data to decide whether the setup is realistically executable\n")
+		sb.WriteString("- Use recent closed-trade behavior / recent execution regime to distinguish healthy follow-through from churn; stay aggressive on strong follow-through, tighten same-symbol re-entries on weak follow-through\n")
 		sb.WriteString("- Treat conflicting timeframe structure, weak market leadership, or poor execution feasibility as reasons to wait instead of forcing a trade\n\n")
 	}
 
@@ -395,6 +396,18 @@ func (e *StrategyEngine) BuildUserPrompt(ctx *Context) string {
 			}
 		}
 		sb.WriteString("\n")
+	}
+
+	if ctx.RecentExecutionRegime != nil && ctx.RecentExecutionRegime.TradeCount > 0 {
+		sb.WriteString("## Recent Execution Regime\n")
+		sb.WriteString(fmt.Sprintf("Last %d closed trades | Win Rate: %.1f%% | Avg PnL: %+.2f%% | Consecutive Losses: %d | Follow-through: %s | Churn Risk: %s\n\n",
+			ctx.RecentExecutionRegime.TradeCount,
+			ctx.RecentExecutionRegime.WinRatePct,
+			ctx.RecentExecutionRegime.AvgPnLPct,
+			ctx.RecentExecutionRegime.ConsecutiveLosses,
+			ctx.RecentExecutionRegime.FollowThroughState,
+			ctx.RecentExecutionRegime.ChurnRisk,
+		))
 	}
 
 	// Position information
