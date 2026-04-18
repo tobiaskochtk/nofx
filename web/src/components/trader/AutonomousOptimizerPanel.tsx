@@ -10,6 +10,7 @@ import type {
   AutonomousOptimizerRun,
   AutonomousOptimizerRunDetail,
   DealReviewJSONDiffEntry,
+  SemanticMemorySearchHit,
   DealReviewStrategyVersionDetail,
   RemoteModelInfo,
 } from '../../types'
@@ -114,6 +115,11 @@ function formatLabel(value?: string): string {
 function formatScore(value?: number): string {
   const safe = typeof value === 'number' && Number.isFinite(value) ? value : 0
   return `${Math.round(safe)}/100`
+}
+
+function formatSemanticSimilarityScore(value?: number): string {
+  if (typeof value !== 'number' || Number.isNaN(value)) return '-'
+  return `${Math.round(Math.max(0, Math.min(1, value)) * 100)}% match`
 }
 
 function statusToneClasses(status?: string): string {
@@ -284,6 +290,20 @@ function readNestedStringArray(
   return readStringArray(current)
 }
 
+function formatCooldownOutcomeSummary(
+  summary: Record<string, unknown> | undefined
+): string {
+  const trades = readNestedNumber(summary, 'trade_count')
+  const wins = readNestedNumber(summary, 'win_count')
+  const losses = readNestedNumber(summary, 'loss_count')
+  const avgPnL = readNestedNumber(summary, 'avg_pnl_pct')
+  const netPnL = readNestedNumber(summary, 'net_pnl_pct')
+  if (typeof trades !== 'number') {
+    return 'No outcomes'
+  }
+  return `${Math.round(trades)} trades • ${Math.round(wins || 0)}/${Math.round(losses || 0)} W/L • avg ${formatNumber(avgPnL)}% • net ${formatNumber(netPnL)}%`
+}
+
 function renderDiffList(diffs?: DealReviewJSONDiffEntry[]) {
   if (!diffs || diffs.length === 0) {
     return (
@@ -338,6 +358,9 @@ export function AutonomousOptimizerPanel({
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null)
   const [selectedRunDetail, setSelectedRunDetail] =
     useState<AutonomousOptimizerRunDetail | null>(null)
+  const [similarRuns, setSimilarRuns] = useState<SemanticMemorySearchHit[]>([])
+  const [similarRunsLoading, setSimilarRunsLoading] = useState(false)
+  const [similarRunsError, setSimilarRunsError] = useState<string | null>(null)
   const [runDetailLoading, setRunDetailLoading] = useState(false)
   const [manualRunLoading, setManualRunLoading] = useState(false)
   const [loading, setLoading] = useState(false)
@@ -459,9 +482,48 @@ export function AutonomousOptimizerPanel({
   useEffect(() => {
     setSelectedRunId(null)
     setSelectedRunDetail(null)
+    setSimilarRuns([])
+    setSimilarRunsError(null)
     setEditingBacklogId(null)
     setBacklogDraft(null)
   }, [traderId])
+
+  useEffect(() => {
+    if (!traderId || !selectedRunDetail?.run.id) {
+      setSimilarRuns([])
+      setSimilarRunsError(null)
+      setSimilarRunsLoading(false)
+      return
+    }
+    let active = true
+    setSimilarRunsLoading(true)
+    setSimilarRunsError(null)
+    void (async () => {
+      try {
+        const result = await api.getTraderAutonomousOptimizerRunSimilar(
+          traderId,
+          selectedRunDetail.run.id,
+          { limit: 5 }
+        )
+        if (!active) return
+        setSimilarRuns(result.items || [])
+      } catch (err) {
+        if (!active) return
+        setSimilarRuns([])
+        setSimilarRunsError(
+          err instanceof Error
+            ? err.message
+            : 'Failed to fetch similar autonomous optimizer runs'
+        )
+      } finally {
+        if (!active) return
+        setSimilarRunsLoading(false)
+      }
+    })()
+    return () => {
+      active = false
+    }
+  }, [traderId, selectedRunDetail?.run.id])
 
   useEffect(() => {
     if (!config) return
@@ -683,6 +745,22 @@ export function AutonomousOptimizerPanel({
     adaptiveCooldownTelemetry,
     'config'
   )
+  const adaptiveCooldownBlockedSymbolOutcomes = readNestedObject(
+    adaptiveCooldownTelemetry,
+    'blocked_symbol_reentry_outcomes'
+  )
+  const adaptiveCooldownPostSymbolOutcomes = readNestedObject(
+    adaptiveCooldownTelemetry,
+    'post_symbol_cooldown_outcomes'
+  )
+  const adaptiveCooldownBlockedRegimeOutcomes = readNestedObject(
+    adaptiveCooldownTelemetry,
+    'blocked_regime_reentry_outcomes'
+  )
+  const adaptiveCooldownPostRegimeOutcomes = readNestedObject(
+    adaptiveCooldownTelemetry,
+    'post_regime_cooldown_outcomes'
+  )
   const adaptiveCooldownTopSymbols = readNestedObjectArray(
     adaptiveCooldownTelemetry,
     'top_symbols'
@@ -694,6 +772,14 @@ export function AutonomousOptimizerPanel({
   const recentOptimizerContext = readNestedObjectArray(
     selectedMetadata,
     'recent_optimizer_runs'
+  )
+  const proposalConversation = readNestedObject(
+    selectedMetadata,
+    'proposal_conversation'
+  )
+  const criticConversation = readNestedObject(
+    selectedMetadata,
+    'critic_conversation'
   )
   const cooldownUntilMs = readNestedNumber(
     selectedMetadata,
@@ -2145,6 +2231,57 @@ export function AutonomousOptimizerPanel({
                   </div>
                 </div>
 
+                <div className="rounded-lg border border-white/10 bg-black/20 p-4">
+                  <div className="text-xs uppercase tracking-[0.2em] text-nofx-text-muted mb-3">
+                    Similar Prior Runs
+                  </div>
+                  {similarRunsLoading ? (
+                    <div className="text-sm text-nofx-text-muted">
+                      Loading similar prior runs…
+                    </div>
+                  ) : similarRunsError ? (
+                    <div className="text-sm text-amber-200">
+                      {similarRunsError}
+                    </div>
+                  ) : similarRuns.length === 0 ? (
+                    <div className="text-sm text-nofx-text-muted">
+                      No similar prior optimizer runs were found yet.
+                    </div>
+                  ) : (
+                    <div className="space-y-3">
+                      {similarRuns.map((hit) => (
+                        <div
+                          key={`${hit.document.id}-${hit.document.source_id}`}
+                          className="rounded-lg border border-white/10 bg-black/20 p-3"
+                        >
+                          <div className="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-3">
+                            <div>
+                              <div className="font-semibold">
+                                {hit.document.title || hit.document.source_id}
+                              </div>
+                              <div className="text-xs text-nofx-text-muted mt-1">
+                                {formatSemanticSimilarityScore(hit.similarity_score)} · updated{' '}
+                                {hit.document.source_updated_at
+                                  ? normalizeTime(hit.document.source_updated_at)
+                                  : '-'}
+                              </div>
+                            </div>
+                            <button
+                              onClick={() => void loadRunDetail(hit.document.source_id)}
+                              className="h-9 px-3 rounded-lg border border-white/10 bg-black/20 text-sm"
+                            >
+                              Focus run
+                            </button>
+                          </div>
+                          <div className="text-sm text-nofx-text-muted mt-3">
+                            {hit.document.summary || 'No summary stored'}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
                 <div className="grid grid-cols-1 xl:grid-cols-3 gap-4">
                   <div className="rounded-lg border border-white/10 bg-black/20 p-4">
                     <div className="text-xs uppercase tracking-[0.2em] text-nofx-text-muted mb-3">
@@ -2871,6 +3008,49 @@ export function AutonomousOptimizerPanel({
                           </div>
                         </div>
 
+                        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3 text-sm">
+                          <div className="rounded-lg border border-white/10 bg-black/20 p-3">
+                            <div className="text-xs text-nofx-text-muted">
+                              Blocked symbol reentries
+                            </div>
+                            <div className="mt-1">
+                              {formatCooldownOutcomeSummary(
+                                adaptiveCooldownBlockedSymbolOutcomes
+                              )}
+                            </div>
+                          </div>
+                          <div className="rounded-lg border border-white/10 bg-black/20 p-3">
+                            <div className="text-xs text-nofx-text-muted">
+                              After symbol cooldown
+                            </div>
+                            <div className="mt-1">
+                              {formatCooldownOutcomeSummary(
+                                adaptiveCooldownPostSymbolOutcomes
+                              )}
+                            </div>
+                          </div>
+                          <div className="rounded-lg border border-white/10 bg-black/20 p-3">
+                            <div className="text-xs text-nofx-text-muted">
+                              Blocked regime repeats
+                            </div>
+                            <div className="mt-1">
+                              {formatCooldownOutcomeSummary(
+                                adaptiveCooldownBlockedRegimeOutcomes
+                              )}
+                            </div>
+                          </div>
+                          <div className="rounded-lg border border-white/10 bg-black/20 p-3">
+                            <div className="text-xs text-nofx-text-muted">
+                              After regime cooldown
+                            </div>
+                            <div className="mt-1">
+                              {formatCooldownOutcomeSummary(
+                                adaptiveCooldownPostRegimeOutcomes
+                              )}
+                            </div>
+                          </div>
+                        </div>
+
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                           <div className="rounded-lg border border-white/10 bg-black/20 p-3">
                             <div className="text-xs text-nofx-text-muted mb-2">
@@ -2905,6 +3085,20 @@ export function AutonomousOptimizerPanel({
                                         : '-'}{' '}
                                       after loss • avg{' '}
                                       {formatNumber(item.avg_pnl_pct)}%
+                                    </div>
+                                    <div className="text-xs text-nofx-text-muted mt-2">
+                                      Blocked: {formatCooldownOutcomeSummary(
+                                        readNestedObject(item, 'blocked_outcomes')
+                                      )}
+                                    </div>
+                                    <div className="text-xs text-nofx-text-muted mt-1">
+                                      After cooldown:{' '}
+                                      {formatCooldownOutcomeSummary(
+                                        readNestedObject(
+                                          item,
+                                          'post_cooldown_outcomes'
+                                        )
+                                      )}
                                     </div>
                                   </div>
                                 ))}
@@ -2960,6 +3154,20 @@ export function AutonomousOptimizerPanel({
                                         : '-'}{' '}
                                       after loss • avg{' '}
                                       {formatNumber(item.avg_pnl_pct)}%
+                                    </div>
+                                    <div className="text-xs text-nofx-text-muted mt-2">
+                                      Blocked: {formatCooldownOutcomeSummary(
+                                        readNestedObject(item, 'blocked_outcomes')
+                                      )}
+                                    </div>
+                                    <div className="text-xs text-nofx-text-muted mt-1">
+                                      After cooldown:{' '}
+                                      {formatCooldownOutcomeSummary(
+                                        readNestedObject(
+                                          item,
+                                          'post_cooldown_outcomes'
+                                        )
+                                      )}
                                     </div>
                                   </div>
                                 ))}
@@ -3057,6 +3265,84 @@ export function AutonomousOptimizerPanel({
                           </div>
                         )}
                       </div>
+                    </div>
+                  </div>
+                )}
+
+                {(proposalConversation || criticConversation) && (
+                  <div className="rounded-lg border border-white/10 bg-black/20 p-4">
+                    <div className="text-xs uppercase tracking-[0.2em] text-nofx-text-muted mb-3">
+                      Conversation Memory
+                    </div>
+                    <div className="grid grid-cols-1 xl:grid-cols-2 gap-4 text-sm">
+                      {[proposalConversation, criticConversation]
+                        .filter(
+                          (
+                            item
+                          ): item is Record<string, unknown> => Boolean(item)
+                        )
+                        .map((item) => {
+                          const purpose =
+                            typeof item.purpose === 'string'
+                              ? item.purpose
+                              : 'conversation'
+                          return (
+                            <div
+                              key={purpose}
+                              className="rounded-lg border border-white/10 bg-black/20 p-3"
+                            >
+                              <div className="font-semibold">
+                                {formatLabel(purpose)}
+                              </div>
+                              <div className="grid grid-cols-2 gap-3 mt-3 text-xs">
+                                <div>
+                                  <div className="text-nofx-text-muted">
+                                    Mode
+                                  </div>
+                                  <div className="mt-1">
+                                    {typeof item.mode === 'string'
+                                      ? formatLabel(item.mode)
+                                      : '-'}
+                                  </div>
+                                </div>
+                                <div>
+                                  <div className="text-nofx-text-muted">
+                                    Replay messages
+                                  </div>
+                                  <div className="mt-1">
+                                    {typeof item.history_messages_replayed ===
+                                    'number'
+                                      ? Math.round(
+                                          item.history_messages_replayed
+                                        )
+                                      : '-'}
+                                  </div>
+                                </div>
+                                <div>
+                                  <div className="text-nofx-text-muted">
+                                    Replay limit
+                                  </div>
+                                  <div className="mt-1">
+                                    {typeof item.replay_message_limit ===
+                                    'number'
+                                      ? Math.round(item.replay_message_limit)
+                                      : '-'}
+                                  </div>
+                                </div>
+                                <div>
+                                  <div className="text-nofx-text-muted">
+                                    Conversation ID
+                                  </div>
+                                  <div className="mt-1 break-all">
+                                    {typeof item.conversation_id === 'string'
+                                      ? item.conversation_id
+                                      : '-'}
+                                  </div>
+                                </div>
+                              </div>
+                            </div>
+                          )
+                        })}
                     </div>
                   </div>
                 )}

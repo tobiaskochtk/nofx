@@ -1,3 +1,6 @@
+//go:build legacy_sqlite_config
+// +build legacy_sqlite_config
+
 package config
 
 import (
@@ -483,21 +486,21 @@ type AIModelConfig struct {
 
 // ExchangeConfig 交易所配置
 type ExchangeConfig struct {
-	ID        string    `json:"id"`
-	UserID    string    `json:"user_id"`
-	Name      string    `json:"name"`
-	Type      string    `json:"type"`
-	Enabled   bool      `json:"enabled"`
-	APIKey    string    `json:"apiKey"`    // For Binance: API Key; For Hyperliquid: Agent Private Key (should have ~0 balance)
-	SecretKey string    `json:"secretKey"` // For Binance: Secret Key; Not used for Hyperliquid
-	Testnet   bool      `json:"testnet"`
+	ID        string `json:"id"`
+	UserID    string `json:"user_id"`
+	Name      string `json:"name"`
+	Type      string `json:"type"`
+	Enabled   bool   `json:"enabled"`
+	APIKey    string `json:"apiKey"`    // For Binance: API Key; For Hyperliquid: Agent Private Key (should have ~0 balance)
+	SecretKey string `json:"secretKey"` // For Binance: Secret Key; Not used for Hyperliquid
+	Testnet   bool   `json:"testnet"`
 	// Hyperliquid Agent Wallet configuration (following official best practices)
 	// Reference: https://hyperliquid.gitbook.io/hyperliquid-docs/for-developers/api/nonces-and-api-wallets
-	HyperliquidWalletAddr string    `json:"hyperliquidWalletAddr"` // Main Wallet Address (holds funds, never expose private key)
+	HyperliquidWalletAddr string `json:"hyperliquidWalletAddr"` // Main Wallet Address (holds funds, never expose private key)
 	// Aster 特定字段
-	AsterUser       string    `json:"asterUser"`
-	AsterSigner     string    `json:"asterSigner"`
-	AsterPrivateKey string    `json:"asterPrivateKey"`
+	AsterUser       string `json:"asterUser"`
+	AsterSigner     string `json:"asterSigner"`
+	AsterPrivateKey string `json:"asterPrivateKey"`
 	// LIGHTER 特定字段
 	LighterWalletAddr       string    `json:"lighterWalletAddr"`       // Ethereum 钱包地址 (L1)
 	LighterPrivateKey       string    `json:"lighterPrivateKey"`       // L1私钥（用于识别账户）

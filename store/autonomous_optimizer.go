@@ -139,7 +139,13 @@ func NewAutonomousOptimizerStore(db *gorm.DB) *AutonomousOptimizerStore {
 }
 
 func (s *AutonomousOptimizerStore) initTables() error {
-	return s.db.AutoMigrate(&AutonomousOptimizerConfig{}, &AutonomousOptimizerRun{}, &AutonomousOptimizerBacklogItem{})
+	return s.db.AutoMigrate(
+		&AutonomousOptimizerConfig{},
+		&AutonomousOptimizerRun{},
+		&AutonomousOptimizerBacklogItem{},
+		&AutonomousOptimizerConversation{},
+		&AutonomousOptimizerConversationMessage{},
+	)
 }
 
 func (s *AutonomousOptimizerStore) GetConfig(userID, traderID string) (*AutonomousOptimizerConfig, error) {

@@ -135,6 +135,8 @@ type autonomousOptimizerCooldownSymbolAgg struct {
 	RepeatAfterLossCount int
 	PnLSum               float64
 	LastGapMinutes       float64
+	BlockedOutcomes      autonomousOptimizerCooldownOutcomeAgg
+	PostCooldownOutcomes autonomousOptimizerCooldownOutcomeAgg
 }
 
 type autonomousOptimizerCooldownRegimeAgg struct {
@@ -144,6 +146,15 @@ type autonomousOptimizerCooldownRegimeAgg struct {
 	ReentryCount         int
 	RepeatAfterLossCount int
 	PnLSum               float64
+	BlockedOutcomes      autonomousOptimizerCooldownOutcomeAgg
+	PostCooldownOutcomes autonomousOptimizerCooldownOutcomeAgg
+}
+
+type autonomousOptimizerCooldownOutcomeAgg struct {
+	TradeCount int
+	WinCount   int
+	LossCount  int
+	NetPnLPct  float64
 }
 
 func autonomousOptimizerPromptFieldPriority(label string) int {
@@ -469,6 +480,10 @@ func buildAutonomousOptimizerAdaptiveCooldownTelemetry(strategyCfg *store.Strate
 	cooldownWindow := time.Duration(cfg.SameSymbolLossCooldownMinutes) * time.Minute
 	regimeLookback := time.Duration(cfg.PairLossLookbackHours) * time.Hour
 	sameSessionWindow := time.Duration(autonomousOptimizerSameSessionGapHours) * time.Hour
+	blockedSymbolOutcomes := autonomousOptimizerCooldownOutcomeAgg{}
+	postSymbolOutcomes := autonomousOptimizerCooldownOutcomeAgg{}
+	blockedRegimeOutcomes := autonomousOptimizerCooldownOutcomeAgg{}
+	postRegimeOutcomes := autonomousOptimizerCooldownOutcomeAgg{}
 
 	for _, caseRec := range closedCases {
 		symbol := strings.ToUpper(strings.TrimSpace(caseRec.Symbol))
@@ -491,9 +506,16 @@ func buildAutonomousOptimizerAdaptiveCooldownTelemetry(strategyCfg *store.Strate
 					if prev.RealizedPnLPct < 0 {
 						telemetry.RepeatAfterLossCount++
 						agg.RepeatAfterLossCount++
+						accumulateAutonomousOptimizerCooldownOutcome(&blockedSymbolOutcomes, caseRec)
+						accumulateAutonomousOptimizerCooldownOutcome(&agg.BlockedOutcomes, caseRec)
 					}
 					if sameSession {
 						telemetry.SameSessionReentryCount++
+					}
+				} else if prev.RealizedPnLPct < 0 {
+					accumulateAutonomousOptimizerCooldownOutcome(&postSymbolOutcomes, caseRec)
+					if agg := symbolAggs[symbol]; agg != nil {
+						accumulateAutonomousOptimizerCooldownOutcome(&agg.PostCooldownOutcomes, caseRec)
 					}
 				}
 			}
@@ -518,6 +540,13 @@ func buildAutonomousOptimizerAdaptiveCooldownTelemetry(strategyCfg *store.Strate
 					agg.ReentryCount++
 					agg.RepeatAfterLossCount++
 					agg.PnLSum += caseRec.RealizedPnLPct
+					accumulateAutonomousOptimizerCooldownOutcome(&blockedRegimeOutcomes, caseRec)
+					accumulateAutonomousOptimizerCooldownOutcome(&agg.BlockedOutcomes, caseRec)
+				} else {
+					accumulateAutonomousOptimizerCooldownOutcome(&postRegimeOutcomes, caseRec)
+					if agg := regimeAggs[regimeKey]; agg != nil {
+						accumulateAutonomousOptimizerCooldownOutcome(&agg.PostCooldownOutcomes, caseRec)
+					}
 				}
 			}
 			if caseRec.RealizedPnLPct < 0 {
@@ -526,6 +555,10 @@ func buildAutonomousOptimizerAdaptiveCooldownTelemetry(strategyCfg *store.Strate
 		}
 	}
 
+	telemetry.BlockedSymbolReentryOutcomes = finalizeAutonomousOptimizerCooldownOutcome(blockedSymbolOutcomes)
+	telemetry.PostSymbolCooldownOutcomes = finalizeAutonomousOptimizerCooldownOutcome(postSymbolOutcomes)
+	telemetry.BlockedRegimeReentryOutcomes = finalizeAutonomousOptimizerCooldownOutcome(blockedRegimeOutcomes)
+	telemetry.PostRegimeCooldownOutcomes = finalizeAutonomousOptimizerCooldownOutcome(postRegimeOutcomes)
 	telemetry.TopSymbols = buildAutonomousOptimizerCooldownSymbols(symbolAggs, 6)
 	telemetry.TopRegimes = buildAutonomousOptimizerCooldownRegimes(regimeAggs, 6)
 	return telemetry
@@ -546,6 +579,8 @@ func buildAutonomousOptimizerCooldownSymbols(items map[string]*autonomousOptimiz
 			RepeatAfterLossCount: item.RepeatAfterLossCount,
 			AvgPnLPct:            roundAutonomousOptimizerFloat(item.PnLSum/float64(item.ReentryCount), 2),
 			LastGapMinutes:       item.LastGapMinutes,
+			BlockedOutcomes:      finalizeAutonomousOptimizerCooldownOutcome(item.BlockedOutcomes),
+			PostCooldownOutcomes: finalizeAutonomousOptimizerCooldownOutcome(item.PostCooldownOutcomes),
 		})
 	}
 	sort.Slice(result, func(i, j int) bool {
@@ -579,6 +614,8 @@ func buildAutonomousOptimizerCooldownRegimes(items map[string]*autonomousOptimiz
 			ReentryCount:         item.ReentryCount,
 			RepeatAfterLossCount: item.RepeatAfterLossCount,
 			AvgPnLPct:            roundAutonomousOptimizerFloat(item.PnLSum/float64(item.ReentryCount), 2),
+			BlockedOutcomes:      finalizeAutonomousOptimizerCooldownOutcome(item.BlockedOutcomes),
+			PostCooldownOutcomes: finalizeAutonomousOptimizerCooldownOutcome(item.PostCooldownOutcomes),
 		})
 	}
 	sort.Slice(result, func(i, j int) bool {
@@ -596,6 +633,32 @@ func buildAutonomousOptimizerCooldownRegimes(items map[string]*autonomousOptimiz
 		return result[:limit]
 	}
 	return result
+}
+
+func accumulateAutonomousOptimizerCooldownOutcome(agg *autonomousOptimizerCooldownOutcomeAgg, caseRec store.DealReviewCase) {
+	if agg == nil {
+		return
+	}
+	agg.TradeCount++
+	if caseRec.RealizedPnLPct > 0 {
+		agg.WinCount++
+	} else if caseRec.RealizedPnLPct < 0 {
+		agg.LossCount++
+	}
+	agg.NetPnLPct += caseRec.RealizedPnLPct
+}
+
+func finalizeAutonomousOptimizerCooldownOutcome(agg autonomousOptimizerCooldownOutcomeAgg) autonomousOptimizerCooldownOutcomeSummary {
+	summary := autonomousOptimizerCooldownOutcomeSummary{
+		TradeCount: agg.TradeCount,
+		WinCount:   agg.WinCount,
+		LossCount:  agg.LossCount,
+		NetPnLPct:  roundAutonomousOptimizerFloat(agg.NetPnLPct, 2),
+	}
+	if agg.TradeCount > 0 {
+		summary.AvgPnLPct = roundAutonomousOptimizerFloat(agg.NetPnLPct/float64(agg.TradeCount), 2)
+	}
+	return summary
 }
 
 func autonomousOptimizerRegimeKey(caseRec store.DealReviewCase) string {
@@ -750,7 +813,7 @@ Rules:
 - Use latest_gate_feedback explicitly when it is present. If the last optimizer run was blocked, do not repeat the same patch unchanged. Either propose a materially narrower subset, switch to backlog_only, or explain why the new evidence is now different enough.
 - When inactivity is the problem, cite concrete reject reasons, confidence bands, sessions, or symbols from the supplied telemetry.
 - Use trailing_stop_telemetry when exit management is the issue. Distinguish profitable protective trailing exits from early loss-making stop tightening before proposing stop logic changes, and use sample_updates for first-tighten timing plus pre-update unrealized PnL context.
-- Use adaptive_cooldown_telemetry plus current risk_control settings when repeated same-symbol or same-regime re-entries are the issue. Prefer narrow cooldown controls over blunt reductions in trade frequency.
+- Use adaptive_cooldown_telemetry plus current risk_control settings when repeated same-symbol or same-regime re-entries are the issue. Compare blocked re-entry outcomes versus post-cooldown outcomes before tightening or loosening cooldowns, and prefer narrow cooldown controls over blunt reductions in trade frequency.
 - Keep patches minimal and high-signal. Do not modify credentials, exchange bindings, or unrelated trader settings.
 - If you touch more than 6 prompt fields, only the highest-priority 6 fields will be auto-applied. Concentrate changes into the most causally important prompt surfaces first.
 - Never output markdown or code fences.`

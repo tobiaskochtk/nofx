@@ -59,11 +59,11 @@ func NewDBDriver(cfg DBConfig) (*DBDriver, error) {
 }
 
 // NewDBDriverFromEnv creates database driver from environment variables
-// DB_TYPE: sqlite (default) or postgres
-// For SQLite: DB_PATH (default: data/data.db)
+// DB_TYPE: postgres (default) or sqlite
+// For SQLite: DB_PATH (legacy fallback, default: data/data.db)
 // For PostgreSQL: DB_HOST, DB_PORT, DB_USER, DB_PASSWORD, DB_NAME, DB_SSLMODE
 func NewDBDriverFromEnv() (*DBDriver, error) {
-	dbType := DBType(strings.ToLower(getEnv("DB_TYPE", "sqlite")))
+	dbType := DBType(strings.ToLower(getEnv("DB_TYPE", "postgres")))
 
 	switch dbType {
 	case DBTypeSQLite:

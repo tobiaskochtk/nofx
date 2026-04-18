@@ -544,6 +544,204 @@ export interface DealReviewCaseDetail {
   ai_classifier_assist?: DealReviewClassifierAssist
 }
 
+export interface SemanticMemoryDocument {
+  id: string
+  user_id: string
+  trader_id: string
+  doc_type: string
+  source_id: string
+  source_updated_at: string
+  title: string
+  summary: string
+  body: string
+  content_hash: string
+  token_estimate: number
+  embedding_provider: string
+  embedding_model: string
+  embedding_dimensions: number
+  embedding_status: string
+  last_embedding_error?: string
+  last_built_at?: string
+  last_embedded_at?: string
+  created_at: string
+  updated_at: string
+}
+
+export interface SemanticMemorySearchHit {
+  document: SemanticMemoryDocument
+  similarity_score: number
+  distance: number
+  source_link?: string
+}
+
+export interface SemanticMemorySimilarityResponse {
+  query_document?: SemanticMemoryDocument
+  items: SemanticMemorySearchHit[]
+  total: number
+}
+
+export interface SemanticMemoryQueryResult {
+  query: string
+  embedding_provider: string
+  embedding_model: string
+  items: SemanticMemorySearchHit[]
+}
+
+export interface SemanticMemorySearchPreset {
+  id: string
+  user_id: string
+  trader_id: string
+  name: string
+  created_at: string
+  updated_at: string
+}
+
+export interface SemanticMemorySearchPresetDetail {
+  preset: SemanticMemorySearchPreset
+  config?: Record<string, unknown>
+}
+
+export interface SemanticMemoryCorpusDocTypeStatus {
+  doc_type: string
+  total_documents: number
+  embedded_documents: number
+  pending_documents: number
+  failed_documents: number
+  skipped_documents: number
+  total_token_estimate: number
+  embedded_token_estimate: number
+  pending_token_estimate: number
+  failed_token_estimate: number
+  estimated_total_cost_usd: number
+  estimated_pending_cost_usd: number
+  estimated_embedded_cost_usd: number
+  estimated_failed_reembed_cost_usd: number
+  last_updated_at?: string
+  last_embedded_at?: string
+  dominant_model?: string
+  dominant_provider?: string
+}
+
+export interface SemanticMemoryEmbeddingUsageSummary {
+  recent_runs: number
+  recent_embedded_documents: number
+  recent_failed_documents: number
+  recent_prompt_tokens: number
+  recent_estimated_cost_usd: number
+  last_completed_at?: string
+  last_embedding_model?: string
+  last_embedding_provider?: string
+}
+
+export interface SemanticMemoryFailureSummary {
+  recent_failed_runs: number
+  last_failed_at?: string
+  last_failure_scope?: string
+  last_failure_message?: string
+}
+
+export interface SemanticMemoryCostEstimate {
+  embedding_model: string
+  price_per_1m_tokens_usd: number
+  total_token_estimate: number
+  embedded_token_estimate: number
+  pending_token_estimate: number
+  failed_token_estimate: number
+  estimated_total_cost_usd: number
+  estimated_embedded_cost_usd: number
+  estimated_pending_cost_usd: number
+  estimated_failed_reembed_cost_usd: number
+}
+
+export interface SemanticMemoryBenchmarkConfig {
+  doc_types?: string[]
+  sample_per_doc_type: number
+  top_k: number
+}
+
+export interface SemanticMemoryBenchmarkCorpusResult {
+  doc_type: string
+  document_count: number
+  evaluated_queries: number
+  skipped_queries: number
+  zero_hit_queries: number
+  avg_top1_similarity: number
+  avg_top1_relevance: number
+  avg_top_k_relevance: number
+  hit_rate_at_k: number
+  strong_top1_rate: number
+  avg_returned_hits: number
+}
+
+export interface SemanticMemoryBenchmarkRun {
+  id: string
+  user_id: string
+  trader_id: string
+  scope: string
+  status: string
+  summary: string
+  corpus_count: number
+  query_count: number
+  relevant_query_count: number
+  avg_top1_similarity: number
+  avg_top1_relevance: number
+  avg_top_k_relevance: number
+  hit_rate_at_k: number
+  strong_top1_rate: number
+  error_message?: string
+  started_at: string
+  completed_at?: string
+  created_at: string
+  updated_at: string
+  config?: SemanticMemoryBenchmarkConfig
+  corpus_results?: SemanticMemoryBenchmarkCorpusResult[]
+}
+
+export interface SemanticMemorySyncRun {
+  id: string
+  user_id: string
+  trader_id: string
+  scope: string
+  status: string
+  summary: string
+  total_documents: number
+  inserted_documents: number
+  updated_documents: number
+  unchanged_documents: number
+  failed_documents: number
+  error_message?: string
+  embedding_provider?: string
+  embedding_model?: string
+  prompt_tokens?: number
+  estimated_cost_usd?: number
+  doc_types?: string[]
+  started_at: string
+  completed_at?: string
+  created_at: string
+  updated_at: string
+}
+
+export interface SemanticMemoryCorpusStatus {
+  user_id: string
+  trader_id: string
+  vector_available: boolean
+  vector_extension_name?: string
+  total_documents: number
+  embedded_documents: number
+  pending_documents: number
+  failed_documents: number
+  skipped_documents: number
+  total_token_estimate: number
+  embedded_token_estimate: number
+  pending_token_estimate: number
+  failed_token_estimate: number
+  cost_estimate: SemanticMemoryCostEstimate
+  embedding_usage: SemanticMemoryEmbeddingUsageSummary
+  failure_summary: SemanticMemoryFailureSummary
+  doc_types: SemanticMemoryCorpusDocTypeStatus[]
+  recent_sync_runs?: SemanticMemorySyncRun[]
+}
+
 export interface DealReviewClassifierSuggestion {
   classifier_id: string
   suggestion_key: string
@@ -1227,12 +1425,22 @@ export interface AutonomousOptimizerAdaptiveCooldownConfig {
   pair_loss_lookback_hours: number
 }
 
+export interface AutonomousOptimizerCooldownOutcomeSummary {
+  trade_count: number
+  win_count: number
+  loss_count: number
+  net_pnl_pct: number
+  avg_pnl_pct: number
+}
+
 export interface AutonomousOptimizerAdaptiveCooldownSymbol {
   symbol: string
   reentry_count: number
   repeat_after_loss_count: number
   avg_pnl_pct: number
   last_gap_minutes?: number
+  blocked_outcomes?: AutonomousOptimizerCooldownOutcomeSummary
+  post_cooldown_outcomes?: AutonomousOptimizerCooldownOutcomeSummary
 }
 
 export interface AutonomousOptimizerAdaptiveCooldownRegime {
@@ -1242,6 +1450,8 @@ export interface AutonomousOptimizerAdaptiveCooldownRegime {
   reentry_count: number
   repeat_after_loss_count: number
   avg_pnl_pct: number
+  blocked_outcomes?: AutonomousOptimizerCooldownOutcomeSummary
+  post_cooldown_outcomes?: AutonomousOptimizerCooldownOutcomeSummary
 }
 
 export interface AutonomousOptimizerAdaptiveCooldownTelemetry {
@@ -1250,6 +1460,10 @@ export interface AutonomousOptimizerAdaptiveCooldownTelemetry {
   same_session_reentry_count: number
   repeat_after_loss_count: number
   regime_repeat_loss_count: number
+  blocked_symbol_reentry_outcomes?: AutonomousOptimizerCooldownOutcomeSummary
+  post_symbol_cooldown_outcomes?: AutonomousOptimizerCooldownOutcomeSummary
+  blocked_regime_reentry_outcomes?: AutonomousOptimizerCooldownOutcomeSummary
+  post_regime_cooldown_outcomes?: AutonomousOptimizerCooldownOutcomeSummary
   top_symbols?: AutonomousOptimizerAdaptiveCooldownSymbol[]
   top_regimes?: AutonomousOptimizerAdaptiveCooldownRegime[]
 }

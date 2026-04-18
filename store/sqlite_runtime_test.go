@@ -2,7 +2,6 @@ package store
 
 import (
 	"database/sql"
-	"fmt"
 	"path/filepath"
 	"testing"
 
@@ -34,40 +33,5 @@ func TestConfigureSQLiteSQLDBEnablesWALAndBusyTimeout(t *testing.T) {
 	}
 	if busyTimeout != sqliteBusyTimeoutMillis {
 		t.Fatalf("busy_timeout = %d, want %d", busyTimeout, sqliteBusyTimeoutMillis)
-	}
-}
-
-func TestRetrySQLiteWriteRetriesTransientLockErrors(t *testing.T) {
-	root := newPositionHistoryTestStore(t, "sqlite-retry.db")
-
-	attempts := 0
-	err := retrySQLiteWrite(root.gdb, "unit-test transient retry", func() error {
-		attempts++
-		if attempts < 3 {
-			return fmt.Errorf("disk I/O error: permission denied")
-		}
-		return nil
-	})
-	if err != nil {
-		t.Fatalf("retrySQLiteWrite() error = %v", err)
-	}
-	if attempts != 3 {
-		t.Fatalf("attempts = %d, want 3", attempts)
-	}
-}
-
-func TestRetrySQLiteWriteDoesNotRetryNonTransientErrors(t *testing.T) {
-	root := newPositionHistoryTestStore(t, "sqlite-no-retry.db")
-
-	attempts := 0
-	err := retrySQLiteWrite(root.gdb, "unit-test non-transient", func() error {
-		attempts++
-		return fmt.Errorf("permanent failure")
-	})
-	if err == nil {
-		t.Fatal("retrySQLiteWrite() error = nil, want non-nil")
-	}
-	if attempts != 1 {
-		t.Fatalf("attempts = %d, want 1", attempts)
 	}
 }

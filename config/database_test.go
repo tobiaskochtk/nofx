@@ -1,3 +1,6 @@
+//go:build legacy_sqlite_config
+// +build legacy_sqlite_config
+
 package config
 
 import (

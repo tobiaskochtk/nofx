@@ -10,9 +10,11 @@
 
 services:
   postgres:
-    image: postgres:16-alpine
+    image: pgvector/pgvector:pg16
     container_name: nofx-postgres
     restart: unless-stopped
+    ports:
+      - "${POSTGRES_BIND_IP:-127.0.0.1}:${POSTGRES_HOST_PORT:-15432}:5432"
     environment:
       - POSTGRES_USER=${DB_USER:-nofx}
       - POSTGRES_PASSWORD=${DB_PASSWORD:-nofx}
@@ -44,7 +46,14 @@ services:
     environment:
       - SELFHOSTED_AI500_PORT=8081
       - SELFHOSTED_AI500_AUTH_TOKEN=${SELFHOSTED_AI500_AUTH_TOKEN:-local-selfhosted-ai500-token}
+      - SELFHOSTED_AI500_DB_TYPE=${SELFHOSTED_AI500_DB_TYPE:-postgres}
       - SELFHOSTED_AI500_DB_PATH=/app/data/selfhosted-ai500.db
+      - SELFHOSTED_AI500_DB_HOST=${SELFHOSTED_AI500_DB_HOST:-postgres}
+      - SELFHOSTED_AI500_DB_PORT=${SELFHOSTED_AI500_DB_PORT:-5432}
+      - SELFHOSTED_AI500_DB_USER=${SELFHOSTED_AI500_DB_USER:-nofx}
+      - SELFHOSTED_AI500_DB_PASSWORD=${SELFHOSTED_AI500_DB_PASSWORD:-nofx}
+      - SELFHOSTED_AI500_DB_NAME=${SELFHOSTED_AI500_DB_NAME:-nofx}
+      - SELFHOSTED_AI500_DB_SSLMODE=${SELFHOSTED_AI500_DB_SSLMODE:-disable}
       - SELFHOSTED_AI500_EXCHANGES=${SELFHOSTED_AI500_EXCHANGES:-hyperliquid,binance,bybit}
       - SELFHOSTED_AI500_REFRESH_SECS=${SELFHOSTED_AI500_REFRESH_SECS:-60}
       - SELFHOSTED_AI500_UNIVERSE_LIMIT=${SELFHOSTED_AI500_UNIVERSE_LIMIT:-120}
@@ -53,6 +62,9 @@ services:
       - SELFHOSTED_AI500_SNAPSHOT_RETENTION_HOURS=${SELFHOSTED_AI500_SNAPSHOT_RETENTION_HOURS:-72}
     networks:
       - nofx-network
+    depends_on:
+      postgres:
+        condition: service_healthy
     healthcheck:
       test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8081/health"]
       interval: 30s
@@ -76,7 +88,7 @@ services:
     environment:
       - TZ=${TZ:-Asia/Shanghai}
       - AI_MAX_TOKENS=8000
-      - DB_TYPE=${DB_TYPE:-sqlite}
+      - DB_TYPE=${DB_TYPE:-postgres}
       - DB_PATH=${DB_PATH:-/app/data/data.db}
       - DB_HOST=${DB_HOST:-postgres}
       - DB_PORT=${DB_PORT:-5432}

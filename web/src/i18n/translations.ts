@@ -721,7 +721,7 @@ export const translations = {
 
     faqUpdateNOFX: 'How do I update NOFX?',
     faqUpdateNOFXAnswer:
-      'For Docker: Run "docker compose pull && docker compose up -d" to pull latest images and restart. For manual installation: "git pull && go build -o nofx" for backend, "cd web && npm install && npm run build" for frontend. Your configurations in data.db are preserved during updates.',
+      'For Docker: Run "docker compose pull && docker compose up -d" to pull latest images and restart. For manual installation: "git pull && go build -o nofx" for backend, "cd web && npm install && npm run build" for frontend. Keep your .env file and PostgreSQL volume/database backup before major upgrades.',
 
     // ===== CONFIGURATION =====
     faqConfigureAIModels: 'How do I configure AI models?',
@@ -792,7 +792,7 @@ export const translations = {
 
     faqDatabaseLocked: 'Database locked error',
     faqDatabaseLockedAnswer:
-      'Multiple processes accessing SQLite simultaneously. Solution: 1) Stop all processes: "docker compose down" or "pkill nofx"; 2) Remove lock files if present: "rm -f data/data.db-wal data/data.db-shm"; 3) Restart: "docker compose up -d". Only one backend instance should access the database.',
+      'This usually indicates a legacy SQLite deployment. Current Docker deployments should use PostgreSQL instead. Check "docker compose ps postgres" and "docker compose exec postgres pg_isready -U nofx -d nofx". If you still run SQLite, stop extra NOFX processes and migrate that installation to PostgreSQL.',
 
     faqTALibNotFound: 'TA-Lib not found during build',
     faqTALibNotFoundAnswer:
@@ -817,7 +817,7 @@ export const translations = {
     // ===== SECURITY =====
     faqAPIKeyStorage: 'How are API keys stored?',
     faqAPIKeyStorageAnswer:
-      'API keys are encrypted using AES-256-GCM before storage in the local SQLite database. The encryption key (DATA_ENCRYPTION_KEY) is stored in your .env file. Keys are decrypted only in memory when needed for API calls. Never share your data.db or .env files.',
+      'API keys are encrypted using AES-256-GCM before storage in the local NOFX database. The encryption key (DATA_ENCRYPTION_KEY) is stored in your .env file. Keys are decrypted only in memory when needed for API calls. Never share your database backups or .env file.',
 
     faqEncryptionDetails: 'What encryption does NOFX use?',
     faqEncryptionDetailsAnswer:
@@ -825,7 +825,7 @@ export const translations = {
 
     faqSecurityBestPractices: 'What are security best practices?',
     faqSecurityBestPracticesAnswer:
-      'Recommended: 1) Use exchange API keys with IP whitelist and minimal permissions (Futures Trading only); 2) Use dedicated subaccount for NOFX; 3) Enable TRANSPORT_ENCRYPTION for remote deployments; 4) Never share .env or data.db files; 5) Use HTTPS with valid certificates; 6) Regularly rotate API keys; 7) Monitor account activity.',
+      'Recommended: 1) Use exchange API keys with IP whitelist and minimal permissions (Futures Trading only); 2) Use dedicated subaccount for NOFX; 3) Enable TRANSPORT_ENCRYPTION for remote deployments; 4) Never share .env files or database backups; 5) Use HTTPS with valid certificates; 6) Regularly rotate API keys; 7) Monitor account activity.',
 
     faqCanNOFXStealFunds: 'Can NOFX steal my funds?',
     faqCanNOFXStealFundsAnswer:
@@ -2035,7 +2035,7 @@ export const translations = {
 
     faqUpdateNOFX: '如何更新 NOFX？',
     faqUpdateNOFXAnswer:
-      'Docker 方式：运行 "docker compose pull && docker compose up -d" 拉取最新镜像并重启。手动安装：后端 "git pull && go build -o nofx"，前端 "cd web && npm install && npm run build"。data.db 中的配置在更新时会保留。',
+      'Docker 方式：运行 "docker compose pull && docker compose up -d" 拉取最新镜像并重启。手动安装：后端 "git pull && go build -o nofx"，前端 "cd web && npm install && npm run build"。升级前请保留 .env，并备份 PostgreSQL 数据库或数据卷。',
 
     // ===== 配置设置 =====
     faqConfigureAIModels: '如何配置 AI 模型？',
@@ -2106,7 +2106,7 @@ export const translations = {
 
     faqDatabaseLocked: '数据库锁定错误',
     faqDatabaseLockedAnswer:
-      '多个进程同时访问 SQLite 导致。解决方案：1）停止所有进程："docker compose down" 或 "pkill nofx"；2）如有锁文件删除："rm -f data/data.db-wal data/data.db-shm"；3）重启："docker compose up -d"。只能有一个后端实例访问数据库。',
+      '这通常说明你还在使用旧的 SQLite 部署。当前 Docker 部署应改用 PostgreSQL。请检查 "docker compose ps postgres" 和 "docker compose exec postgres pg_isready -U nofx -d nofx"。如果你仍在运行 SQLite，请停止多余的 NOFX 进程，并尽快将该实例迁移到 PostgreSQL。',
 
     faqTALibNotFound: '构建时找不到 TA-Lib',
     faqTALibNotFoundAnswer:
@@ -2131,7 +2131,7 @@ export const translations = {
     // ===== 安全相关 =====
     faqAPIKeyStorage: 'API 密钥如何存储？',
     faqAPIKeyStorageAnswer:
-      'API 密钥使用 AES-256-GCM 加密后存储在本地 SQLite 数据库中。加密密钥（DATA_ENCRYPTION_KEY）存储在您的 .env 文件中。密钥仅在 API 调用需要时在内存中解密。切勿分享您的 data.db 或 .env 文件。',
+      'API 密钥会先使用 AES-256-GCM 加密，再存储在本地 NOFX 数据库中。加密密钥（DATA_ENCRYPTION_KEY）存储在您的 .env 文件中。密钥仅在 API 调用需要时在内存中解密。切勿分享数据库备份或 .env 文件。',
 
     faqEncryptionDetails: 'NOFX 使用什么加密？',
     faqEncryptionDetailsAnswer:
@@ -2139,7 +2139,7 @@ export const translations = {
 
     faqSecurityBestPractices: '安全最佳实践是什么？',
     faqSecurityBestPracticesAnswer:
-      '建议：1）使用带 IP 白名单和最小权限（仅合约交易）的交易所 API 密钥；2）为 NOFX 使用专用子账户；3）远程部署启用 TRANSPORT_ENCRYPTION；4）切勿分享 .env 或 data.db 文件；5）使用有效证书的 HTTPS；6）定期轮换 API 密钥；7）监控账户活动。',
+      '建议：1）使用带 IP 白名单和最小权限（仅合约交易）的交易所 API 密钥；2）为 NOFX 使用专用子账户；3）远程部署启用 TRANSPORT_ENCRYPTION；4）切勿分享 .env 或数据库备份；5）使用有效证书的 HTTPS；6）定期轮换 API 密钥；7）监控账户活动。',
 
     faqCanNOFXStealFunds: 'NOFX 会盗取我的资金吗？',
     faqCanNOFXStealFundsAnswer:
@@ -3273,7 +3273,7 @@ export const translations = {
     faqFrontendNotLoading: 'Frontend menampilkan "Memuat..." terus-menerus',
     faqFrontendNotLoadingAnswer: 'Backend mungkin tidak berjalan. Periksa: "curl http://127.0.0.1:8080/api/health" harus mengembalikan {"status":"ok"}.',
     faqDatabaseLocked: 'Error database terkunci',
-    faqDatabaseLockedAnswer: 'Beberapa proses mengakses SQLite bersamaan. Hentikan semua, hapus file lock, restart.',
+    faqDatabaseLockedAnswer: 'Ini biasanya menandakan deployment SQLite lama. Deployment Docker saat ini seharusnya memakai PostgreSQL. Periksa container postgres sehat; jika masih memakai SQLite, hentikan proses tambahan lalu migrasikan instance itu ke PostgreSQL.',
     faqTALibNotFound: 'TA-Lib tidak ditemukan saat build',
     faqTALibNotFoundAnswer: 'Instal TA-Lib: macOS: "brew install ta-lib"; Ubuntu: "sudo apt-get install libta-lib0-dev".',
     faqAIAPITimeout: 'API AI timeout atau koneksi ditolak',
@@ -3285,7 +3285,7 @@ export const translations = {
     faqDockerPullFailed: 'Penarikan image Docker gagal atau lambat',
     faqDockerPullFailedAnswer: 'Konfigurasi mirror Docker di daemon.json atau gunakan GitHub Container Registry.',
     faqAPIKeyStorage: 'Bagaimana API key disimpan?',
-    faqAPIKeyStorageAnswer: 'API key dienkripsi menggunakan AES-256-GCM sebelum disimpan di database SQLite lokal. Jangan pernah bagikan file data.db atau .env Anda.',
+    faqAPIKeyStorageAnswer: 'API key dienkripsi menggunakan AES-256-GCM sebelum disimpan di database NOFX lokal. Jangan pernah bagikan backup database atau file .env Anda.',
     faqEncryptionDetails: 'Enkripsi apa yang digunakan NOFX?',
     faqEncryptionDetailsAnswer: 'NOFX menggunakan: 1) AES-256-GCM untuk penyimpanan database; 2) RSA-2048 untuk enkripsi transport opsional; 3) JWT untuk token autentikasi.',
     faqSecurityBestPractices: 'Apa praktik terbaik keamanan?',

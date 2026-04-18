@@ -15,6 +15,102 @@ import (
 	_ "modernc.org/sqlite"
 )
 
+func TestEnsureCaseForPositionTxRefreshesExistingCase(t *testing.T) {
+	root := newPositionHistoryTestStore(t, "deal-review-conflict.db")
+
+	trader := &Trader{
+		ID:             "trader-deal-review-conflict",
+		UserID:         "user-deal-review-conflict",
+		Name:           "Deal Review Conflict Trader",
+		AIModelID:      "model-deal-review-conflict",
+		ExchangeID:     "exchange-deal-review-conflict",
+		InitialBalance: 1000,
+	}
+	if err := root.Trader().Create(trader); err != nil {
+		t.Fatalf("Trader().Create() error = %v", err)
+	}
+
+	now := time.Now().UTC()
+	position := &TraderPosition{
+		TraderID:           trader.ID,
+		ExchangeID:         trader.ExchangeID,
+		ExchangeType:       "bybit",
+		ExchangePositionID: "position-deal-review-conflict",
+		Symbol:             "BTCUSDT",
+		Side:               "LONG",
+		Quantity:           1.25,
+		EntryQuantity:      1.25,
+		EntryPrice:         64250,
+		EntryTime:          now.Add(-20 * time.Minute).UnixMilli(),
+		EntryOrderID:       "live-entry-order",
+		CreatedAt:          now.Add(-20 * time.Minute).UnixMilli(),
+		UpdatedAt:          now.Add(-20 * time.Minute).UnixMilli(),
+	}
+	if err := root.gdb.Create(position).Error; err != nil {
+		t.Fatalf("Create(position) error = %v", err)
+	}
+
+	existing := &DealReviewCase{
+		ID:           "case-existing",
+		UserID:       trader.UserID,
+		TraderID:     trader.ID,
+		PositionID:   position.ID,
+		ExchangeID:   "stale-exchange",
+		ExchangeType: "stale-type",
+		Symbol:       "STALEUSDT",
+		Side:         "SHORT",
+		Status:       DealReviewCaseStatusOpen,
+		Outcome:      "open",
+		EntryOrderID: "stale-entry-order",
+	}
+	if err := root.gdb.Create(existing).Error; err != nil {
+		t.Fatalf("Create(existing case) error = %v", err)
+	}
+
+	var createdCase *DealReviewCase
+	if err := root.gdb.Transaction(func(tx *gorm.DB) error {
+		var err error
+		createdCase, err = root.DealReview().ensureCaseForPositionTx(tx, position)
+		return err
+	}); err != nil {
+		t.Fatalf("ensureCaseForPositionTx() error = %v", err)
+	}
+	if createdCase == nil {
+		t.Fatal("expected deal review case to be returned")
+	}
+	if createdCase.ID != "case-existing" {
+		t.Fatalf("createdCase.ID = %q, want case-existing", createdCase.ID)
+	}
+
+	var cases []DealReviewCase
+	if err := root.gdb.Where("position_id = ?", position.ID).Find(&cases).Error; err != nil {
+		t.Fatalf("Find(cases) error = %v", err)
+	}
+	if len(cases) != 1 {
+		t.Fatalf("len(cases) = %d, want 1", len(cases))
+	}
+
+	caseRec := cases[0]
+	if caseRec.ID != "case-existing" {
+		t.Fatalf("caseRec.ID = %q, want case-existing", caseRec.ID)
+	}
+	if caseRec.ExchangeID != position.ExchangeID {
+		t.Fatalf("caseRec.ExchangeID = %q, want %q", caseRec.ExchangeID, position.ExchangeID)
+	}
+	if caseRec.ExchangeType != position.ExchangeType {
+		t.Fatalf("caseRec.ExchangeType = %q, want %q", caseRec.ExchangeType, position.ExchangeType)
+	}
+	if caseRec.Symbol != position.Symbol {
+		t.Fatalf("caseRec.Symbol = %q, want %q", caseRec.Symbol, position.Symbol)
+	}
+	if caseRec.Side != normalizeDealReviewSide(position.Side) {
+		t.Fatalf("caseRec.Side = %q, want %q", caseRec.Side, normalizeDealReviewSide(position.Side))
+	}
+	if caseRec.EntryOrderID != position.EntryOrderID {
+		t.Fatalf("caseRec.EntryOrderID = %q, want %q", caseRec.EntryOrderID, position.EntryOrderID)
+	}
+}
+
 func TestDealReviewBackfillsDecisionContextFromHistoricalRecords(t *testing.T) {
 	sqlDB, err := sql.Open("sqlite", filepath.Join(t.TempDir(), "deal-review.db"))
 	if err != nil {

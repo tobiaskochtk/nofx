@@ -13,6 +13,26 @@ if [ -z "$DATA_ENCRYPTION_KEY" ]; then
     export DATA_ENCRYPTION_KEY=$(openssl rand -base64 32)
 fi
 
+# PostgreSQL is the default runtime datastore.
+# Railway-managed Postgres commonly exposes PG* variables, so map them when DB_* is unset.
+export DB_TYPE=${DB_TYPE:-postgres}
+if [ -z "$DB_HOST" ] && [ -n "$PGHOST" ]; then
+    export DB_HOST="$PGHOST"
+fi
+if [ -z "$DB_PORT" ] && [ -n "$PGPORT" ]; then
+    export DB_PORT="$PGPORT"
+fi
+if [ -z "$DB_USER" ] && [ -n "$PGUSER" ]; then
+    export DB_USER="$PGUSER"
+fi
+if [ -z "$DB_PASSWORD" ] && [ -n "$PGPASSWORD" ]; then
+    export DB_PASSWORD="$PGPASSWORD"
+fi
+if [ -z "$DB_NAME" ] && [ -n "$PGDATABASE" ]; then
+    export DB_NAME="$PGDATABASE"
+fi
+export DB_SSLMODE=${DB_SSLMODE:-disable}
+
 # Generate nginx config
 cat > /etc/nginx/http.d/default.conf << NGINX_EOF
 server {

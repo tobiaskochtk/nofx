@@ -21,6 +21,11 @@ import type {
   DealReviewChallengerCompareDetail,
   DealReviewFilterPresetDetail,
   DealReviewStrategyVersionDetail,
+  SemanticMemoryCorpusStatus,
+  SemanticMemoryBenchmarkRun,
+  SemanticMemoryQueryResult,
+  SemanticMemorySearchPresetDetail,
+  SemanticMemorySimilarityResponse,
 } from '../../types'
 import { API_BASE, httpClient } from './helpers'
 
@@ -162,6 +167,97 @@ export const dataApi = {
     return result.data!
   },
 
+  async getTraderSemanticMemoryStatus(
+    traderId: string
+  ): Promise<SemanticMemoryCorpusStatus> {
+    const result = await httpClient.get<SemanticMemoryCorpusStatus>(
+      `${API_BASE}/traders/${traderId}/semantic-memory/status`
+    )
+    if (!result.success) {
+      throw new Error(result.message || 'Failed to fetch semantic memory status')
+    }
+    return result.data!
+  },
+
+  async getTraderSemanticMemoryBenchmarks(
+    traderId: string
+  ): Promise<SemanticMemoryBenchmarkRun[]> {
+    const result = await httpClient.get<{ items: SemanticMemoryBenchmarkRun[] }>(
+      `${API_BASE}/traders/${traderId}/semantic-memory/benchmarks`
+    )
+    if (!result.success) {
+      throw new Error(result.message || 'Failed to fetch semantic memory benchmarks')
+    }
+    return result.data?.items || []
+  },
+
+  async runTraderSemanticMemoryBenchmark(
+    traderId: string,
+    body: Record<string, unknown>
+  ): Promise<SemanticMemoryBenchmarkRun> {
+    const result = await httpClient.post<SemanticMemoryBenchmarkRun>(
+      `${API_BASE}/traders/${traderId}/semantic-memory/benchmarks/run`,
+      body
+    )
+    if (!result.success) {
+      throw new Error(result.message || 'Failed to run semantic memory benchmark')
+    }
+    return result.data!
+  },
+
+  async searchTraderSemanticMemory(
+    traderId: string,
+    body: Record<string, unknown>
+  ): Promise<SemanticMemoryQueryResult> {
+    const result = await httpClient.post<SemanticMemoryQueryResult>(
+      `${API_BASE}/traders/${traderId}/semantic-memory/search`,
+      body
+    )
+    if (!result.success) {
+      throw new Error(result.message || 'Failed to search semantic memory')
+    }
+    return result.data!
+  },
+
+  async getTraderSemanticMemoryPresets(
+    traderId: string
+  ): Promise<SemanticMemorySearchPresetDetail[]> {
+    const result = await httpClient.get<{ items: SemanticMemorySearchPresetDetail[] }>(
+      `${API_BASE}/traders/${traderId}/semantic-memory/presets`
+    )
+    if (!result.success) {
+      throw new Error(result.message || 'Failed to fetch semantic memory presets')
+    }
+    return result.data?.items || []
+  },
+
+  async saveTraderSemanticMemoryPreset(
+    traderId: string,
+    body: Record<string, unknown>
+  ): Promise<SemanticMemorySearchPresetDetail[]> {
+    const result = await httpClient.post<{ items: SemanticMemorySearchPresetDetail[] }>(
+      `${API_BASE}/traders/${traderId}/semantic-memory/presets`,
+      body
+    )
+    if (!result.success) {
+      throw new Error(result.message || 'Failed to save semantic memory preset')
+    }
+    return result.data?.items || []
+  },
+
+  async deleteTraderSemanticMemoryPreset(
+    traderId: string,
+    presetId: string
+  ): Promise<SemanticMemorySearchPresetDetail[]> {
+    const result = await httpClient.delete<{ items: SemanticMemorySearchPresetDetail[] }>(
+      `${API_BASE}/traders/${traderId}/semantic-memory/presets/${presetId}`
+    )
+    if (!result.success) {
+      throw new Error(result.message || 'Failed to delete semantic memory preset')
+    }
+    return result.data?.items || []
+  },
+
   async getTraderAutonomousOptimizerConfig(
     traderId: string
   ): Promise<AutonomousOptimizerConfig> {
@@ -222,6 +318,29 @@ export const dataApi = {
     )
     if (!result.success) {
       throw new Error('Failed to fetch autonomous optimizer run detail')
+    }
+    return result.data!
+  },
+
+  async getTraderAutonomousOptimizerRunSimilar(
+    traderId: string,
+    runId: string,
+    params: Record<string, string | number | undefined> = {}
+  ): Promise<SemanticMemorySimilarityResponse> {
+    const search = new URLSearchParams()
+    Object.entries(params).forEach(([key, value]) => {
+      if (value !== undefined && value !== null && value !== '') {
+        search.set(key, String(value))
+      }
+    })
+    const suffix = search.toString() ? `?${search.toString()}` : ''
+    const result = await httpClient.get<SemanticMemorySimilarityResponse>(
+      `${API_BASE}/traders/${traderId}/autonomous-optimizer/runs/${runId}/similar${suffix}`
+    )
+    if (!result.success) {
+      throw new Error(
+        result.message || 'Failed to fetch similar autonomous optimizer runs'
+      )
     }
     return result.data!
   },
@@ -295,6 +414,29 @@ export const dataApi = {
       `${API_BASE}/traders/${traderId}/deal-review/cases/${caseId}`
     )
     if (!result.success) throw new Error('Failed to fetch deal review case')
+    return result.data!
+  },
+
+  async getDealReviewCaseSimilar(
+    traderId: string,
+    caseId: string,
+    params: Record<string, string | number | undefined> = {}
+  ): Promise<SemanticMemorySimilarityResponse> {
+    const search = new URLSearchParams()
+    Object.entries(params).forEach(([key, value]) => {
+      if (value !== undefined && value !== null && value !== '') {
+        search.set(key, String(value))
+      }
+    })
+    const suffix = search.toString() ? `?${search.toString()}` : ''
+    const result = await httpClient.get<SemanticMemorySimilarityResponse>(
+      `${API_BASE}/traders/${traderId}/deal-review/cases/${caseId}/similar${suffix}`
+    )
+    if (!result.success) {
+      throw new Error(
+        result.message || 'Failed to fetch similar deal review cases'
+      )
+    }
     return result.data!
   },
 
@@ -490,6 +632,27 @@ export const dataApi = {
     if (!result.success)
       throw new Error('Failed to fetch strategy version history')
     return result.data?.items || []
+  },
+
+  async getDealReviewStrategyVersionSimilar(
+    traderId: string,
+    versionId: string,
+    params: Record<string, string | number | undefined> = {}
+  ): Promise<SemanticMemorySimilarityResponse> {
+    const search = new URLSearchParams()
+    Object.entries(params).forEach(([key, value]) => {
+      if (value !== undefined && value !== null && value !== '') {
+        search.set(key, String(value))
+      }
+    })
+    const suffix = search.toString() ? `?${search.toString()}` : ''
+    const result = await httpClient.get<SemanticMemorySimilarityResponse>(
+      `${API_BASE}/traders/${traderId}/deal-review/strategy-versions/${versionId}/similar${suffix}`
+    )
+    if (!result.success) {
+      throw new Error(result.message || 'Failed to fetch similar strategy versions')
+    }
+    return result.data!
   },
 
   async rollbackDealReviewStrategyVersion(

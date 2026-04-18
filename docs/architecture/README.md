@@ -10,7 +10,7 @@ Technical documentation for developers who want to understand NOFX internals.
 
 NOFX is a full-stack AI trading platform for cryptocurrency and US stock markets:
 
-- **Backend:** Go (Gin framework, SQLite)
+- **Backend:** Go (Gin framework, PostgreSQL)
 - **Frontend:** React/TypeScript (Vite, TailwindCSS)
 - **AI Models:** DeepSeek, Qwen, OpenAI (GPT-5.2), Claude, Gemini, Grok, Kimi
 - **Exchanges:** Binance, Bybit, OKX, Hyperliquid, Aster, Lighter
@@ -42,7 +42,7 @@ NOFX is a full-stack AI trading platform for cryptocurrency and US stock markets
 │         │                          │                          │            │
 │  ┌──────▼──────┐         ┌─────────▼─────────┐      ┌────────▼────────┐   │
 │  │  Exchanges  │         │     Database      │      │   Frontend UI   │   │
-│  │  (CEX/DEX)  │         │    (SQLite)       │      │   (React SPA)   │   │
+│  │  (CEX/DEX)  │         │  (PostgreSQL)     │      │   (React SPA)   │   │
 │  └─────────────┘         └───────────────────┘      └─────────────────┘   │
 │                                                                             │
 └─────────────────────────────────────────────────────────────────────────────┘

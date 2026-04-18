@@ -30,6 +30,7 @@ type migrationConfig struct {
 type postgresColumn struct {
 	Name     string
 	DataType string
+	Nullable bool
 }
 
 func main() {
@@ -136,12 +137,12 @@ func run(cfg migrationConfig) error {
 		log.Printf("copied %d rows into %s", copied, table)
 	}
 
-	if err := resetPostgresSequences(tx, migratable); err != nil {
-		return fmt.Errorf("reset postgres sequences: %w", err)
-	}
-
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("commit postgres transaction: %w", err)
+	}
+
+	if err := resetPostgresSequences(target, migratable); err != nil {
+		return fmt.Errorf("reset postgres sequences: %w", err)
 	}
 
 	log.Printf("SQLite -> PostgreSQL migration completed successfully")
@@ -353,10 +354,10 @@ func copyTable(source *sql.DB, target *sql.Tx, table string) (int64, error) {
 		return 0, fmt.Errorf("load postgres columns for %s: %w", table, err)
 	}
 
-	targetColumnTypes := make(map[string]string, len(targetColumns))
+	targetColumnMap := make(map[string]postgresColumn, len(targetColumns))
 	targetColumnSet := make(map[string]struct{}, len(targetColumns))
 	for _, column := range targetColumns {
-		targetColumnTypes[column.Name] = column.DataType
+		targetColumnMap[column.Name] = column
 		targetColumnSet[column.Name] = struct{}{}
 	}
 
@@ -414,9 +415,13 @@ func copyTable(source *sql.DB, target *sql.Tx, table string) (int64, error) {
 
 		values := make([]any, len(columns))
 		for i, column := range columns {
-			value, err := normalizeValueForTarget(rawValues[i], targetColumnTypes[column])
+			targetColumn := targetColumnMap[column]
+			value, warningText, err := normalizeValueForTarget(rawValues[i], targetColumn)
 			if err != nil {
 				return copied, fmt.Errorf("normalize %s.%s: %w", table, column, err)
+			}
+			if warningText != "" {
+				log.Printf("warning: %s.%s row %d: %s", table, column, copied+1, warningText)
 			}
 			values[i] = value
 		}
@@ -463,7 +468,7 @@ func sqliteColumns(source *sql.DB, table string) ([]string, error) {
 
 func postgresColumns(target *sql.Tx, table string) ([]postgresColumn, error) {
 	rows, err := target.Query(`
-		SELECT column_name, data_type
+		SELECT column_name, data_type, is_nullable
 		FROM information_schema.columns
 		WHERE table_schema = 'public' AND table_name = $1
 		ORDER BY ordinal_position
@@ -476,9 +481,11 @@ func postgresColumns(target *sql.Tx, table string) ([]postgresColumn, error) {
 	var columns []postgresColumn
 	for rows.Next() {
 		var column postgresColumn
-		if err := rows.Scan(&column.Name, &column.DataType); err != nil {
+		var isNullable string
+		if err := rows.Scan(&column.Name, &column.DataType, &isNullable); err != nil {
 			return nil, err
 		}
+		column.Nullable = strings.EqualFold(isNullable, "YES")
 		columns = append(columns, column)
 	}
 	return columns, rows.Err()
@@ -493,7 +500,7 @@ func countRows(db *sql.DB, table string) (int64, error) {
 	return count, nil
 }
 
-func resetPostgresSequences(target *sql.Tx, migratedTables []string) error {
+func resetPostgresSequences(target *sql.DB, migratedTables []string) error {
 	tableSet := make(map[string]struct{}, len(migratedTables))
 	for _, table := range migratedTables {
 		tableSet[table] = struct{}{}
@@ -534,30 +541,41 @@ func resetPostgresSequences(target *sql.Tx, migratedTables []string) error {
 	return rows.Err()
 }
 
-func normalizeValueForTarget(value any, targetType string) (any, error) {
+func normalizeValueForTarget(value any, targetColumn postgresColumn) (any, string, error) {
 	if value == nil {
-		return nil, nil
+		return nil, "", nil
 	}
 
 	switch v := value.(type) {
 	case []byte:
-		return normalizeValueForTarget(string(v), targetType)
+		return normalizeValueForTarget(string(v), targetColumn)
 	case time.Time:
-		return v.UTC(), nil
+		return v.UTC(), "", nil
 	}
 
-	switch strings.ToLower(targetType) {
-	case "boolean":
-		return toBool(value)
-	case "smallint", "integer", "bigint":
-		return toInt64(value)
-	case "real", "double precision", "numeric":
-		return toFloat64(value)
-	case "timestamp without time zone", "timestamp with time zone":
-		return toTimeValue(value)
-	default:
-		return value, nil
+	normalizedValue, err := func() (any, error) {
+		switch strings.ToLower(targetColumn.DataType) {
+		case "boolean":
+			return toBool(value)
+		case "smallint", "integer", "bigint":
+			return toInt64(value)
+		case "real", "double precision", "numeric":
+			return toFloat64(value)
+		case "timestamp without time zone", "timestamp with time zone":
+			return toTimeValue(value)
+		default:
+			return value, nil
+		}
+	}()
+	if err == nil {
+		return normalizedValue, "", nil
 	}
+
+	if targetColumn.Nullable {
+		return nil, fmt.Sprintf("coerced invalid %s value %q to NULL (%v)", targetColumn.DataType, previewValue(value), err), nil
+	}
+
+	return nil, "", err
 }
 
 func toBool(value any) (bool, error) {
@@ -722,4 +740,15 @@ func envIntOrDefault(key string, fallback int) int {
 		return fallback
 	}
 	return parsed
+}
+
+func previewValue(value any) string {
+	const limit = 120
+	text := fmt.Sprintf("%v", value)
+	text = strings.ReplaceAll(text, "\n", " ")
+	text = strings.ReplaceAll(text, "\r", " ")
+	if len(text) > limit {
+		return text[:limit] + "..."
+	}
+	return text
 }

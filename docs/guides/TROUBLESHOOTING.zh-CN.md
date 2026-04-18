@@ -383,20 +383,17 @@ environment:
 
 #### ❌ `database is locked` 错误
 
-**原因:** SQLite 数据库被多个进程访问。
+**原因:** 这通常说明你还在使用旧的 SQLite 部署。当前 Docker 部署应使用 PostgreSQL，不再依赖 `data.db` 锁文件。
 
 **解决方案:**
 ```bash
-# 停止所有 NOFX 进程
-docker compose down
-# 或
-pkill nofx
-
-# 重启
-docker compose up -d
-# 或
-./nofx
+# 确认当前运行时已经切到 PostgreSQL
+docker compose exec nofx-trading printenv DB_TYPE
+docker compose ps postgres
+docker compose exec postgres pg_isready -U nofx -d nofx
 ```
+
+如果这是旧的 SQLite 安装，请先停止多余的 NOFX 进程，只保留一个写入实例，然后尽快迁移到 PostgreSQL。
 
 ---
 

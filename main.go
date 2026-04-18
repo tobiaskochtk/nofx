@@ -46,8 +46,8 @@ func main() {
 	crypto.SetGlobalCryptoService(cryptoService)
 	logger.Info("✅ Encryption service initialized successfully")
 
-	// Initialize database from configuration
-	// For backward compatibility: command line arg overrides config (SQLite only)
+	// Initialize database from configuration.
+	// Legacy convenience: a positional CLI arg still overrides DBPath when running SQLite explicitly.
 	if len(os.Args) > 1 {
 		cfg.DBPath = os.Args[1]
 	}
@@ -149,6 +149,7 @@ func main() {
 
 	go server.RunDealReviewChallengerCompareSupervisor()
 	go server.RunAutonomousOptimizerSupervisor()
+	go server.RunSemanticMemoryRefreshSupervisor()
 
 	go func() {
 		if err := st.DealReview().BackfillExistingPositions(); err != nil {

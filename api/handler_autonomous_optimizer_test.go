@@ -591,6 +591,97 @@ func TestValidateAutonomousOptimizerPromptPatchIgnoresBlankPlaceholders(t *testi
 	}
 }
 
+func TestBeginAutonomousOptimizerRunUsesManualTrigger(t *testing.T) {
+	sqlDB, err := sql.Open("sqlite", filepath.Join(t.TempDir(), "autonomous-optimizer-manual-run.db"))
+	if err != nil {
+		t.Fatalf("sql.Open() error = %v", err)
+	}
+	t.Cleanup(func() { _ = sqlDB.Close() })
+
+	gdb, err := gorm.Open(gormsqlite.Dialector{Conn: sqlDB}, &gorm.Config{
+		Logger: gormlogger.Default.LogMode(gormlogger.Silent),
+		NowFunc: func() time.Time {
+			return time.Now().UTC()
+		},
+	})
+	if err != nil {
+		t.Fatalf("gorm.Open() error = %v", err)
+	}
+
+	root, err := store.NewFromGorm(gdb)
+	if err != nil {
+		t.Fatalf("store.NewFromGorm() error = %v", err)
+	}
+	if err := gdb.AutoMigrate(&store.AutonomousOptimizerConfig{}, &store.AutonomousOptimizerRun{}); err != nil {
+		t.Fatalf("AutoMigrate() error = %v", err)
+	}
+
+	server := &Server{store: root}
+	now := time.Now().UTC()
+	cfg := &store.AutonomousOptimizerConfig{
+		ID:                  "cfg-manual",
+		UserID:              "user-1",
+		TraderID:            "trader-1",
+		Enabled:             true,
+		Status:              store.AutonomousOptimizerStatusScheduled,
+		ReviewIntervalHours: 12,
+		PrimaryModelName:    "gpt-5.4",
+		CriticModelName:     "gpt-5.4",
+	}
+	if err := root.AutonomousOptimizer().SaveConfig(cfg); err != nil {
+		t.Fatalf("SaveConfig() error = %v", err)
+	}
+
+	run, err := server.beginAutonomousOptimizerRun(cfg, now, store.AutonomousOptimizerRunTriggerManual)
+	if err != nil {
+		t.Fatalf("beginAutonomousOptimizerRun() error = %v", err)
+	}
+	if run == nil {
+		t.Fatal("beginAutonomousOptimizerRun() = nil, want run")
+	}
+	if run.Trigger != store.AutonomousOptimizerRunTriggerManual {
+		t.Fatalf("Trigger = %q, want manual", run.Trigger)
+	}
+
+	storedRun, err := root.AutonomousOptimizer().GetRun(cfg.UserID, cfg.TraderID, run.ID)
+	if err != nil {
+		t.Fatalf("GetRun() error = %v", err)
+	}
+	if storedRun.Trigger != store.AutonomousOptimizerRunTriggerManual {
+		t.Fatalf("stored run trigger = %q, want manual", storedRun.Trigger)
+	}
+}
+
+func TestBuildAutonomousOptimizerConversationRequestUsesReplayHistory(t *testing.T) {
+	history := []*store.AutonomousOptimizerConversationMessage{
+		{Role: store.AutonomousOptimizerConversationRoleSystem, ReplayContent: ""},
+		{Role: store.AutonomousOptimizerConversationRoleUser, ReplayContent: "older-user"},
+		{Role: store.AutonomousOptimizerConversationRoleAssistant, ReplayContent: "older-assistant"},
+		{Role: store.AutonomousOptimizerConversationRoleUser, ReplayContent: "newer-user"},
+		{Role: store.AutonomousOptimizerConversationRoleAssistant, ReplayContent: "newer-assistant"},
+	}
+
+	req, replayed, err := buildAutonomousOptimizerConversationRequest(history, 2, "system-now", "current-user")
+	if err != nil {
+		t.Fatalf("buildAutonomousOptimizerConversationRequest() error = %v", err)
+	}
+	if replayed != 2 {
+		t.Fatalf("replayed = %d, want 2", replayed)
+	}
+	if len(req.Messages) != 4 {
+		t.Fatalf("len(Messages) = %d, want 4", len(req.Messages))
+	}
+	if req.Messages[0].Role != "system" || req.Messages[0].Content != "system-now" {
+		t.Fatalf("Messages[0] = %#v, want latest system prompt first", req.Messages[0])
+	}
+	if req.Messages[1].Content != "newer-user" || req.Messages[2].Content != "newer-assistant" {
+		t.Fatalf("replayed messages = %#v, want newest replay history only", req.Messages[1:3])
+	}
+	if req.Messages[3].Role != "user" || req.Messages[3].Content != "current-user" {
+		t.Fatalf("Messages[3] = %#v, want current user prompt last", req.Messages[3])
+	}
+}
+
 func TestBuildAutonomousOptimizerStarvationMetrics(t *testing.T) {
 	review := &store.TraderBucketReview{
 		RecordCount:             18,
@@ -713,7 +804,7 @@ func TestBuildAutonomousOptimizerTrailingStopTelemetry(t *testing.T) {
 
 func TestBuildAutonomousOptimizerAdaptiveCooldownTelemetry(t *testing.T) {
 	strategyCfg := store.GetDefaultStrategyConfig("en")
-	base := time.Now().UTC().Add(-6 * time.Hour)
+	base := time.Now().UTC().Add(-30 * time.Hour)
 	cases := []store.DealReviewCaseDetail{
 		{
 			Case: store.DealReviewCase{
@@ -754,6 +845,19 @@ func TestBuildAutonomousOptimizerAdaptiveCooldownTelemetry(t *testing.T) {
 				RealizedPnLPct:       -0.4,
 			},
 		},
+		{
+			Case: store.DealReviewCase{
+				Status:               store.DealReviewCaseStatusClosed,
+				Symbol:               "ENAUSDT",
+				EntryTimeMs:          base.Add(16 * time.Hour).UnixMilli(),
+				ExitTimeMs:           base.Add(16*time.Hour + 30*time.Minute).UnixMilli(),
+				OpenSessionBucket:    "asia",
+				OpenTrendRegime:      "uptrend",
+				OpenVolatilityRegime: "high_vol",
+				OpenOIRegime:         "flat",
+				RealizedPnLPct:       1.4,
+			},
+		},
 	}
 
 	telemetry := buildAutonomousOptimizerAdaptiveCooldownTelemetry(&strategyCfg, cases)
@@ -772,11 +876,37 @@ func TestBuildAutonomousOptimizerAdaptiveCooldownTelemetry(t *testing.T) {
 	if telemetry.RegimeRepeatLossCount != 2 {
 		t.Fatalf("RegimeRepeatLossCount = %d, want 2", telemetry.RegimeRepeatLossCount)
 	}
+	if telemetry.BlockedSymbolReentryOutcomes.TradeCount != 1 ||
+		telemetry.BlockedSymbolReentryOutcomes.LossCount != 1 ||
+		telemetry.BlockedSymbolReentryOutcomes.NetPnLPct != -0.6 {
+		t.Fatalf("BlockedSymbolReentryOutcomes = %#v, want one blocked same-symbol loss at -0.6%%", telemetry.BlockedSymbolReentryOutcomes)
+	}
+	if telemetry.PostSymbolCooldownOutcomes.TradeCount != 1 ||
+		telemetry.PostSymbolCooldownOutcomes.WinCount != 1 ||
+		telemetry.PostSymbolCooldownOutcomes.NetPnLPct != 1.4 {
+		t.Fatalf("PostSymbolCooldownOutcomes = %#v, want one post-cooldown same-symbol winner at +1.4%%", telemetry.PostSymbolCooldownOutcomes)
+	}
+	if telemetry.BlockedRegimeReentryOutcomes.TradeCount != 2 ||
+		telemetry.BlockedRegimeReentryOutcomes.LossCount != 2 ||
+		telemetry.BlockedRegimeReentryOutcomes.NetPnLPct != -1.0 {
+		t.Fatalf("BlockedRegimeReentryOutcomes = %#v, want two blocked regime repeats totaling -1.0%%", telemetry.BlockedRegimeReentryOutcomes)
+	}
+	if telemetry.PostRegimeCooldownOutcomes.TradeCount != 1 ||
+		telemetry.PostRegimeCooldownOutcomes.WinCount != 1 ||
+		telemetry.PostRegimeCooldownOutcomes.NetPnLPct != 1.4 {
+		t.Fatalf("PostRegimeCooldownOutcomes = %#v, want one post-cooldown regime follow-up winner at +1.4%%", telemetry.PostRegimeCooldownOutcomes)
+	}
 	if len(telemetry.TopSymbols) == 0 || telemetry.TopSymbols[0].Symbol != "ENAUSDT" {
 		t.Fatalf("TopSymbols = %#v, want ENAUSDT first", telemetry.TopSymbols)
 	}
+	if telemetry.TopSymbols[0].BlockedOutcomes.TradeCount != 1 || telemetry.TopSymbols[0].PostCooldownOutcomes.TradeCount != 1 {
+		t.Fatalf("TopSymbols = %#v, want ENAUSDT blocked/post outcome breakdown", telemetry.TopSymbols)
+	}
 	if len(telemetry.TopRegimes) == 0 || telemetry.TopRegimes[0].RepeatAfterLossCount != 2 {
 		t.Fatalf("TopRegimes = %#v, want repeated uptrend/high_vol/flat regime", telemetry.TopRegimes)
+	}
+	if telemetry.TopRegimes[0].BlockedOutcomes.TradeCount != 2 || telemetry.TopRegimes[0].PostCooldownOutcomes.TradeCount != 1 {
+		t.Fatalf("TopRegimes = %#v, want blocked/post regime outcome breakdown", telemetry.TopRegimes)
 	}
 }
 

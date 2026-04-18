@@ -54,12 +54,15 @@ func enrichDecisionRecordTelemetry(record *DecisionRecord) {
 		if !isHoldOrWaitAction(action.Action) {
 			continue
 		}
-		if len(action.RejectReasons) == 0 {
-			action.RejectReasons = deriveRejectReasons(action.Reasoning, action.MarketContext)
+		reasons := sanitizeRejectReasonList(action.RejectReasons)
+		if rejectReasonsNeedRefinement(reasons) {
+			reasons = mergeRejectReasonLists(reasons, deriveRejectReasons(action.Reasoning, action.MarketContext))
+			reasons = sanitizeRejectReasonList(reasons)
 		}
-		if len(action.RejectReasons) == 0 {
+		if len(reasons) == 0 {
 			continue
 		}
+		action.RejectReasons = reasons
 		if symbol == "" {
 			genericRejectReasons = mergeRejectReasonLists(genericRejectReasons, action.RejectReasons)
 			continue
@@ -90,11 +93,14 @@ func enrichDecisionRecordTelemetry(record *DecisionRecord) {
 		if _, opened := openSymbols[symbol]; opened {
 			continue
 		}
-		if len(detail.RejectReasons) > 0 {
-			continue
+		reasons := sanitizeRejectReasonList(detail.RejectReasons)
+		if rejectReasonsNeedRefinement(reasons) {
+			reasons = mergeRejectReasonLists(reasons, symbolRejectReasons[symbol])
+			reasons = mergeRejectReasonLists(reasons, genericRejectReasons)
+			reasons = mergeRejectReasonLists(reasons, deriveRejectReasons("", detail.MarketContext))
+			reasons = mergeRejectReasonLists(reasons, deriveRejectReasonsFromCandidateDetail(detail))
+			reasons = sanitizeRejectReasonList(reasons)
 		}
-		reasons := mergeRejectReasonLists(symbolRejectReasons[symbol], genericRejectReasons)
-		reasons = mergeRejectReasonLists(reasons, deriveRejectReasons("", detail.MarketContext))
 		if len(reasons) == 0 {
 			reasons = []string{"unspecified"}
 		}
@@ -325,6 +331,51 @@ func deriveRejectReasons(reasoning string, context *DealReviewMarketContextSnaps
 	return reasons
 }
 
+func deriveRejectReasonsFromCandidateDetail(detail *CandidateDetail) []string {
+	if detail == nil {
+		return nil
+	}
+
+	reasons := []string{}
+	appendReason := func(reason string) {
+		reason = normalizeDetailedRejectReason(reason)
+		if reason == "" {
+			return
+		}
+		for _, existing := range reasons {
+			if existing == reason {
+				return
+			}
+		}
+		reasons = append(reasons, reason)
+	}
+
+	bucket := strings.ToLower(strings.TrimSpace(detail.SelectionBucket))
+	switch bucket {
+	case "exploration":
+		appendReason("low_confidence")
+	case "primary", "adaptive", "fallback_eligible", "fallback_ranked":
+		appendReason("missing_confirmation")
+	}
+
+	sourceSet := make(map[string]struct{}, len(detail.Sources))
+	for _, source := range detail.Sources {
+		normalized := strings.ToLower(strings.TrimSpace(source))
+		if normalized == "" {
+			continue
+		}
+		sourceSet[normalized] = struct{}{}
+	}
+	if _, ok := sourceSet["oi_low"]; ok {
+		appendReason("liquidity_concerns")
+	}
+	if len(reasons) == 0 && len(sourceSet) > 0 {
+		appendReason("missing_confirmation")
+	}
+
+	return reasons
+}
+
 func normalizeDetailedRejectReason(reason string) string {
 	switch strings.ToLower(strings.TrimSpace(reason)) {
 	case "", "unknown":
@@ -334,6 +385,57 @@ func normalizeDetailedRejectReason(reason string) string {
 	default:
 		return normalizeTraderRejectReason(reason)
 	}
+}
+
+func rejectReasonsNeedRefinement(reasons []string) bool {
+	for _, item := range reasons {
+		normalized := normalizeDetailedRejectReason(item)
+		if normalized != "" && normalized != "unspecified" {
+			return false
+		}
+	}
+	return true
+}
+
+func sanitizeRejectReasonList(reasons []string) []string {
+	if len(reasons) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(reasons))
+	hasSpecificReason := false
+	for _, item := range reasons {
+		normalized := normalizeDetailedRejectReason(item)
+		if normalized == "" {
+			continue
+		}
+		alreadyExists := false
+		for _, existing := range out {
+			if existing == normalized {
+				alreadyExists = true
+				break
+			}
+		}
+		if alreadyExists {
+			continue
+		}
+		if normalized != "unspecified" {
+			hasSpecificReason = true
+		}
+		out = append(out, normalized)
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	if !hasSpecificReason {
+		return []string{"unspecified"}
+	}
+	filtered := make([]string, 0, len(out))
+	for _, item := range out {
+		if item != "unspecified" {
+			filtered = append(filtered, item)
+		}
+	}
+	return filtered
 }
 
 func mergeRejectReasonLists(base []string, additions []string) []string {

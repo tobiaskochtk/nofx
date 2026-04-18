@@ -147,13 +147,8 @@ func (s *EquityStore) MigrateFromDecision() (int64, error) {
 		return 0, nil // Already has data, skip migration
 	}
 
-	// Check if old table exists (SQLite specific check, but works for migration)
-	var tableName string
-	err := s.db.Raw(`
-		SELECT name FROM sqlite_master
-		WHERE type='table' AND name='decision_account_snapshots'
-	`).Scan(&tableName).Error
-	if err != nil || tableName == "" {
+	// Check if old table exists before attempting the legacy migration query.
+	if !s.db.Migrator().HasTable("decision_account_snapshots") {
 		return 0, nil // Old table doesn't exist, skip
 	}
 

@@ -9,7 +9,14 @@ import (
 type Config struct {
 	Port                 string
 	AuthToken            string
+	DBType               string
 	DBPath               string
+	DBHost               string
+	DBPort               int
+	DBUser               string
+	DBPassword           string
+	DBName               string
+	DBSSLMode            string
 	Exchanges            []string
 	RefreshInterval      time.Duration
 	UniverseLimit        int
@@ -55,13 +62,33 @@ func LoadConfig() Config {
 	return Config{
 		Port:                 envString("SELFHOSTED_AI500_PORT", "8081"),
 		AuthToken:            envString("SELFHOSTED_AI500_AUTH_TOKEN", "local-selfhosted-ai500-token"),
+		DBType:               envString("SELFHOSTED_AI500_DB_TYPE", "postgres"),
 		DBPath:               envString("SELFHOSTED_AI500_DB_PATH", "data/selfhosted-ai500/selfhosted-ai500.db"),
+		DBHost:               envString("SELFHOSTED_AI500_DB_HOST", "localhost"),
+		DBPort:               envInt("SELFHOSTED_AI500_DB_PORT", 5432),
+		DBUser:               envString("SELFHOSTED_AI500_DB_USER", "nofx"),
+		DBPassword:           envString("SELFHOSTED_AI500_DB_PASSWORD", ""),
+		DBName:               envString("SELFHOSTED_AI500_DB_NAME", "nofx"),
+		DBSSLMode:            envString("SELFHOSTED_AI500_DB_SSLMODE", "disable"),
 		Exchanges:            exchanges,
 		RefreshInterval:      time.Duration(refreshSecs) * time.Second,
 		UniverseLimit:        universeLimit,
 		ScoreThreshold:       scoreThreshold,
 		BootstrapConcurrency: bootstrapConcurrency,
 		SnapshotRetention:    time.Duration(retentionHours) * time.Hour,
+	}
+}
+
+func (c Config) StoreConfig() StoreConfig {
+	return StoreConfig{
+		Type:     normalizeStoreDBType(c.DBType),
+		Path:     c.DBPath,
+		Host:     c.DBHost,
+		Port:     c.DBPort,
+		User:     c.DBUser,
+		Password: c.DBPassword,
+		DBName:   c.DBName,
+		SSLMode:  c.DBSSLMode,
 	}
 }
 

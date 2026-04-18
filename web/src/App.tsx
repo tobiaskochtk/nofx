@@ -17,6 +17,7 @@ import { StrategyMarketPage } from './pages/StrategyMarketPage'
 import { DataPage } from './pages/DataPage'
 import { DealReviewPage } from './pages/DealReviewPage'
 import { AutonomousOptimizerPage } from './pages/AutonomousOptimizerPage'
+import { SemanticMemoryPage } from './pages/SemanticMemoryPage'
 import { BeginnerOnboardingPage } from './pages/BeginnerOnboardingPage'
 import { LoginRequiredOverlay } from './components/auth/LoginRequiredOverlay'
 import HeaderBar from './components/common/HeaderBar'
@@ -46,6 +47,7 @@ type Page =
   | 'strategy-market'
   | 'deal-review'
   | 'optimizer'
+  | 'memory'
   | 'data'
   | 'faq'
   | 'login'
@@ -69,6 +71,7 @@ function App() {
       return 'strategy-market'
     if (path === '/deal-review' || hash === 'deal-review') return 'deal-review'
     if (path === '/optimizer' || hash === 'optimizer') return 'optimizer'
+    if (path === '/memory' || hash === 'memory') return 'memory'
     if (path === '/data' || hash === 'data') return 'data'
     if (path === '/dashboard' || hash === 'trader' || hash === 'details')
       return 'trader'
@@ -91,6 +94,7 @@ function App() {
       'strategy-market': '/strategy-market',
       'deal-review': '/deal-review',
       optimizer: '/optimizer',
+      memory: '/memory',
       data: '/data',
       traders: '/traders',
       trader: '/dashboard',
@@ -174,6 +178,8 @@ function App() {
         setCurrentPage('deal-review')
       } else if (path === '/optimizer' || hash === 'optimizer') {
         setCurrentPage('optimizer')
+      } else if (path === '/memory' || hash === 'memory') {
+        setCurrentPage('memory')
       } else if (path === '/data' || hash === 'data') {
         setCurrentPage('data')
       } else if (
@@ -372,6 +378,8 @@ function App() {
       setCurrentPage('traders')
     } else if (route === '/optimizer') {
       setCurrentPage('optimizer')
+    } else if (route === '/memory') {
+      setCurrentPage('memory')
     } else if (route === '/dashboard') {
       setCurrentPage('trader')
     }
@@ -569,6 +577,20 @@ function App() {
               />
             ) : currentPage === 'optimizer' ? (
               <AutonomousOptimizerPage
+                traders={traders}
+                tradersError={tradersError}
+                selectedTraderId={selectedTraderId}
+                onTraderSelect={(traderId) => {
+                  setSelectedTraderId(traderId)
+                  const trader = traders?.find((t) => t.trader_id === traderId)
+                  if (trader) {
+                    const slug = getTraderSlug(trader)
+                    setSelectedTraderSlug(slug)
+                  }
+                }}
+              />
+            ) : currentPage === 'memory' ? (
+              <SemanticMemoryPage
                 traders={traders}
                 tradersError={tradersError}
                 selectedTraderId={selectedTraderId}

@@ -11,7 +11,6 @@ import (
 	"github.com/google/uuid"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
-	"nofx/logger"
 )
 
 const (
@@ -3440,25 +3439,15 @@ func (s *DealReviewStore) enrichCaseList(cases []DealReviewCase) ([]DealReviewCa
 	if len(eventIDs) > 0 {
 		var events []DealReviewEvent
 		if err := s.db.Where("id IN ?", eventIDs).Find(&events).Error; err != nil {
-			if isDealReviewSQLiteCorruptionError(err) {
-				logger.Warnf("⚠️ Deal-review event enrichment skipped due to SQLite corruption: %v", err)
-			} else {
-				return nil, err
-			}
-		} else {
-			for _, event := range events {
-				eventMap[event.ID] = event
-			}
+			return nil, err
+		}
+		for _, event := range events {
+			eventMap[event.ID] = event
 		}
 	}
 	timelineSummaries, err := s.buildCaseListPriceTimelineSummaries(cases)
 	if err != nil {
-		if isDealReviewSQLiteCorruptionError(err) {
-			logger.Warnf("⚠️ Deal-review timeline summaries skipped due to SQLite corruption: %v", err)
-			timelineSummaries = map[int64]*DealReviewPriceTimelineSummary{}
-		} else {
-			return nil, err
-		}
+		return nil, err
 	}
 
 	result := make([]DealReviewCaseListItem, 0, len(cases))
@@ -3484,11 +3473,7 @@ func (s *DealReviewStore) enrichCaseList(cases []DealReviewCase) ([]DealReviewCa
 	if len(cases) > 0 {
 		model, err := s.buildHeuristicClassifierModel(cases[0].UserID, cases[0].TraderID)
 		if err != nil {
-			if isDealReviewSQLiteCorruptionError(err) {
-				logger.Warnf("⚠️ Deal-review classifier assist skipped due to SQLite corruption: %v", err)
-			} else {
-				return nil, err
-			}
+			return nil, err
 		} else {
 			for i := range result {
 				result[i].ClassifierAssist = model.EvaluateCase(&result[i].Case)
@@ -3613,7 +3598,7 @@ func (s *DealReviewStore) computeDatasetSummary(userID string, filter DealReview
 
 func (s *DealReviewStore) ensureCaseForPositionTx(tx *gorm.DB, position *TraderPosition) (*DealReviewCase, error) {
 	var caseRec DealReviewCase
-	err := tx.Where("position_id = ?", position.ID).First(&caseRec).Error
+	err := s.loadCaseForPositionTx(tx, position.ID, &caseRec)
 	if err == nil {
 		s.syncCaseFromPosition(&caseRec, position)
 		if err := tx.Save(&caseRec).Error; err != nil {
@@ -3645,10 +3630,47 @@ func (s *DealReviewStore) ensureCaseForPositionTx(tx *gorm.DB, position *TraderP
 		Outcome:      "open",
 	}
 	s.syncCaseFromPosition(&caseRec, position)
-	if err := tx.Create(&caseRec).Error; err != nil {
+	result := tx.Clauses(clause.OnConflict{
+		Columns:   []clause.Column{{Name: "position_id"}},
+		DoNothing: true,
+	}).Create(&caseRec)
+	if result.Error != nil {
+		return nil, result.Error
+	}
+
+	persisted := caseRec
+	if err := s.loadCaseForPositionTx(tx, position.ID, &persisted); err != nil {
 		return nil, err
 	}
-	return &caseRec, nil
+	if persisted.ID != caseRec.ID {
+		s.syncCaseFromPosition(&persisted, position)
+		if err := tx.Save(&persisted).Error; err != nil {
+			return nil, err
+		}
+		return &persisted, nil
+	}
+	if result.RowsAffected == 0 {
+		s.syncCaseFromPosition(&caseRec, position)
+		if err := tx.Save(&caseRec).Error; err != nil {
+			return nil, err
+		}
+	}
+	return &persisted, nil
+}
+
+func (s *DealReviewStore) loadCaseForPositionTx(tx *gorm.DB, positionID int64, dest *DealReviewCase) error {
+	if tx == nil || dest == nil || positionID == 0 {
+		return gorm.ErrRecordNotFound
+	}
+	var lastErr error
+	for attempt := 0; attempt < 3; attempt++ {
+		lastErr = tx.Where("position_id = ?", positionID).First(dest).Error
+		if lastErr == nil || lastErr != gorm.ErrRecordNotFound {
+			return lastErr
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	return lastErr
 }
 
 func (s *DealReviewStore) syncCaseFromPosition(caseRec *DealReviewCase, position *TraderPosition) {
@@ -4495,11 +4517,7 @@ func (s *DealReviewStore) loadTimelinePointsByPositionIDsWithDB(db *gorm.DB, pos
 		Where("position_id IN ?", positionIDs).
 		Order("timestamp_ms ASC, decision_cycle_number ASC").
 		Find(&cycleRecords).Error; err != nil {
-		if isDealReviewSQLiteCorruptionError(err) {
-			logger.Warnf("⚠️ Deal-review cycle timeline points skipped due to SQLite corruption: %v", err)
-		} else {
-			return nil, err
-		}
+		return nil, err
 	} else {
 		for _, record := range cycleRecords {
 			pointsByPosition[record.PositionID] = append(pointsByPosition[record.PositionID], buildDealReviewTimelinePointFromCycleRecord(record))
@@ -4511,11 +4529,7 @@ func (s *DealReviewStore) loadTimelinePointsByPositionIDsWithDB(db *gorm.DB, pos
 		Where("position_id IN ?", positionIDs).
 		Order("timestamp_ms ASC, source ASC").
 		Find(&marketRecords).Error; err != nil {
-		if isDealReviewSQLiteCorruptionError(err) {
-			logger.Warnf("⚠️ Deal-review market timeline points skipped due to SQLite corruption: %v", err)
-		} else {
-			return nil, err
-		}
+		return nil, err
 	} else {
 		for _, record := range marketRecords {
 			pointsByPosition[record.PositionID] = append(pointsByPosition[record.PositionID], buildDealReviewTimelinePointFromMarketRecord(record))
@@ -4523,16 +4537,6 @@ func (s *DealReviewStore) loadTimelinePointsByPositionIDsWithDB(db *gorm.DB, pos
 	}
 
 	return pointsByPosition, nil
-}
-
-func isDealReviewSQLiteCorruptionError(err error) bool {
-	if err == nil {
-		return false
-	}
-	lower := strings.ToLower(err.Error())
-	return strings.Contains(lower, "database disk image is malformed") ||
-		strings.Contains(lower, "sqlite_corrupt") ||
-		strings.Contains(lower, "corrupt")
 }
 
 func buildDealReviewTimelinePoints(caseRec *DealReviewCase, timelinePoints []DealReviewPriceTimelinePoint) []DealReviewPriceTimelinePoint {

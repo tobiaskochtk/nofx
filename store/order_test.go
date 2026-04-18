@@ -53,6 +53,50 @@ func TestCreateOrderDuplicateReturnsExistingRow(t *testing.T) {
 	}
 }
 
+func TestCreateOrderAllowsSameExchangeOrderIDAcrossDifferentExchanges(t *testing.T) {
+	root := newPositionHistoryTestStore(t, "order-composite-unique.db")
+
+	first := &TraderOrder{
+		TraderID:        "trader-a",
+		ExchangeID:      "exchange-a",
+		ExchangeType:    "bybit",
+		ExchangeOrderID: "shared-order-id",
+		Symbol:          "ETHUSDT",
+		Side:            "BUY",
+		Type:            "Market",
+		Quantity:        0.1,
+		Status:          "FILLED",
+		CreatedAt:       time.Now().UTC().UnixMilli(),
+		UpdatedAt:       time.Now().UTC().UnixMilli(),
+	}
+	second := &TraderOrder{
+		TraderID:        "trader-b",
+		ExchangeID:      "exchange-b",
+		ExchangeType:    "binance",
+		ExchangeOrderID: "shared-order-id",
+		Symbol:          "ETHUSDT",
+		Side:            "BUY",
+		Type:            "Market",
+		Quantity:        0.1,
+		Status:          "FILLED",
+		CreatedAt:       time.Now().UTC().UnixMilli(),
+		UpdatedAt:       time.Now().UTC().UnixMilli(),
+	}
+
+	if err := root.Order().CreateOrder(first); err != nil {
+		t.Fatalf("CreateOrder(first) error = %v", err)
+	}
+	if err := root.Order().CreateOrder(second); err != nil {
+		t.Fatalf("CreateOrder(second) error = %v", err)
+	}
+	if first.ID == 0 || second.ID == 0 {
+		t.Fatal("expected both orders to be persisted")
+	}
+	if first.ID == second.ID {
+		t.Fatalf("expected distinct rows, got same id %d", first.ID)
+	}
+}
+
 func TestCreateFillDuplicateReturnsExistingRow(t *testing.T) {
 	root := newPositionHistoryTestStore(t, "fill-duplicate.db")
 
@@ -97,6 +141,56 @@ func TestCreateFillDuplicateReturnsExistingRow(t *testing.T) {
 	}
 	if duplicate.ID != fill.ID {
 		t.Fatalf("duplicate.ID = %d, want %d", duplicate.ID, fill.ID)
+	}
+}
+
+func TestCreateFillAllowsSameExchangeTradeIDAcrossDifferentExchanges(t *testing.T) {
+	root := newPositionHistoryTestStore(t, "fill-composite-unique.db")
+
+	first := &TraderFill{
+		TraderID:        "trader-a",
+		ExchangeID:      "exchange-a",
+		ExchangeType:    "bybit",
+		OrderID:         1,
+		ExchangeOrderID: "order-a",
+		ExchangeTradeID: "shared-trade-id",
+		Symbol:          "ETHUSDT",
+		Side:            "BUY",
+		Price:           2500,
+		Quantity:        0.1,
+		QuoteQuantity:   250,
+		Commission:      0.1,
+		CommissionAsset: "USDT",
+		CreatedAt:       time.Now().UTC().UnixMilli(),
+	}
+	second := &TraderFill{
+		TraderID:        "trader-b",
+		ExchangeID:      "exchange-b",
+		ExchangeType:    "binance",
+		OrderID:         2,
+		ExchangeOrderID: "order-b",
+		ExchangeTradeID: "shared-trade-id",
+		Symbol:          "ETHUSDT",
+		Side:            "BUY",
+		Price:           2501,
+		Quantity:        0.2,
+		QuoteQuantity:   500.2,
+		Commission:      0.2,
+		CommissionAsset: "USDT",
+		CreatedAt:       time.Now().UTC().UnixMilli(),
+	}
+
+	if err := root.Order().CreateFill(first); err != nil {
+		t.Fatalf("CreateFill(first) error = %v", err)
+	}
+	if err := root.Order().CreateFill(second); err != nil {
+		t.Fatalf("CreateFill(second) error = %v", err)
+	}
+	if first.ID == 0 || second.ID == 0 {
+		t.Fatal("expected both fills to be persisted")
+	}
+	if first.ID == second.ID {
+		t.Fatalf("expected distinct rows, got same id %d", first.ID)
 	}
 }
 

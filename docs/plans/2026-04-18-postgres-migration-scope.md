@@ -2,7 +2,7 @@
 
 Date: 2026-04-18
 Owner: Codex draft for implementation
-Status: Audit complete, slice 1 in progress
+Status: Main app and selfhosted-ai500 locally cut over to PostgreSQL; legacy SQLite config layer isolated from default build
 
 ## Goal
 
@@ -24,21 +24,21 @@ A fresh repository audit found four different SQLite buckets:
 ### A. Main App Runtime
 
 - `config/config.go`
-  - global defaults still point to `DBType=sqlite` and `DBPath=data/data.db`
+  - runtime now defaults to PostgreSQL; `DBPath=data/data.db` remains only as a legacy SQLite fallback
 - `main.go`
-  - startup still contains explicit SQLite-first compatibility handling for CLI override and local directory creation
+  - positional CLI path override and local directory creation now apply only when SQLite is explicitly selected
 - `store/driver.go`
-  - `DB_TYPE` defaults to `sqlite`
+  - `DB_TYPE` now defaults to `postgres`
 - `store/gorm.go`
-  - both backends exist, but SQLite remains a full first-class dialector in the live store bootstrap
+  - both backends still exist, but SQLite is now an explicit legacy fallback instead of the runtime default
 - `store/sqlite_runtime.go`
-  - WAL, busy timeout, and retry logic are SQLite-specific operational patches
+  - only explicit SQLite pragma configuration remains; write-retry logic was removed from live runtime paths
 - `store/position_history.go`
-  - write paths still call `retrySQLiteWrite(...)`
+  - closed-PnL sync writes now fail normally instead of using SQLite-specific retry wrappers
 - `store/deal_review.go`
-  - some live paths explicitly swallow or downgrade SQLite corruption errors
+  - live deal-review queries now fail normally instead of swallowing SQLite corruption errors
 - `store/equity.go`
-  - historical migration detection still queries `sqlite_master`
+  - legacy equity migration now uses a backend-neutral table existence check
 
 ### B. Deploy / Packaging
 
@@ -49,9 +49,9 @@ A fresh repository audit found four different SQLite buckets:
 - `docker-compose.stable.yml`
   - same gap in stable compose
 - `Dockerfile.railway`
-  - still hardwires `DB_PATH=/app/data/data.db`
+  - Railway bootstrap now defaults to PostgreSQL and maps `PG*` env vars into `DB_*`
 - `docker/Dockerfile.backend`
-  - still installs the `sqlite` runtime package in the backend image
+  - backend runtime image no longer installs the `sqlite` system package
 
 ### C. Legacy SQLite-Only Database Layer
 
@@ -152,10 +152,17 @@ This implementation pass starts with the minimum slice that materially moves us 
 - [x] audit all SQLite usage buckets and separate runtime from baggage
 - [x] add this scope document
 - [x] add a dedicated `cmd/migrate_sqlite_to_postgres` tool
-- [x] add PostgreSQL service wiring to compose manifests while keeping SQLite as the default until cutover is explicit
-- [ ] remove the legacy SQLite-only config layer
-- [ ] migrate or intentionally isolate `selfhosted-ai500`
-- [ ] rewrite docs/frontend text that still present SQLite as the normal production datastore
+- [x] add PostgreSQL service wiring to compose manifests
+- [x] run a local SQLite snapshot backup and confirm it was still corrupt
+- [x] rebuild a clean migration source via SQLite `.recover`
+- [x] migrate the main overlapping runtime tables into PostgreSQL
+- [x] verify migrated row counts table-by-table for the main runtime schema
+- [x] cut the local runtime over to PostgreSQL and verify `/api/health`
+- [x] isolate the legacy SQLite-only `config/database.go` stack from the default build via build tags
+- [x] migrate `selfhosted-ai500` cache/state tables into PostgreSQL
+- [x] rewrite docs/frontend text that still present SQLite as the normal production datastore
+- [x] flip main runtime defaults and compose fallbacks from SQLite to PostgreSQL
+- [x] remove SQLite-specific write retries, corruption suppression, and runtime image packaging from the active runtime path
 
 ## Migration Tooling In This Slice
 
@@ -179,6 +186,92 @@ Behaviour of the first slice:
 - copies the intersection of source and target tables in foreign-key-safe order
 - resets PostgreSQL sequences afterward
 - reports skipped SQLite-only legacy tables explicitly
+
+## Execution Notes
+
+Local execution completed on 2026-04-18 against:
+
+- source runtime DB snapshot: `data/data.db.before_postgres_cutover_20260418_122314.db`
+- recovered migration source: `data/data.db.recovered_for_postgres_20260418_122314.db`
+- archived SQLite-only table dump: `data/sqlite_only_tables_20260418_122314.sql`
+- selfhosted-ai500 source snapshot: `data/selfhosted-ai500/selfhosted-ai500.db.before_postgres_cutover_20260418_124310.db`
+
+Observed result:
+
+- the stopped runtime snapshot still failed `PRAGMA integrity_check`, confirming recurring SQLite corruption in the active dataset
+- the rebuilt `.recover` database passed integrity check
+- the main runtime table set was migrated successfully into PostgreSQL
+- row counts were verified table-by-table between recovered SQLite and PostgreSQL for the migrated runtime schema
+- local runtime was cut over and `GET /api/health` returned `{"status":"ok","time":null}`
+- the legacy SQLite-only `config/database.go` path is now behind the `legacy_sqlite_config` build tag and no longer participates in default builds/tests
+- `selfhosted-ai500` was rebuilt with PostgreSQL support, its SQLite cache tables were migrated, and `/health` now reports `status":"ok"` while the container runs with `SELFHOSTED_AI500_DB_TYPE=postgres`
+
+## Runtime Tables Verified
+
+- `ai_charges`
+- `ai_models`
+- `autonomous_optimizer_backlog_items`
+- `autonomous_optimizer_configs`
+- `autonomous_optimizer_runs`
+- `deal_review_ai_scans`
+- `deal_review_cases`
+- `deal_review_challenger_compares`
+- `deal_review_classifier_feedback`
+- `deal_review_cycle_points`
+- `deal_review_events`
+- `deal_review_exit_intents`
+- `deal_review_filter_presets`
+- `deal_review_market_points`
+- `deal_review_strategy_versions`
+- `deal_review_trailing_updates`
+- `decision_records`
+- `exchanges`
+- `grid_configs`
+- `grid_events`
+- `grid_instances`
+- `grid_levels`
+- `grid_regime_assessments`
+- `strategies`
+- `system_config`
+- `telegram_configs`
+- `trader_equity_snapshots`
+- `trader_fills`
+- `trader_orders`
+- `trader_positions`
+- `traders`
+- `users`
+
+## SQLite-Only Tables Still Outside The Store Schema
+
+These were not dropped. They were preserved in the SQLite backups and exported separately to `data/sqlite_only_tables_20260418_122314.sql`.
+
+- `backtest_checkpoints` with `1` row
+- `backtest_decisions` with `24` rows
+- `backtest_equity` with `480` rows
+- `backtest_metrics` with `1` row
+- `backtest_runs` with `1` row
+- `backtest_trades` with `0` rows
+- `debate_messages` with `0` rows
+- `debate_participants` with `0` rows
+- `debate_sessions` with `0` rows
+- `debate_votes` with `0` rows
+- `lost_and_found` with `15` rows
+
+## selfhosted-ai500 Migration Notes
+
+The sidecar cache/state store now supports both SQLite and PostgreSQL. Docker compose defaults were switched to PostgreSQL for this service.
+
+Migration execution on 2026-04-18:
+
+- SQLite backup used: `data/selfhosted-ai500/selfhosted-ai500.db.before_postgres_cutover_20260418_124310.db`
+- imported counts at migration time:
+  - `market_snapshots = 518279`
+  - `score_state = 312`
+- after service restart, PostgreSQL counts changed slightly during normal retention pruning and fresh refreshes:
+  - `market_snapshots = 516839`
+  - `score_state = 312`
+
+This is expected because the service prunes old snapshots on refresh.
 
 ## Cutover Rule
 

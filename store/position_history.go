@@ -280,9 +280,7 @@ func (s *PositionStore) CreateFromClosedPnL(traderID, exchangeID, exchangeType s
 		UpdatedAt:          nowMs,
 	}
 
-	err = retrySQLiteWrite(s.db, fmt.Sprintf("create closed PnL position for trader %s symbol %s", traderID, record.Symbol), func() error {
-		return s.db.Create(pos).Error
-	})
+	err = s.db.Create(pos).Error
 	if err != nil {
 		if strings.Contains(err.Error(), "UNIQUE constraint failed") {
 			return false, nil
@@ -392,47 +390,42 @@ func (s *PositionStore) applyClosedPnLToPosition(positionID int64, record *Close
 		return nil
 	}
 
-	if err := retrySQLiteWrite(s.db, fmt.Sprintf("apply closed PnL to position %d", positionID), func() error {
-		position, err := s.GetByID(positionID)
-		if err != nil {
-			return fmt.Errorf("failed to load matching position %d: %w", positionID, err)
-		}
+	position, err := s.GetByID(positionID)
+	if err != nil {
+		return fmt.Errorf("failed to load matching position %d: %w", positionID, err)
+	}
 
-		updates := map[string]any{
-			"realized_pnl": record.RealizedPnL,
-			"fee":          record.Fee,
-			"updated_at":   time.Now().UTC().UnixMilli(),
-		}
+	updates := map[string]any{
+		"realized_pnl": record.RealizedPnL,
+		"fee":          record.Fee,
+		"updated_at":   time.Now().UTC().UnixMilli(),
+	}
 
-		if record.ExitPrice > 0 {
-			updates["exit_price"] = record.ExitPrice
-		}
-		if record.ExitTime > 0 {
-			updates["exit_time"] = record.ExitTime
-		}
-		if record.Leverage > 0 && position.Leverage != record.Leverage {
-			updates["leverage"] = record.Leverage
-		}
-		if orderID := strings.TrimSpace(record.OrderID); orderID != "" && position.ExitOrderID != orderID {
-			updates["exit_order_id"] = orderID
-		}
-		if record.EntryTime > 0 && record.EntryTime < record.ExitTime &&
-			(position.EntryTime == 0 || position.EntryTime == position.ExitTime || position.EntryTime > record.EntryTime) {
-			updates["entry_time"] = record.EntryTime
-		}
-		if record.EntryPrice > 0 && position.EntryPrice <= 0 {
-			updates["entry_price"] = record.EntryPrice
-		}
-		if shouldReplaceCloseReason(position.CloseReason, record.CloseType) {
-			updates["close_reason"] = record.CloseType
-		}
+	if record.ExitPrice > 0 {
+		updates["exit_price"] = record.ExitPrice
+	}
+	if record.ExitTime > 0 {
+		updates["exit_time"] = record.ExitTime
+	}
+	if record.Leverage > 0 && position.Leverage != record.Leverage {
+		updates["leverage"] = record.Leverage
+	}
+	if orderID := strings.TrimSpace(record.OrderID); orderID != "" && position.ExitOrderID != orderID {
+		updates["exit_order_id"] = orderID
+	}
+	if record.EntryTime > 0 && record.EntryTime < record.ExitTime &&
+		(position.EntryTime == 0 || position.EntryTime == position.ExitTime || position.EntryTime > record.EntryTime) {
+		updates["entry_time"] = record.EntryTime
+	}
+	if record.EntryPrice > 0 && position.EntryPrice <= 0 {
+		updates["entry_price"] = record.EntryPrice
+	}
+	if shouldReplaceCloseReason(position.CloseReason, record.CloseType) {
+		updates["close_reason"] = record.CloseType
+	}
 
-		if err := s.db.Model(&TraderPosition{}).Where("id = ?", positionID).Updates(updates).Error; err != nil {
-			return fmt.Errorf("failed to update matching position %d with closed PnL data: %w", positionID, err)
-		}
-		return nil
-	}); err != nil {
-		return err
+	if err := s.db.Model(&TraderPosition{}).Where("id = ?", positionID).Updates(updates).Error; err != nil {
+		return fmt.Errorf("failed to update matching position %d with closed PnL data: %w", positionID, err)
 	}
 	s.syncDealReviewClosedByID(positionID)
 	return nil

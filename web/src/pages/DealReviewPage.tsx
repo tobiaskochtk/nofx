@@ -25,6 +25,7 @@ import type {
   DealReviewValidationCheck,
   Exchange,
   RemoteModelInfo,
+  SemanticMemorySearchHit,
   TraderInfo,
 } from '../types'
 
@@ -41,6 +42,11 @@ function formatMoney(value: number): string {
 
 function formatPct(value: number): string {
   return `${value >= 0 ? '+' : ''}${value.toFixed(2)}%`
+}
+
+function formatSemanticSimilarityScore(value?: number): string {
+  if (typeof value !== 'number' || Number.isNaN(value)) return '-'
+  return `${Math.round(Math.max(0, Math.min(1, value)) * 100)}% match`
 }
 
 function formatValidationScope(value: string): string {
@@ -985,6 +991,9 @@ export function DealReviewPage({
   const [selectedCaseId, setSelectedCaseId] = useState<string | null>(null)
   const [detail, setDetail] = useState<DealReviewCaseDetail | null>(null)
   const [detailLoading, setDetailLoading] = useState(false)
+  const [similarCases, setSimilarCases] = useState<SemanticMemorySearchHit[]>([])
+  const [similarCasesLoading, setSimilarCasesLoading] = useState(false)
+  const [similarCasesError, setSimilarCasesError] = useState<string | null>(null)
   const [comparePeerCaseId, setComparePeerCaseId] = useState('')
   const [comparePeerDetail, setComparePeerDetail] =
     useState<DealReviewCaseDetail | null>(null)
@@ -1015,6 +1024,9 @@ export function DealReviewPage({
     []
   )
   const [selectedVersionId, setSelectedVersionId] = useState<string | null>(null)
+  const [similarVersions, setSimilarVersions] = useState<SemanticMemorySearchHit[]>([])
+  const [similarVersionsLoading, setSimilarVersionsLoading] = useState(false)
+  const [similarVersionsError, setSimilarVersionsError] = useState<string | null>(null)
   const [exchanges, setExchanges] = useState<Exchange[]>([])
   const [challengerCompares, setChallengerCompares] = useState<
     DealReviewChallengerCompareDetail[]
@@ -1044,6 +1056,8 @@ export function DealReviewPage({
   const versionDetailRef = useRef<HTMLDivElement | null>(null)
   const previousTraderIdRef = useRef<string | undefined>(undefined)
   const detailRequestKeyRef = useRef(0)
+  const similarCasesRequestKeyRef = useRef(0)
+  const similarVersionsRequestKeyRef = useRef(0)
   const comparePeerRequestKeyRef = useRef(0)
   const traderChanged = previousTraderIdRef.current !== selectedTraderId
 
@@ -1072,6 +1086,10 @@ export function DealReviewPage({
   )
   const comparePeerCaseVisible = Boolean(
     comparePeerCaseId && items.some((item) => item.case.id === comparePeerCaseId)
+  )
+  const selectedVersionVisible = Boolean(
+    selectedVersionId &&
+      versions.some((item) => item.version.id === selectedVersionId)
   )
 
   const buildFilterPayload = (
@@ -1516,6 +1534,10 @@ export function DealReviewPage({
     setSummary(null)
     setSelectedCaseId(null)
     setDetail(null)
+    setSimilarCases([])
+    setSimilarCasesError(null)
+    setSimilarVersions([])
+    setSimilarVersionsError(null)
     setComparePeerCaseId('')
     setComparePeerDetail(null)
     setReviewQueueMode('')
@@ -1545,6 +1567,39 @@ export function DealReviewPage({
       return
     }
     void loadDetail()
+  }, [selectedTraderId, selectedCaseId, selectedCaseVisible, traderChanged])
+
+  useEffect(() => {
+    if (!selectedTraderId || !selectedCaseId || !selectedCaseVisible || traderChanged) {
+      setSimilarCases([])
+      setSimilarCasesError(null)
+      setSimilarCasesLoading(false)
+      return
+    }
+    const requestKey = similarCasesRequestKeyRef.current + 1
+    similarCasesRequestKeyRef.current = requestKey
+    setSimilarCasesLoading(true)
+    setSimilarCasesError(null)
+    void (async () => {
+      try {
+        const result = await api.getDealReviewCaseSimilar(
+          selectedTraderId,
+          selectedCaseId,
+          { limit: 6 }
+        )
+        if (similarCasesRequestKeyRef.current !== requestKey) return
+        setSimilarCases(result.items || [])
+      } catch (err) {
+        if (similarCasesRequestKeyRef.current !== requestKey) return
+        setSimilarCases([])
+        setSimilarCasesError(
+          err instanceof Error ? err.message : 'Failed to fetch similar historical deals'
+        )
+      } finally {
+        if (similarCasesRequestKeyRef.current !== requestKey) return
+        setSimilarCasesLoading(false)
+      }
+    })()
   }, [selectedTraderId, selectedCaseId, selectedCaseVisible, traderChanged])
 
   useEffect(() => {
@@ -1642,7 +1697,10 @@ export function DealReviewPage({
     const params = new URLSearchParams(window.location.search)
     const fromTime = Number(params.get('optimizer_from_time') || '')
     const toTime = Number(params.get('optimizer_to_time') || '')
-    const versionId = params.get('optimizer_version_id')?.trim() || ''
+    const versionId =
+      params.get('strategy_version_id')?.trim() ||
+      params.get('optimizer_version_id')?.trim() ||
+      ''
 
     if (Number.isFinite(fromTime) && fromTime > 0) {
       setSelectedPresetId('')
@@ -1705,6 +1763,39 @@ export function DealReviewPage({
       setSelectedVersionId(versions[0].version.id)
     }
   }, [versions, selectedVersionId])
+
+  useEffect(() => {
+    if (!selectedTraderId || !selectedVersionId || !selectedVersionVisible) {
+      setSimilarVersions([])
+      setSimilarVersionsError(null)
+      setSimilarVersionsLoading(false)
+      return
+    }
+    const requestKey = similarVersionsRequestKeyRef.current + 1
+    similarVersionsRequestKeyRef.current = requestKey
+    setSimilarVersionsLoading(true)
+    setSimilarVersionsError(null)
+    void (async () => {
+      try {
+        const result = await api.getDealReviewStrategyVersionSimilar(
+          selectedTraderId,
+          selectedVersionId,
+          { limit: 5 }
+        )
+        if (similarVersionsRequestKeyRef.current !== requestKey) return
+        setSimilarVersions(result.items || [])
+      } catch (err) {
+        if (similarVersionsRequestKeyRef.current !== requestKey) return
+        setSimilarVersions([])
+        setSimilarVersionsError(
+          err instanceof Error ? err.message : 'Failed to fetch similar strategy versions'
+        )
+      } finally {
+        if (similarVersionsRequestKeyRef.current !== requestKey) return
+        setSimilarVersionsLoading(false)
+      }
+    })()
+  }, [selectedTraderId, selectedVersionId, selectedVersionVisible])
 
   useEffect(() => {
     if (!selectedPreset) {
@@ -3623,8 +3714,65 @@ export function DealReviewPage({
                               )
                             }
                           )}
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="rounded-xl border border-white/10 bg-black/20 p-4 space-y-4">
+                    <div className="flex items-start justify-between gap-4">
+                      <div>
+                        <div className="font-semibold">Similar historical deals</div>
+                        <div className="text-xs text-nofx-text-muted mt-1">
+                          Semantic matches from the internal review corpus for this trader.
                         </div>
-                      )}
+                      </div>
+                    </div>
+
+                    {similarCasesLoading ? (
+                      <div className="text-sm text-nofx-text-muted">
+                        Loading similar historical deals…
+                      </div>
+                    ) : similarCasesError ? (
+                      <div className="text-sm text-amber-200">
+                        {similarCasesError}
+                      </div>
+                    ) : similarCases.length === 0 ? (
+                      <div className="text-sm text-nofx-text-muted">
+                        No similar historical deals were found yet.
+                      </div>
+                    ) : (
+                      <div className="space-y-3">
+                        {similarCases.map((hit) => (
+                          <div
+                            key={`${hit.document.id}-${hit.document.source_id}`}
+                            className="rounded-xl border border-white/10 bg-black/20 p-4"
+                          >
+                            <div className="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-3">
+                              <div>
+                                <div className="font-semibold">
+                                  {hit.document.title || hit.document.source_id}
+                                </div>
+                                <div className="text-xs text-nofx-text-muted mt-1">
+                                  {formatSemanticSimilarityScore(hit.similarity_score)} · updated{' '}
+                                  {hit.document.source_updated_at
+                                    ? new Date(hit.document.source_updated_at).toLocaleString()
+                                    : '-'}
+                                </div>
+                              </div>
+                              <button
+                                onClick={() => setSelectedCaseId(hit.document.source_id)}
+                                className="h-9 px-3 rounded-lg border border-white/10 bg-black/20 text-sm"
+                              >
+                                Focus deal
+                              </button>
+                            </div>
+                            <div className="text-sm text-nofx-text-muted mt-3">
+                              {hit.document.summary || 'No summary stored'}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
                   </div>
 
                   <div className="rounded-xl border border-white/10 bg-black/20 p-4 space-y-4">
@@ -6221,6 +6369,67 @@ export function DealReviewPage({
                       <div className="space-y-1 text-sm text-rose-300">
                         {selectedVersion.attribution.warnings.map((item) => (
                           <div key={item}>• {item}</div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="rounded-lg border border-white/10 bg-black/20 p-4 mt-4 space-y-4">
+                    <div>
+                      <div className="text-xs uppercase tracking-[0.2em] text-nofx-text-muted">
+                        Similar strategy versions
+                      </div>
+                      <div className="text-sm text-nofx-text-muted mt-2">
+                        Semantic matches from prior strategy patches for this trader.
+                      </div>
+                    </div>
+
+                    {similarVersionsLoading ? (
+                      <div className="text-sm text-nofx-text-muted">
+                        Loading similar strategy versions…
+                      </div>
+                    ) : similarVersionsError ? (
+                      <div className="text-sm text-amber-200">
+                        {similarVersionsError}
+                      </div>
+                    ) : similarVersions.length === 0 ? (
+                      <div className="text-sm text-nofx-text-muted">
+                        No similar strategy versions were found yet.
+                      </div>
+                    ) : (
+                      <div className="space-y-3">
+                        {similarVersions.map((hit) => (
+                          <div
+                            key={`${hit.document.id}-${hit.document.source_id}`}
+                            className="rounded-xl border border-white/10 bg-black/20 p-4"
+                          >
+                            <div className="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-3">
+                              <div>
+                                <div className="font-semibold">
+                                  {hit.document.title || hit.document.source_id}
+                                </div>
+                                <div className="text-xs text-nofx-text-muted mt-1">
+                                  {formatSemanticSimilarityScore(hit.similarity_score)} · updated{' '}
+                                  {hit.document.source_updated_at
+                                    ? new Date(
+                                        hit.document.source_updated_at
+                                      ).toLocaleString()
+                                    : '-'}
+                                </div>
+                              </div>
+                              <button
+                                onClick={() =>
+                                  setSelectedVersionId(hit.document.source_id)
+                                }
+                                className="h-9 px-3 rounded-lg border border-white/10 bg-black/20 text-sm"
+                              >
+                                Focus version
+                              </button>
+                            </div>
+                            <div className="text-sm text-nofx-text-muted mt-3">
+                              {hit.document.summary || 'No summary stored'}
+                            </div>
+                          </div>
                         ))}
                       </div>
                     )}

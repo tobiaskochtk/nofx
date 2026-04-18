@@ -19,6 +19,7 @@ type Page =
   | 'strategy-market'
   | 'deal-review'
   | 'optimizer'
+  | 'memory'
   | 'data'
   | 'faq'
   | 'login'
@@ -161,6 +162,17 @@ export default function HeaderBar({
                       : language === 'id'
                         ? 'Optimizer'
                         : 'Optimizer',
+                  requiresAuth: true,
+                },
+                {
+                  page: 'memory',
+                  path: '/memory',
+                  label:
+                    language === 'zh'
+                      ? '语义记忆'
+                      : language === 'id'
+                        ? 'Memory'
+                        : 'Memory',
                   requiresAuth: true,
                 },
                 {
@@ -504,6 +516,17 @@ export default function HeaderBar({
                           : language === 'id'
                             ? 'Optimizer'
                             : 'Optimizer',
+                      requiresAuth: true,
+                    },
+                    {
+                      page: 'memory',
+                      path: '/memory',
+                      label:
+                        language === 'zh'
+                          ? '语义记忆'
+                          : language === 'id'
+                            ? 'Memory'
+                            : 'Memory',
                       requiresAuth: true,
                     },
                     {

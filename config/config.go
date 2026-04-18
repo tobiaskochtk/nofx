@@ -19,8 +19,8 @@ type Config struct {
 	JWTSecret     string
 
 	// Database configuration
-	DBType     string // sqlite or postgres
-	DBPath     string // SQLite database file path
+	DBType     string // postgres or sqlite
+	DBPath     string // Legacy SQLite database file path
 	DBHost     string // PostgreSQL host
 	DBPort     int    // PostgreSQL port
 	DBUser     string // PostgreSQL user
@@ -51,7 +51,7 @@ func Init() {
 		APIServerPort:         8080,
 		ExperienceImprovement: true, // Default: enabled to help improve the product
 		// Database defaults
-		DBType:    "sqlite",
+		DBType:    "postgres",
 		DBPath:    "data/data.db",
 		DBHost:    "localhost",
 		DBPort:    5432,

@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 // TraderOrder order record
@@ -14,7 +15,7 @@ import (
 type TraderOrder struct {
 	ID                int64   `gorm:"primaryKey;autoIncrement" json:"id"`
 	TraderID          string  `gorm:"column:trader_id;not null;index:idx_orders_trader_id" json:"trader_id"`
-	ExchangeID        string  `gorm:"column:exchange_id;not null;default:''" json:"exchange_id"`
+	ExchangeID        string  `gorm:"column:exchange_id;not null;default:'';uniqueIndex:idx_orders_exchange_unique,priority:1" json:"exchange_id"`
 	ExchangeType      string  `gorm:"column:exchange_type;not null;default:''" json:"exchange_type"`
 	ExchangeOrderID   string  `gorm:"column:exchange_order_id;not null;uniqueIndex:idx_orders_exchange_unique,priority:2" json:"exchange_order_id"`
 	ClientOrderID     string  `gorm:"column:client_order_id;default:''" json:"client_order_id"`
@@ -56,7 +57,7 @@ func (TraderOrder) TableName() string {
 type TraderFill struct {
 	ID              int64   `gorm:"primaryKey;autoIncrement" json:"id"`
 	TraderID        string  `gorm:"column:trader_id;not null;index:idx_fills_trader_id" json:"trader_id"`
-	ExchangeID      string  `gorm:"column:exchange_id;not null;default:''" json:"exchange_id"`
+	ExchangeID      string  `gorm:"column:exchange_id;not null;default:'';uniqueIndex:idx_fills_exchange_unique,priority:1" json:"exchange_id"`
 	ExchangeType    string  `gorm:"column:exchange_type;not null;default:''" json:"exchange_type"`
 	OrderID         int64   `gorm:"column:order_id;not null;index:idx_fills_order_id" json:"order_id"`
 	ExchangeOrderID string  `gorm:"column:exchange_order_id;not null" json:"exchange_order_id"`
@@ -127,16 +128,6 @@ func (s *OrderStore) InitTables() error {
 					s.db.Exec(fmt.Sprintf(`ALTER TABLE %s ALTER COLUMN %s TYPE BIGINT USING EXTRACT(EPOCH FROM %s) * 1000`, c.table, c.col, c.col))
 				}
 			}
-
-			// Ensure indexes exist
-			s.db.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_orders_exchange_unique ON trader_orders(exchange_id, exchange_order_id)`)
-			s.db.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_fills_exchange_unique ON trader_fills(exchange_id, exchange_trade_id)`)
-			s.db.Exec(`CREATE INDEX IF NOT EXISTS idx_orders_trader_id ON trader_orders(trader_id)`)
-			s.db.Exec(`CREATE INDEX IF NOT EXISTS idx_orders_symbol ON trader_orders(symbol)`)
-			s.db.Exec(`CREATE INDEX IF NOT EXISTS idx_orders_status ON trader_orders(status)`)
-			s.db.Exec(`CREATE INDEX IF NOT EXISTS idx_fills_trader_id ON trader_fills(trader_id)`)
-			s.db.Exec(`CREATE INDEX IF NOT EXISTS idx_fills_order_id ON trader_fills(order_id)`)
-			return nil
 		}
 	}
 
@@ -144,43 +135,38 @@ func (s *OrderStore) InitTables() error {
 		return fmt.Errorf("failed to migrate order tables: %w", err)
 	}
 
-	// Create unique composite index for exchange_id + exchange_order_id
-	s.db.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_orders_exchange_unique ON trader_orders(exchange_id, exchange_order_id)`)
-	// Create unique composite index for exchange_id + exchange_trade_id
-	s.db.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_fills_exchange_unique ON trader_fills(exchange_id, exchange_trade_id)`)
-
-	return nil
+	return s.ensureIndexes()
 }
 
 // CreateOrder creates order record
 func (s *OrderStore) CreateOrder(order *TraderOrder) error {
-	// Check if order already exists
-	existing, err := s.GetOrderByExchangeID(order.ExchangeID, order.ExchangeOrderID)
-	if err != nil {
-		return fmt.Errorf("failed to check existing order: %w", err)
-	}
-	if existing != nil {
-		order.ID = existing.ID
-		order.CreatedAt = existing.CreatedAt
-		order.UpdatedAt = existing.UpdatedAt
+	if order == nil {
 		return nil
 	}
 
-	if err := s.db.Create(order).Error; err != nil {
-		if isUniqueConstraintError(err) {
-			existing, lookupErr := s.GetOrderByExchangeID(order.ExchangeID, order.ExchangeOrderID)
-			if lookupErr != nil {
-				return fmt.Errorf("failed to resolve existing order after unique conflict: %w", lookupErr)
-			}
-			if existing != nil {
-				order.ID = existing.ID
-				order.CreatedAt = existing.CreatedAt
-				order.UpdatedAt = existing.UpdatedAt
-				return nil
-			}
-		}
-		return err
+	result := s.db.Clauses(clause.OnConflict{
+		Columns:   []clause.Column{{Name: "exchange_id"}, {Name: "exchange_order_id"}},
+		DoNothing: true,
+	}).Create(order)
+	if result.Error != nil {
+		return result.Error
 	}
+	if result.RowsAffected > 0 {
+		return nil
+	}
+
+	existing, err := s.GetOrderByExchangeID(order.ExchangeID, order.ExchangeOrderID)
+	if err != nil {
+		return fmt.Errorf("failed to resolve existing order after conflict: %w", err)
+	}
+	if existing == nil {
+		return fmt.Errorf("order conflict detected but no existing row found for exchange_id=%s exchange_order_id=%s", order.ExchangeID, order.ExchangeOrderID)
+	}
+
+	order.ID = existing.ID
+	order.CreatedAt = existing.CreatedAt
+	order.UpdatedAt = existing.UpdatedAt
+	order.FilledAt = existing.FilledAt
 	return nil
 }
 
@@ -270,31 +256,31 @@ func (s *OrderStore) UpdateOrderStatus(id int64, status string, filledQty, avgPr
 
 // CreateFill creates fill record
 func (s *OrderStore) CreateFill(fill *TraderFill) error {
-	// Check if fill already exists
-	existing, err := s.GetFillByExchangeTradeID(fill.ExchangeID, fill.ExchangeTradeID)
-	if err != nil {
-		return fmt.Errorf("failed to check existing fill: %w", err)
-	}
-	if existing != nil {
-		fill.ID = existing.ID
-		fill.CreatedAt = existing.CreatedAt
+	if fill == nil {
 		return nil
 	}
 
-	if err := s.db.Create(fill).Error; err != nil {
-		if isUniqueConstraintError(err) {
-			existing, lookupErr := s.GetFillByExchangeTradeID(fill.ExchangeID, fill.ExchangeTradeID)
-			if lookupErr != nil {
-				return fmt.Errorf("failed to resolve existing fill after unique conflict: %w", lookupErr)
-			}
-			if existing != nil {
-				fill.ID = existing.ID
-				fill.CreatedAt = existing.CreatedAt
-				return nil
-			}
-		}
-		return err
+	result := s.db.Clauses(clause.OnConflict{
+		Columns:   []clause.Column{{Name: "exchange_id"}, {Name: "exchange_trade_id"}},
+		DoNothing: true,
+	}).Create(fill)
+	if result.Error != nil {
+		return result.Error
 	}
+	if result.RowsAffected > 0 {
+		return nil
+	}
+
+	existing, err := s.GetFillByExchangeTradeID(fill.ExchangeID, fill.ExchangeTradeID)
+	if err != nil {
+		return fmt.Errorf("failed to resolve existing fill after conflict: %w", err)
+	}
+	if existing == nil {
+		return fmt.Errorf("fill conflict detected but no existing row found for exchange_id=%s exchange_trade_id=%s", fill.ExchangeID, fill.ExchangeTradeID)
+	}
+
+	fill.ID = existing.ID
+	fill.CreatedAt = existing.CreatedAt
 	return nil
 }
 
@@ -305,6 +291,101 @@ func isUniqueConstraintError(err error) bool {
 	msg := strings.ToLower(err.Error())
 	return strings.Contains(msg, "unique constraint failed") ||
 		strings.Contains(msg, "duplicate key value violates unique constraint")
+}
+
+func (s *OrderStore) ensureIndexes() error {
+	if err := s.ensureCompositeUniqueIndex(
+		"trader_orders",
+		"idx_orders_exchange_unique",
+		[]string{"exchange_id", "exchange_order_id"},
+	); err != nil {
+		return err
+	}
+	if err := s.ensureCompositeUniqueIndex(
+		"trader_fills",
+		"idx_fills_exchange_unique",
+		[]string{"exchange_id", "exchange_trade_id"},
+	); err != nil {
+		return err
+	}
+
+	indexes := []string{
+		`CREATE INDEX IF NOT EXISTS idx_orders_trader_id ON trader_orders(trader_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_orders_symbol ON trader_orders(symbol)`,
+		`CREATE INDEX IF NOT EXISTS idx_orders_status ON trader_orders(status)`,
+		`CREATE INDEX IF NOT EXISTS idx_fills_trader_id ON trader_fills(trader_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_fills_order_id ON trader_fills(order_id)`,
+	}
+	for _, stmt := range indexes {
+		if err := s.db.Exec(stmt).Error; err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (s *OrderStore) ensureCompositeUniqueIndex(tableName, indexName string, expectedColumns []string) error {
+	matches, err := s.compositeIndexMatches(tableName, indexName, expectedColumns)
+	if err != nil {
+		return err
+	}
+	if matches {
+		return nil
+	}
+
+	if err := s.db.Exec(fmt.Sprintf(`DROP INDEX IF EXISTS %s`, indexName)).Error; err != nil {
+		return fmt.Errorf("failed to drop stale index %s: %w", indexName, err)
+	}
+
+	createSQL := fmt.Sprintf(
+		`CREATE UNIQUE INDEX IF NOT EXISTS %s ON %s(%s)`,
+		indexName,
+		tableName,
+		strings.Join(expectedColumns, ", "),
+	)
+	if err := s.db.Exec(createSQL).Error; err != nil {
+		return fmt.Errorf("failed to create composite index %s: %w", indexName, err)
+	}
+	return nil
+}
+
+func (s *OrderStore) compositeIndexMatches(tableName, indexName string, expectedColumns []string) (bool, error) {
+	switch s.db.Dialector.Name() {
+	case "postgres":
+		var indexDef string
+		if err := s.db.Raw(
+			`SELECT indexdef FROM pg_indexes WHERE schemaname = current_schema() AND tablename = ? AND indexname = ?`,
+			tableName,
+			indexName,
+		).Scan(&indexDef).Error; err != nil {
+			return false, err
+		}
+		if strings.TrimSpace(indexDef) == "" {
+			return false, nil
+		}
+		expected := fmt.Sprintf("(%s)", strings.Join(expectedColumns, ", "))
+		return strings.Contains(strings.ToLower(indexDef), strings.ToLower(expected)), nil
+	case "sqlite":
+		type sqliteIndexInfoRow struct {
+			SeqNo int    `gorm:"column:seqno"`
+			Name  string `gorm:"column:name"`
+		}
+		var rows []sqliteIndexInfoRow
+		if err := s.db.Raw(fmt.Sprintf(`PRAGMA index_info('%s')`, indexName)).Scan(&rows).Error; err != nil {
+			return false, err
+		}
+		if len(rows) != len(expectedColumns) {
+			return false, nil
+		}
+		for i, row := range rows {
+			if row.Name != expectedColumns[i] {
+				return false, nil
+			}
+		}
+		return true, nil
+	default:
+		return false, nil
+	}
 }
 
 // GetFillByExchangeTradeID gets fill by exchange trade ID

@@ -131,6 +131,7 @@ func TestDecisionStoreGetBucketReview(t *testing.T) {
 		t.Fatalf("RejectReasons = %#v, want at least two entries", review.RejectReasons)
 	}
 	if review.RejectReasons[0].Reason != "low_confidence" &&
+		review.RejectReasons[0].Reason != "missing_confirmation" &&
 		review.RejectReasons[0].Reason != "spread_slippage_concerns" &&
 		review.RejectReasons[0].Reason != "unspecified" {
 		t.Fatalf("RejectReasons[0] = %#v, want normalized reject reason", review.RejectReasons[0])
@@ -278,6 +279,80 @@ func TestDecisionStoreGetBucketReviewRecordsExplicitRejectReasons(t *testing.T) 
 	}
 	if reasons["unspecified"] != 0 {
 		t.Fatalf("RejectReasons = %#v, want explicit reasons instead of unspecified", review.RejectReasons)
+	}
+}
+
+func TestDecisionStoreGetBucketReviewRefinesStoredUnspecifiedRejectReasons(t *testing.T) {
+	sqlDB, err := sql.Open("sqlite", filepath.Join(t.TempDir(), "decision-review-refine-unspecified.db"))
+	if err != nil {
+		t.Fatalf("sql.Open() error = %v", err)
+	}
+	t.Cleanup(func() { _ = sqlDB.Close() })
+
+	gdb, err := gorm.Open(gormsqlite.Dialector{Conn: sqlDB}, &gorm.Config{
+		Logger: gormlogger.Default.LogMode(gormlogger.Silent),
+		NowFunc: func() time.Time {
+			return time.Now().UTC()
+		},
+	})
+	if err != nil {
+		t.Fatalf("gorm.Open() error = %v", err)
+	}
+
+	store := NewDecisionStore(gdb)
+	if err := store.initTables(); err != nil {
+		t.Fatalf("initTables() error = %v", err)
+	}
+
+	record := &DecisionRecord{
+		TraderID:         "trader-refine-unspecified",
+		CycleNumber:      12,
+		Timestamp:        time.Now().UTC().Add(-10 * time.Minute),
+		CandidateMetaVer: DecisionCandidateMetadataVersion,
+		CandidateDetails: []CandidateDetail{
+			{
+				Symbol:        "REEFUSDT",
+				Sources:       []string{"oi_low"},
+				RejectReasons: []string{"unspecified"},
+			},
+			{
+				Symbol:          "DOGEUSDT",
+				SelectionBucket: "primary",
+				Sources:         []string{"ai500"},
+				RejectReasons:   []string{"unspecified"},
+			},
+			{
+				Symbol:          "XRPUSDT",
+				SelectionBucket: "exploration",
+				RejectReasons:   []string{"unspecified"},
+			},
+		},
+		Success: true,
+	}
+	if err := store.LogDecision(record); err != nil {
+		t.Fatalf("LogDecision() error = %v", err)
+	}
+
+	review, err := store.GetBucketReview("trader-refine-unspecified", 24*time.Hour, 10)
+	if err != nil {
+		t.Fatalf("GetBucketReview() error = %v", err)
+	}
+
+	reasons := map[string]int{}
+	for _, item := range review.RejectReasons {
+		reasons[item.Reason] = item.Count
+	}
+	if reasons["liquidity_concerns"] == 0 {
+		t.Fatalf("RejectReasons = %#v, want liquidity_concerns from oi_low source fallback", review.RejectReasons)
+	}
+	if reasons["missing_confirmation"] == 0 {
+		t.Fatalf("RejectReasons = %#v, want missing_confirmation for primary shortlist candidate", review.RejectReasons)
+	}
+	if reasons["low_confidence"] == 0 {
+		t.Fatalf("RejectReasons = %#v, want low_confidence for exploration bucket", review.RejectReasons)
+	}
+	if reasons["unspecified"] != 0 {
+		t.Fatalf("RejectReasons = %#v, want stored unspecified reasons to be refined away", review.RejectReasons)
 	}
 }
 

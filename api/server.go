@@ -217,6 +217,26 @@ Body: {"id":"<optional preset id for update>","name":"Loss review queue","filter
 				`:id = trader_id from GET /api/my-traders.
 :caseId = id from GET /api/traders/:id/deal-review/cases.`,
 				s.handleTraderDealReviewCaseDetail)
+			s.routeWithSchema(protected, "GET", "/traders/:id/deal-review/cases/:caseId/similar", "Get semantically similar historical deal-review cases",
+				`:id = trader_id from GET /api/my-traders.
+:caseId = id from GET /api/traders/:id/deal-review/cases.
+Query params:
+  limit=<int, default 8, max 50>
+  symbol=<string>
+  side=LONG|SHORT
+  outcome=profit|loss|flat|open
+  close_reason=<string>
+  exit_origin=<string>
+  exit_reason_quality=<explicit|high_confidence|inferred|low_confidence>
+  open_trend_regime=<string>
+  open_volatility_regime=<string>
+  open_oi_regime=<string>
+  close_trend_regime=<string>
+  close_volatility_regime=<string>
+  close_oi_regime=<string>
+  from_time=<unix ms>
+  to_time=<unix ms>`,
+				s.handleTraderDealReviewSimilarCases)
 			s.routeWithSchema(protected, "PUT", "/traders/:id/deal-review/cases/:caseId/review", "Save analyst labels and note for a deal-review case",
 				`:id = trader_id from GET /api/my-traders.
 :caseId = id from GET /api/traders/:id/deal-review/cases.
@@ -272,6 +292,12 @@ Body: {"mode":"paper|isolated_live|shared_live","exchange_id":"<wallet from GET 
 Query params:
   limit=<int, default 10, max 50>`,
 				s.handleTraderDealReviewStrategyVersions)
+			s.routeWithSchema(protected, "GET", "/traders/:id/deal-review/strategy-versions/:versionId/similar", "Get semantically similar strategy versions for a trader",
+				`:id = trader_id from GET /api/my-traders.
+:versionId = id from GET /api/traders/:id/deal-review/strategy-versions.
+Query params:
+  limit=<int, default 6, max 25>`,
+				s.handleTraderDealReviewSimilarStrategyVersions)
 			s.routeWithSchema(protected, "GET", "/traders/:id/deal-review/challenger-compares", "List challenger compares for the current trader review module",
 				`:id = trader_id from GET /api/my-traders.
 Query params:
@@ -324,6 +350,16 @@ Aggregates recent optimizer runs and backlog adoption into per-model metrics suc
 				`:id = trader_id from GET /api/my-traders.
 :runId = run id from GET /api/traders/:id/autonomous-optimizer/runs.`,
 				s.handleTraderAutonomousOptimizerRunDetail)
+			s.routeWithSchema(protected, "GET", "/traders/:id/autonomous-optimizer/runs/:runId/similar", "Get semantically similar prior autonomous optimizer runs",
+				`:id = trader_id from GET /api/my-traders.
+:runId = run id from GET /api/traders/:id/autonomous-optimizer/runs.
+Query params:
+  limit=<int, default 6, max 25>
+  status=<string>
+  trigger=<string>
+  from_time=<unix ms>
+  to_time=<unix ms>`,
+				s.handleTraderAutonomousOptimizerSimilarRuns)
 			s.routeWithSchema(protected, "GET", "/traders/:id/autonomous-optimizer/backlog", "List scored autonomous optimizer backlog items for a trader",
 				`:id = trader_id from GET /api/my-traders.
 Query params:
@@ -333,6 +369,32 @@ Query params:
 				`:id = trader_id from GET /api/my-traders.
 Body: {"id":"<optional>","title":"Need better OI delta signal","category":"missing_indicator","description":"...","confidence":78,"implementation_cost":25,"urgency":80}`,
 				s.handleTraderAutonomousOptimizerSaveBacklog)
+			s.routeWithSchema(protected, "GET", "/traders/:id/semantic-memory/status", "Get semantic-memory corpus status for a trader",
+				`:id = trader_id from GET /api/my-traders.
+Returns corpus counts, embedding status, doc-type coverage, and recent sync runs for the internal semantic-memory layer.`,
+				s.handleTraderSemanticMemoryStatus)
+			s.routeWithSchema(protected, "GET", "/traders/:id/semantic-memory/benchmarks", "List recent semantic-memory benchmark runs for a trader",
+				`:id = trader_id from GET /api/my-traders.`,
+				s.handleTraderSemanticMemoryBenchmarks)
+			s.routeWithSchema(protected, "POST", "/traders/:id/semantic-memory/benchmarks/run", "Run a semantic-memory similarity benchmark for a trader",
+				`:id = trader_id from GET /api/my-traders.
+Body: {"doc_types":["deal_review_case","autonomous_optimizer_run"],"sample_per_doc_type":12,"top_k":5}`,
+				s.handleTraderSemanticMemoryRunBenchmark)
+			s.routeWithSchema(protected, "POST", "/traders/:id/semantic-memory/search", "Run free-text semantic search over a trader's semantic-memory corpus",
+				`:id = trader_id from GET /api/my-traders.
+Body: {"query":"same-symbol re-entry losses after failed breakout","doc_types":["deal_review_case","autonomous_optimizer_run"],"limit":12,"model_id":"<optional OpenAI account id>","embedding_model":"text-embedding-3-small","outcome":"loss","close_reason":"stop_loss","status":"blocked_by_gate","from_time":<unix ms>,"to_time":<unix ms>}`,
+				s.handleTraderSemanticMemorySearch)
+			s.routeWithSchema(protected, "GET", "/traders/:id/semantic-memory/presets", "List saved semantic-memory search presets for a trader",
+				`:id = trader_id from GET /api/my-traders.`,
+				s.handleTraderSemanticMemoryPresets)
+			s.routeWithSchema(protected, "POST", "/traders/:id/semantic-memory/presets", "Create or update a semantic-memory search preset",
+				`:id = trader_id from GET /api/my-traders.
+Body: {"id":"<optional>","name":"Re-entry losses","config":{"query":"same-symbol re-entry losses","doc_types":["deal_review_case"],"outcome":"loss","limit":12}}`,
+				s.handleTraderSemanticMemorySavePreset)
+			s.routeWithSchema(protected, "DELETE", "/traders/:id/semantic-memory/presets/:presetId", "Delete a semantic-memory search preset",
+				`:id = trader_id from GET /api/my-traders.
+:presetId = id from GET /api/traders/:id/semantic-memory/presets.`,
+				s.handleTraderSemanticMemoryDeletePreset)
 
 			// AI cost tracking
 			s.route(protected, "GET", "/ai-costs", "Get AI call costs for a trader (?trader_id=xxx&period=today)", s.handleGetAICosts)

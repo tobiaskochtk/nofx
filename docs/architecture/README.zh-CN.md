@@ -10,7 +10,7 @@
 
 NOFX 是一个支持加密货币和美股市场的全栈 AI 交易平台：
 
-- **后端:** Go (Gin 框架, SQLite)
+- **后端:** Go (Gin 框架, PostgreSQL)
 - **前端:** React/TypeScript (Vite, TailwindCSS)
 - **AI 模型:** DeepSeek, Qwen, OpenAI (GPT-5.2), Claude, Gemini, Grok, Kimi
 - **交易所:** Binance, Bybit, OKX, Hyperliquid, Aster, Lighter
@@ -42,7 +42,7 @@ NOFX 是一个支持加密货币和美股市场的全栈 AI 交易平台：
 │         │                          │                          │            │
 │  ┌──────▼──────┐         ┌─────────▼─────────┐      ┌────────▼────────┐   │
 │  │   交易所    │         │      数据库       │      │    前端 UI      │   │
-│  │  (CEX/DEX)  │         │    (SQLite)       │      │   (React SPA)   │   │
+│  │  (CEX/DEX)  │         │  (PostgreSQL)     │      │   (React SPA)   │   │
 │  └─────────────┘         └───────────────────┘      └─────────────────┘   │
 │                                                                             │
 └─────────────────────────────────────────────────────────────────────────────┘

@@ -13,7 +13,7 @@ import (
 func main() {
 	cfg := selfhostedai500.LoadConfig()
 
-	store, err := selfhostedai500.OpenStore(cfg.DBPath)
+	store, err := selfhostedai500.OpenStoreWithConfig(cfg.StoreConfig())
 	if err != nil {
 		log.Fatalf("open store: %v", err)
 	}

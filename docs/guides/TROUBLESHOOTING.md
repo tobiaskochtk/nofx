@@ -383,20 +383,17 @@ Binance has strict API rate limits:
 
 #### ❌ `database is locked` Error
 
-**Cause:** SQLite database being accessed by multiple processes.
+**Cause:** This usually indicates a legacy SQLite deployment. Current Docker deployments should use PostgreSQL and do not rely on `data.db` lock files.
 
 **Solution:**
 ```bash
-# Stop all NOFX processes
-docker compose down
-# OR
-pkill nofx
-
-# Restart
-docker compose up -d
-# OR
-./nofx
+# Verify the runtime is on PostgreSQL
+docker compose exec nofx-trading printenv DB_TYPE
+docker compose ps postgres
+docker compose exec postgres pg_isready -U nofx -d nofx
 ```
+
+If this is an older SQLite installation, stop extra NOFX processes so only one instance writes to the database, then migrate that installation to PostgreSQL.
 
 ---
 

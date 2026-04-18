@@ -284,7 +284,7 @@ func (s *Server) handleTraderAutonomousOptimizerRunNow(c *gin.Context) {
 		SafeInternalError(c, "Failed to schedule immediate autonomous optimizer run", err)
 		return
 	}
-	if err := s.processAutonomousOptimizerConfig(cfg, now); err != nil {
+	if err := s.processAutonomousOptimizerConfig(cfg, now, store.AutonomousOptimizerRunTriggerManual); err != nil {
 		SafeInternalError(c, "Failed to execute autonomous optimizer run", err)
 		return
 	}

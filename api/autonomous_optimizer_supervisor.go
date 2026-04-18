@@ -110,31 +110,47 @@ type autonomousOptimizerAdaptiveCooldownConfigSnapshot struct {
 	PairLossLookbackHours         int  `json:"pair_loss_lookback_hours"`
 }
 
+type autonomousOptimizerCooldownOutcomeSummary struct {
+	TradeCount int     `json:"trade_count"`
+	WinCount   int     `json:"win_count"`
+	LossCount  int     `json:"loss_count"`
+	NetPnLPct  float64 `json:"net_pnl_pct"`
+	AvgPnLPct  float64 `json:"avg_pnl_pct"`
+}
+
 type autonomousOptimizerAdaptiveCooldownSymbol struct {
-	Symbol               string  `json:"symbol"`
-	ReentryCount         int     `json:"reentry_count"`
-	RepeatAfterLossCount int     `json:"repeat_after_loss_count"`
-	AvgPnLPct            float64 `json:"avg_pnl_pct"`
-	LastGapMinutes       float64 `json:"last_gap_minutes,omitempty"`
+	Symbol               string                                    `json:"symbol"`
+	ReentryCount         int                                       `json:"reentry_count"`
+	RepeatAfterLossCount int                                       `json:"repeat_after_loss_count"`
+	AvgPnLPct            float64                                   `json:"avg_pnl_pct"`
+	LastGapMinutes       float64                                   `json:"last_gap_minutes,omitempty"`
+	BlockedOutcomes      autonomousOptimizerCooldownOutcomeSummary `json:"blocked_outcomes"`
+	PostCooldownOutcomes autonomousOptimizerCooldownOutcomeSummary `json:"post_cooldown_outcomes"`
 }
 
 type autonomousOptimizerAdaptiveCooldownRegime struct {
-	TrendRegime          string  `json:"trend_regime,omitempty"`
-	VolatilityRegime     string  `json:"volatility_regime,omitempty"`
-	OIRegime             string  `json:"oi_regime,omitempty"`
-	ReentryCount         int     `json:"reentry_count"`
-	RepeatAfterLossCount int     `json:"repeat_after_loss_count"`
-	AvgPnLPct            float64 `json:"avg_pnl_pct"`
+	TrendRegime          string                                    `json:"trend_regime,omitempty"`
+	VolatilityRegime     string                                    `json:"volatility_regime,omitempty"`
+	OIRegime             string                                    `json:"oi_regime,omitempty"`
+	ReentryCount         int                                       `json:"reentry_count"`
+	RepeatAfterLossCount int                                       `json:"repeat_after_loss_count"`
+	AvgPnLPct            float64                                   `json:"avg_pnl_pct"`
+	BlockedOutcomes      autonomousOptimizerCooldownOutcomeSummary `json:"blocked_outcomes"`
+	PostCooldownOutcomes autonomousOptimizerCooldownOutcomeSummary `json:"post_cooldown_outcomes"`
 }
 
 type autonomousOptimizerAdaptiveCooldownTelemetry struct {
-	Config                  autonomousOptimizerAdaptiveCooldownConfigSnapshot `json:"config"`
-	CooldownCandidateCount  int                                               `json:"cooldown_candidate_count"`
-	SameSessionReentryCount int                                               `json:"same_session_reentry_count"`
-	RepeatAfterLossCount    int                                               `json:"repeat_after_loss_count"`
-	RegimeRepeatLossCount   int                                               `json:"regime_repeat_loss_count"`
-	TopSymbols              []autonomousOptimizerAdaptiveCooldownSymbol       `json:"top_symbols,omitempty"`
-	TopRegimes              []autonomousOptimizerAdaptiveCooldownRegime       `json:"top_regimes,omitempty"`
+	Config                       autonomousOptimizerAdaptiveCooldownConfigSnapshot `json:"config"`
+	CooldownCandidateCount       int                                               `json:"cooldown_candidate_count"`
+	SameSessionReentryCount      int                                               `json:"same_session_reentry_count"`
+	RepeatAfterLossCount         int                                               `json:"repeat_after_loss_count"`
+	RegimeRepeatLossCount        int                                               `json:"regime_repeat_loss_count"`
+	BlockedSymbolReentryOutcomes autonomousOptimizerCooldownOutcomeSummary         `json:"blocked_symbol_reentry_outcomes"`
+	PostSymbolCooldownOutcomes   autonomousOptimizerCooldownOutcomeSummary         `json:"post_symbol_cooldown_outcomes"`
+	BlockedRegimeReentryOutcomes autonomousOptimizerCooldownOutcomeSummary         `json:"blocked_regime_reentry_outcomes"`
+	PostRegimeCooldownOutcomes   autonomousOptimizerCooldownOutcomeSummary         `json:"post_regime_cooldown_outcomes"`
+	TopSymbols                   []autonomousOptimizerAdaptiveCooldownSymbol       `json:"top_symbols,omitempty"`
+	TopRegimes                   []autonomousOptimizerAdaptiveCooldownRegime       `json:"top_regimes,omitempty"`
 }
 
 type autonomousOptimizerMonitoringSnapshot struct {
@@ -210,23 +226,27 @@ func (s *Server) ProcessPendingAutonomousOptimizerRuns() error {
 	}
 	for i := range configs {
 		cfg := configs[i]
-		if err := s.processAutonomousOptimizerConfig(&cfg, now); err != nil {
+		if err := s.processAutonomousOptimizerConfig(&cfg, now, store.AutonomousOptimizerRunTriggerSchedule); err != nil {
 			logger.Warnf("⚠️ Failed to process autonomous optimizer config %s for trader %s: %v", cfg.ID, cfg.TraderID, err)
 		}
 	}
 	return nil
 }
 
-func (s *Server) processAutonomousOptimizerConfig(cfg *store.AutonomousOptimizerConfig, now time.Time) error {
+func (s *Server) beginAutonomousOptimizerRun(cfg *store.AutonomousOptimizerConfig, now time.Time, trigger string) (*store.AutonomousOptimizerRun, error) {
 	if cfg == nil || !cfg.Enabled {
-		return nil
+		return nil, nil
+	}
+	trigger = strings.TrimSpace(trigger)
+	if trigger == "" {
+		trigger = store.AutonomousOptimizerRunTriggerSchedule
 	}
 	runID := uuid.NewString()
 	cfg.Status = store.AutonomousOptimizerStatusRunning
 	cfg.LastRunID = runID
 	cfg.NextRunAt = now.Add(time.Duration(cfg.ReviewIntervalHours) * time.Hour)
 	if err := s.store.AutonomousOptimizer().SaveConfig(cfg); err != nil {
-		return err
+		return nil, err
 	}
 
 	run := &store.AutonomousOptimizerRun{
@@ -234,7 +254,7 @@ func (s *Server) processAutonomousOptimizerConfig(cfg *store.AutonomousOptimizer
 		UserID:               cfg.UserID,
 		TraderID:             cfg.TraderID,
 		ConfigID:             cfg.ID,
-		Trigger:              store.AutonomousOptimizerRunTriggerSchedule,
+		Trigger:              trigger,
 		Status:               store.AutonomousOptimizerStatusRunning,
 		PrimaryModelConfigID: cfg.PrimaryModelConfigID,
 		PrimaryModelName:     cfg.PrimaryModelName,
@@ -245,7 +265,18 @@ func (s *Server) processAutonomousOptimizerConfig(cfg *store.AutonomousOptimizer
 		StartedAt:            now,
 	}
 	if err := s.store.AutonomousOptimizer().SaveRun(run); err != nil {
+		return nil, err
+	}
+	return run, nil
+}
+
+func (s *Server) processAutonomousOptimizerConfig(cfg *store.AutonomousOptimizerConfig, now time.Time, trigger string) error {
+	run, err := s.beginAutonomousOptimizerRun(cfg, now, trigger)
+	if err != nil {
 		return err
+	}
+	if run == nil {
+		return nil
 	}
 
 	result, err := s.runAutonomousOptimizerCycle(cfg, run, now)
@@ -512,7 +543,33 @@ func (s *Server) runAutonomousOptimizerCycle(cfg *store.AutonomousOptimizerConfi
 		return nil, err
 	}
 	proposerClient := newClientFromModelConfig(proposerCfg, proposerModelName)
-	proposalResponse, err := proposerClient.CallWithMessages(proposalSystemPrompt, proposalUserPrompt)
+	proposalConversation, err := s.store.AutonomousOptimizer().GetOrCreateConversation(
+		cfg.UserID,
+		cfg.TraderID,
+		store.AutonomousOptimizerConversationPurposeProposal,
+		cfg.PrimaryModelConfigID,
+		proposerModelName,
+	)
+	if err != nil {
+		return nil, err
+	}
+	proposalHistory, err := s.store.AutonomousOptimizer().ListConversationMessages(
+		proposalConversation.ID,
+		proposalConversation.ReplayMessageLimit*3,
+	)
+	if err != nil {
+		return nil, err
+	}
+	proposalRequest, proposalReplayCount, err := buildAutonomousOptimizerConversationRequest(
+		proposalHistory,
+		proposalConversation.ReplayMessageLimit,
+		proposalSystemPrompt,
+		proposalUserPrompt,
+	)
+	if err != nil {
+		return nil, err
+	}
+	proposalResponse, err := proposerClient.CallWithRequest(proposalRequest)
 	if err != nil {
 		return nil, err
 	}
@@ -521,6 +578,27 @@ func (s *Server) runAutonomousOptimizerCycle(cfg *store.AutonomousOptimizerConfi
 		return nil, err
 	}
 	metadata["proposal"] = parseAutonomousOptimizerJSONObject(proposalRaw)
+	proposalUserReplay := buildAutonomousOptimizerProposalConversationUserReplay(payload)
+	proposalAssistantReplay := buildAutonomousOptimizerProposalConversationAssistantReplay(proposal)
+	if err := persistAutonomousOptimizerConversationTurn(
+		s,
+		proposalConversation,
+		run.ID,
+		proposalSystemPrompt,
+		proposalUserPrompt,
+		proposalResponse,
+		proposalUserReplay,
+		proposalAssistantReplay,
+	); err != nil {
+		return nil, err
+	}
+	metadata["proposal_conversation"] = map[string]any{
+		"conversation_id":           proposalConversation.ID,
+		"purpose":                   proposalConversation.Purpose,
+		"mode":                      "persistent_replay_history",
+		"history_messages_replayed": proposalReplayCount,
+		"replay_message_limit":      proposalConversation.ReplayMessageLimit,
+	}
 
 	createdBacklogCount, backlogErr := s.saveAutonomousOptimizerBacklogFindings(cfg, run.ID, proposal.BacklogItems, proposal.ExecutiveSummary)
 	if backlogErr != nil {
@@ -533,13 +611,60 @@ func (s *Server) runAutonomousOptimizerCycle(cfg *store.AutonomousOptimizerConfi
 		return nil, err
 	}
 	criticClient := newClientFromModelConfig(criticCfg, criticModelName)
-	criticResponse, err := criticClient.CallWithMessages(criticSystemPrompt, criticUserPrompt)
+	criticConversation, err := s.store.AutonomousOptimizer().GetOrCreateConversation(
+		cfg.UserID,
+		cfg.TraderID,
+		store.AutonomousOptimizerConversationPurposeCritic,
+		cfg.CriticModelConfigID,
+		criticModelName,
+	)
+	if err != nil {
+		return nil, err
+	}
+	criticHistory, err := s.store.AutonomousOptimizer().ListConversationMessages(
+		criticConversation.ID,
+		criticConversation.ReplayMessageLimit*3,
+	)
+	if err != nil {
+		return nil, err
+	}
+	criticRequest, criticReplayCount, err := buildAutonomousOptimizerConversationRequest(
+		criticHistory,
+		criticConversation.ReplayMessageLimit,
+		criticSystemPrompt,
+		criticUserPrompt,
+	)
+	if err != nil {
+		return nil, err
+	}
+	criticResponse, err := criticClient.CallWithRequest(criticRequest)
 	if err != nil {
 		return nil, err
 	}
 	critic, criticRaw, err := parseAutonomousOptimizerCriticResponse(criticResponse)
 	if err != nil {
 		return nil, err
+	}
+	criticUserReplay := buildAutonomousOptimizerCriticConversationUserReplay(payload, proposal)
+	criticAssistantReplay := buildAutonomousOptimizerCriticConversationAssistantReplay(critic)
+	if err := persistAutonomousOptimizerConversationTurn(
+		s,
+		criticConversation,
+		run.ID,
+		criticSystemPrompt,
+		criticUserPrompt,
+		criticResponse,
+		criticUserReplay,
+		criticAssistantReplay,
+	); err != nil {
+		return nil, err
+	}
+	metadata["critic_conversation"] = map[string]any{
+		"conversation_id":           criticConversation.ID,
+		"purpose":                   criticConversation.Purpose,
+		"mode":                      "persistent_replay_history",
+		"history_messages_replayed": criticReplayCount,
+		"replay_message_limit":      criticConversation.ReplayMessageLimit,
 	}
 
 	return s.evaluateAutonomousOptimizerProposal(cfg, run, traderCfg, strategyRecord, strategyCfg, bundle, recentRuns, metadata, proposal, critic, criticRaw)

@@ -30,6 +30,7 @@ type Store struct {
 	grid                *GridStore
 	dealReview          *DealReviewStore
 	autonomousOptimizer *AutonomousOptimizerStore
+	semanticMemory      *SemanticMemoryStore
 	aiCharge            *AIChargeStore
 	telegramConfig      TelegramConfigStore
 
@@ -165,6 +166,9 @@ func (s *Store) initTables() error {
 	}
 	if err := s.AutonomousOptimizer().initTables(); err != nil {
 		return fmt.Errorf("failed to initialize autonomous optimizer tables: %w", err)
+	}
+	if err := s.SemanticMemory().initTables(); err != nil {
+		return fmt.Errorf("failed to initialize semantic memory tables: %w", err)
 	}
 	if err := s.TelegramConfig().(*telegramConfigStore).initTables(); err != nil {
 		return fmt.Errorf("failed to initialize telegram config tables: %w", err)
@@ -315,6 +319,16 @@ func (s *Store) AutonomousOptimizer() *AutonomousOptimizerStore {
 	return s.autonomousOptimizer
 }
 
+// SemanticMemory gets semantic memory storage.
+func (s *Store) SemanticMemory() *SemanticMemoryStore {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.semanticMemory == nil {
+		s.semanticMemory = NewSemanticMemoryStore(s.gdb)
+	}
+	return s.semanticMemory
+}
+
 // AICharge gets AI charge storage
 func (s *Store) AICharge() *AIChargeStore {
 	s.mu.Lock()
@@ -370,7 +384,7 @@ func (s *Store) DBType() DBType {
 			return DBTypeSQLite
 		}
 	}
-	return DBTypeSQLite
+	return DBTypePostgres
 }
 
 // q converts query placeholders for current database type (legacy helper)

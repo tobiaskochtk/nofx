@@ -51,35 +51,39 @@ docker compose --version  # Docker 24+ 自带，无需单独安装
 
 ## 🚀 快速开始（3步完成部署）
 
-### 第 1 步：准备配置文件
+### 第 1 步：准备 `.env`
 
 ```bash
-# 复制配置文件模板
-cp config.json.example config.json
+# 复制环境变量模板
+cp .env.example .env
 
-# 编辑配置文件，填入你的 API 密钥
-nano config.json  # 或使用其他编辑器
+# 编辑环境变量
+nano .env  # 或使用其他编辑器
 ```
 
-**必须配置的字段：**
-```json
-{
-  "use_default_coins": true,
-  "api_server_port": 8081,
-  "jwt_secret": "YOUR_JWT_SECRET_CHANGE_IN_PRODUCTION"  // ← 填入一个长随机字符串作为JWT密钥
-}
+**最低必填项：**
+```dotenv
+JWT_SECRET=your-long-random-jwt-secret
+DATA_ENCRYPTION_KEY=your-base64-encoded-32-byte-key
+DB_TYPE=postgres
+DB_HOST=postgres
+DB_PORT=5432
+DB_USER=nofx
+DB_PASSWORD=change-this-in-production
+DB_NAME=nofx
+DB_SSLMODE=disable
 ```
 
 > **⚠️ 重要安全提醒**：
-> - `jwt_secret` 字段是用户认证系统的关键安全配置
-> - **必须设置一个长度至少32位的随机字符串**
-> - 在生产环境中，建议使用64位以上的随机字符串
-> - 可以使用命令生成：`openssl rand -base64 64`
+> - `JWT_SECRET` 是用户认证系统的关键安全配置
+> - `DATA_ENCRYPTION_KEY` 用于加密数据库中的 API 密钥等敏感信息
+> - Docker 部署请保持 `DB_TYPE=postgres`
+> - 对外暴露服务前请修改数据库密码和所有密钥
 
 **配置说明：**
-- 🔐 **用户认证**：系统现在支持用户注册登录，每个用户都有独立的AI模型和交易所配置
-- 🚫 **移除traders配置**：不再需要在config.json中预配置交易员，用户可以通过Web界面创建
-- 🔑 **JWT密钥**：用于保护用户会话安全，强烈建议在生产环境中设置复杂密钥
+- 🔐 **用户认证**：系统支持用户注册登录，每个用户都有独立的 AI 模型和交易所配置
+- 🗄️ **运行时数据库**：主服务使用 PostgreSQL 存储配置和交易数据
+- 🔑 **密钥管理**：JWT 与数据加密密钥都应使用高强度随机值
 
 ### 第 2 步：一键启动
 
@@ -217,11 +221,11 @@ services:
 
 ## 📁 数据持久化
 
-系统会自动持久化以下数据到本地目录：
+系统会自动持久化以下数据到本地目录和 Docker 数据卷：
 
 - `./decision_logs/`: AI 决策日志
 - `./coin_pool_cache/`: 币种池缓存
-- `./config.json`: 配置文件（挂载）
+- `postgres-data`: PostgreSQL 服务使用的 Docker 数据卷
 
 **数据位置：**
 ```bash
@@ -229,11 +233,18 @@ services:
 ls -la decision_logs/
 ls -la coin_pool_cache/
 
-# 备份数据
-tar -czf backup_$(date +%Y%m%d).tar.gz decision_logs/ coin_pool_cache/ config.json
+# 备份文件和环境配置
+tar -czf backup_$(date +%Y%m%d)_files.tar.gz decision_logs/ coin_pool_cache/ .env
+
+# 备份 PostgreSQL
+docker compose exec -T postgres \
+  pg_dump -U "${DB_USER:-nofx}" -d "${DB_NAME:-nofx}" \
+  > backup_$(date +%Y%m%d)_postgres.sql
 
 # 恢复数据
-tar -xzf backup_20241029.tar.gz
+tar -xzf backup_20241029_files.tar.gz
+cat backup_20241029_postgres.sql | docker compose exec -T postgres \
+  psql -U "${DB_USER:-nofx}" -d "${DB_NAME:-nofx}"
 ```
 
 ## 🐛 故障排查
@@ -263,14 +274,26 @@ lsof -i :3000  # 前端端口
 kill -9 <PID>
 ```
 
-### 配置文件未找到
+### `.env` 文件缺失或配置不完整
 
 ```bash
-# 确保 config.json 存在
-ls -la config.json
+# 确保 .env 存在
+ls -la .env
 
 # 如果不存在，复制模板
-cp config.json.example config.json
+cp .env.example .env
+```
+
+Docker 部署所需的数据库配置：
+
+```dotenv
+DB_TYPE=postgres
+DB_HOST=postgres
+DB_PORT=5432
+DB_USER=nofx
+DB_PASSWORD=change-this-in-production
+DB_NAME=nofx
+DB_SSLMODE=disable
 ```
 
 ### 健康检查失败
@@ -325,13 +348,14 @@ docker system prune -a --volumes
    - 在生产环境中绝不使用默认值
    - 定期更换（会使现有用户需要重新登录）
 
-2. ~~**不要将 config.json 提交到 Git**~~
+2. **不要将 `.env` 或 PostgreSQL 备份提交到 Git**
    ```bash
-   # ~~确保 config.json 在 .gitignore 中~~
-   # ~~echo "config.json" >> .gitignore~~
+   # 常见敏感文件加入 .gitignore
+   echo ".env" >> .gitignore
+   echo "backup_*.sql" >> .gitignore
    ```
-   
-   *注意：现在使用trading.db数据库，请确保不提交敏感数据*
+
+   PostgreSQL 导出文件和 `.env` 都包含敏感信息，应按凭据处理。
 
 3. **使用环境变量存储敏感信息**
    ```yaml

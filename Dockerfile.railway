@@ -29,7 +29,8 @@ RUN mkdir -p /app/data
 COPY railway/start.sh /app/start.sh
 RUN chmod +x /app/start.sh
 
-ENV DB_PATH=/app/data/data.db
+ENV DB_TYPE=postgres
+ENV DB_SSLMODE=disable
 
 # Railway automatically sets the PORT environment variable
 EXPOSE 8080

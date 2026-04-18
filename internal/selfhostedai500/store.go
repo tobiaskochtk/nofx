@@ -5,38 +5,128 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
+	_ "github.com/lib/pq"
 	_ "modernc.org/sqlite"
 )
 
+type DBType string
+
+const (
+	DBTypeSQLite   DBType = "sqlite"
+	DBTypePostgres DBType = "postgres"
+)
+
+type StoreConfig struct {
+	Type     DBType
+	Path     string
+	Host     string
+	Port     int
+	User     string
+	Password string
+	DBName   string
+	SSLMode  string
+}
+
 type Store struct {
-	db *sql.DB
+	db     *sql.DB
+	dbType DBType
 }
 
 func OpenStore(dbPath string) (*Store, error) {
-	if dbPath == "" {
-		return nil, fmt.Errorf("db path is required")
-	}
-	if err := os.MkdirAll(filepath.Dir(dbPath), 0o755); err != nil {
-		return nil, err
+	return OpenStoreWithConfig(StoreConfig{
+		Type: DBTypeSQLite,
+		Path: dbPath,
+	})
+}
+
+func OpenStoreWithConfig(cfg StoreConfig) (*Store, error) {
+	cfg.Type = normalizeStoreDBType(string(cfg.Type))
+	if cfg.Type == "" {
+		cfg.Type = DBTypePostgres
 	}
 
-	db, err := sql.Open("sqlite", dbPath)
+	var (
+		db  *sql.DB
+		err error
+	)
+
+	switch cfg.Type {
+	case DBTypePostgres:
+		db, err = openPostgres(cfg)
+	default:
+		db, err = openSQLite(cfg)
+	}
 	if err != nil {
 		return nil, err
 	}
 
-	db.SetMaxOpenConns(1)
-	db.SetMaxIdleConns(1)
-	db.SetConnMaxLifetime(0)
-
-	store := &Store{db: db}
+	store := &Store{db: db, dbType: cfg.Type}
 	if err := store.init(); err != nil {
 		_ = db.Close()
 		return nil, err
 	}
 	return store, nil
+}
+
+func openSQLite(cfg StoreConfig) (*sql.DB, error) {
+	if strings.TrimSpace(cfg.Path) == "" {
+		return nil, fmt.Errorf("db path is required for sqlite")
+	}
+	if err := os.MkdirAll(filepath.Dir(cfg.Path), 0o755); err != nil {
+		return nil, err
+	}
+
+	db, err := sql.Open("sqlite", cfg.Path)
+	if err != nil {
+		return nil, err
+	}
+	db.SetMaxOpenConns(1)
+	db.SetMaxIdleConns(1)
+	db.SetConnMaxLifetime(0)
+	return db, nil
+}
+
+func openPostgres(cfg StoreConfig) (*sql.DB, error) {
+	if strings.TrimSpace(cfg.Host) == "" {
+		return nil, fmt.Errorf("db host is required for postgres")
+	}
+	if strings.TrimSpace(cfg.User) == "" {
+		return nil, fmt.Errorf("db user is required for postgres")
+	}
+	if strings.TrimSpace(cfg.DBName) == "" {
+		return nil, fmt.Errorf("db name is required for postgres")
+	}
+
+	dsn := fmt.Sprintf(
+		"host=%s port=%d user=%s password=%s dbname=%s sslmode=%s",
+		cfg.Host, cfg.Port, cfg.User, cfg.Password, cfg.DBName, cfg.SSLMode,
+	)
+	db, err := sql.Open("postgres", dsn)
+	if err != nil {
+		return nil, err
+	}
+	db.SetMaxOpenConns(5)
+	db.SetMaxIdleConns(2)
+	db.SetConnMaxLifetime(0)
+	if err := db.Ping(); err != nil {
+		_ = db.Close()
+		return nil, err
+	}
+	return db, nil
+}
+
+func normalizeStoreDBType(raw string) DBType {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "", string(DBTypePostgres):
+		return DBTypePostgres
+	case string(DBTypeSQLite):
+		return DBTypeSQLite
+	default:
+		return DBTypePostgres
+	}
 }
 
 func (s *Store) Close() error {
@@ -46,10 +136,15 @@ func (s *Store) Close() error {
 	return s.db.Close()
 }
 
+func (s *Store) DB() *sql.DB {
+	if s == nil {
+		return nil
+	}
+	return s.db
+}
+
 func (s *Store) init() error {
 	statements := []string{
-		`PRAGMA journal_mode = WAL;`,
-		`PRAGMA busy_timeout = 5000;`,
 		`CREATE TABLE IF NOT EXISTS market_snapshots (
             symbol TEXT NOT NULL,
             ts INTEGER NOT NULL,
@@ -73,6 +168,13 @@ func (s *Store) init() error {
         );`,
 	}
 
+	if s.dbType == DBTypeSQLite {
+		statements = append([]string{
+			`PRAGMA journal_mode = WAL;`,
+			`PRAGMA busy_timeout = 5000;`,
+		}, statements...)
+	}
+
 	for _, stmt := range statements {
 		if _, err := s.db.Exec(stmt); err != nil {
 			return err
@@ -85,9 +187,16 @@ func (s *Store) InsertSnapshot(snapshot *marketSnapshot) error {
 	if snapshot == nil {
 		return nil
 	}
-	_, err := s.db.Exec(
-		`INSERT OR REPLACE INTO market_snapshots(symbol, ts, price, open_interest, volume_24h, funding, premium, prev_day_price)
-         VALUES(?, ?, ?, ?, ?, ?, ?, ?)`,
+	_, err := s.exec(
+		`INSERT INTO market_snapshots(symbol, ts, price, open_interest, volume_24h, funding, premium, prev_day_price)
+         VALUES(?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT(symbol, ts) DO UPDATE SET
+             price = excluded.price,
+             open_interest = excluded.open_interest,
+             volume_24h = excluded.volume_24h,
+             funding = excluded.funding,
+             premium = excluded.premium,
+             prev_day_price = excluded.prev_day_price`,
 		snapshot.Symbol,
 		snapshot.UpdatedAt.UTC().Unix(),
 		snapshot.Price,
@@ -102,11 +211,11 @@ func (s *Store) InsertSnapshot(snapshot *marketSnapshot) error {
 
 func (s *Store) LatestSnapshotBefore(symbol string, target time.Time) (*historyPoint, error) {
 	row := s.db.QueryRow(
-		`SELECT ts, price, open_interest
+		s.query(`SELECT ts, price, open_interest
          FROM market_snapshots
          WHERE symbol = ? AND ts <= ?
          ORDER BY ts DESC
-         LIMIT 1`,
+         LIMIT 1`),
 		symbol,
 		target.UTC().Unix(),
 	)
@@ -146,7 +255,7 @@ func (s *Store) SaveScoreState(snapshot *marketSnapshot) error {
 	if snapshot == nil {
 		return nil
 	}
-	_, err := s.db.Exec(
+	_, err := s.exec(
 		`INSERT INTO score_state(symbol, start_time, start_price, last_score, max_score, max_price, last_updated_at)
          VALUES(?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(symbol) DO UPDATE SET
@@ -168,6 +277,28 @@ func (s *Store) SaveScoreState(snapshot *marketSnapshot) error {
 }
 
 func (s *Store) PruneSnapshots(before time.Time) error {
-	_, err := s.db.Exec(`DELETE FROM market_snapshots WHERE ts < ?`, before.UTC().Unix())
+	_, err := s.exec(`DELETE FROM market_snapshots WHERE ts < ?`, before.UTC().Unix())
 	return err
+}
+
+func (s *Store) exec(query string, args ...any) (sql.Result, error) {
+	return s.db.Exec(s.query(query), args...)
+}
+
+func (s *Store) query(query string) string {
+	if s.dbType != DBTypePostgres {
+		return query
+	}
+
+	var builder strings.Builder
+	index := 1
+	for _, r := range query {
+		if r == '?' {
+			builder.WriteString(fmt.Sprintf("$%d", index))
+			index++
+			continue
+		}
+		builder.WriteRune(r)
+	}
+	return builder.String()
 }
