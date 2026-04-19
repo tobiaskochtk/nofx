@@ -1091,6 +1091,7 @@ func normalizeTraderRejectReason(reasoning string) string {
 		value == "missing_confirmation",
 		value == "venue_unsupported",
 		value == "risk_control",
+		value == "symbol_behavior_prior_block",
 		value == "extended_setup",
 		value == "late_breakout",
 		value == "volume_not_confirming",

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { mutate } from 'swr'
 import { api } from '../lib/api'
 import { DeepVoidBackground } from '../components/common/DeepVoidBackground'
@@ -19,8 +19,18 @@ import type {
   DealReviewEventDetail,
   DealReviewEventSnapshot,
   DealReviewFilterPresetDetail,
+  DealReviewLearnedPattern,
+  DealReviewLearnedPatternLiveGuardEvent,
+  DealReviewLearnedPatternLiveGuardEventSummary,
+  DealReviewLearnedPatternLiveGuardStatus,
+  DealReviewLearnedPatternSummary,
   DealReviewCaseListItem,
   DealReviewDatasetSummary,
+  DealReviewSymbolBehaviorLiveGuardEvent,
+  DealReviewSymbolBehaviorLiveGuardEventSummary,
+  DealReviewSymbolBehaviorLiveGuardStatus,
+  DealReviewSymbolBehaviorPrior,
+  DealReviewSymbolBehaviorPriorSummary,
   DealReviewStrategyVersionDetail,
   DealReviewValidationCheck,
   Exchange,
@@ -84,6 +94,224 @@ function formatValidationCheckSummary(check: DealReviewValidationCheck): string 
     return `actual ${formatValidationMetricValue(check.metric, check.actual)} | ceiling ${formatValidationMetricValue(check.metric, check.threshold)}`
   }
   return `actual ${formatValidationMetricValue(check.metric, check.actual)} | floor ${formatValidationMetricValue(check.metric, check.threshold)}`
+}
+
+function formatSymbolBehaviorAction(value?: string): string {
+  switch (value) {
+    case 'penalize_setup':
+      return 'Penalize setup'
+    case 'favor_setup':
+      return 'Favor setup'
+    case 'observe':
+      return 'Observe'
+    default:
+      return value || '-'
+  }
+}
+
+function formatSymbolBehaviorValidationLabel(value?: string): string {
+  switch (value) {
+    case 'confirmed':
+      return 'Confirmed'
+    case 'candidate':
+      return 'Candidate'
+    case 'insufficient_evidence':
+      return 'Need evidence'
+    case 'drifting':
+      return 'Drifting'
+    case 'false_positive':
+      return 'False positive'
+    case 'false_negative_risk':
+      return 'False-negative risk'
+    default:
+      return value || '-'
+  }
+}
+
+function symbolBehaviorValidationClasses(value?: string): string {
+  switch (value) {
+    case 'confirmed':
+      return 'border-emerald-400/20 bg-emerald-500/10 text-emerald-200'
+    case 'false_positive':
+      return 'border-rose-400/20 bg-rose-500/10 text-rose-200'
+    case 'false_negative_risk':
+      return 'border-amber-400/20 bg-amber-500/10 text-amber-200'
+    case 'drifting':
+      return 'border-orange-400/20 bg-orange-500/10 text-orange-200'
+    case 'insufficient_evidence':
+      return 'border-white/10 bg-white/5 text-white'
+    default:
+      return 'border-sky-400/20 bg-sky-500/10 text-sky-200'
+  }
+}
+
+function symbolBehaviorToneClasses(value?: string): string {
+  switch (value) {
+    case 'negative':
+      return 'border-rose-400/25 bg-rose-500/10 text-rose-200'
+    case 'positive':
+      return 'border-emerald-400/25 bg-emerald-500/10 text-emerald-200'
+    default:
+      return 'border-white/10 bg-white/5 text-white'
+  }
+}
+
+function formatLearnedPatternClass(value?: string): string {
+  switch (value) {
+    case 'positive_edge':
+      return 'Positive edge'
+    case 'negative_edge':
+      return 'Anti-edge'
+    default:
+      return value || '-'
+  }
+}
+
+function learnedPatternClassClasses(value?: string): string {
+  switch (value) {
+    case 'positive_edge':
+      return 'border-emerald-400/20 bg-emerald-500/10 text-emerald-200'
+    case 'negative_edge':
+      return 'border-rose-400/20 bg-rose-500/10 text-rose-200'
+    default:
+      return 'border-white/10 bg-white/5 text-white'
+  }
+}
+
+function formatLearnedPatternValidationLabel(value?: string): string {
+  switch (value) {
+    case 'confirmed':
+      return 'Confirmed'
+    case 'candidate':
+      return 'Candidate'
+    case 'insufficient_evidence':
+      return 'Need evidence'
+    case 'false_positive':
+      return 'False positive'
+    case 'reverse_risk':
+      return 'Reverse risk'
+    case 'drifting':
+      return 'Drifting'
+    case 'expired':
+      return 'Expired'
+    default:
+      return value || '-'
+  }
+}
+
+function learnedPatternValidationClasses(value?: string): string {
+  switch (value) {
+    case 'confirmed':
+      return 'border-emerald-400/20 bg-emerald-500/10 text-emerald-200'
+    case 'false_positive':
+      return 'border-rose-400/20 bg-rose-500/10 text-rose-200'
+    case 'reverse_risk':
+      return 'border-amber-400/20 bg-amber-500/10 text-amber-200'
+    case 'drifting':
+      return 'border-orange-400/20 bg-orange-500/10 text-orange-200'
+    case 'expired':
+      return 'border-white/10 bg-white/5 text-nofx-text-muted'
+    case 'insufficient_evidence':
+      return 'border-white/10 bg-white/5 text-white'
+    default:
+      return 'border-sky-400/20 bg-sky-500/10 text-sky-200'
+  }
+}
+
+function formatLearnedPatternUse(value?: string): string {
+  switch (value) {
+    case 'review_hint':
+      return 'Review hint'
+    case 'prompt_hint':
+      return 'Prompt hint'
+    case 'config_candidate':
+      return 'Config candidate'
+    case 'monitor_only':
+      return 'Monitor only'
+    case 'expired_do_not_use':
+      return 'Do not use'
+    default:
+      return value || '-'
+  }
+}
+
+function formatLearnedPatternScope(pattern?: DealReviewLearnedPattern | null): string {
+  if (!pattern) return '-'
+  if (pattern.scope_type === 'symbol' && pattern.symbol) {
+    return `${pattern.symbol} override`
+  }
+  if (pattern.scope_type === 'trader_local') {
+    return 'Trader-local'
+  }
+  return pattern.scope_type || '-'
+}
+
+function symbolBehaviorTabClasses(value: string, active: boolean): string {
+  const base =
+    'inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-xs font-medium transition-colors'
+  if (!active) {
+    return `${base} border-white/10 bg-black/20 text-nofx-text-muted hover:border-white/20 hover:text-white`
+  }
+  switch (value) {
+    case 'confirmed':
+      return `${base} border-emerald-400/25 bg-emerald-500/15 text-emerald-200`
+    case 'false_positive':
+      return `${base} border-rose-400/25 bg-rose-500/15 text-rose-200`
+    case 'false_negative_risk':
+      return `${base} border-amber-400/25 bg-amber-500/15 text-amber-200`
+    case 'drifting':
+      return `${base} border-orange-400/25 bg-orange-500/15 text-orange-200`
+    default:
+      return `${base} border-sky-400/25 bg-sky-500/15 text-sky-200`
+  }
+}
+
+function formatSymbolBehaviorLiveGuardMode(value?: string): string {
+  switch (value) {
+    case 'hard_block':
+      return 'Hard block'
+    case 'monitor':
+      return 'Monitor'
+    default:
+      return value || '-'
+  }
+}
+
+function formatSymbolBehaviorLiveGuardEffect(value?: string): string {
+  switch (value) {
+    case 'hard_blocked':
+      return 'Hard blocked'
+    case 'monitor_only':
+      return 'Monitor only'
+    case 'matched_not_qualified':
+      return 'Matched, not qualified'
+    case 'no_match':
+      return 'No match'
+    default:
+      return value || '-'
+  }
+}
+
+function symbolBehaviorLiveGuardEffectClasses(value?: string): string {
+  switch (value) {
+    case 'hard_blocked':
+      return 'border-rose-400/20 bg-rose-500/10 text-rose-200'
+    case 'monitor_only':
+      return 'border-amber-400/20 bg-amber-500/10 text-amber-200'
+    case 'matched_not_qualified':
+      return 'border-sky-400/20 bg-sky-500/10 text-sky-200'
+    case 'no_match':
+      return 'border-white/10 bg-white/5 text-white'
+    default:
+      return 'border-white/10 bg-white/5 text-white'
+  }
+}
+
+function formatTimestampLabel(value?: string): string {
+  if (!value) return '-'
+  const parsed = new Date(value)
+  if (Number.isNaN(parsed.getTime())) return '-'
+  return parsed.toLocaleString()
 }
 
 function formatVersionCohort(targetCohort?: Record<string, unknown>): string {
@@ -1020,6 +1248,34 @@ export function DealReviewPage({
   const [anomalies, setAnomalies] = useState<DealReviewAnomalySummary | null>(
     null
   )
+  const [symbolBehaviorPriors, setSymbolBehaviorPriors] = useState<
+    DealReviewSymbolBehaviorPrior[]
+  >([])
+  const [symbolBehaviorLiveGuardEvents, setSymbolBehaviorLiveGuardEvents] =
+    useState<DealReviewSymbolBehaviorLiveGuardEvent[]>([])
+  const [symbolBehaviorLiveGuardSummary, setSymbolBehaviorLiveGuardSummary] =
+    useState<DealReviewSymbolBehaviorLiveGuardEventSummary | null>(null)
+  const [symbolBehaviorLiveGuardStatus, setSymbolBehaviorLiveGuardStatus] =
+    useState<DealReviewSymbolBehaviorLiveGuardStatus | null>(null)
+  const [symbolBehaviorPriorSummary, setSymbolBehaviorPriorSummary] = useState<
+    DealReviewSymbolBehaviorPriorSummary | null
+  >(null)
+  const [learnedPatternLiveGuardEvents, setLearnedPatternLiveGuardEvents] =
+    useState<DealReviewLearnedPatternLiveGuardEvent[]>([])
+  const [learnedPatternLiveGuardSummary, setLearnedPatternLiveGuardSummary] =
+    useState<DealReviewLearnedPatternLiveGuardEventSummary | null>(null)
+  const [learnedPatternLiveGuardStatus, setLearnedPatternLiveGuardStatus] =
+    useState<DealReviewLearnedPatternLiveGuardStatus | null>(null)
+  const [learnedPatternSummary, setLearnedPatternSummary] =
+    useState<DealReviewLearnedPatternSummary | null>(null)
+  const [selectedSymbolPriorId, setSelectedSymbolPriorId] = useState<string | null>(
+    null
+  )
+  const [symbolBehaviorClusterFilter, setSymbolBehaviorClusterFilter] =
+    useState('')
+  const [symbolBehaviorPriorTab, setSymbolBehaviorPriorTab] = useState<
+    'all' | 'confirmed' | 'false_positive' | 'false_negative_risk' | 'drifting'
+  >('all')
   const [versions, setVersions] = useState<DealReviewStrategyVersionDetail[]>(
     []
   )
@@ -1091,6 +1347,96 @@ export function DealReviewPage({
     selectedVersionId &&
       versions.some((item) => item.version.id === selectedVersionId)
   )
+
+  const openPatternLabWithFilters = (params?: Record<string, string>) => {
+    const url = new URL(window.location.href)
+    url.pathname = '/pattern-lab'
+    url.search = ''
+    Object.entries(params || {}).forEach(([key, value]) => {
+      const normalized = value.trim()
+      if (normalized) {
+        url.searchParams.set(key, normalized)
+      }
+    })
+    window.history.pushState({}, '', url.toString())
+    window.dispatchEvent(new PopStateEvent('popstate'))
+  }
+  const symbolBehaviorPriorTabCounts = useMemo(() => {
+    const counts = {
+      all: symbolBehaviorPriors.length,
+      confirmed: 0,
+      false_positive: 0,
+      false_negative_risk: 0,
+      drifting: 0,
+    }
+    symbolBehaviorPriors.forEach((prior) => {
+      switch (prior.validation_label) {
+        case 'confirmed':
+          counts.confirmed += 1
+          break
+        case 'false_positive':
+          counts.false_positive += 1
+          break
+        case 'false_negative_risk':
+          counts.false_negative_risk += 1
+          break
+        case 'drifting':
+          counts.drifting += 1
+          break
+        default:
+          break
+      }
+    })
+    return counts
+  }, [symbolBehaviorPriors])
+  const symbolBehaviorPriorTabs = useMemo(
+    () => [
+      { value: 'all', label: 'All priors', count: symbolBehaviorPriorTabCounts.all },
+      {
+        value: 'confirmed',
+        label: 'Confirmed',
+        count: symbolBehaviorPriorTabCounts.confirmed,
+      },
+      {
+        value: 'false_positive',
+        label: 'False positives',
+        count: symbolBehaviorPriorTabCounts.false_positive,
+      },
+      {
+        value: 'false_negative_risk',
+        label: 'Reverse-edge risk',
+        count: symbolBehaviorPriorTabCounts.false_negative_risk,
+      },
+      {
+        value: 'drifting',
+        label: 'Drifting',
+        count: symbolBehaviorPriorTabCounts.drifting,
+      },
+    ] as const,
+    [symbolBehaviorPriorTabCounts]
+  )
+  const visibleSymbolBehaviorPriors = useMemo(() => {
+    if (symbolBehaviorPriors.length === 0) {
+      return []
+    }
+    const filtered =
+      symbolBehaviorPriorTab === 'all'
+        ? symbolBehaviorPriors
+        : symbolBehaviorPriors.filter(
+            (item) => item.validation_label === symbolBehaviorPriorTab
+          )
+    const ordered = [...filtered]
+    if (selectedSymbolPriorId) {
+      const selectedIndex = ordered.findIndex((item) => item.id === selectedSymbolPriorId)
+      if (selectedIndex > 0) {
+        const [selected] = ordered.splice(selectedIndex, 1)
+        if (selected) {
+          ordered.unshift(selected)
+        }
+      }
+    }
+    return ordered.slice(0, 6)
+  }, [symbolBehaviorPriors, selectedSymbolPriorId, symbolBehaviorPriorTab])
 
   const buildFilterPayload = (
     overrides?: Record<string, string | number | undefined>
@@ -1423,6 +1769,98 @@ export function DealReviewPage({
     }
   }
 
+  const loadSymbolBehaviorPriors = async () => {
+    if (!selectedTraderId) return
+    try {
+      const result = await api.getDealReviewSymbolBehaviorPriors(
+        selectedTraderId,
+        {
+          symbol: symbol || undefined,
+          side: side || undefined,
+          signal_cluster: symbolBehaviorClusterFilter || undefined,
+          limit: 100,
+        }
+      )
+      setSymbolBehaviorPriors(result.items || [])
+      setSymbolBehaviorPriorSummary(result.summary || null)
+    } catch (err) {
+      setSymbolBehaviorPriors([])
+      setSymbolBehaviorPriorSummary(null)
+      notify.error(
+        err instanceof Error
+          ? err.message
+          : 'Failed to fetch symbol behavior priors'
+      )
+    }
+  }
+
+  const loadSymbolBehaviorLiveGuardEvents = async () => {
+    if (!selectedTraderId) {
+      setSymbolBehaviorLiveGuardEvents([])
+      setSymbolBehaviorLiveGuardSummary(null)
+      setSymbolBehaviorLiveGuardStatus(null)
+      return
+    }
+    try {
+      const result = await api.getDealReviewSymbolBehaviorLiveGuardEvents(
+        selectedTraderId,
+        {
+          symbol: symbol || undefined,
+          side: side || undefined,
+          limit: 12,
+        }
+      )
+      setSymbolBehaviorLiveGuardEvents(result.items || [])
+      setSymbolBehaviorLiveGuardSummary(result.summary || null)
+      setSymbolBehaviorLiveGuardStatus(result.guard || null)
+    } catch (err) {
+      setSymbolBehaviorLiveGuardEvents([])
+      setSymbolBehaviorLiveGuardSummary(null)
+      setSymbolBehaviorLiveGuardStatus(null)
+      notify.error(
+        err instanceof Error
+          ? err.message
+          : 'Failed to fetch symbol-prior live guard events'
+      )
+    }
+  }
+
+  const loadLearnedPatterns = async () => {
+    if (!selectedTraderId) {
+      setLearnedPatternLiveGuardEvents([])
+      setLearnedPatternLiveGuardSummary(null)
+      setLearnedPatternLiveGuardStatus(null)
+      setLearnedPatternSummary(null)
+      return
+    }
+    try {
+      const [result, guardResult] = await Promise.all([
+        api.getDealReviewLearnedPatterns(selectedTraderId, {
+          symbol: symbol || undefined,
+          side: side || undefined,
+          limit: 60,
+        }),
+        api.getDealReviewLearnedPatternLiveGuardEvents(selectedTraderId, {
+          symbol: symbol || undefined,
+          side: side || undefined,
+          limit: 12,
+        }),
+      ])
+      setLearnedPatternSummary(result.summary || null)
+      setLearnedPatternLiveGuardEvents(guardResult.items || [])
+      setLearnedPatternLiveGuardSummary(guardResult.summary || null)
+      setLearnedPatternLiveGuardStatus(guardResult.guard || null)
+    } catch (err) {
+      setLearnedPatternLiveGuardEvents([])
+      setLearnedPatternLiveGuardSummary(null)
+      setLearnedPatternLiveGuardStatus(null)
+      setLearnedPatternSummary(null)
+      notify.error(
+        err instanceof Error ? err.message : 'Failed to fetch learned patterns'
+      )
+    }
+  }
+
   const loadFilterPresets = async () => {
     if (!selectedTraderId) return
     try {
@@ -1673,6 +2111,10 @@ export function DealReviewPage({
   }, [selectedTraderId])
 
   useEffect(() => {
+    setSymbolBehaviorClusterFilter('')
+  }, [selectedTraderId])
+
+  useEffect(() => {
     void loadAnomalies()
   }, [
     selectedTraderId,
@@ -1691,17 +2133,68 @@ export function DealReviewPage({
   ])
 
   useEffect(() => {
+    void loadSymbolBehaviorPriors()
+  }, [selectedTraderId, symbol, side, symbolBehaviorClusterFilter])
+
+  useEffect(() => {
+    void loadSymbolBehaviorLiveGuardEvents()
+  }, [selectedTraderId, symbol, side])
+
+  useEffect(() => {
+    void loadLearnedPatterns()
+  }, [selectedTraderId, symbol, side])
+
+  useEffect(() => {
+    if (!selectedSymbolPriorId) {
+      return
+    }
+    const selectedPrior = symbolBehaviorPriors.find(
+      (item) => item.id === selectedSymbolPriorId
+    )
+    switch (selectedPrior?.validation_label) {
+      case 'confirmed':
+      case 'false_positive':
+      case 'false_negative_risk':
+      case 'drifting':
+        setSymbolBehaviorPriorTab(selectedPrior.validation_label)
+        break
+      default:
+        break
+    }
+  }, [selectedSymbolPriorId, symbolBehaviorPriors])
+
+  useEffect(() => {
     if (!selectedTraderId || window.location.pathname !== '/deal-review') {
       return
     }
     const params = new URLSearchParams(window.location.search)
+    const caseId = params.get('case_id')?.trim() || ''
     const fromTime = Number(params.get('optimizer_from_time') || '')
     const toTime = Number(params.get('optimizer_to_time') || '')
     const versionId =
       params.get('strategy_version_id')?.trim() ||
       params.get('optimizer_version_id')?.trim() ||
       ''
+    const symbolParam = params.get('symbol')?.trim().toUpperCase() || ''
+    const sideParam = params.get('side')?.trim().toUpperCase() || ''
+    const statusParam = params.get('status')?.trim().toUpperCase() || ''
+    const selectionBucketParam = params.get('open_selection_bucket')?.trim() || ''
+    const trendParam = params.get('open_trend_regime')?.trim() || ''
+    const volatilityParam = params.get('open_volatility_regime')?.trim() || ''
+    const btcStrengthParam = params.get('open_btc_strength_regime')?.trim() || ''
+    const fundingParam = params.get('open_funding_regime')?.trim() || ''
+    const oiParam = params.get('open_oi_regime')?.trim() || ''
+    const sessionParam = params.get('open_session_bucket')?.trim() || ''
+    const weekdayParam = params.get('open_weekday_bucket')?.trim() || ''
+    const venueTierParam = params.get('open_venue_tier')?.trim() || ''
+    const liquidityTierParam = params.get('open_liquidity_tier')?.trim() || ''
+    const spreadParam = params.get('open_spread_bucket')?.trim() || ''
+    const slippageParam = params.get('open_slippage_bucket')?.trim() || ''
+    const symbolPriorId = params.get('symbol_prior_id')?.trim() || ''
 
+    if (caseId) {
+      setSelectedCaseId(caseId)
+    }
     if (Number.isFinite(fromTime) && fromTime > 0) {
       setSelectedPresetId('')
       setCustomFromTime(fromTime)
@@ -1713,6 +2206,67 @@ export function DealReviewPage({
     if (versionId) {
       setSelectedVersionId(versionId)
     }
+    if (symbolParam) {
+      setSelectedPresetId('')
+      setSymbol(symbolParam)
+    }
+    if (sideParam) {
+      setSelectedPresetId('')
+      setSide(sideParam)
+    }
+    if (statusParam) {
+      setSelectedPresetId('')
+      setStatus(statusParam)
+    }
+    if (selectionBucketParam) {
+      setSelectedPresetId('')
+      setOpenSelectionBucket(selectionBucketParam)
+    }
+    if (trendParam) {
+      setSelectedPresetId('')
+      setOpenTrendRegime(trendParam)
+    }
+    if (volatilityParam) {
+      setSelectedPresetId('')
+      setOpenVolatilityRegime(volatilityParam)
+    }
+    if (btcStrengthParam) {
+      setSelectedPresetId('')
+      setOpenBTCStrengthRegime(btcStrengthParam)
+    }
+    if (fundingParam) {
+      setSelectedPresetId('')
+      setOpenFundingRegime(fundingParam)
+    }
+    if (oiParam) {
+      setSelectedPresetId('')
+      setOpenOIRegime(oiParam)
+    }
+    if (sessionParam) {
+      setSelectedPresetId('')
+      setOpenSessionBucket(sessionParam)
+    }
+    if (weekdayParam) {
+      setSelectedPresetId('')
+      setOpenWeekdayBucket(weekdayParam)
+    }
+    if (venueTierParam) {
+      setSelectedPresetId('')
+      setOpenVenueTier(venueTierParam)
+    }
+    if (liquidityTierParam) {
+      setSelectedPresetId('')
+      setOpenLiquidityTier(liquidityTierParam)
+    }
+    if (spreadParam) {
+      setSelectedPresetId('')
+      setOpenSpreadBucket(spreadParam)
+    }
+    if (slippageParam) {
+      setSelectedPresetId('')
+      setOpenSlippageBucket(slippageParam)
+    }
+    setSelectedSymbolPriorId(symbolPriorId || null)
   }, [selectedTraderId])
 
   useEffect(() => {
@@ -2427,7 +2981,7 @@ export function DealReviewPage({
                 run AI scans against the filtered dataset.
               </p>
             </div>
-            <div className="w-full lg:w-80">
+            <div className="w-full lg:w-80 space-y-2">
               <label className="text-xs text-nofx-text-muted block mb-2">
                 Trader
               </label>
@@ -2441,6 +2995,17 @@ export function DealReviewPage({
                   }))}
                 />
               </div>
+              <button
+                onClick={() =>
+                  openPatternLabWithFilters({
+                    symbol: symbol.trim().toUpperCase(),
+                    side: side.trim().toUpperCase(),
+                  })
+                }
+                className="w-full h-10 rounded-lg border border-white/10 bg-black/20 text-sm font-medium"
+              >
+                Open Pattern Lab
+              </button>
             </div>
           </div>
         </div>
@@ -3392,6 +3957,403 @@ export function DealReviewPage({
                   <div className="rounded-xl border border-white/10 bg-black/20 p-4 space-y-4">
                     <div className="flex items-start justify-between gap-4">
                       <div>
+                        <div className="font-semibold">Matching symbol priors</div>
+                        <div className="text-xs text-nofx-text-muted mt-1">
+                          Learned symbol+side+regime patterns from prior closed
+                          deals for this trader.
+                        </div>
+                      </div>
+                      <div className="text-xs text-nofx-text-muted">
+                        {detail.symbol_behavior_priors?.length || 0} matches
+                      </div>
+                    </div>
+
+                    {!detail.symbol_behavior_priors ||
+                    detail.symbol_behavior_priors.length === 0 ? (
+                      <div className="text-sm text-nofx-text-muted">
+                        No learned symbol prior matched this deal yet.
+                      </div>
+                    ) : (
+                      <div className="space-y-3">
+                        {detail.symbol_behavior_priors.map((prior) => (
+                          <div
+                            key={prior.id}
+                            className="rounded-xl border border-white/10 bg-black/20 p-4 space-y-3"
+                          >
+                            <div className="flex flex-wrap items-start justify-between gap-3">
+                              <div>
+                                <div className="flex flex-wrap items-center gap-2">
+                                  <span className="font-semibold">
+                                    {prior.symbol} · {prior.side}
+                                  </span>
+                                  <span
+                                    className={`px-2 py-1 rounded-full text-[11px] border ${symbolBehaviorToneClasses(
+                                      prior.behavior_bias
+                                    )}`}
+                                  >
+                                    {prior.behavior_bias || 'mixed'}
+                                  </span>
+                                <span className="px-2 py-1 rounded-full text-[11px] border border-white/10 bg-white/5 text-white">
+                                  {prior.status}
+                                </span>
+                                <span
+                                  className={`px-2 py-1 rounded-full text-[11px] border ${symbolBehaviorValidationClasses(
+                                    prior.validation_label
+                                  )}`}
+                                >
+                                  {formatSymbolBehaviorValidationLabel(
+                                    prior.validation_label
+                                  )}
+                                </span>
+                              </div>
+                              <div className="text-xs text-nofx-text-muted mt-1">
+                                {prior.regime_signature}
+                              </div>
+                              </div>
+                              <div className="text-right text-xs text-nofx-text-muted">
+                                <div>
+                                  Match {formatSemanticSimilarityScore(prior.match_score)}
+                                </div>
+                                <div className="mt-1">
+                                  Action {formatSymbolBehaviorAction(prior.recommended_action)}
+                                </div>
+                              </div>
+                            </div>
+
+                            <div className="text-sm text-nofx-text-muted">
+                              {prior.summary}
+                            </div>
+
+                            {prior.validation_summary && (
+                              <div className="rounded-lg border border-amber-400/15 bg-amber-500/5 px-3 py-2 text-xs text-amber-100">
+                                {prior.validation_summary}
+                              </div>
+                            )}
+
+                            {prior.validation_alert && (
+                              <div className="rounded-lg border border-white/10 bg-black/20 px-3 py-2 text-xs text-nofx-text-muted">
+                                {prior.validation_alert}
+                              </div>
+                            )}
+
+                            <div className="grid grid-cols-2 md:grid-cols-5 gap-3 text-xs">
+                              <div>
+                                Samples:{' '}
+                                <span className="text-white">
+                                  {prior.sample_count}
+                                </span>
+                              </div>
+                              <div>
+                                Win rate:{' '}
+                                <span className="text-white">
+                                  {formatPct(prior.win_rate * 100)}
+                                </span>
+                              </div>
+                              <div>
+                                Avg PnL:{' '}
+                                <span
+                                  className={
+                                    prior.avg_pnl >= 0
+                                      ? 'text-emerald-300'
+                                      : 'text-rose-300'
+                                  }
+                                >
+                                  {formatMoney(prior.avg_pnl)} /{' '}
+                                  {formatPct(prior.avg_pnl_pct)}
+                                </span>
+                              </div>
+                              <div>
+                                Confidence:{' '}
+                                <span className="text-white">
+                                  {formatPct(prior.confidence_score * 100)}
+                                </span>
+                              </div>
+                              <div>
+                                Stability:{' '}
+                                <span className="text-white">
+                                  {formatPct(prior.stability_score * 100)}
+                                </span>
+                              </div>
+                            </div>
+
+                            <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-xs">
+                              <div>
+                                Train / holdout:{' '}
+                                <span className="text-white">
+                                  {prior.training_sample_count || 0} /{' '}
+                                  {prior.validation_sample_count || 0}
+                                </span>
+                              </div>
+                              <div>
+                                Holdout support:{' '}
+                                <span className="text-white">
+                                  {prior.validation_support_count || 0} /{' '}
+                                  {prior.validation_sample_count || 0}
+                                </span>
+                                <span className="text-nofx-text-muted">
+                                  {' '}
+                                  ({formatPct(
+                                    (prior.validation_support_score || 0) * 100
+                                  )})
+                                </span>
+                              </div>
+                              <div>
+                                Recent support:{' '}
+                                <span className="text-white">
+                                  {prior.recent_support_count || 0} /{' '}
+                                  {prior.recent_sample_count || 0}
+                                </span>
+                                <span className="text-nofx-text-muted">
+                                  {' '}
+                                  ({formatPct(
+                                    (prior.recent_support_score || 0) * 100
+                                  )})
+                                </span>
+                              </div>
+                              <div>
+                                Drift:{' '}
+                                <span
+                                  className={
+                                    (prior.drift_score || 0) >= 0.5
+                                      ? 'text-amber-300'
+                                      : 'text-white'
+                                  }
+                                >
+                                  {formatPct((prior.drift_score || 0) * 100)}
+                                </span>
+                              </div>
+                            </div>
+
+                            <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-xs">
+                              <div>
+                                FP score:{' '}
+                                <span className="text-rose-300">
+                                  {formatPct(
+                                    (prior.false_positive_score || 0) * 100
+                                  )}
+                                </span>
+                              </div>
+                              <div>
+                                FN risk:{' '}
+                                <span className="text-amber-300">
+                                  {formatPct(
+                                    (prior.false_negative_score || 0) * 100
+                                  )}
+                                </span>
+                              </div>
+                              <div>
+                                Validation label:{' '}
+                                <span className="text-white">
+                                  {formatSymbolBehaviorValidationLabel(
+                                    prior.validation_label
+                                  )}
+                                </span>
+                              </div>
+                              <div>
+                                Recent avg:{' '}
+                                <span className="text-white">
+                                  {formatPct(prior.recent_avg_pnl_pct || 0)}
+                                </span>
+                              </div>
+                            </div>
+
+                            <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-xs">
+                              <div>
+                                Decision cycles:{' '}
+                                <span className="text-white">
+                                  {prior.decision_cycle_count || 0}
+                                </span>
+                              </div>
+                              <div>
+                                Open signals:{' '}
+                                <span className="text-white">
+                                  {prior.decision_open_count || 0}
+                                </span>
+                              </div>
+                              <div>
+                                Avg decision conf:{' '}
+                                <span className="text-white">
+                                  {formatPct(prior.avg_decision_confidence || 0)}
+                                </span>
+                              </div>
+                              <div>
+                                Contradiction:{' '}
+                                <span
+                                  className={
+                                    (prior.contradiction_score || 0) >= 0.55
+                                      ? 'text-rose-300'
+                                      : 'text-white'
+                                  }
+                                >
+                                  {formatPct((prior.contradiction_score || 0) * 100)}
+                                </span>
+                              </div>
+                            </div>
+
+                            {prior.signal_cluster_key && (
+                              <div className="text-xs text-nofx-text-muted">
+                                Normalized cluster:{' '}
+                                <span className="text-white">
+                                  {prior.signal_cluster_key}
+                                </span>
+                              </div>
+                            )}
+
+                            {prior.signal_clusters &&
+                              prior.signal_clusters.length > 0 && (
+                                <div className="flex flex-wrap gap-2">
+                                  {prior.signal_clusters.map((cluster) => (
+                                    <span
+                                      key={`${prior.id}-cluster-${cluster}`}
+                                      className="px-2 py-1 rounded-full text-[11px] border border-emerald-400/20 bg-emerald-500/10 text-emerald-200"
+                                    >
+                                      {cluster}
+                                    </span>
+                                  ))}
+                                </div>
+                              )}
+
+                            {prior.signal_tags && prior.signal_tags.length > 0 && (
+                              <div className="flex flex-wrap gap-2">
+                                {prior.signal_tags.map((tag) => (
+                                  <span
+                                    key={`${prior.id}-signal-${tag}`}
+                                    className="px-2 py-1 rounded-full text-[11px] border border-sky-400/20 bg-sky-500/10 text-sky-200"
+                                  >
+                                    {tag}
+                                  </span>
+                                ))}
+                              </div>
+                            )}
+
+                            {prior.evidence && prior.evidence.length > 0 && (
+                              <div className="space-y-2">
+                                <div className="text-xs uppercase tracking-[0.2em] text-nofx-text-muted">
+                                  Evidence
+                                </div>
+                                <div className="space-y-2">
+                                  {prior.evidence.map((evidence) => (
+                                    <div
+                                      key={`${prior.id}-${evidence.case_id}`}
+                                      className="rounded-lg border border-white/10 bg-black/20 px-3 py-2 flex flex-wrap items-center justify-between gap-3"
+                                    >
+                                      <div className="text-xs text-nofx-text-muted">
+                                        <span className="text-white">
+                                          {evidence.case_id}
+                                        </span>{' '}
+                                        · {evidence.outcome || '-'} ·{' '}
+                                        {formatMoney(evidence.realized_pnl)} /{' '}
+                                        {formatPct(evidence.realized_pnl_pct)}
+                                      </div>
+                                      <button
+                                        onClick={() =>
+                                          setSelectedCaseId(evidence.case_id)
+                                        }
+                                        className="h-8 px-3 rounded-lg border border-white/10 bg-black/20 text-xs"
+                                      >
+                                        Focus evidence
+                                      </button>
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+                            )}
+
+                            {prior.decision_evidence &&
+                              prior.decision_evidence.length > 0 && (
+                                <div className="space-y-2">
+                                  <div className="text-xs uppercase tracking-[0.2em] text-nofx-text-muted">
+                                    Decision evidence
+                                  </div>
+                                  <div className="space-y-2">
+                                    {prior.decision_evidence.map((evidence) => (
+                                      <div
+                                        key={`${prior.id}-decision-${evidence.cycle_number}`}
+                                        className="rounded-lg border border-white/10 bg-black/20 px-3 py-2"
+                                      >
+                                        <div className="flex flex-wrap items-center justify-between gap-3">
+                                          <div className="text-xs text-nofx-text-muted">
+                                            Cycle{' '}
+                                            <span className="text-white">
+                                              {evidence.cycle_number}
+                                            </span>{' '}
+                                            · {evidence.action} ·{' '}
+                                            {formatPct(evidence.confidence || 0)}
+                                          </div>
+                                          <div className="text-xs text-nofx-text-muted">
+                                            {evidence.timestamp
+                                              ? new Date(
+                                                  evidence.timestamp
+                                                ).toLocaleString()
+                                              : '-'}
+                                          </div>
+                                        </div>
+                                        {evidence.reasoning && (
+                                          <div className="text-sm text-nofx-text-muted mt-2">
+                                        {evidence.reasoning}
+                                          </div>
+                                        )}
+                                        {evidence.signal_cluster_key && (
+                                          <div className="text-xs text-nofx-text-muted mt-2">
+                                            Normalized cluster:{' '}
+                                            <span className="text-white">
+                                              {evidence.signal_cluster_key}
+                                            </span>
+                                          </div>
+                                        )}
+                                        {((evidence.signal_tags &&
+                                          evidence.signal_tags.length > 0) ||
+                                          (evidence.signal_clusters &&
+                                            evidence.signal_clusters.length >
+                                              0) ||
+                                          (evidence.candidate_sources &&
+                                            evidence.candidate_sources.length >
+                                              0)) && (
+                                          <div className="flex flex-wrap gap-2 mt-2">
+                                            {evidence.signal_clusters?.map(
+                                              (cluster) => (
+                                                <span
+                                                  key={`${prior.id}-decision-cluster-${evidence.cycle_number}-${cluster}`}
+                                                  className="px-2 py-1 rounded-full text-[11px] border border-emerald-400/20 bg-emerald-500/10 text-emerald-200"
+                                                >
+                                                  {cluster}
+                                                </span>
+                                              )
+                                            )}
+                                            {evidence.signal_tags?.map((tag) => (
+                                              <span
+                                                key={`${prior.id}-decision-tag-${evidence.cycle_number}-${tag}`}
+                                                className="px-2 py-1 rounded-full text-[11px] border border-sky-400/20 bg-sky-500/10 text-sky-200"
+                                              >
+                                                {tag}
+                                              </span>
+                                            ))}
+                                            {evidence.candidate_sources?.map(
+                                              (source) => (
+                                                <span
+                                                  key={`${prior.id}-decision-source-${evidence.cycle_number}-${source}`}
+                                                  className="px-2 py-1 rounded-full text-[11px] border border-white/10 bg-white/5 text-white"
+                                                >
+                                                  {source}
+                                                </span>
+                                              )
+                                            )}
+                                          </div>
+                                        )}
+                                      </div>
+                                    ))}
+                                  </div>
+                                </div>
+                              )}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="rounded-xl border border-white/10 bg-black/20 p-4 space-y-4">
+                    <div className="flex items-start justify-between gap-4">
+                      <div>
                         <div className="font-semibold">Deal compare</div>
                         <div className="text-xs text-nofx-text-muted mt-1">
                           Compare the current deal against another loaded case
@@ -3714,6 +4676,255 @@ export function DealReviewPage({
                               )
                             }
                           )}
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="rounded-xl border border-white/10 bg-black/20 p-4 space-y-4">
+                    <div className="flex items-start justify-between gap-4">
+                      <div>
+                        <div className="font-semibold">Matching learned patterns</div>
+                        <div className="text-xs text-nofx-text-muted mt-1">
+                          Learned feature combinations replayed from prior closed
+                          deals for this trader.
+                        </div>
+                      </div>
+                      <div className="text-xs text-nofx-text-muted">
+                        {detail.learned_patterns?.length || 0} matches
+                      </div>
+                    </div>
+
+                    {!detail.learned_patterns ||
+                    detail.learned_patterns.length === 0 ? (
+                      <div className="text-sm text-nofx-text-muted">
+                        No learned pattern matched this deal yet.
+                      </div>
+                    ) : (
+                      <div className="space-y-3">
+                        {detail.learned_patterns.map((pattern) => (
+                          <div
+                            key={pattern.id}
+                            className="rounded-xl border border-white/10 bg-black/20 p-4 space-y-3"
+                          >
+                            <div className="flex flex-wrap items-start justify-between gap-3">
+                              <div>
+                                <div className="flex flex-wrap items-center gap-2">
+                                  <span className="font-semibold">
+                                    {pattern.pattern_signature}
+                                  </span>
+                                  <span
+                                    className={`px-2 py-1 rounded-full text-[11px] border ${learnedPatternClassClasses(
+                                      pattern.pattern_class
+                                    )}`}
+                                  >
+                                    {formatLearnedPatternClass(pattern.pattern_class)}
+                                  </span>
+                                  <span
+                                    className={`px-2 py-1 rounded-full text-[11px] border ${learnedPatternValidationClasses(
+                                      pattern.validation_label
+                                    )}`}
+                                  >
+                                    {formatLearnedPatternValidationLabel(
+                                      pattern.validation_label
+                                    )}
+                                  </span>
+                                  <span className="px-2 py-1 rounded-full text-[11px] border border-white/10 bg-white/5 text-white">
+                                    {formatLearnedPatternScope(pattern)}
+                                  </span>
+                                </div>
+                                <div className="text-xs text-nofx-text-muted mt-1">
+                                  {pattern.regime_signature || 'No regime signature stored'}
+                                </div>
+                              </div>
+                              <div className="text-right text-xs text-nofx-text-muted">
+                                <div>
+                                  {formatSemanticSimilarityScore(pattern.match_score)}
+                                </div>
+                                <div className="mt-1">
+                                  {formatLearnedPatternUse(pattern.recommended_use)}
+                                </div>
+                              </div>
+                            </div>
+
+                            <div className="text-sm text-nofx-text-muted">
+                              {pattern.summary}
+                            </div>
+
+                            {pattern.validation_alert && (
+                              <div className="rounded-lg border border-sky-400/15 bg-sky-500/5 px-3 py-2 text-xs text-sky-100">
+                                {pattern.validation_alert}
+                              </div>
+                            )}
+
+                            {pattern.feature_set && pattern.feature_set.length > 0 && (
+                              <div className="flex flex-wrap gap-2">
+                                {pattern.feature_set.map((feature) => (
+                                  <span
+                                    key={`${pattern.id}-${feature}`}
+                                    className="px-2 py-1 rounded-full text-[11px] border border-white/10 bg-white/5 text-white"
+                                  >
+                                    {feature}
+                                  </span>
+                                ))}
+                              </div>
+                            )}
+
+                            <div className="grid grid-cols-2 md:grid-cols-5 gap-3 text-xs">
+                              <div>
+                                Samples:{' '}
+                                <span className="text-white">
+                                  {pattern.sample_count}
+                                </span>
+                              </div>
+                              <div>
+                                Support:{' '}
+                                <span className="text-white">
+                                  {pattern.support_count} / {pattern.sample_count}
+                                </span>
+                              </div>
+                              <div>
+                                Avg PnL:{' '}
+                                <span
+                                  className={
+                                    pattern.avg_pnl >= 0
+                                      ? 'text-emerald-300'
+                                      : 'text-rose-300'
+                                  }
+                                >
+                                  {formatMoney(pattern.avg_pnl)} /{' '}
+                                  {formatPct(pattern.avg_pnl_pct)}
+                                </span>
+                              </div>
+                              <div>
+                                Lift:{' '}
+                                <span
+                                  className={
+                                    pattern.lift_avg_pnl_pct >= 0
+                                      ? 'text-emerald-300'
+                                      : 'text-rose-300'
+                                  }
+                                >
+                                  {formatPct(pattern.lift_avg_pnl_pct)}
+                                </span>
+                              </div>
+                              <div>
+                                Confidence:{' '}
+                                <span className="text-white">
+                                  {formatPct((pattern.confidence_score || 0) * 100)}
+                                </span>
+                              </div>
+                            </div>
+
+                            <div className="grid grid-cols-2 md:grid-cols-5 gap-3 text-xs">
+                              <div>
+                                Train / holdout:{' '}
+                                <span className="text-white">
+                                  {pattern.training_sample_count || 0} /{' '}
+                                  {pattern.validation_sample_count || 0}
+                                </span>
+                              </div>
+                              <div>
+                                Holdout support:{' '}
+                                <span className="text-white">
+                                  {pattern.validation_support_count || 0} /{' '}
+                                  {pattern.validation_sample_count || 0}
+                                </span>
+                              </div>
+                              <div>
+                                Recent support:{' '}
+                                <span className="text-white">
+                                  {pattern.recent_support_count || 0} /{' '}
+                                  {pattern.recent_sample_count || 0}
+                                </span>
+                              </div>
+                              <div>
+                                Drift:{' '}
+                                <span
+                                  className={
+                                    (pattern.drift_score || 0) >= 0.5
+                                      ? 'text-amber-300'
+                                      : 'text-white'
+                                  }
+                                >
+                                  {formatPct((pattern.drift_score || 0) * 100)}
+                                </span>
+                              </div>
+                              <div>
+                                Recency:{' '}
+                                <span className="text-white">
+                                  {formatPct((pattern.recency_weight || 0) * 100)}
+                                </span>
+                              </div>
+                            </div>
+
+                            <div className="grid grid-cols-2 md:grid-cols-5 gap-3 text-xs">
+                              <div>
+                                Stability:{' '}
+                                <span className="text-white">
+                                  {formatPct((pattern.stability_score || 0) * 100)}
+                                </span>
+                              </div>
+                              <div>
+                                Composite:{' '}
+                                <span className="text-white">
+                                  {formatPct((pattern.composite_score || 0) * 100)}
+                                </span>
+                              </div>
+                              <div>
+                                False-positive:{' '}
+                                <span className="text-rose-300">
+                                  {formatPct((pattern.false_positive_score || 0) * 100)}
+                                </span>
+                              </div>
+                              <div>
+                                Reverse-risk:{' '}
+                                <span className="text-amber-300">
+                                  {formatPct((pattern.reverse_risk_score || 0) * 100)}
+                                </span>
+                              </div>
+                              <div>
+                                Avg hold:{' '}
+                                <span className="text-white">
+                                  {formatHold(pattern.avg_hold_ms || 0)}
+                                </span>
+                              </div>
+                            </div>
+
+                            {pattern.evidence && pattern.evidence.length > 0 && (
+                              <div className="space-y-2">
+                                <div className="text-xs uppercase tracking-[0.2em] text-nofx-text-muted">
+                                  Evidence
+                                </div>
+                                <div className="space-y-2">
+                                  {pattern.evidence.map((evidence) => (
+                                    <div
+                                      key={`${pattern.id}-${evidence.case_id}`}
+                                      className="rounded-lg border border-white/10 bg-black/20 px-3 py-2 flex flex-wrap items-center justify-between gap-3"
+                                    >
+                                      <div className="text-xs text-nofx-text-muted">
+                                        <span className="text-white">
+                                          {evidence.symbol} · {evidence.side}
+                                        </span>{' '}
+                                        · {evidence.outcome || '-'} ·{' '}
+                                        {formatMoney(evidence.realized_pnl)} /{' '}
+                                        {formatPct(evidence.realized_pnl_pct)} ·{' '}
+                                        {formatHold(evidence.hold_duration_ms || 0)}
+                                      </div>
+                                      <button
+                                        onClick={() =>
+                                          setSelectedCaseId(evidence.case_id)
+                                        }
+                                        className="h-8 px-3 rounded-lg border border-white/10 bg-black/20 text-xs"
+                                      >
+                                        Focus evidence
+                                      </button>
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        ))}
                       </div>
                     )}
                   </div>
@@ -4608,6 +5819,1263 @@ export function DealReviewPage({
                 </div>
               ) : (
                 <div className="space-y-4 mt-4">
+                  <div>
+                    <div className="text-xs uppercase tracking-[0.2em] text-nofx-text-muted mb-2">
+                      Learned symbol priors
+                    </div>
+                    <div className="space-y-3">
+                      {(symbolBehaviorLiveGuardStatus ||
+                        symbolBehaviorLiveGuardEvents.length > 0) && (
+                        <div className="rounded-lg border border-white/10 bg-black/20 px-3 py-3 space-y-3">
+                          <div className="flex flex-wrap items-start justify-between gap-3">
+                            <div>
+                              <div className="text-xs uppercase tracking-[0.2em] text-nofx-text-muted">
+                                Live guard
+                              </div>
+                              <div className="text-sm mt-1">
+                                {symbolBehaviorLiveGuardStatus?.strategy_name ||
+                                  'Strategy config'}
+                              </div>
+                              <div className="text-xs text-nofx-text-muted mt-1">
+                                {symbolBehaviorLiveGuardStatus?.config.enabled
+                                  ? 'Live symbol-prior gating is active for this trader.'
+                                  : 'Live symbol-prior gating is currently disabled for this trader.'}
+                              </div>
+                            </div>
+                            <div className="flex flex-wrap items-center gap-2">
+                              <span
+                                className={`px-2 py-1 rounded-full text-[11px] border ${
+                                  symbolBehaviorLiveGuardStatus?.config.enabled
+                                    ? 'border-emerald-400/20 bg-emerald-500/10 text-emerald-200'
+                                    : 'border-white/10 bg-white/5 text-white'
+                                }`}
+                              >
+                                {symbolBehaviorLiveGuardStatus?.config.enabled
+                                  ? 'Enabled'
+                                  : 'Disabled'}
+                              </span>
+                              {symbolBehaviorLiveGuardStatus?.config.mode && (
+                                <span className="px-2 py-1 rounded-full text-[11px] border border-sky-400/20 bg-sky-500/10 text-sky-200">
+                                  {formatSymbolBehaviorLiveGuardMode(
+                                    symbolBehaviorLiveGuardStatus.config.mode
+                                  )}
+                                </span>
+                              )}
+                            </div>
+                          </div>
+
+                          {symbolBehaviorLiveGuardSummary && (
+                            <div className="grid grid-cols-2 xl:grid-cols-5 gap-3 text-xs">
+                              <div className="rounded-lg border border-white/10 bg-black/20 px-3 py-3">
+                                <div className="text-nofx-text-muted">Recent checks</div>
+                                <div className="text-lg font-semibold mt-1">
+                                  {symbolBehaviorLiveGuardSummary.total_visible || 0}
+                                </div>
+                              </div>
+                              <div className="rounded-lg border border-rose-400/15 bg-rose-500/5 px-3 py-3">
+                                <div className="text-nofx-text-muted">Hard blocked</div>
+                                <div className="text-lg font-semibold mt-1 text-rose-300">
+                                  {symbolBehaviorLiveGuardSummary.hard_blocked_count || 0}
+                                </div>
+                              </div>
+                              <div className="rounded-lg border border-amber-400/15 bg-amber-500/5 px-3 py-3">
+                                <div className="text-nofx-text-muted">Monitor only</div>
+                                <div className="text-lg font-semibold mt-1 text-amber-200">
+                                  {symbolBehaviorLiveGuardSummary.monitor_only_count || 0}
+                                </div>
+                              </div>
+                              <div className="rounded-lg border border-sky-400/15 bg-sky-500/5 px-3 py-3">
+                                <div className="text-nofx-text-muted">
+                                  Matched, not qualified
+                                </div>
+                                <div className="text-lg font-semibold mt-1 text-sky-200">
+                                  {symbolBehaviorLiveGuardSummary.matched_unqualified_count ||
+                                    0}
+                                </div>
+                              </div>
+                              <div className="rounded-lg border border-white/10 bg-white/5 px-3 py-3">
+                                <div className="text-nofx-text-muted">Last check</div>
+                                <div className="text-xs font-medium mt-1">
+                                  {formatTimestampLabel(
+                                    symbolBehaviorLiveGuardSummary.latest_decision_timestamp
+                                  )}
+                                </div>
+                              </div>
+                            </div>
+                          )}
+
+                          {symbolBehaviorLiveGuardStatus?.config.enabled && (
+                            <div className="rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-xs text-nofx-text-muted">
+                              Thresholds: confidence ≥{' '}
+                              {formatPct(
+                                (symbolBehaviorLiveGuardStatus.config
+                                  .min_confidence_score || 0) * 100
+                              )}{' '}
+                              · samples ≥{' '}
+                              {symbolBehaviorLiveGuardStatus.config.min_sample_count || 0}{' '}
+                              · match ≥{' '}
+                              {formatPct(
+                                (symbolBehaviorLiveGuardStatus.config.min_match_score || 0) *
+                                  100
+                              )}{' '}
+                              · contradiction ≥{' '}
+                              {formatPct(
+                                (symbolBehaviorLiveGuardStatus.config
+                                  .min_contradiction_score || 0) * 100
+                              )}{' '}
+                              · FP ≤{' '}
+                              {formatPct(
+                                (symbolBehaviorLiveGuardStatus.config
+                                  .max_false_positive_score || 0) * 100
+                              )}{' '}
+                              · drift ≤{' '}
+                              {formatPct(
+                                (symbolBehaviorLiveGuardStatus.config.max_drift_score || 0) *
+                                  100
+                              )}
+                            </div>
+                          )}
+
+                          {symbolBehaviorLiveGuardEvents.length === 0 ? (
+                            <div className="text-sm text-nofx-text-muted">
+                              No live guard evaluations recorded yet for this trader
+                              slice. The panel will populate once the trader reaches
+                              new open-decision checks.
+                            </div>
+                          ) : (
+                            <div className="space-y-2">
+                              {symbolBehaviorLiveGuardEvents.map((event) => (
+                                <div
+                                  key={event.id}
+                                  className={`rounded-lg border bg-black/20 px-3 py-3 ${
+                                    event.matched_prior_id &&
+                                    selectedSymbolPriorId === event.matched_prior_id
+                                      ? 'border-nofx-gold/40 ring-1 ring-nofx-gold/20'
+                                      : 'border-white/10'
+                                  }`}
+                                >
+                                  <div className="flex flex-wrap items-start justify-between gap-3">
+                                    <div>
+                                      <div className="flex flex-wrap items-center gap-2">
+                                        <div className="font-medium">
+                                          {event.symbol} · {event.side}
+                                        </div>
+                                        <span
+                                          className={`px-2 py-1 rounded-full text-[11px] border ${symbolBehaviorLiveGuardEffectClasses(
+                                            event.effect
+                                          )}`}
+                                        >
+                                          {formatSymbolBehaviorLiveGuardEffect(event.effect)}
+                                        </span>
+                                        {event.policy_mode && (
+                                          <span className="px-2 py-1 rounded-full text-[11px] border border-white/10 bg-white/5 text-white">
+                                            {formatSymbolBehaviorLiveGuardMode(
+                                              event.policy_mode
+                                            )}
+                                          </span>
+                                        )}
+                                      </div>
+                                      <div className="text-xs text-nofx-text-muted mt-1">
+                                        {event.action || 'open'} · cycle{' '}
+                                        {event.cycle_number || '-'} ·{' '}
+                                        {event.selection_bucket || 'unknown'} ·{' '}
+                                        {event.trend_regime || 'unknown'} /{' '}
+                                        {event.volatility_regime || 'unknown'} /{' '}
+                                        {event.oi_regime || 'unknown'}
+                                      </div>
+                                    </div>
+                                    <div className="text-right text-xs text-nofx-text-muted">
+                                      <div>{formatTimestampLabel(event.decision_timestamp)}</div>
+                                      <div className="mt-1">
+                                        match {formatPct((event.match_score || 0) * 100)}
+                                      </div>
+                                      <div className="mt-1">
+                                        conf {event.decision_confidence || 0}%
+                                      </div>
+                                    </div>
+                                  </div>
+
+                                  <div className="text-sm text-nofx-text-muted mt-2">
+                                    {event.summary || event.block_reason || 'No summary stored'}
+                                  </div>
+
+                                  {event.matched_prior_key && (
+                                    <div className="text-xs text-nofx-text-muted mt-2">
+                                      Prior: {event.matched_prior_key}
+                                      {event.matched_prior_validation_label
+                                        ? ` · ${formatSymbolBehaviorValidationLabel(
+                                            event.matched_prior_validation_label
+                                          )}`
+                                        : ''}
+                                    </div>
+                                  )}
+
+                                  <div className="flex flex-wrap gap-2 mt-3">
+                                    {event.matched_prior_id && (
+                                      <button
+                                        onClick={() =>
+                                          setSelectedSymbolPriorId(event.matched_prior_id || null)
+                                        }
+                                        className="px-2.5 py-1 rounded-lg border border-white/10 bg-white/5 text-xs font-medium"
+                                      >
+                                        Focus prior
+                                      </button>
+                                    )}
+                                    <button
+                                      onClick={() =>
+                                        applyDrilldownFilters(
+                                          {
+                                            symbol: event.symbol,
+                                            side: event.side,
+                                          },
+                                          `Filtered review to live guard event ${event.symbol} ${event.side}.`
+                                        )
+                                      }
+                                      className="px-2.5 py-1 rounded-lg border border-white/10 bg-white/5 text-xs font-medium"
+                                    >
+                                      Filter deals
+                                    </button>
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      )}
+
+                      {symbolBehaviorPriorSummary && (
+                        <div className="grid grid-cols-2 xl:grid-cols-5 gap-3 text-xs">
+                          <div className="rounded-lg border border-white/10 bg-black/20 px-3 py-3">
+                            <div className="text-nofx-text-muted">Tracked priors</div>
+                            <div className="text-lg font-semibold mt-1">
+                              {symbolBehaviorPriorSummary.total_count || 0}
+                            </div>
+                          </div>
+                          <div className="rounded-lg border border-emerald-400/15 bg-emerald-500/5 px-3 py-3">
+                            <div className="text-nofx-text-muted">Confirmed</div>
+                            <div className="text-lg font-semibold mt-1 text-emerald-300">
+                              {symbolBehaviorPriorSummary.confirmed_count || 0}
+                            </div>
+                          </div>
+                          <div className="rounded-lg border border-rose-400/15 bg-rose-500/5 px-3 py-3">
+                            <div className="text-nofx-text-muted">False positives</div>
+                            <div className="text-lg font-semibold mt-1 text-rose-300">
+                              {symbolBehaviorPriorSummary.false_positive_count || 0}
+                            </div>
+                          </div>
+                          <div className="rounded-lg border border-amber-400/15 bg-amber-500/5 px-3 py-3">
+                            <div className="text-nofx-text-muted">Reverse-edge risk</div>
+                            <div className="text-lg font-semibold mt-1 text-amber-300">
+                              {symbolBehaviorPriorSummary.false_negative_risk_count || 0}
+                            </div>
+                          </div>
+                          <div className="rounded-lg border border-orange-400/15 bg-orange-500/5 px-3 py-3">
+                            <div className="text-nofx-text-muted">Drifting</div>
+                            <div className="text-lg font-semibold mt-1 text-orange-300">
+                              {symbolBehaviorPriorSummary.drifting_count || 0}
+                            </div>
+                          </div>
+                        </div>
+                      )}
+
+                      {symbolBehaviorPriorSummary?.notes &&
+                        symbolBehaviorPriorSummary.notes.length > 0 && (
+                          <div className="space-y-2">
+                            {symbolBehaviorPriorSummary.notes.map((note) => (
+                              <div
+                                key={`prior-note-${note}`}
+                                className="rounded-lg border border-amber-400/15 bg-amber-500/5 px-3 py-2 text-xs text-amber-100"
+                              >
+                                {note}
+                              </div>
+                            ))}
+                          </div>
+                        )}
+
+                      {symbolBehaviorPriorSummary?.top_signal_clusters &&
+                        symbolBehaviorPriorSummary.top_signal_clusters.length >
+                          0 && (
+                          <div className="rounded-lg border border-emerald-400/15 bg-emerald-500/5 px-3 py-3 space-y-3">
+                            <div className="flex flex-wrap items-center justify-between gap-3">
+                              <div className="text-xs uppercase tracking-[0.2em] text-emerald-200">
+                                Normalized Signal Clusters
+                              </div>
+                              {symbolBehaviorClusterFilter && (
+                                <button
+                                  onClick={() => setSymbolBehaviorClusterFilter('')}
+                                  className="px-2.5 py-1 rounded-lg border border-white/10 bg-black/20 text-xs font-medium"
+                                >
+                                  Clear cluster filter
+                                </button>
+                              )}
+                            </div>
+                            <div className="space-y-2">
+                              {symbolBehaviorPriorSummary.top_signal_clusters.map(
+                                (cluster) => (
+                                  <button
+                                    key={`cluster-rollup-${cluster.cluster_label}`}
+                                    onClick={() => {
+                                      setSymbolBehaviorClusterFilter(
+                                        cluster.cluster_label
+                                      )
+                                      setSymbolBehaviorPriorTab('all')
+                                      setSelectedSymbolPriorId(null)
+                                    }}
+                                    className={`w-full text-left rounded-lg border px-3 py-3 flex items-start justify-between gap-4 ${
+                                      symbolBehaviorClusterFilter ===
+                                      cluster.cluster_label
+                                        ? 'border-emerald-300/40 bg-emerald-500/10 ring-1 ring-emerald-300/20'
+                                        : 'border-white/10 bg-black/20'
+                                    }`}
+                                  >
+                                    <div>
+                                      <div className="flex flex-wrap items-center gap-2">
+                                        <span className="font-medium">
+                                          {cluster.cluster_label}
+                                        </span>
+                                        <span className="px-2 py-1 rounded-full text-[11px] border border-white/10 bg-white/5 text-white">
+                                          {cluster.prior_count} priors
+                                        </span>
+                                        <span className="px-2 py-1 rounded-full text-[11px] border border-white/10 bg-white/5 text-white">
+                                          {cluster.symbol_count} symbols
+                                        </span>
+                                      </div>
+                                      <div className="text-xs text-nofx-text-muted mt-1">
+                                        {cluster.sample_count} deals ·{' '}
+                                        {cluster.decision_open_count} decision
+                                        opens · confirmed {cluster.confirmed_count}{' '}
+                                        · FP {cluster.false_positive_count} · FN{' '}
+                                        {cluster.false_negative_risk_count} ·
+                                        drifting {cluster.drifting_count}
+                                      </div>
+                                      {cluster.top_symbols &&
+                                        cluster.top_symbols.length > 0 && (
+                                          <div className="flex flex-wrap gap-2 mt-2">
+                                            {cluster.top_symbols.map((symbol) => (
+                                              <span
+                                                key={`${cluster.cluster_label}-${symbol}`}
+                                                className="px-2 py-1 rounded-full text-[11px] border border-white/10 bg-white/5 text-white"
+                                              >
+                                                {symbol}
+                                              </span>
+                                            ))}
+                                          </div>
+                                        )}
+                                    </div>
+                                    <div className="text-right text-xs text-nofx-text-muted">
+                                      <div>
+                                        avg pnl{' '}
+                                        <span
+                                          className={
+                                            (cluster.avg_pnl_pct || 0) >= 0
+                                              ? 'text-emerald-300'
+                                              : 'text-rose-300'
+                                          }
+                                        >
+                                          {formatPct(cluster.avg_pnl_pct || 0)}
+                                        </span>
+                                      </div>
+                                      <div className="mt-1">
+                                        contradiction{' '}
+                                        {formatPct(
+                                          (cluster.avg_contradiction_score || 0) *
+                                            100
+                                        )}
+                                      </div>
+                                      <div className="mt-1">
+                                        support{' '}
+                                        {formatPct(
+                                          (cluster.avg_validation_support_score ||
+                                            0) * 100
+                                        )}
+                                      </div>
+                                    </div>
+                                  </button>
+                                )
+                              )}
+                            </div>
+                          </div>
+                        )}
+
+                      {symbolBehaviorPriorSummary?.top_false_positives &&
+                        symbolBehaviorPriorSummary.top_false_positives.length >
+                          0 && (
+                          <div className="rounded-lg border border-rose-400/15 bg-rose-500/5 px-3 py-3 space-y-2">
+                            <div className="text-xs uppercase tracking-[0.2em] text-rose-200">
+                              Top False Positives
+                            </div>
+                            <div className="space-y-2">
+                              {symbolBehaviorPriorSummary.top_false_positives.map(
+                                (prior) => (
+                                  <button
+                                    key={`fp-${prior.id}`}
+                                    onClick={() => {
+                                      setSymbolBehaviorPriorTab('false_positive')
+                                      setSelectedSymbolPriorId(prior.id)
+                                    }}
+                                    className="w-full text-left rounded-lg border border-white/10 bg-black/20 px-3 py-2 flex items-start justify-between gap-3"
+                                  >
+                                    <div>
+                                      <div className="font-medium">
+                                        {prior.symbol} · {prior.side}
+                                      </div>
+                                      <div className="text-xs text-nofx-text-muted mt-1">
+                                        {prior.validation_alert ||
+                                          prior.validation_summary}
+                                      </div>
+                                    </div>
+                                    <div className="text-right text-xs text-rose-200">
+                                      FP {formatPct((prior.false_positive_score || 0) * 100)}
+                                    </div>
+                                  </button>
+                                )
+                              )}
+                            </div>
+                          </div>
+                        )}
+
+                      {symbolBehaviorPriorSummary?.top_false_negative_risks &&
+                        symbolBehaviorPriorSummary.top_false_negative_risks
+                          .length > 0 && (
+                          <div className="rounded-lg border border-amber-400/15 bg-amber-500/5 px-3 py-3 space-y-2">
+                            <div className="text-xs uppercase tracking-[0.2em] text-amber-200">
+                              Top Reverse-Edge Risks
+                            </div>
+                            <div className="space-y-2">
+                              {symbolBehaviorPriorSummary.top_false_negative_risks.map(
+                                (prior) => (
+                                  <button
+                                    key={`fn-${prior.id}`}
+                                    onClick={() => {
+                                      setSymbolBehaviorPriorTab('false_negative_risk')
+                                      setSelectedSymbolPriorId(prior.id)
+                                    }}
+                                    className="w-full text-left rounded-lg border border-white/10 bg-black/20 px-3 py-2 flex items-start justify-between gap-3"
+                                  >
+                                    <div>
+                                      <div className="font-medium">
+                                        {prior.symbol} · {prior.side}
+                                      </div>
+                                      <div className="text-xs text-nofx-text-muted mt-1">
+                                        {prior.validation_alert ||
+                                          prior.validation_summary}
+                                      </div>
+                                    </div>
+                                    <div className="text-right text-xs text-amber-200">
+                                      FN {formatPct((prior.false_negative_score || 0) * 100)}
+                                    </div>
+                                  </button>
+                                )
+                              )}
+                            </div>
+                          </div>
+                        )}
+
+                      <div className="space-y-2">
+                        <div className="flex flex-wrap items-center gap-2">
+                          {symbolBehaviorPriorTabs.map((tab) => (
+                            <button
+                              key={`symbol-prior-tab-${tab.value}`}
+                              onClick={() => setSymbolBehaviorPriorTab(tab.value)}
+                              className={symbolBehaviorTabClasses(
+                                tab.value,
+                                symbolBehaviorPriorTab === tab.value
+                              )}
+                            >
+                              <span>{tab.label}</span>
+                              <span className="rounded-full bg-black/20 px-2 py-0.5 text-[11px]">
+                                {tab.count}
+                              </span>
+                            </button>
+                          ))}
+                        </div>
+                        <div className="text-xs text-nofx-text-muted">
+                          {symbolBehaviorClusterFilter
+                            ? `Cluster filter active: ${symbolBehaviorClusterFilter}. `
+                            : ''}
+                          {symbolBehaviorPriorTab === 'all'
+                            ? `Showing ${visibleSymbolBehaviorPriors.length} of ${symbolBehaviorPriorTabCounts.all} priors in this trader slice.`
+                            : `Showing ${visibleSymbolBehaviorPriors.length} of ${
+                                symbolBehaviorPriorTabCounts[symbolBehaviorPriorTab]
+                              } ${formatSymbolBehaviorValidationLabel(
+                                symbolBehaviorPriorTab
+                              ).toLowerCase()} priors.`}
+                        </div>
+                      </div>
+
+                      {symbolBehaviorPriors.length === 0 ? (
+                        <div className="text-sm text-nofx-text-muted">
+                          No symbol priors available yet for this trader slice.
+                        </div>
+                      ) : visibleSymbolBehaviorPriors.length === 0 ? (
+                        <div className="rounded-lg border border-white/10 bg-black/20 px-3 py-3 text-sm text-nofx-text-muted flex items-center justify-between gap-3">
+                          <div>
+                            No{' '}
+                            {formatSymbolBehaviorValidationLabel(
+                              symbolBehaviorPriorTab
+                            ).toLowerCase()}{' '}
+                            priors matched the current trader slice.
+                          </div>
+                          <button
+                            onClick={() => setSymbolBehaviorPriorTab('all')}
+                            className="px-2.5 py-1 rounded-lg border border-white/10 bg-white/5 text-xs font-medium"
+                          >
+                            Show all
+                          </button>
+                        </div>
+                      ) : (
+                        visibleSymbolBehaviorPriors.map((prior) => (
+                          <div
+                            key={prior.id}
+                            className={`rounded-lg border bg-black/20 px-3 py-3 flex items-start justify-between gap-4 ${
+                              selectedSymbolPriorId === prior.id
+                                ? 'border-nofx-gold/40 ring-1 ring-nofx-gold/20'
+                                : 'border-white/10'
+                            }`}
+                          >
+                            <div>
+                              <div className="flex flex-wrap items-center gap-2">
+                                <div className="font-medium">
+                                  {prior.symbol} · {prior.side}
+                                </div>
+                                <span
+                                  className={`px-2 py-1 rounded-full text-[11px] border ${symbolBehaviorToneClasses(
+                                    prior.behavior_bias
+                                  )}`}
+                                >
+                                  {prior.behavior_bias || 'mixed'}
+                                </span>
+                                <span className="px-2 py-1 rounded-full text-[11px] border border-white/10 bg-white/5 text-white">
+                                  {prior.status}
+                                </span>
+                                <span
+                                  className={`px-2 py-1 rounded-full text-[11px] border ${symbolBehaviorValidationClasses(
+                                    prior.validation_label
+                                  )}`}
+                                >
+                                  {formatSymbolBehaviorValidationLabel(
+                                    prior.validation_label
+                                  )}
+                                </span>
+                              </div>
+                              <div className="text-xs text-nofx-text-muted mt-1">
+                                {prior.regime_signature}
+                              </div>
+                              <div className="text-sm text-nofx-text-muted mt-2">
+                                {prior.summary}
+                              </div>
+                              {prior.validation_alert && (
+                                <div className="text-xs text-nofx-text-muted mt-2">
+                                  {prior.validation_alert}
+                                </div>
+                              )}
+                              <div className="text-xs text-nofx-text-muted mt-2">
+                                {prior.decision_open_count || 0} opens across{' '}
+                                {prior.decision_cycle_count || 0} cycles · avg
+                                decision conf{' '}
+                                {formatPct(prior.avg_decision_confidence || 0)} ·
+                                contradiction{' '}
+                                {formatPct((prior.contradiction_score || 0) * 100)}
+                              </div>
+                              {prior.signal_cluster_key && (
+                                <div className="text-xs text-nofx-text-muted mt-2">
+                                  Normalized cluster:{' '}
+                                  <span className="text-white">
+                                    {prior.signal_cluster_key}
+                                  </span>
+                                </div>
+                              )}
+                              {prior.signal_clusters &&
+                                prior.signal_clusters.length > 0 && (
+                                  <div className="flex flex-wrap gap-2 mt-2">
+                                    {prior.signal_clusters
+                                      .slice(0, 6)
+                                      .map((cluster) => (
+                                        <span
+                                          key={`${prior.id}-top-cluster-${cluster}`}
+                                          className="px-2 py-1 rounded-full text-[11px] border border-emerald-400/20 bg-emerald-500/10 text-emerald-200"
+                                        >
+                                          {cluster}
+                                        </span>
+                                      ))}
+                                  </div>
+                                )}
+                              {prior.signal_tags && prior.signal_tags.length > 0 && (
+                                <div className="flex flex-wrap gap-2 mt-2">
+                                  {prior.signal_tags.slice(0, 5).map((tag) => (
+                                    <span
+                                      key={`${prior.id}-top-signal-${tag}`}
+                                      className="px-2 py-1 rounded-full text-[11px] border border-sky-400/20 bg-sky-500/10 text-sky-200"
+                                    >
+                                      {tag}
+                                    </span>
+                                  ))}
+                                </div>
+                              )}
+                              <div className="flex flex-wrap gap-2 mt-3">
+                                <button
+                                  onClick={() =>
+                                    applyDrilldownFilters(
+                                      {
+                                        symbol: prior.symbol,
+                                        side: prior.side,
+                                        status: 'CLOSED',
+                                        open_selection_bucket:
+                                          prior.open_selection_bucket || undefined,
+                                        open_trend_regime:
+                                          prior.open_trend_regime || undefined,
+                                        open_volatility_regime:
+                                          prior.open_volatility_regime || undefined,
+                                        open_oi_regime:
+                                          prior.open_oi_regime || undefined,
+                                      },
+                                      `Filtered deals to learned prior ${prior.symbol} ${prior.side}.`
+                                    )
+                                  }
+                                  className="px-2.5 py-1 rounded-lg border border-white/10 bg-white/5 text-xs font-medium"
+                                >
+                                  Filter
+                                </button>
+                                <button
+                                  onClick={() =>
+                                    void runAIScan(
+                                      {
+                                        symbol: prior.symbol,
+                                        side: prior.side,
+                                        status: 'CLOSED',
+                                        open_selection_bucket:
+                                          prior.open_selection_bucket || undefined,
+                                        open_trend_regime:
+                                          prior.open_trend_regime || undefined,
+                                        open_volatility_regime:
+                                          prior.open_volatility_regime || undefined,
+                                        open_oi_regime:
+                                          prior.open_oi_regime || undefined,
+                                      },
+                                      `AI scan started for learned prior ${prior.symbol} ${prior.side}.`
+                                    )
+                                  }
+                                  disabled={
+                                    !selectedTraderId ||
+                                    runningScan ||
+                                    items.length === 0
+                                  }
+                                  className="px-2.5 py-1 rounded-lg border border-nofx-gold/30 bg-nofx-gold/10 text-nofx-gold text-xs font-medium disabled:opacity-50"
+                                >
+                                  Scan this prior
+                                </button>
+                              </div>
+                            </div>
+                            <div className="text-right text-sm">
+                              <div
+                                className={
+                                  prior.avg_pnl >= 0
+                                    ? 'font-semibold text-emerald-400'
+                                    : 'font-semibold text-rose-400'
+                                }
+                              >
+                                {formatMoney(prior.avg_pnl)} /{' '}
+                                {formatPct(prior.avg_pnl_pct)}
+                              </div>
+                              <div className="text-xs text-nofx-text-muted mt-2">
+                                {prior.sample_count} deals · {formatPct(prior.win_rate * 100)} win
+                              </div>
+                              <div className="text-xs text-nofx-text-muted mt-1">
+                                Holdout {prior.validation_support_count || 0}/
+                                {prior.validation_sample_count || 0} · drift{' '}
+                                {formatPct((prior.drift_score || 0) * 100)}
+                              </div>
+                              <div className="text-xs text-nofx-text-muted mt-1">
+                                FP {formatPct((prior.false_positive_score || 0) * 100)} · FN{' '}
+                                {formatPct((prior.false_negative_score || 0) * 100)}
+                              </div>
+                              <div className="text-xs text-nofx-text-muted mt-1">
+                                {formatSymbolBehaviorAction(prior.recommended_action)}
+                              </div>
+                            </div>
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  </div>
+
+                  <div>
+                    <div className="text-xs uppercase tracking-[0.2em] text-nofx-text-muted mb-2">
+                      Learned patterns
+                    </div>
+                    {!learnedPatternSummary ? (
+                      <div className="text-sm text-nofx-text-muted">
+                        No learned pattern data available yet for this trader slice.
+                      </div>
+                    ) : (
+                      <div className="space-y-3">
+                        <div className="grid grid-cols-2 xl:grid-cols-5 gap-3 text-xs">
+                          <div className="rounded-lg border border-white/10 bg-black/20 px-3 py-3">
+                            <div className="text-nofx-text-muted">Tracked patterns</div>
+                            <div className="text-lg font-semibold mt-1">
+                              {learnedPatternSummary.total_count || 0}
+                            </div>
+                          </div>
+                          <div className="rounded-lg border border-emerald-400/15 bg-emerald-500/5 px-3 py-3">
+                            <div className="text-nofx-text-muted">Positive edges</div>
+                            <div className="text-lg font-semibold mt-1 text-emerald-300">
+                              {learnedPatternSummary.positive_count || 0}
+                            </div>
+                          </div>
+                          <div className="rounded-lg border border-rose-400/15 bg-rose-500/5 px-3 py-3">
+                            <div className="text-nofx-text-muted">Anti-edges</div>
+                            <div className="text-lg font-semibold mt-1 text-rose-300">
+                              {learnedPatternSummary.negative_count || 0}
+                            </div>
+                          </div>
+                          <div className="rounded-lg border border-sky-400/15 bg-sky-500/5 px-3 py-3">
+                            <div className="text-nofx-text-muted">Confirmed</div>
+                            <div className="text-lg font-semibold mt-1 text-sky-200">
+                              {learnedPatternSummary.confirmed_count || 0}
+                            </div>
+                          </div>
+                          <div className="rounded-lg border border-amber-400/15 bg-amber-500/5 px-3 py-3">
+                            <div className="text-nofx-text-muted">Reverse / drifting</div>
+                            <div className="text-lg font-semibold mt-1 text-amber-200">
+                              {(learnedPatternSummary.reverse_risk_count || 0) +
+                                (learnedPatternSummary.drifting_count || 0)}
+                            </div>
+                          </div>
+                        </div>
+
+                        {learnedPatternSummary.notes &&
+                          learnedPatternSummary.notes.length > 0 && (
+                            <div className="space-y-2">
+                              {learnedPatternSummary.notes.map((note) => (
+                                <div
+                                  key={`learned-pattern-note-${note}`}
+                                  className="rounded-lg border border-sky-400/15 bg-sky-500/5 px-3 py-2 text-xs text-sky-100"
+                                >
+                                  {note}
+                                </div>
+                              ))}
+                            </div>
+                          )}
+
+                        {(learnedPatternLiveGuardStatus ||
+                          learnedPatternLiveGuardEvents.length > 0) && (
+                          <div className="rounded-lg border border-white/10 bg-black/20 px-3 py-3 space-y-3">
+                            <div className="flex flex-wrap items-start justify-between gap-3">
+                              <div>
+                                <div className="text-xs uppercase tracking-[0.2em] text-nofx-text-muted">
+                                  Live guard
+                                </div>
+                                <div className="text-sm mt-1">
+                                  {learnedPatternLiveGuardStatus?.strategy_name ||
+                                    'Strategy config'}
+                                </div>
+                                <div className="text-xs text-nofx-text-muted mt-1">
+                                  {learnedPatternLiveGuardStatus?.config.enabled
+                                    ? 'Live learned-pattern gating is active for this trader.'
+                                    : 'Live learned-pattern gating is currently disabled for this trader.'}
+                                </div>
+                              </div>
+                              <div className="flex flex-wrap items-center gap-2">
+                                <span
+                                  className={`px-2 py-1 rounded-full text-[11px] border ${
+                                    learnedPatternLiveGuardStatus?.config.enabled
+                                      ? 'border-emerald-400/20 bg-emerald-500/10 text-emerald-200'
+                                      : 'border-white/10 bg-white/5 text-white'
+                                  }`}
+                                >
+                                  {learnedPatternLiveGuardStatus?.config.enabled
+                                    ? 'Enabled'
+                                    : 'Disabled'}
+                                </span>
+                                {learnedPatternLiveGuardStatus?.config.mode && (
+                                  <span className="px-2 py-1 rounded-full text-[11px] border border-sky-400/20 bg-sky-500/10 text-sky-200">
+                                    {formatSymbolBehaviorLiveGuardMode(
+                                      learnedPatternLiveGuardStatus.config.mode
+                                    )}
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+
+                            {learnedPatternLiveGuardSummary && (
+                              <div className="grid grid-cols-2 xl:grid-cols-5 gap-3 text-xs">
+                                <div className="rounded-lg border border-white/10 bg-black/20 px-3 py-3">
+                                  <div className="text-nofx-text-muted">Recent checks</div>
+                                  <div className="text-lg font-semibold mt-1">
+                                    {learnedPatternLiveGuardSummary.total_visible || 0}
+                                  </div>
+                                </div>
+                                <div className="rounded-lg border border-rose-400/15 bg-rose-500/5 px-3 py-3">
+                                  <div className="text-nofx-text-muted">Hard blocked</div>
+                                  <div className="text-lg font-semibold mt-1 text-rose-300">
+                                    {learnedPatternLiveGuardSummary.hard_blocked_count || 0}
+                                  </div>
+                                </div>
+                                <div className="rounded-lg border border-amber-400/15 bg-amber-500/5 px-3 py-3">
+                                  <div className="text-nofx-text-muted">Monitor only</div>
+                                  <div className="text-lg font-semibold mt-1 text-amber-200">
+                                    {learnedPatternLiveGuardSummary.monitor_only_count || 0}
+                                  </div>
+                                </div>
+                                <div className="rounded-lg border border-sky-400/15 bg-sky-500/5 px-3 py-3">
+                                  <div className="text-nofx-text-muted">
+                                    Matched, not qualified
+                                  </div>
+                                  <div className="text-lg font-semibold mt-1 text-sky-200">
+                                    {learnedPatternLiveGuardSummary.matched_unqualified_count ||
+                                      0}
+                                  </div>
+                                </div>
+                                <div className="rounded-lg border border-white/10 bg-white/5 px-3 py-3">
+                                  <div className="text-nofx-text-muted">Last check</div>
+                                  <div className="text-xs font-medium mt-1">
+                                    {formatTimestampLabel(
+                                      learnedPatternLiveGuardSummary.latest_decision_timestamp
+                                    )}
+                                  </div>
+                                </div>
+                              </div>
+                            )}
+
+                            {learnedPatternLiveGuardStatus?.config.enabled && (
+                              <div className="rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-xs text-nofx-text-muted">
+                                Thresholds: composite ≥{' '}
+                                {formatPct(
+                                  (learnedPatternLiveGuardStatus.config
+                                    .min_composite_score || 0) * 100
+                                )}{' '}
+                                · confidence ≥{' '}
+                                {formatPct(
+                                  (learnedPatternLiveGuardStatus.config
+                                    .min_confidence_score || 0) * 100
+                                )}{' '}
+                                · validation support ≥{' '}
+                                {formatPct(
+                                  (learnedPatternLiveGuardStatus.config
+                                    .min_validation_support_score || 0) * 100
+                                )}{' '}
+                                · samples ≥{' '}
+                                {learnedPatternLiveGuardStatus.config.min_sample_count ||
+                                  0}{' '}
+                                · match ≥{' '}
+                                {formatPct(
+                                  (learnedPatternLiveGuardStatus.config
+                                    .min_match_score || 0) * 100
+                                )}{' '}
+                                · FP ≤{' '}
+                                {formatPct(
+                                  (learnedPatternLiveGuardStatus.config
+                                    .max_false_positive_score || 0) * 100
+                                )}{' '}
+                                · drift ≤{' '}
+                                {formatPct(
+                                  (learnedPatternLiveGuardStatus.config.max_drift_score ||
+                                    0) * 100
+                                )}
+                              </div>
+                            )}
+
+                            {learnedPatternLiveGuardEvents.length === 0 ? (
+                              <div className="text-sm text-nofx-text-muted">
+                                No learned-pattern live guard evaluations recorded yet
+                                for this trader slice. The panel will populate once
+                                the trader reaches new open-decision checks.
+                              </div>
+                            ) : (
+                              <div className="space-y-2">
+                                {learnedPatternLiveGuardEvents.map((event) => (
+                                  <div
+                                    key={event.id}
+                                    className="rounded-lg border border-white/10 bg-black/20 px-3 py-3"
+                                  >
+                                    <div className="flex flex-wrap items-start justify-between gap-3">
+                                      <div>
+                                        <div className="flex flex-wrap items-center gap-2">
+                                          <div className="font-medium">
+                                            {event.symbol} · {event.side}
+                                          </div>
+                                          <span
+                                            className={`px-2 py-1 rounded-full text-[11px] border ${symbolBehaviorLiveGuardEffectClasses(
+                                              event.effect
+                                            )}`}
+                                          >
+                                            {formatSymbolBehaviorLiveGuardEffect(
+                                              event.effect
+                                            )}
+                                          </span>
+                                          {event.policy_mode && (
+                                            <span className="px-2 py-1 rounded-full text-[11px] border border-white/10 bg-white/5 text-white">
+                                              {formatSymbolBehaviorLiveGuardMode(
+                                                event.policy_mode
+                                              )}
+                                            </span>
+                                          )}
+                                          {event.matched_pattern_class && (
+                                            <span
+                                              className={`px-2 py-1 rounded-full text-[11px] border ${learnedPatternClassClasses(
+                                                event.matched_pattern_class
+                                              )}`}
+                                            >
+                                              {formatLearnedPatternClass(
+                                                event.matched_pattern_class
+                                              )}
+                                            </span>
+                                          )}
+                                          {event.matched_pattern_validation_label && (
+                                            <span
+                                              className={`px-2 py-1 rounded-full text-[11px] border ${learnedPatternValidationClasses(
+                                                event.matched_pattern_validation_label
+                                              )}`}
+                                            >
+                                              {formatLearnedPatternValidationLabel(
+                                                event.matched_pattern_validation_label
+                                              )}
+                                            </span>
+                                          )}
+                                        </div>
+                                        <div className="text-xs text-nofx-text-muted mt-1">
+                                          {event.action || 'open'} · cycle{' '}
+                                          {event.cycle_number || '-'} ·{' '}
+                                          {event.selection_bucket || 'unknown'} ·{' '}
+                                          {event.trend_regime || 'unknown'} /{' '}
+                                          {event.volatility_regime || 'unknown'} /{' '}
+                                          {event.oi_regime || 'unknown'}
+                                        </div>
+                                      </div>
+                                      <div className="text-right text-xs text-nofx-text-muted">
+                                        <div>{formatTimestampLabel(event.decision_timestamp)}</div>
+                                        <div className="mt-1">
+                                          match {formatPct((event.match_score || 0) * 100)}
+                                        </div>
+                                        <div className="mt-1">
+                                          conf {event.decision_confidence || 0}%
+                                        </div>
+                                      </div>
+                                    </div>
+
+                                    <div className="text-sm text-nofx-text-muted mt-2">
+                                      {event.summary || 'No summary stored.'}
+                                    </div>
+
+                                    {(event.block_reason ||
+                                      event.matched_pattern_signature ||
+                                      event.matched_pattern_recommended_use) && (
+                                      <div className="flex flex-wrap items-center gap-2 mt-2 text-xs">
+                                        {event.matched_pattern_signature && (
+                                          <span className="rounded-full border border-white/10 bg-white/5 px-2 py-1">
+                                            {event.matched_pattern_signature}
+                                          </span>
+                                        )}
+                                        {event.matched_pattern_recommended_use && (
+                                          <span className="rounded-full border border-white/10 bg-white/5 px-2 py-1">
+                                            {formatLearnedPatternUse(
+                                              event.matched_pattern_recommended_use
+                                            )}
+                                          </span>
+                                        )}
+                                        {event.block_reason && (
+                                          <span className="text-rose-300">
+                                            Block reason: {event.block_reason}
+                                          </span>
+                                        )}
+                                      </div>
+                                    )}
+
+                                    <div className="flex flex-wrap gap-2 mt-3">
+                                      {event.matched_pattern_id && (
+                                        <button
+                                          onClick={() =>
+                                            openPatternLabWithFilters({
+                                              pattern_id: event.matched_pattern_id || '',
+                                              symbol: event.symbol || '',
+                                              side: event.side || '',
+                                            })
+                                          }
+                                          className="h-8 px-3 rounded-lg border border-white/10 bg-white/5 text-xs"
+                                        >
+                                          Open pattern
+                                        </button>
+                                      )}
+                                      <button
+                                        onClick={() => {
+                                          if (event.symbol) setSymbol(event.symbol)
+                                          if (event.side) setSide(event.side)
+                                        }}
+                                        className="h-8 px-3 rounded-lg border border-white/10 bg-white/5 text-xs"
+                                      >
+                                        Filter review to this setup
+                                      </button>
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        )}
+
+                        <div className="grid xl:grid-cols-2 gap-3">
+                          <div className="rounded-lg border border-emerald-400/15 bg-emerald-500/5 px-3 py-3 space-y-2">
+                            <div className="text-xs uppercase tracking-[0.2em] text-emerald-200">
+                              Top Positive Patterns
+                            </div>
+                            {!learnedPatternSummary.top_positive_patterns ||
+                            learnedPatternSummary.top_positive_patterns.length === 0 ? (
+                              <div className="text-sm text-nofx-text-muted">
+                                No positive patterns surfaced yet.
+                              </div>
+                            ) : (
+                              learnedPatternSummary.top_positive_patterns.map((pattern) => (
+                                <div
+                                  key={`learned-pattern-positive-${pattern.id}`}
+                                  className="rounded-lg border border-white/10 bg-black/20 px-3 py-3"
+                                >
+                                  <div className="flex flex-wrap items-center gap-2">
+                                    <span className="font-medium">
+                                      {pattern.pattern_signature}
+                                    </span>
+                                    <span className="px-2 py-1 rounded-full text-[11px] border border-white/10 bg-white/5 text-white">
+                                      {formatLearnedPatternScope(pattern)}
+                                    </span>
+                                    <span
+                                      className={`px-2 py-1 rounded-full text-[11px] border ${learnedPatternValidationClasses(
+                                        pattern.validation_label
+                                      )}`}
+                                    >
+                                      {formatLearnedPatternValidationLabel(
+                                        pattern.validation_label
+                                      )}
+                                    </span>
+                                  </div>
+                                  <div className="text-xs text-nofx-text-muted mt-1">
+                                    {pattern.sample_count} deals · avg{' '}
+                                    {formatPct(pattern.avg_pnl_pct)} · lift{' '}
+                                    {formatPct(pattern.lift_avg_pnl_pct)}
+                                  </div>
+                                </div>
+                              ))
+                            )}
+                          </div>
+
+                          <div className="rounded-lg border border-rose-400/15 bg-rose-500/5 px-3 py-3 space-y-2">
+                            <div className="text-xs uppercase tracking-[0.2em] text-rose-200">
+                              Top Anti-Patterns
+                            </div>
+                            {!learnedPatternSummary.top_negative_patterns ||
+                            learnedPatternSummary.top_negative_patterns.length === 0 ? (
+                              <div className="text-sm text-nofx-text-muted">
+                                No anti-patterns surfaced yet.
+                              </div>
+                            ) : (
+                              learnedPatternSummary.top_negative_patterns.map((pattern) => (
+                                <div
+                                  key={`learned-pattern-negative-${pattern.id}`}
+                                  className="rounded-lg border border-white/10 bg-black/20 px-3 py-3"
+                                >
+                                  <div className="flex flex-wrap items-center gap-2">
+                                    <span className="font-medium">
+                                      {pattern.pattern_signature}
+                                    </span>
+                                    <span className="px-2 py-1 rounded-full text-[11px] border border-white/10 bg-white/5 text-white">
+                                      {formatLearnedPatternScope(pattern)}
+                                    </span>
+                                    <span
+                                      className={`px-2 py-1 rounded-full text-[11px] border ${learnedPatternValidationClasses(
+                                        pattern.validation_label
+                                      )}`}
+                                    >
+                                      {formatLearnedPatternValidationLabel(
+                                        pattern.validation_label
+                                      )}
+                                    </span>
+                                  </div>
+                                  <div className="text-xs text-nofx-text-muted mt-1">
+                                    {pattern.sample_count} deals · avg{' '}
+                                    {formatPct(pattern.avg_pnl_pct)} · lift{' '}
+                                    {formatPct(pattern.lift_avg_pnl_pct)}
+                                  </div>
+                                </div>
+                              ))
+                            )}
+                          </div>
+
+                          <div className="rounded-lg border border-amber-400/15 bg-amber-500/5 px-3 py-3 space-y-2">
+                            <div className="text-xs uppercase tracking-[0.2em] text-amber-200">
+                              Top Symbol Overrides
+                            </div>
+                            {!learnedPatternSummary.top_symbol_overrides ||
+                            learnedPatternSummary.top_symbol_overrides.length === 0 ? (
+                              <div className="text-sm text-nofx-text-muted">
+                                No symbol-specific overrides surfaced yet.
+                              </div>
+                            ) : (
+                              learnedPatternSummary.top_symbol_overrides.map((pattern) => (
+                                <div
+                                  key={`learned-pattern-override-${pattern.id}`}
+                                  className="rounded-lg border border-white/10 bg-black/20 px-3 py-3"
+                                >
+                                  <div className="flex flex-wrap items-center gap-2">
+                                    <span className="font-medium">
+                                      {pattern.symbol || 'Trader-local'} ·{' '}
+                                      {pattern.pattern_signature}
+                                    </span>
+                                    <span
+                                      className={`px-2 py-1 rounded-full text-[11px] border ${learnedPatternClassClasses(
+                                        pattern.pattern_class
+                                      )}`}
+                                    >
+                                      {formatLearnedPatternClass(pattern.pattern_class)}
+                                    </span>
+                                    <span
+                                      className={`px-2 py-1 rounded-full text-[11px] border ${learnedPatternValidationClasses(
+                                        pattern.validation_label
+                                      )}`}
+                                    >
+                                      {formatLearnedPatternValidationLabel(
+                                        pattern.validation_label
+                                      )}
+                                    </span>
+                                  </div>
+                                  <div className="text-xs text-nofx-text-muted mt-1">
+                                    {pattern.side} · lift {formatPct(pattern.lift_avg_pnl_pct)} ·{' '}
+                                    {pattern.sample_count} deals
+                                  </div>
+                                </div>
+                              ))
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  <div>
+                    <div className="text-xs uppercase tracking-[0.2em] text-nofx-text-muted mb-2">
+                      Repeated symbol edge failures
+                    </div>
+                    <div className="space-y-2">
+                      {!anomalies.symbol_edge_failures ||
+                      anomalies.symbol_edge_failures.length === 0 ? (
+                        <div className="text-sm text-nofx-text-muted">
+                          No repeated symbol-specific edge failures detected in
+                          this filtered slice yet.
+                        </div>
+                      ) : (
+                        anomalies.symbol_edge_failures.map((item) => (
+                          <div
+                            key={`${item.symbol}-${item.side}-${item.regime_signature}`}
+                            className="rounded-lg border border-rose-400/15 bg-rose-500/5 px-3 py-3 flex items-start justify-between gap-4"
+                          >
+                            <div>
+                              <div className="flex flex-wrap items-center gap-2">
+                                <div className="font-medium">
+                                  {item.symbol} · {item.side}
+                                </div>
+                                <span className="px-2 py-1 rounded-full text-[11px] border border-rose-400/20 bg-rose-500/10 text-rose-200">
+                                  contradiction {formatPct(item.contradiction_score * 100)}
+                                </span>
+                                <span className="px-2 py-1 rounded-full text-[11px] border border-white/10 bg-white/5 text-white">
+                                  {formatSymbolBehaviorAction(
+                                    item.recommended_action
+                                  )}
+                                </span>
+                              </div>
+                              <div className="text-xs text-nofx-text-muted mt-1">
+                                {item.regime_signature}
+                              </div>
+                              <div className="text-sm text-nofx-text-muted mt-2">
+                                {item.summary ||
+                                  `${item.symbol} ${item.side} repeatedly underperformed under this setup.`}
+                              </div>
+                              <div className="text-xs text-nofx-text-muted mt-2">
+                                {item.slice_deals} matching deals in current
+                                slice · {item.historical_deals} historical
+                                deals · {item.decision_open_count} decision
+                                opens · avg decision conf{' '}
+                                {formatPct(item.avg_decision_confidence || 0)}
+                              </div>
+                              {item.signal_tags && item.signal_tags.length > 0 && (
+                                <div className="flex flex-wrap gap-2 mt-2">
+                                  {item.signal_tags.slice(0, 6).map((tag) => (
+                                    <span
+                                      key={`${item.symbol}-${item.side}-${tag}`}
+                                      className="px-2 py-1 rounded-full text-[11px] border border-rose-400/20 bg-rose-500/10 text-rose-100"
+                                    >
+                                      {tag}
+                                    </span>
+                                  ))}
+                                </div>
+                              )}
+                              <div className="flex flex-wrap gap-2 mt-3">
+                                <button
+                                  onClick={() =>
+                                    applyDrilldownFilters(
+                                      {
+                                        symbol: item.symbol,
+                                        side: item.side,
+                                        status: 'CLOSED',
+                                        open_selection_bucket:
+                                          item.open_selection_bucket || undefined,
+                                        open_trend_regime:
+                                          item.open_trend_regime || undefined,
+                                        open_volatility_regime:
+                                          item.open_volatility_regime || undefined,
+                                        open_oi_regime:
+                                          item.open_oi_regime || undefined,
+                                      },
+                                      `Filtered deals to repeated edge failure ${item.symbol} ${item.side}.`
+                                    )
+                                  }
+                                  className="px-2.5 py-1 rounded-lg border border-white/10 bg-white/5 text-xs font-medium"
+                                >
+                                  Filter
+                                </button>
+                                <button
+                                  onClick={() =>
+                                    void runAIScan(
+                                      {
+                                        symbol: item.symbol,
+                                        side: item.side,
+                                        status: 'CLOSED',
+                                        open_selection_bucket:
+                                          item.open_selection_bucket || undefined,
+                                        open_trend_regime:
+                                          item.open_trend_regime || undefined,
+                                        open_volatility_regime:
+                                          item.open_volatility_regime || undefined,
+                                        open_oi_regime:
+                                          item.open_oi_regime || undefined,
+                                      },
+                                      `AI scan started for repeated edge failure ${item.symbol} ${item.side}.`
+                                    )
+                                  }
+                                  disabled={
+                                    !selectedTraderId ||
+                                    runningScan ||
+                                    items.length === 0
+                                  }
+                                  className="px-2.5 py-1 rounded-lg border border-nofx-gold/30 bg-nofx-gold/10 text-nofx-gold text-xs font-medium disabled:opacity-50"
+                                >
+                                  Scan this cohort
+                                </button>
+                              </div>
+                            </div>
+                            <div className="text-right text-sm">
+                              <div className="font-semibold text-rose-400">
+                                {formatMoney(item.slice_net_pnl)}
+                              </div>
+                              <div className="text-xs text-nofx-text-muted mt-2">
+                                current slice
+                              </div>
+                              <div className="text-xs text-nofx-text-muted mt-1">
+                                historical avg {formatPct(item.avg_pnl_pct)}
+                              </div>
+                            </div>
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  </div>
+
                   {anomalies.notes && anomalies.notes.length > 0 && (
                     <div className="space-y-2">
                       {anomalies.notes.map((note) => (

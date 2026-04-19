@@ -2,7 +2,7 @@
 
 Date: 2026-04-18
 Owner: Codex draft for implementation
-Status: Phase 6 retrieval benchmark slice live
+Status: Phase 6 symbol-prior corpus slice live
 
 ## Goal
 
@@ -129,7 +129,7 @@ Once `pgvector` is enabled, add:
 - [x] choose internal PostgreSQL + `pgvector` strategy over hosted vector store
 - [x] cost-check current live corpus size against OpenAI embedding pricing
 - [x] decide to start with compact review and optimizer corpora instead of full `decision_records`
-- [ ] finalize whether initial retrieval stays document-level or starts with chunk-level indexing
+- [x] finalize whether initial retrieval stays document-level or starts with chunk-level indexing
 
 ## Phase 1. Semantic Document Registry
 
@@ -152,7 +152,7 @@ Once `pgvector` is enabled, add:
 - [x] add store capability checks for vector extension presence/version
 - [x] add migration path for vector-backed storage tables
 - [x] decide initial embedding dimension strategy
-- [ ] verify local compose and production compose both support the extension in deployed environments
+- [ ] optionally verify the identical Compose stack on a clean machine or clean volume before wider rollout
 
 ## Phase 3. Embedding Pipeline
 
@@ -182,10 +182,12 @@ Once `pgvector` is enabled, add:
 ## Phase 6. Expansion And Hardening
 
 - [x] add strategy-version corpus
-- [ ] evaluate whether selected `decision_records` summaries should be indexed later
+- [x] evaluate whether selected `decision_records` summaries should be indexed later
 - [x] add backfill scheduling and periodic refresh jobs
 - [x] add observability for embedding cost estimates and sync failures
 - [x] add benchmarks for retrieval quality before broader rollout
+- [x] enrich optimizer-run semantic documents and hybrid similarity ranking after first benchmark results
+- [x] index learned symbol-behavior priors as a first-class semantic-memory corpus
 - [ ] evaluate optional future self-hosted embedding models if OpenAI should later be removed from the embedding path
 
 ## Current Delivery Slice
@@ -219,18 +221,111 @@ Completed in this slice:
 - [x] periodic semantic-memory refresh supervisor with automatic backfill and embed passes
 - [x] semantic-memory observability for token estimates, cost estimates, recent embed usage, and sync failures
 - [x] heuristic similarity benchmark runner with persisted runs, API access, CLI entry point, and `/memory` visibility
+- [x] optimizer-run semantic-memory enrichment for proposal type, critic action, gate/deferred reasons, and patch surfaces
+- [x] optimizer-run hybrid similarity rerank that mixes vector distance with metadata overlap for the small initial corpus
+- [x] targeted optimizer-run re-embed and benchmark comparison on live `GAMMA-RAY` data
+- [x] opt-in `decision_record_summary` corpus for curated decision-cycle summaries with compact action/reject/bucket/regime metadata
+- [x] first live evaluation backfill for `GAMMA-RAY` with `124` decision summaries embedded
+- [x] first benchmark pass for `decision_record_summary` showing usable retrieval quality before broader rollout
+- [x] capped default refresh policy for `decision_record_summary` inside the semantic-memory supervisor
+- [x] first-class `symbol_behavior_prior` corpus for learned symbol+regime priors
+- [x] review deep-links from semantic-memory hits back into the learned-prior view on `/deal-review`
+- [x] symbol-prior similarity rerank using metadata overlap on top of vector distance
 
 Deliberately left for the next slice:
 
-- [ ] production-environment pgvector verification beyond local compose/runtime
-- [ ] evaluate selected `decision_records` summaries before expanding corpus
-- [ ] calibrate benchmark heuristics and thresholds after more strategy-version corpus coverage
+- [ ] optional clean-machine smoke test for the identical Compose-based deployment footprint
+- [ ] recalibrate strategy-version benchmark heuristics and thresholds after more corpus coverage
 
 ## Notes For The Next Slice
 
-- start retrieval at document level, not chunk level
+- retrieval is intentionally document-level for the current rollout; chunking stays deferred until the corpus or query patterns justify the added complexity
 - keep the document body compact and opinionated
 - only bring `decision_records` in later if we define curated summaries instead of raw full-prompt indexing
 - keep analyst retrieval scoped to authenticated internal review workflows
-- current benchmarking is heuristic and strongest on deal-review cases; optimizer/strategy corpora should be recalibrated as they grow
-- next focus should be selected `decision_records` evaluation, heuristic calibration, and wider pgvector validation outside the local compose runtime
+- current benchmarking is heuristic; optimizer-run retrieval is now materially better than the first pass, while strategy-version scoring still needs recalibration once that corpus grows
+- decision-cycle summaries still remain a deliberately curated corpus, but they now participate in the default refresh through a capped recent-window policy rather than an unlimited full-history rebuild
+- learned symbol-prior documents are now part of the default core corpus and can be reached from `/memory` back into `/deal-review`
+- because deployment is currently the same Compose stack rather than a separate production topology, wider pgvector validation mainly means one optional clean-machine smoke test on the same images and volume layout
+- next focus should be multi-trader evaluation of decision-summary and symbol-prior retrieval quality, plus strategy-version heuristic calibration
+
+## Current Handoff State
+
+This section is intentionally redundant so future work can resume from this file without prior chat context.
+
+### Runtime Status
+
+- local runtime is healthy in Docker Compose:
+  - `nofx-trading`
+  - `nofx-frontend`
+  - `nofx-postgres`
+  - `selfhosted-ai500`
+- PostgreSQL runs on the `pgvector/pgvector:pg16` image directly in `docker-compose.yml`
+- semantic-memory APIs and `/memory` UI are already live
+
+### Corpus Status As Of 2026-04-19
+
+- `deal_review_case`: `761`
+- `decision_record_summary`: `579`
+- `autonomous_optimizer_backlog_item`: `23`
+- `autonomous_optimizer_run`: `11`
+- `strategy_version`: `3`
+- `symbol_behavior_prior`: `50`
+
+### Important Benchmark State
+
+- `decision_record_summary` has already passed an initial live evaluation slice:
+  - first benchmark run used `12` docs / `12` queries
+  - `avg_top1_relevance ≈ 0.73`
+  - `hit_rate_at_k = 1.00`
+  - `strong_top1_rate ≈ 0.58`
+- `strategy_version` is not ready for recalibration yet:
+  - only `1` strategy-version document exists
+  - benchmark runs therefore show `evaluated_queries = 0` and `skipped_queries = 1` for that corpus
+
+### Current Strategy-Version Reality
+
+- the corpus is still small, but it is no longer bootstrap-only
+- current persisted strategy versions:
+  - `1` `autonomous_optimizer_seed`
+  - `2` `autonomous_optimizer_apply`
+- autonomous optimizer run history currently contains:
+  - `11` total runs
+  - `4` `blocked_by_gate`
+  - `1` `insufficient_evidence`
+  - `1` `deferred_for_next_window`
+  - `3` `auto_applied`
+- this is enough to keep strategy-version indexing live, but still not enough for meaningful heuristic recalibration
+
+### What Is Actually Done
+
+- semantic document registry and sync-run tracking are live
+- embedding pipeline with OpenAI embeddings is live
+- pgvector-backed retrieval is live
+- analyst search page `/memory` is live
+- deal-review similar-case retrieval is live
+- optimizer similar-run retrieval is live
+- learned symbol-prior retrieval is now live through the shared `/memory` corpus
+- strategy-version corpus is live, but still too small for meaningful calibration
+- curated `decision_record_summary` documents are live and now refresh through a capped default supervisor policy
+
+### What Is Still Open
+
+- optional clean-machine smoke test for the identical Compose stack on a fresh host or fresh volume
+- strategy-version benchmark recalibration after the corpus grows materially
+- optional later evaluation of self-hosted embeddings if OpenAI embeddings should be removed from the path
+
+### Practical Readiness Threshold For Strategy-Version Recalibration
+
+- do not recalibrate with the current corpus size
+- absolute minimum to start a first serious pass: about `12` real strategy-version documents
+- materially better first pass: `20-30` strategy-version documents
+- the blocker is not the benchmark code; the blocker is lack of applied strategy-version events feeding that corpus
+
+### Key Implementation Notes For Future Work
+
+- the benchmark framework skips corpora with fewer than `2` documents
+- current strategy-version relevance is still heuristic and needs adjustment only after enough real patches accumulate
+- symbol-prior retrieval now has a dedicated semantic document shape and metadata-aware rerank, but still benefits from more live corpus coverage before heavier calibration work
+- decision summaries are intentionally curated and capped; do not switch them to unbounded raw-history indexing
+- for your deployment model, “production verification” mainly means one clean-machine smoke test of the same Compose stack, not a separate infra project

@@ -76,6 +76,38 @@ func buildAutonomousOptimizerProposalConversationUserReplay(payload map[string]a
 		"decision_starvation_metrics": parseAutonomousOptimizerNestedObject(payload, "decision_starvation_metrics"),
 		"latest_gate_feedback":        parseAutonomousOptimizerNestedObject(payload, "latest_gate_feedback"),
 	}
+	if priors := parseAutonomousOptimizerNestedObject(payload, "symbol_behavior_priors"); len(priors) > 0 {
+		replay["symbol_behavior_priors"] = map[string]any{
+			"available_count":           priors["available_count"],
+			"relevant_count":            priors["relevant_count"],
+			"confirmed_count":           priors["confirmed_count"],
+			"false_positive_count":      priors["false_positive_count"],
+			"false_negative_risk_count": priors["false_negative_risk_count"],
+			"drifting_count":            priors["drifting_count"],
+			"config_candidate_count":    priors["config_candidate_count"],
+			"prompt_only_count":         priors["prompt_only_count"],
+			"backlog_candidate_count":   priors["backlog_candidate_count"],
+			"notes":                     limitAutonomousOptimizerReplayArray(priors["notes"], 4),
+			"items":                     limitAutonomousOptimizerReplayArray(priors["items"], 4),
+		}
+	}
+	if patterns := parseAutonomousOptimizerNestedObject(payload, "learned_patterns"); len(patterns) > 0 {
+		replay["learned_patterns"] = map[string]any{
+			"available_count":        patterns["available_count"],
+			"relevant_count":         patterns["relevant_count"],
+			"positive_count":         patterns["positive_count"],
+			"negative_count":         patterns["negative_count"],
+			"confirmed_count":        patterns["confirmed_count"],
+			"false_positive_count":   patterns["false_positive_count"],
+			"reverse_risk_count":     patterns["reverse_risk_count"],
+			"drifting_count":         patterns["drifting_count"],
+			"config_candidate_count": patterns["config_candidate_count"],
+			"prompt_only_count":      patterns["prompt_only_count"],
+			"monitor_only_count":     patterns["monitor_only_count"],
+			"notes":                  limitAutonomousOptimizerReplayArray(patterns["notes"], 4),
+			"items":                  limitAutonomousOptimizerReplayArray(patterns["items"], 4),
+		}
+	}
 	if telemetry := parseAutonomousOptimizerNestedObject(payload, "adaptive_cooldown_telemetry"); len(telemetry) > 0 {
 		replay["adaptive_cooldown_telemetry"] = map[string]any{
 			"cooldown_candidate_count":        telemetry["cooldown_candidate_count"],
@@ -107,13 +139,18 @@ func buildAutonomousOptimizerProposalConversationAssistantReplay(proposal *auton
 		return ""
 	}
 	replay := map[string]any{
-		"kind":              "proposal_response",
-		"proposal_type":     proposal.ProposalType,
-		"executive_summary": proposal.ExecutiveSummary,
-		"expected_effect":   proposal.ExpectedEffect,
-		"confidence":        roundAutonomousOptimizerFloat(proposal.Confidence, 3),
-		"evidence_strength": roundAutonomousOptimizerFloat(proposal.EvidenceStrength, 3),
-		"rationale":         limitAutonomousOptimizerReplayStrings(proposal.Rationale, 6),
+		"kind":                    "proposal_response",
+		"proposal_type":           proposal.ProposalType,
+		"executive_summary":       proposal.ExecutiveSummary,
+		"expected_effect":         proposal.ExpectedEffect,
+		"confidence":              roundAutonomousOptimizerFloat(proposal.Confidence, 3),
+		"evidence_strength":       roundAutonomousOptimizerFloat(proposal.EvidenceStrength, 3),
+		"symbol_prior_references": limitAutonomousOptimizerReplayStrings(proposal.SymbolPriorRefs, 6),
+		"learned_pattern_references": limitAutonomousOptimizerReplayStrings(
+			proposal.LearnedPatternRefs,
+			6,
+		),
+		"rationale": limitAutonomousOptimizerReplayStrings(proposal.Rationale, 6),
 		"config_patch_paths": flattenAutonomousOptimizerJSONPaths(
 			sanitizeAutonomousOptimizerJSONMap(proposal.ConfigPatch),
 		),
@@ -134,13 +171,47 @@ func buildAutonomousOptimizerCriticConversationUserReplay(payload map[string]any
 		"review_window":        parseAutonomousOptimizerNestedObject(payload, "review_window"),
 		"latest_gate_feedback": parseAutonomousOptimizerNestedObject(payload, "latest_gate_feedback"),
 	}
+	if priors := parseAutonomousOptimizerNestedObject(payload, "symbol_behavior_priors"); len(priors) > 0 {
+		replay["symbol_behavior_priors"] = map[string]any{
+			"confirmed_count":           priors["confirmed_count"],
+			"false_positive_count":      priors["false_positive_count"],
+			"false_negative_risk_count": priors["false_negative_risk_count"],
+			"drifting_count":            priors["drifting_count"],
+			"config_candidate_count":    priors["config_candidate_count"],
+			"prompt_only_count":         priors["prompt_only_count"],
+			"backlog_candidate_count":   priors["backlog_candidate_count"],
+			"items":                     limitAutonomousOptimizerReplayArray(priors["items"], 4),
+		}
+	}
+	if patterns := parseAutonomousOptimizerNestedObject(payload, "learned_patterns"); len(patterns) > 0 {
+		replay["learned_patterns"] = map[string]any{
+			"relevant_count":         patterns["relevant_count"],
+			"positive_count":         patterns["positive_count"],
+			"negative_count":         patterns["negative_count"],
+			"false_positive_count":   patterns["false_positive_count"],
+			"reverse_risk_count":     patterns["reverse_risk_count"],
+			"drifting_count":         patterns["drifting_count"],
+			"config_candidate_count": patterns["config_candidate_count"],
+			"prompt_only_count":      patterns["prompt_only_count"],
+			"monitor_only_count":     patterns["monitor_only_count"],
+			"items":                  limitAutonomousOptimizerReplayArray(patterns["items"], 4),
+		}
+	}
 	if proposal != nil {
 		replay["proposal"] = map[string]any{
-			"proposal_type":      proposal.ProposalType,
-			"executive_summary":  proposal.ExecutiveSummary,
-			"expected_effect":    proposal.ExpectedEffect,
-			"confidence":         roundAutonomousOptimizerFloat(proposal.Confidence, 3),
-			"evidence_strength":  roundAutonomousOptimizerFloat(proposal.EvidenceStrength, 3),
+			"proposal_type":     proposal.ProposalType,
+			"executive_summary": proposal.ExecutiveSummary,
+			"expected_effect":   proposal.ExpectedEffect,
+			"confidence":        roundAutonomousOptimizerFloat(proposal.Confidence, 3),
+			"evidence_strength": roundAutonomousOptimizerFloat(proposal.EvidenceStrength, 3),
+			"symbol_prior_references": limitAutonomousOptimizerReplayStrings(
+				proposal.SymbolPriorRefs,
+				6,
+			),
+			"learned_pattern_references": limitAutonomousOptimizerReplayStrings(
+				proposal.LearnedPatternRefs,
+				6,
+			),
 			"config_patch_paths": flattenAutonomousOptimizerJSONPaths(sanitizeAutonomousOptimizerJSONMap(proposal.ConfigPatch)),
 			"prompt_patch_fields": flattenAutonomousOptimizerJSONPaths(
 				sanitizeAutonomousOptimizerJSONMap(proposal.PromptPatch),
@@ -155,13 +226,18 @@ func buildAutonomousOptimizerCriticConversationAssistantReplay(critic *autonomou
 		return ""
 	}
 	replay := map[string]any{
-		"kind":               "critic_response",
-		"approved":           critic.Approved,
-		"recommended_action": critic.RecommendedAction,
-		"confidence":         roundAutonomousOptimizerFloat(critic.Confidence, 3),
-		"summary":            critic.Summary,
-		"blocking_issues":    limitAutonomousOptimizerReplayStrings(critic.BlockingIssues, 6),
-		"warnings":           limitAutonomousOptimizerReplayStrings(critic.Warnings, 6),
+		"kind":                    "critic_response",
+		"approved":                critic.Approved,
+		"recommended_action":      critic.RecommendedAction,
+		"confidence":              roundAutonomousOptimizerFloat(critic.Confidence, 3),
+		"summary":                 critic.Summary,
+		"symbol_prior_references": limitAutonomousOptimizerReplayStrings(critic.SymbolPriorRefs, 6),
+		"learned_pattern_references": limitAutonomousOptimizerReplayStrings(
+			critic.LearnedPatternRefs,
+			6,
+		),
+		"blocking_issues": limitAutonomousOptimizerReplayStrings(critic.BlockingIssues, 6),
+		"warnings":        limitAutonomousOptimizerReplayStrings(critic.Warnings, 6),
 	}
 	return buildAutonomousOptimizerConversationReplay("critic_response_memory", replay)
 }

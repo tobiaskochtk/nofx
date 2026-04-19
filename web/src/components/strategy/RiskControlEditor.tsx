@@ -1,6 +1,7 @@
 import { Shield, AlertTriangle, Plus, Trash2 } from 'lucide-react'
 import type {
   AdaptiveReentryGuardConfig,
+  LearnedPatternLiveGuardConfig,
   RiskControlConfig,
   TrailingStopConfig,
   TrailingStopMode,
@@ -43,6 +44,19 @@ export function RiskControlEditor({
       same_symbol_loss_cooldown_minutes: 180,
       pair_loss_lookback_hours: 12,
     }
+  const learnedPatternLiveGuard: LearnedPatternLiveGuardConfig =
+    config.learned_pattern_live_guard ?? {
+      enabled: false,
+      mode: 'monitor',
+      require_confirmed_label: true,
+      min_composite_score: 0.85,
+      min_confidence_score: 0.9,
+      min_sample_count: 8,
+      min_match_score: 0.8,
+      max_false_positive_score: 0.1,
+      max_drift_score: 0.15,
+      min_validation_support_score: 0.6,
+    }
 
   const updateField = <K extends keyof RiskControlConfig>(
     key: K,
@@ -61,6 +75,12 @@ export function RiskControlEditor({
     updateField('adaptive_reentry_guard', value)
   }
 
+  const updateLearnedPatternLiveGuard = (
+    value: LearnedPatternLiveGuardConfig
+  ) => {
+    updateField('learned_pattern_live_guard', value)
+  }
+
   const updateTrailingStopField = <K extends keyof TrailingStopConfig>(
     key: K,
     value: TrailingStopConfig[K]
@@ -75,6 +95,18 @@ export function RiskControlEditor({
     value: AdaptiveReentryGuardConfig[K]
   ) => {
     updateAdaptiveReentryGuard({ ...adaptiveReentryGuard, [key]: value })
+  }
+
+  const updateLearnedPatternLiveGuardField = <
+    K extends keyof LearnedPatternLiveGuardConfig,
+  >(
+    key: K,
+    value: LearnedPatternLiveGuardConfig[K]
+  ) => {
+    updateLearnedPatternLiveGuard({
+      ...learnedPatternLiveGuard,
+      [key]: value,
+    })
   }
 
   const updateTrailingTier = (
@@ -986,6 +1018,325 @@ export function RiskControlEditor({
                   h
                 </span>
               </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div>
+        <div className="flex items-center gap-2 mb-4">
+          <Shield className="w-5 h-5" style={{ color: '#F6465D' }} />
+          <h3 className="font-medium" style={{ color: '#EAECEF' }}>
+            Learned Pattern Live Guard
+          </h3>
+        </div>
+
+        <div
+          className="p-4 rounded-lg space-y-4"
+          style={{ background: '#0B0E11', border: '1px solid #2B3139' }}
+        >
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <label
+                className="block text-sm mb-1"
+                style={{ color: '#EAECEF' }}
+              >
+                Enable live learned-pattern guard
+              </label>
+              <p className="text-xs" style={{ color: '#848E9C' }}>
+                Uses confirmed anti-patterns as a late pre-execution check after
+                the AI already proposed an entry.
+              </p>
+            </div>
+            <label className="inline-flex items-center gap-2 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={learnedPatternLiveGuard.enabled}
+                onChange={(e) =>
+                  updateLearnedPatternLiveGuardField('enabled', e.target.checked)
+                }
+                disabled={disabled}
+                className="accent-red-500"
+              />
+              <span className="text-sm" style={{ color: '#EAECEF' }}>
+                {learnedPatternLiveGuard.enabled ? 'Enabled' : 'Disabled'}
+              </span>
+            </label>
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label
+                className="block text-sm mb-1"
+                style={{ color: '#EAECEF' }}
+              >
+                Mode
+              </label>
+              <p className="text-xs mb-2" style={{ color: '#848E9C' }}>
+                `monitor` only records matches. `hard_block` vetoes entries when
+                thresholds are met.
+              </p>
+              <select
+                value={
+                  learnedPatternLiveGuard.mode === 'hard_block'
+                    ? 'hard_block'
+                    : 'monitor'
+                }
+                onChange={(e) =>
+                  updateLearnedPatternLiveGuardField(
+                    'mode',
+                    e.target.value as 'monitor' | 'hard_block'
+                  )
+                }
+                disabled={disabled}
+                className="w-full px-3 py-2 rounded"
+                style={{
+                  background: '#1E2329',
+                  border: '1px solid #2B3139',
+                  color: '#EAECEF',
+                }}
+              >
+                <option value="monitor">Monitor only</option>
+                <option value="hard_block">Hard block</option>
+              </select>
+            </div>
+
+            <div
+              className="p-3 rounded-lg"
+              style={{ background: '#11151B', border: '1px solid #2B3139' }}
+            >
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <label
+                    className="block text-sm mb-1"
+                    style={{ color: '#EAECEF' }}
+                  >
+                    Require confirmed label
+                  </label>
+                  <p className="text-xs" style={{ color: '#848E9C' }}>
+                    Only allow confirmed negative patterns to reach live
+                    monitoring or blocking.
+                  </p>
+                </div>
+                <input
+                  type="checkbox"
+                  checked={learnedPatternLiveGuard.require_confirmed_label ?? true}
+                  onChange={(e) =>
+                    updateLearnedPatternLiveGuardField(
+                      'require_confirmed_label',
+                      e.target.checked
+                    )
+                  }
+                  disabled={disabled}
+                  className="accent-red-500 mt-1"
+                />
+              </div>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 xl:grid-cols-3 gap-4">
+            <div>
+              <label
+                className="block text-sm mb-1"
+                style={{ color: '#EAECEF' }}
+              >
+                Min composite score
+              </label>
+              <input
+                type="number"
+                value={learnedPatternLiveGuard.min_composite_score ?? 0.85}
+                onChange={(e) =>
+                  updateLearnedPatternLiveGuardField(
+                    'min_composite_score',
+                    Math.max(0.01, Math.min(1, parseFloat(e.target.value) || 0.85))
+                  )
+                }
+                disabled={disabled}
+                min={0.01}
+                max={1}
+                step={0.01}
+                className="w-full px-3 py-2 rounded"
+                style={{
+                  background: '#1E2329',
+                  border: '1px solid #2B3139',
+                  color: '#EAECEF',
+                }}
+              />
+            </div>
+
+            <div>
+              <label
+                className="block text-sm mb-1"
+                style={{ color: '#EAECEF' }}
+              >
+                Min confidence score
+              </label>
+              <input
+                type="number"
+                value={learnedPatternLiveGuard.min_confidence_score ?? 0.9}
+                onChange={(e) =>
+                  updateLearnedPatternLiveGuardField(
+                    'min_confidence_score',
+                    Math.max(0.01, Math.min(1, parseFloat(e.target.value) || 0.9))
+                  )
+                }
+                disabled={disabled}
+                min={0.01}
+                max={1}
+                step={0.01}
+                className="w-full px-3 py-2 rounded"
+                style={{
+                  background: '#1E2329',
+                  border: '1px solid #2B3139',
+                  color: '#EAECEF',
+                }}
+              />
+            </div>
+
+            <div>
+              <label
+                className="block text-sm mb-1"
+                style={{ color: '#EAECEF' }}
+              >
+                Min validation support
+              </label>
+              <input
+                type="number"
+                value={
+                  learnedPatternLiveGuard.min_validation_support_score ?? 0.6
+                }
+                onChange={(e) =>
+                  updateLearnedPatternLiveGuardField(
+                    'min_validation_support_score',
+                    Math.max(0.01, Math.min(1, parseFloat(e.target.value) || 0.6))
+                  )
+                }
+                disabled={disabled}
+                min={0.01}
+                max={1}
+                step={0.01}
+                className="w-full px-3 py-2 rounded"
+                style={{
+                  background: '#1E2329',
+                  border: '1px solid #2B3139',
+                  color: '#EAECEF',
+                }}
+              />
+            </div>
+
+            <div>
+              <label
+                className="block text-sm mb-1"
+                style={{ color: '#EAECEF' }}
+              >
+                Min samples
+              </label>
+              <input
+                type="number"
+                value={learnedPatternLiveGuard.min_sample_count ?? 8}
+                onChange={(e) =>
+                  updateLearnedPatternLiveGuardField(
+                    'min_sample_count',
+                    Math.max(1, parseInt(e.target.value) || 8)
+                  )
+                }
+                disabled={disabled}
+                min={1}
+                max={500}
+                className="w-full px-3 py-2 rounded"
+                style={{
+                  background: '#1E2329',
+                  border: '1px solid #2B3139',
+                  color: '#EAECEF',
+                }}
+              />
+            </div>
+
+            <div>
+              <label
+                className="block text-sm mb-1"
+                style={{ color: '#EAECEF' }}
+              >
+                Min match score
+              </label>
+              <input
+                type="number"
+                value={learnedPatternLiveGuard.min_match_score ?? 0.8}
+                onChange={(e) =>
+                  updateLearnedPatternLiveGuardField(
+                    'min_match_score',
+                    Math.max(0.01, Math.min(1, parseFloat(e.target.value) || 0.8))
+                  )
+                }
+                disabled={disabled}
+                min={0.01}
+                max={1}
+                step={0.01}
+                className="w-full px-3 py-2 rounded"
+                style={{
+                  background: '#1E2329',
+                  border: '1px solid #2B3139',
+                  color: '#EAECEF',
+                }}
+              />
+            </div>
+
+            <div>
+              <label
+                className="block text-sm mb-1"
+                style={{ color: '#EAECEF' }}
+              >
+                Max false-positive score
+              </label>
+              <input
+                type="number"
+                value={learnedPatternLiveGuard.max_false_positive_score ?? 0.1}
+                onChange={(e) =>
+                  updateLearnedPatternLiveGuardField(
+                    'max_false_positive_score',
+                    Math.max(0, Math.min(1, parseFloat(e.target.value) || 0.1))
+                  )
+                }
+                disabled={disabled}
+                min={0}
+                max={1}
+                step={0.01}
+                className="w-full px-3 py-2 rounded"
+                style={{
+                  background: '#1E2329',
+                  border: '1px solid #2B3139',
+                  color: '#EAECEF',
+                }}
+              />
+            </div>
+
+            <div>
+              <label
+                className="block text-sm mb-1"
+                style={{ color: '#EAECEF' }}
+              >
+                Max drift score
+              </label>
+              <input
+                type="number"
+                value={learnedPatternLiveGuard.max_drift_score ?? 0.15}
+                onChange={(e) =>
+                  updateLearnedPatternLiveGuardField(
+                    'max_drift_score',
+                    Math.max(0, Math.min(1, parseFloat(e.target.value) || 0.15))
+                  )
+                }
+                disabled={disabled}
+                min={0}
+                max={1}
+                step={0.01}
+                className="w-full px-3 py-2 rounded"
+                style={{
+                  background: '#1E2329',
+                  border: '1px solid #2B3139',
+                  color: '#EAECEF',
+                }}
+              />
             </div>
           </div>
         </div>

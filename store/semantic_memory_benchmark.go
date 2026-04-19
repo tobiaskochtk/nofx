@@ -3,7 +3,6 @@ package store
 import (
 	"fmt"
 	"math"
-	"sort"
 	"strings"
 	"time"
 
@@ -348,6 +347,10 @@ func semanticMemoryBenchmarkRelevance(queryDoc, hitDoc *SemanticMemoryDocument) 
 		return semanticMemoryBenchmarkBacklogRelevance(queryDoc, hitDoc, queryMeta, hitMeta)
 	case SemanticMemoryDocTypeStrategyVersion:
 		return semanticMemoryBenchmarkStrategyVersionRelevance(queryDoc, hitDoc, queryMeta, hitMeta)
+	case SemanticMemoryDocTypeDecisionRecordSummary:
+		return semanticMemoryBenchmarkDecisionRecordSummaryRelevance(queryDoc, hitDoc, queryMeta, hitMeta)
+	case SemanticMemoryDocTypeSymbolBehaviorPrior:
+		return semanticMemoryBenchmarkSymbolBehaviorPriorRelevance(queryDoc, hitDoc, queryMeta, hitMeta)
 	default:
 		return semanticMemoryBenchmarkDealCaseRelevance(queryDoc, hitDoc, queryMeta, hitMeta)
 	}
@@ -369,12 +372,19 @@ func semanticMemoryBenchmarkDealCaseRelevance(queryDoc, hitDoc *SemanticMemoryDo
 }
 
 func semanticMemoryBenchmarkOptimizerRunRelevance(queryDoc, hitDoc *SemanticMemoryDocument, queryMeta, hitMeta map[string]any) float64 {
-	score := semanticMemoryBenchmarkLexicalOverlap(queryDoc, hitDoc) * 0.35
-	score += semanticMemoryBenchmarkExactMatch(queryMeta, hitMeta, "status") * 0.25
-	score += semanticMemoryBenchmarkExactMatch(queryMeta, hitMeta, "trigger") * 0.15
+	score := semanticMemoryBenchmarkLexicalOverlap(queryDoc, hitDoc) * 0.16
+	score += semanticMemoryBenchmarkExactMatch(queryMeta, hitMeta, "status") * 0.10
+	score += semanticMemoryBenchmarkExactMatch(queryMeta, hitMeta, "trigger") * 0.06
 	score += semanticMemoryBenchmarkExactMatch(queryMeta, hitMeta, "primary_model_name") * 0.05
 	score += semanticMemoryBenchmarkExactMatch(queryMeta, hitMeta, "critic_model_name") * 0.05
-	score += semanticMemoryBenchmarkExactMatch(queryMeta, hitMeta, "applied_strategy_version_id") * 0.05
+	score += semanticMemoryBenchmarkExactMatch(queryMeta, hitMeta, "proposal_type") * 0.14
+	score += semanticMemoryBenchmarkExactMatch(queryMeta, hitMeta, "critic_recommended_action") * 0.12
+	score += semanticMemoryBenchmarkExactMatch(queryMeta, hitMeta, "config_validation_status") * 0.10
+	score += semanticMemoryBenchmarkArrayOverlap(queryMeta, hitMeta, "gate_reasons") * 0.10
+	score += semanticMemoryBenchmarkArrayOverlap(queryMeta, hitMeta, "deferred_reasons") * 0.06
+	score += semanticMemoryBenchmarkArrayOverlap(queryMeta, hitMeta, "config_patch_paths") * 0.03
+	score += semanticMemoryBenchmarkArrayOverlap(queryMeta, hitMeta, "config_patch_keys") * 0.02
+	score += semanticMemoryBenchmarkArrayOverlap(queryMeta, hitMeta, "prompt_patch_keys") * 0.01
 	return clamp01(score)
 }
 
@@ -395,6 +405,36 @@ func semanticMemoryBenchmarkStrategyVersionRelevance(queryDoc, hitDoc *SemanticM
 	score += semanticMemoryBenchmarkExactMatch(queryMeta, hitMeta, "observation_ready") * 0.05
 	score += semanticMemoryBenchmarkExactMatch(queryMeta, hitMeta, "rollback_suggested") * 0.05
 	score += semanticMemoryBenchmarkTargetCohortOverlap(queryMeta, hitMeta) * 0.30
+	return clamp01(score)
+}
+
+func semanticMemoryBenchmarkDecisionRecordSummaryRelevance(queryDoc, hitDoc *SemanticMemoryDocument, queryMeta, hitMeta map[string]any) float64 {
+	score := semanticMemoryBenchmarkLexicalOverlap(queryDoc, hitDoc) * 0.18
+	score += semanticMemoryBenchmarkArrayOverlap(queryMeta, hitMeta, "symbols") * 0.20
+	score += semanticMemoryBenchmarkArrayOverlap(queryMeta, hitMeta, "action_types") * 0.16
+	score += semanticMemoryBenchmarkArrayOverlap(queryMeta, hitMeta, "reject_reasons") * 0.16
+	score += semanticMemoryBenchmarkArrayOverlap(queryMeta, hitMeta, "selection_buckets") * 0.10
+	score += semanticMemoryBenchmarkArrayOverlap(queryMeta, hitMeta, "candidate_sources") * 0.06
+	score += semanticMemoryBenchmarkArrayOverlap(queryMeta, hitMeta, "sessions") * 0.04
+	score += semanticMemoryBenchmarkArrayOverlap(queryMeta, hitMeta, "trend_regimes") * 0.04
+	score += semanticMemoryBenchmarkArrayOverlap(queryMeta, hitMeta, "volatility_regimes") * 0.03
+	score += semanticMemoryBenchmarkArrayOverlap(queryMeta, hitMeta, "oi_regimes") * 0.03
+	return clamp01(score)
+}
+
+func semanticMemoryBenchmarkSymbolBehaviorPriorRelevance(queryDoc, hitDoc *SemanticMemoryDocument, queryMeta, hitMeta map[string]any) float64 {
+	score := semanticMemoryBenchmarkLexicalOverlap(queryDoc, hitDoc) * 0.16
+	score += semanticMemoryBenchmarkExactMatch(queryMeta, hitMeta, "symbol") * 0.18
+	score += semanticMemoryBenchmarkExactMatch(queryMeta, hitMeta, "side") * 0.08
+	score += semanticMemoryBenchmarkExactMatch(queryMeta, hitMeta, "status") * 0.08
+	score += semanticMemoryBenchmarkExactMatch(queryMeta, hitMeta, "validation_label") * 0.12
+	score += semanticMemoryBenchmarkExactMatch(queryMeta, hitMeta, "behavior_bias") * 0.10
+	score += semanticMemoryBenchmarkExactMatch(queryMeta, hitMeta, "recommended_action") * 0.06
+	score += semanticMemoryBenchmarkExactMatch(queryMeta, hitMeta, "open_selection_bucket") * 0.08
+	score += semanticMemoryBenchmarkExactMatch(queryMeta, hitMeta, "open_trend_regime") * 0.05
+	score += semanticMemoryBenchmarkExactMatch(queryMeta, hitMeta, "open_volatility_regime") * 0.04
+	score += semanticMemoryBenchmarkExactMatch(queryMeta, hitMeta, "open_oi_regime") * 0.04
+	score += semanticMemoryBenchmarkArrayOverlap(queryMeta, hitMeta, "signal_tags") * 0.09
 	return clamp01(score)
 }
 
@@ -534,20 +574,22 @@ func semanticMemoryBenchmarkTargetCohortOverlap(queryMeta, hitMeta map[string]an
 }
 
 func semanticMemoryAnyStringSlice(raw any) []string {
-	items, ok := raw.([]any)
-	if !ok {
+	switch typed := raw.(type) {
+	case []string:
+		return semanticMemoryUniqueSortedStrings(typed)
+	case []any:
+		result := make([]string, 0, len(typed))
+		for _, item := range typed {
+			value := strings.TrimSpace(fmt.Sprint(item))
+			if value == "" || value == "<nil>" {
+				continue
+			}
+			result = append(result, value)
+		}
+		return semanticMemoryUniqueSortedStrings(result)
+	default:
 		return nil
 	}
-	result := make([]string, 0, len(items))
-	for _, item := range items {
-		value := strings.TrimSpace(fmt.Sprint(item))
-		if value == "" || value == "<nil>" {
-			continue
-		}
-		result = append(result, value)
-	}
-	sort.Strings(result)
-	return result
 }
 
 func clamp01(value float64) float64 {

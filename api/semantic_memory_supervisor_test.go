@@ -53,3 +53,45 @@ func TestShouldLogSemanticMemoryRefresh(t *testing.T) {
 		t.Fatal("updated documents should trigger logging")
 	}
 }
+
+func TestMergeSemanticMemoryBackfillResults(t *testing.T) {
+	merged := mergeSemanticMemoryBackfillResults(
+		&store.SemanticMemoryBackfillResult{
+			Run: &store.SemanticMemorySyncRun{
+				TotalDocuments:     10,
+				InsertedDocuments:  2,
+				UpdatedDocuments:   1,
+				UnchangedDocuments: 7,
+				FailedDocuments:    0,
+			},
+		},
+		&store.SemanticMemoryBackfillResult{
+			Run: &store.SemanticMemorySyncRun{
+				TotalDocuments:     5,
+				InsertedDocuments:  1,
+				UpdatedDocuments:   2,
+				UnchangedDocuments: 1,
+				FailedDocuments:    1,
+			},
+		},
+		nil,
+	)
+	if merged == nil || merged.Run == nil {
+		t.Fatal("expected merged result to be present")
+	}
+	if merged.Run.TotalDocuments != 15 {
+		t.Fatalf("TotalDocuments = %d, want 15", merged.Run.TotalDocuments)
+	}
+	if merged.Run.InsertedDocuments != 3 {
+		t.Fatalf("InsertedDocuments = %d, want 3", merged.Run.InsertedDocuments)
+	}
+	if merged.Run.UpdatedDocuments != 3 {
+		t.Fatalf("UpdatedDocuments = %d, want 3", merged.Run.UpdatedDocuments)
+	}
+	if merged.Run.UnchangedDocuments != 8 {
+		t.Fatalf("UnchangedDocuments = %d, want 8", merged.Run.UnchangedDocuments)
+	}
+	if merged.Run.FailedDocuments != 1 {
+		t.Fatalf("FailedDocuments = %d, want 1", merged.Run.FailedDocuments)
+	}
+}

@@ -380,7 +380,7 @@ func normalizeDetailedRejectReason(reason string) string {
 	switch strings.ToLower(strings.TrimSpace(reason)) {
 	case "", "unknown":
 		return ""
-	case "low_confidence", "liquidity_concerns", "spread_slippage_concerns", "regime_mismatch", "trend_conflict", "missing_confirmation", "venue_unsupported", "risk_control", "extended_setup", "late_breakout", "volume_not_confirming", "oi_not_confirming", "same_symbol_cooldown", "unspecified":
+	case "low_confidence", "liquidity_concerns", "spread_slippage_concerns", "regime_mismatch", "trend_conflict", "missing_confirmation", "venue_unsupported", "risk_control", "symbol_behavior_prior_block", "extended_setup", "late_breakout", "volume_not_confirming", "oi_not_confirming", "same_symbol_cooldown", "unspecified":
 		return strings.ToLower(strings.TrimSpace(reason))
 	default:
 		return normalizeTraderRejectReason(reason)

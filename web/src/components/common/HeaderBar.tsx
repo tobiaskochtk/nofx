@@ -18,6 +18,7 @@ type Page =
   | 'strategy'
   | 'strategy-market'
   | 'deal-review'
+  | 'pattern-lab'
   | 'optimizer'
   | 'memory'
   | 'data'
@@ -151,6 +152,17 @@ export default function HeaderBar({
                       : language === 'id'
                         ? 'Review'
                         : 'Review',
+                  requiresAuth: true,
+                },
+                {
+                  page: 'pattern-lab',
+                  path: '/pattern-lab',
+                  label:
+                    language === 'zh'
+                      ? 'Pattern Lab'
+                      : language === 'id'
+                        ? 'Pattern Lab'
+                        : 'Pattern Lab',
                   requiresAuth: true,
                 },
                 {
@@ -505,6 +517,17 @@ export default function HeaderBar({
                           : language === 'id'
                             ? 'Review'
                             : 'Review',
+                      requiresAuth: true,
+                    },
+                    {
+                      page: 'pattern-lab',
+                      path: '/pattern-lab',
+                      label:
+                        language === 'zh'
+                          ? 'Pattern Lab'
+                          : language === 'id'
+                            ? 'Pattern Lab'
+                            : 'Pattern Lab',
                       requiresAuth: true,
                     },
                     {

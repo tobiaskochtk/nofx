@@ -1,8 +1,10 @@
 package market
 
 import (
+	"errors"
 	"math"
 	"testing"
+	"time"
 )
 
 // generateTestKlines generates test K-line data
@@ -275,6 +277,79 @@ func TestCalculateATR_TrueRange(t *testing.T) {
 
 	if math.Abs(atr-expectedATR) > tolerance {
 		t.Errorf("calculateATR() = %.3f, want approximately %.3f", atr, expectedATR)
+	}
+}
+
+func TestMarketDataMissCircuitMarksAndClearsPrimaryCooldown(t *testing.T) {
+	circuit := newMarketDataMissCircuit()
+	now := time.Now()
+
+	if _, active := circuit.cooldownUntil("REQUSDT", "3m", now); active {
+		t.Fatal("cooldown should not be active before first miss")
+	}
+
+	until, activated := circuit.markPrimaryEmpty("REQUSDT", "3m", now)
+	if !activated {
+		t.Fatal("cooldown should activate on first primary-timeframe miss")
+	}
+	if !until.After(now) {
+		t.Fatalf("cooldown deadline %v is not in the future", until)
+	}
+
+	reusedUntil, activatedAgain := circuit.markPrimaryEmpty("REQUSDT", "3m", now.Add(time.Second))
+	if activatedAgain {
+		t.Fatal("cooldown should not reactivate while already active")
+	}
+	if !reusedUntil.Equal(until) {
+		t.Fatalf("expected cooldown deadline %v to be reused, got %v", until, reusedUntil)
+	}
+
+	if gotUntil, active := circuit.cooldownUntil("REQUSDT", "3m", now.Add(2*time.Second)); !active || !gotUntil.Equal(until) {
+		t.Fatalf("cooldownUntil = (%v, %v), want (%v, true)", gotUntil, active, until)
+	}
+
+	circuit.clear("REQUSDT", "3m")
+	if _, active := circuit.cooldownUntil("REQUSDT", "3m", now.Add(2*time.Second)); active {
+		t.Fatal("cooldown should be cleared explicitly")
+	}
+}
+
+func TestIsExpectedDataMiss(t *testing.T) {
+	cases := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{
+			name: "primary timeframe empty",
+			err: &PrimaryTimeframeEmptyError{
+				Symbol:           "REQUSDT",
+				PrimaryTimeframe: "3m",
+			},
+			want: true,
+		},
+		{
+			name: "market data cooldown",
+			err: &MarketDataCooldownError{
+				Symbol:           "REQUSDT",
+				PrimaryTimeframe: "3m",
+				Until:            time.Now().Add(time.Minute),
+			},
+			want: true,
+		},
+		{
+			name: "unrelated error",
+			err:  errors.New("boom"),
+			want: false,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := IsExpectedDataMiss(tc.err); got != tc.want {
+				t.Fatalf("IsExpectedDataMiss() = %v, want %v", got, tc.want)
+			}
+		})
 	}
 }
 

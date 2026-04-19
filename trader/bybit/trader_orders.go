@@ -228,7 +228,13 @@ func (t *BybitTrader) SetMarginMode(symbol string, isCrossMargin bool) error {
 
 	result, err := t.client.NewUtaBybitServiceWithParams(params).SwitchPositionMargin(context.Background())
 	if err != nil {
-		if strings.Contains(err.Error(), "Cross/isolated margin mode is not modified") {
+		errText := err.Error()
+		if strings.Contains(errText, "Cross/isolated margin mode is not modified") {
+			return nil
+		}
+		// Unified Trading Accounts reject this endpoint even though trading can
+		// proceed normally with the account's configured margin behavior.
+		if strings.Contains(errText, "unified account is forbidden") {
 			return nil
 		}
 		return fmt.Errorf("failed to set margin mode: %w", err)

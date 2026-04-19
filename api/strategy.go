@@ -133,6 +133,120 @@ func validateAdaptiveReentryGuard(config *store.StrategyConfig) error {
 	return nil
 }
 
+func validateSymbolBehaviorLiveGuard(config *store.StrategyConfig) error {
+	if config == nil {
+		return nil
+	}
+
+	raw := config.RiskControl.SymbolBehaviorLiveGuard
+	effective := config.RiskControl.EffectiveSymbolBehaviorLiveGuard()
+
+	switch strings.ToLower(strings.TrimSpace(raw.Mode)) {
+	case "", store.SymbolBehaviorLiveGuardModeMonitor, store.SymbolBehaviorLiveGuardModeHardBlock:
+	default:
+		return fmt.Errorf("risk_control.symbol_behavior_live_guard.mode %q is invalid", raw.Mode)
+	}
+	if raw.MinConfidenceScore < 0 {
+		return fmt.Errorf("risk_control.symbol_behavior_live_guard.min_confidence_score must be >= 0")
+	}
+	if raw.MinSampleCount < 0 {
+		return fmt.Errorf("risk_control.symbol_behavior_live_guard.min_sample_count must be >= 0")
+	}
+	if raw.MinMatchScore < 0 {
+		return fmt.Errorf("risk_control.symbol_behavior_live_guard.min_match_score must be >= 0")
+	}
+	if raw.MaxFalsePositiveScore < 0 {
+		return fmt.Errorf("risk_control.symbol_behavior_live_guard.max_false_positive_score must be >= 0")
+	}
+	if raw.MaxDriftScore < 0 {
+		return fmt.Errorf("risk_control.symbol_behavior_live_guard.max_drift_score must be >= 0")
+	}
+	if raw.MinContradictionScore < 0 {
+		return fmt.Errorf("risk_control.symbol_behavior_live_guard.min_contradiction_score must be >= 0")
+	}
+
+	if effective.MinConfidenceScore <= 0 || effective.MinConfidenceScore > 1 {
+		return fmt.Errorf("risk_control.symbol_behavior_live_guard.min_confidence_score must be > 0 and <= 1")
+	}
+	if effective.MinSampleCount < 1 || effective.MinSampleCount > 500 {
+		return fmt.Errorf("risk_control.symbol_behavior_live_guard.min_sample_count must be between 1 and 500")
+	}
+	if effective.MinMatchScore <= 0 || effective.MinMatchScore > 1 {
+		return fmt.Errorf("risk_control.symbol_behavior_live_guard.min_match_score must be > 0 and <= 1")
+	}
+	if effective.MaxFalsePositiveScore < 0 || effective.MaxFalsePositiveScore > 1 {
+		return fmt.Errorf("risk_control.symbol_behavior_live_guard.max_false_positive_score must be between 0 and 1")
+	}
+	if effective.MaxDriftScore < 0 || effective.MaxDriftScore > 1 {
+		return fmt.Errorf("risk_control.symbol_behavior_live_guard.max_drift_score must be between 0 and 1")
+	}
+	if effective.MinContradictionScore <= 0 || effective.MinContradictionScore > 1 {
+		return fmt.Errorf("risk_control.symbol_behavior_live_guard.min_contradiction_score must be > 0 and <= 1")
+	}
+
+	return nil
+}
+
+func validateLearnedPatternLiveGuard(config *store.StrategyConfig) error {
+	if config == nil {
+		return nil
+	}
+
+	raw := config.RiskControl.LearnedPatternLiveGuard
+	effective := config.RiskControl.EffectiveLearnedPatternLiveGuard()
+
+	switch strings.ToLower(strings.TrimSpace(raw.Mode)) {
+	case "", store.LearnedPatternLiveGuardModeMonitor, store.LearnedPatternLiveGuardModeHardBlock:
+	default:
+		return fmt.Errorf("risk_control.learned_pattern_live_guard.mode %q is invalid", raw.Mode)
+	}
+	if raw.MinCompositeScore < 0 {
+		return fmt.Errorf("risk_control.learned_pattern_live_guard.min_composite_score must be >= 0")
+	}
+	if raw.MinConfidenceScore < 0 {
+		return fmt.Errorf("risk_control.learned_pattern_live_guard.min_confidence_score must be >= 0")
+	}
+	if raw.MinSampleCount < 0 {
+		return fmt.Errorf("risk_control.learned_pattern_live_guard.min_sample_count must be >= 0")
+	}
+	if raw.MinMatchScore < 0 {
+		return fmt.Errorf("risk_control.learned_pattern_live_guard.min_match_score must be >= 0")
+	}
+	if raw.MaxFalsePositiveScore < 0 {
+		return fmt.Errorf("risk_control.learned_pattern_live_guard.max_false_positive_score must be >= 0")
+	}
+	if raw.MaxDriftScore < 0 {
+		return fmt.Errorf("risk_control.learned_pattern_live_guard.max_drift_score must be >= 0")
+	}
+	if raw.MinValidationSupportScore < 0 {
+		return fmt.Errorf("risk_control.learned_pattern_live_guard.min_validation_support_score must be >= 0")
+	}
+
+	if effective.MinCompositeScore <= 0 || effective.MinCompositeScore > 1 {
+		return fmt.Errorf("risk_control.learned_pattern_live_guard.min_composite_score must be > 0 and <= 1")
+	}
+	if effective.MinConfidenceScore <= 0 || effective.MinConfidenceScore > 1 {
+		return fmt.Errorf("risk_control.learned_pattern_live_guard.min_confidence_score must be > 0 and <= 1")
+	}
+	if effective.MinSampleCount < 1 || effective.MinSampleCount > 500 {
+		return fmt.Errorf("risk_control.learned_pattern_live_guard.min_sample_count must be between 1 and 500")
+	}
+	if effective.MinMatchScore <= 0 || effective.MinMatchScore > 1 {
+		return fmt.Errorf("risk_control.learned_pattern_live_guard.min_match_score must be > 0 and <= 1")
+	}
+	if effective.MaxFalsePositiveScore < 0 || effective.MaxFalsePositiveScore > 1 {
+		return fmt.Errorf("risk_control.learned_pattern_live_guard.max_false_positive_score must be between 0 and 1")
+	}
+	if effective.MaxDriftScore < 0 || effective.MaxDriftScore > 1 {
+		return fmt.Errorf("risk_control.learned_pattern_live_guard.max_drift_score must be between 0 and 1")
+	}
+	if effective.MinValidationSupportScore <= 0 || effective.MinValidationSupportScore > 1 {
+		return fmt.Errorf("risk_control.learned_pattern_live_guard.min_validation_support_score must be > 0 and <= 1")
+	}
+
+	return nil
+}
+
 func validateSignalProvider(config *store.StrategyConfig) error {
 	rawProvider := config.SignalProvider
 	if strings.TrimSpace(rawProvider.Type) == "" && strings.TrimSpace(rawProvider.BaseURL) == "" && strings.TrimSpace(rawProvider.APIKey) == "" {
@@ -157,6 +271,12 @@ func validateStrategyConfig(config *store.StrategyConfig) ([]string, error) {
 		return nil, err
 	}
 	if err := validateAdaptiveReentryGuard(config); err != nil {
+		return nil, err
+	}
+	if err := validateSymbolBehaviorLiveGuard(config); err != nil {
+		return nil, err
+	}
+	if err := validateLearnedPatternLiveGuard(config); err != nil {
 		return nil, err
 	}
 
@@ -708,15 +828,19 @@ func (s *Server) handleStrategyTestRun(c *gin.Context) {
 		klineCount = 30
 	}
 
-	fmt.Printf("📊 Using timeframes: %v, primary: %s, kline count: %d\n", timeframes, primaryTimeframe, klineCount)
+	logger.Debugf("Strategy prompt preview using timeframes=%v primary=%s kline_count=%d",
+		timeframes, primaryTimeframe, klineCount)
 
 	// Get real market data (using multiple timeframes)
 	marketDataMap := make(map[string]*market.Data)
 	for _, coin := range candidates {
 		data, err := market.GetWithTimeframes(coin.Symbol, timeframes, primaryTimeframe, klineCount)
 		if err != nil {
-			// If getting data for a coin fails, log but continue
-			fmt.Printf("⚠️  Failed to get market data for %s: %v\n", coin.Symbol, err)
+			if market.IsExpectedDataMiss(err) {
+				logger.Debugf("Strategy prompt preview skipped %s due to expected market-data miss: %v", coin.Symbol, err)
+			} else {
+				logger.Warnf("⚠️  Strategy prompt preview failed to get market data for %s: %v", coin.Symbol, err)
+			}
 			continue
 		}
 		marketDataMap[coin.Symbol] = data

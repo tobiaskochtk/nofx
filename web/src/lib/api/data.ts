@@ -20,6 +20,10 @@ import type {
   DealReviewClassifierAssist,
   DealReviewChallengerCompareDetail,
   DealReviewFilterPresetDetail,
+  DealReviewSymbolBehaviorPriorListResponse,
+  DealReviewLearnedPatternListResponse,
+  DealReviewLearnedPatternLiveGuardEventListResponse,
+  DealReviewSymbolBehaviorLiveGuardEventListResponse,
   DealReviewStrategyVersionDetail,
   SemanticMemoryCorpusStatus,
   SemanticMemoryBenchmarkRun,
@@ -543,6 +547,93 @@ export const dataApi = {
     if (!result.success)
       throw new Error('Failed to fetch deal review anomalies')
     return result.data!
+  },
+
+  async getDealReviewSymbolBehaviorPriors(
+    traderId: string,
+    params: Record<string, string | number | undefined>
+  ): Promise<DealReviewSymbolBehaviorPriorListResponse> {
+    const search = new URLSearchParams()
+    Object.entries(params).forEach(([key, value]) => {
+      if (value !== undefined && value !== null && value !== '') {
+        search.set(key, String(value))
+      }
+    })
+    const result = await httpClient.get<DealReviewSymbolBehaviorPriorListResponse>(
+      `${API_BASE}/traders/${traderId}/deal-review/symbol-priors?${search.toString()}`
+    )
+    if (!result.success)
+      throw new Error('Failed to fetch symbol behavior priors')
+    return (
+      result.data || {
+        items: [],
+        refreshed: false,
+        generated_at: '',
+      }
+    )
+  },
+
+  async getDealReviewLearnedPatterns(
+    traderId: string,
+    params: Record<string, string | number | undefined>
+  ): Promise<DealReviewLearnedPatternListResponse> {
+    const search = new URLSearchParams()
+    Object.entries(params).forEach(([key, value]) => {
+      if (value !== undefined && value !== null && value !== '') {
+        search.set(key, String(value))
+      }
+    })
+    const result = await httpClient.get<DealReviewLearnedPatternListResponse>(
+      `${API_BASE}/traders/${traderId}/deal-review/learned-patterns?${search.toString()}`
+    )
+    if (!result.success) throw new Error('Failed to fetch learned patterns')
+    return (
+      result.data || {
+        items: [],
+        refreshed: false,
+        generated_at: '',
+      }
+    )
+  },
+
+  async getDealReviewSymbolBehaviorLiveGuardEvents(
+    traderId: string,
+    params: Record<string, string | number | undefined>
+  ): Promise<DealReviewSymbolBehaviorLiveGuardEventListResponse> {
+    const search = new URLSearchParams()
+    Object.entries(params).forEach(([key, value]) => {
+      if (value !== undefined && value !== null && value !== '') {
+        search.set(key, String(value))
+      }
+    })
+    const result =
+      await httpClient.get<DealReviewSymbolBehaviorLiveGuardEventListResponse>(
+        `${API_BASE}/traders/${traderId}/deal-review/symbol-prior-live-guard-events?${search.toString()}`
+      )
+    if (!result.success) {
+      throw new Error('Failed to fetch symbol-prior live guard events')
+    }
+    return result.data || { items: [] }
+  },
+
+  async getDealReviewLearnedPatternLiveGuardEvents(
+    traderId: string,
+    params: Record<string, string | number | undefined>
+  ): Promise<DealReviewLearnedPatternLiveGuardEventListResponse> {
+    const search = new URLSearchParams()
+    Object.entries(params).forEach(([key, value]) => {
+      if (value !== undefined && value !== null && value !== '') {
+        search.set(key, String(value))
+      }
+    })
+    const result =
+      await httpClient.get<DealReviewLearnedPatternLiveGuardEventListResponse>(
+        `${API_BASE}/traders/${traderId}/deal-review/learned-pattern-live-guard-events?${search.toString()}`
+      )
+    if (!result.success) {
+      throw new Error('Failed to fetch learned-pattern live guard events')
+    }
+    return result.data || { items: [] }
   },
 
   async getDealReviewAIScans(

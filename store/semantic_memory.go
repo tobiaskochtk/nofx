@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -20,6 +21,9 @@ const (
 	SemanticMemoryDocTypeAutonomousOptimizerRun = "autonomous_optimizer_run"
 	SemanticMemoryDocTypeOptimizerBacklogItem   = "autonomous_optimizer_backlog_item"
 	SemanticMemoryDocTypeStrategyVersion        = "strategy_version"
+	SemanticMemoryDocTypeDecisionRecordSummary  = "decision_record_summary"
+	SemanticMemoryDocTypeSymbolBehaviorPrior    = "symbol_behavior_prior"
+	SemanticMemoryDocTypeLearnedPattern         = "learned_pattern"
 
 	SemanticMemoryEmbeddingStatusPending  = "pending_embedding"
 	SemanticMemoryEmbeddingStatusEmbedded = "embedded"
@@ -239,6 +243,8 @@ func semanticMemoryNormalizedRequestedDocTypes(docTypes []string) []string {
 		SemanticMemoryDocTypeAutonomousOptimizerRun,
 		SemanticMemoryDocTypeOptimizerBacklogItem,
 		SemanticMemoryDocTypeStrategyVersion,
+		SemanticMemoryDocTypeSymbolBehaviorPrior,
+		SemanticMemoryDocTypeLearnedPattern,
 	}
 }
 
@@ -329,6 +335,30 @@ func (s *SemanticMemoryStore) BackfillDocuments(userID, traderID string, docType
 			firstErr = err
 		}
 		process(SemanticMemoryDocTypeStrategyVersion, versionDocs)
+	}
+
+	if _, ok := requested[SemanticMemoryDocTypeDecisionRecordSummary]; ok {
+		decisionDocs, err := s.buildDecisionRecordSummaryDocuments(userID, traderID, perTypeLimit)
+		if err != nil && firstErr == nil {
+			firstErr = err
+		}
+		process(SemanticMemoryDocTypeDecisionRecordSummary, decisionDocs)
+	}
+
+	if _, ok := requested[SemanticMemoryDocTypeSymbolBehaviorPrior]; ok {
+		priorDocs, err := s.buildSymbolBehaviorPriorDocuments(userID, traderID, perTypeLimit)
+		if err != nil && firstErr == nil {
+			firstErr = err
+		}
+		process(SemanticMemoryDocTypeSymbolBehaviorPrior, priorDocs)
+	}
+
+	if _, ok := requested[SemanticMemoryDocTypeLearnedPattern]; ok {
+		patternDocs, err := s.buildLearnedPatternDocuments(userID, traderID, perTypeLimit)
+		if err != nil && firstErr == nil {
+			firstErr = err
+		}
+		process(SemanticMemoryDocTypeLearnedPattern, patternDocs)
 	}
 
 	run.CompletedAt = time.Now().UTC()
@@ -481,6 +511,30 @@ func (s *SemanticMemoryStore) buildAutonomousOptimizerBacklogDocuments(userID, t
 	return docs, nil
 }
 
+func (s *SemanticMemoryStore) buildDecisionRecordSummaryDocuments(userID, traderID string, limit int) ([]*SemanticMemoryDocument, error) {
+	if strings.TrimSpace(traderID) == "" {
+		return nil, nil
+	}
+	query := s.db.Model(&DecisionRecordDB{}).
+		Where("trader_id = ? AND candidate_metadata_version > 0 AND decisions IS NOT NULL AND decisions <> '[]' AND LOWER(TRIM(decisions)) <> 'null'", strings.TrimSpace(traderID))
+	if limit > 0 {
+		query = query.Limit(limit)
+	}
+	var items []DecisionRecordDB
+	if err := query.Order("timestamp DESC").Find(&items).Error; err != nil {
+		return nil, err
+	}
+	docs := make([]*SemanticMemoryDocument, 0, len(items))
+	for idx := range items {
+		record := items[idx].toRecord()
+		if !semanticMemoryShouldIndexDecisionRecordSummary(record) {
+			continue
+		}
+		docs = append(docs, buildSemanticMemoryDecisionRecordSummaryDocument(userID, record))
+	}
+	return docs, nil
+}
+
 func (s *SemanticMemoryStore) buildStrategyVersionDocuments(userID, traderID string, limit int) ([]*SemanticMemoryDocument, error) {
 	dealReview := NewDealReviewStore(s.db)
 	query := s.db.Model(&DealReviewStrategyVersion{}).Where("user_id = ?", userID)
@@ -501,6 +555,54 @@ func (s *SemanticMemoryStore) buildStrategyVersionDocuments(userID, traderID str
 			return nil, err
 		}
 		docs = append(docs, buildSemanticMemoryStrategyVersionDocument(detail))
+	}
+	return docs, nil
+}
+
+func (s *SemanticMemoryStore) buildSymbolBehaviorPriorDocuments(userID, traderID string, limit int) ([]*SemanticMemoryDocument, error) {
+	dealReview := NewDealReviewStore(s.db)
+	if _, err := dealReview.RefreshSymbolBehaviorPriorsIfStale(userID, traderID); err != nil {
+		return nil, err
+	}
+
+	query := s.db.Model(&DealReviewSymbolBehaviorPrior{}).Where("user_id = ?", userID)
+	if strings.TrimSpace(traderID) != "" {
+		query = query.Where("trader_id = ?", traderID)
+	}
+	if limit > 0 {
+		query = query.Limit(limit)
+	}
+
+	var items []DealReviewSymbolBehaviorPrior
+	if err := query.Order("composite_score DESC, sample_count DESC, last_observed_at DESC").Find(&items).Error; err != nil {
+		return nil, err
+	}
+
+	docs := make([]*SemanticMemoryDocument, 0, len(items))
+	for idx := range items {
+		hydrateDealReviewSymbolBehaviorPrior(&items[idx])
+		docs = append(docs, buildSemanticMemorySymbolBehaviorPriorDocument(&items[idx]))
+	}
+	return docs, nil
+}
+
+func (s *SemanticMemoryStore) buildLearnedPatternDocuments(userID, traderID string, limit int) ([]*SemanticMemoryDocument, error) {
+	dealReview := NewDealReviewStore(s.db)
+	if _, err := dealReview.RefreshLearnedPatternsIfStale(userID, traderID); err != nil {
+		return nil, err
+	}
+
+	filter := DealReviewLearnedPatternFilter{Limit: limit}
+	if filter.Limit <= 0 {
+		filter.Limit = 100
+	}
+	items, err := dealReview.ListLearnedPatterns(userID, traderID, filter)
+	if err != nil {
+		return nil, err
+	}
+	docs := make([]*SemanticMemoryDocument, 0, len(items))
+	for idx := range items {
+		docs = append(docs, buildSemanticMemoryLearnedPatternDocument(&items[idx]))
 	}
 	return docs, nil
 }
@@ -574,8 +676,65 @@ func buildSemanticMemoryAutonomousOptimizerRunDocument(item *AutonomousOptimizer
 	if item == nil {
 		return nil
 	}
+	configPatch := semanticMemoryParseJSONObject(item.ConfigPatchJSON)
+	promptPatch := semanticMemoryParseJSONObject(item.PromptPatchJSON)
+	validation := semanticMemoryParseJSONObject(item.ValidationJSON)
+	metadataObject := semanticMemoryParseJSONObject(item.MetadataJSON)
+	proposal := semanticMemoryNestedJSONObject(metadataObject, "proposal")
+	critic := semanticMemoryNestedJSONObject(validation, "critic")
+	configValidation := semanticMemoryNestedJSONObject(validation, "config_validation")
+
+	proposalType := semanticMemoryMetadataString(proposal, "proposal_type")
+	if proposalType == "" {
+		proposalType = semanticMemoryMetadataString(metadataObject, "proposal_type")
+	}
+	criticAction := semanticMemoryMetadataString(critic, "recommended_action")
+	configValidationStatus := semanticMemoryMetadataString(configValidation, "status")
+	if configValidationStatus == "" {
+		configValidationStatus = semanticMemoryMetadataString(validation, "status")
+	}
+
+	gateReasons := semanticMemoryUniqueSortedStrings(append(
+		semanticMemoryStringSliceValue(validation["gate_reasons"]),
+		semanticMemoryStringSliceValue(metadataObject["gate_reasons"])...,
+	))
+	deferredReasons := semanticMemoryUniqueSortedStrings(append(
+		semanticMemoryStringSliceValue(validation["deferred_reasons"]),
+		semanticMemoryStringSliceValue(metadataObject["deferred_reasons"])...,
+	))
+	configPatchKeys := semanticMemoryFlattenJSONPaths(configPatch, "")
+	configPatchPaths := semanticMemoryUniqueSortedStrings(append(
+		semanticMemoryStringSliceValue(validation["config_patch_paths"]),
+		configPatchKeys...,
+	))
+	promptPatchKeys := semanticMemoryFlattenJSONPaths(promptPatch, "")
+	criticBlockingIssues := semanticMemoryStringSliceValue(critic["blocking_issues"])
+	proposalRationale := semanticMemoryStringSliceValue(proposal["rationale"])
+	backlogItemsCreated := semanticMemoryMetadataInt(metadataObject, "backlog_items_created")
+
 	title := fmt.Sprintf("Optimizer run %s %s", blankToValue(item.Status, "unknown"), item.ID)
-	summary := fmt.Sprintf("Trigger %s, status %s, proposer %s, critic %s. %s", blankToValue(item.Trigger, "unknown"), blankToValue(item.Status, "unknown"), blankToValue(item.PrimaryModelName, AutonomousOptimizerDefaultModelName), blankToValue(item.CriticModelName, AutonomousOptimizerDefaultModelName), strings.TrimSpace(item.Summary))
+	summaryParts := []string{
+		fmt.Sprintf("Trigger %s", blankToValue(item.Trigger, "unknown")),
+		fmt.Sprintf("status %s", blankToValue(item.Status, "unknown")),
+		fmt.Sprintf("proposer %s", blankToValue(item.PrimaryModelName, AutonomousOptimizerDefaultModelName)),
+		fmt.Sprintf("critic %s", blankToValue(item.CriticModelName, AutonomousOptimizerDefaultModelName)),
+	}
+	if proposalType != "" {
+		summaryParts = append(summaryParts, fmt.Sprintf("proposal %s", proposalType))
+	}
+	if criticAction != "" {
+		summaryParts = append(summaryParts, fmt.Sprintf("critic_action %s", criticAction))
+	}
+	if configValidationStatus != "" {
+		summaryParts = append(summaryParts, fmt.Sprintf("config_validation %s", configValidationStatus))
+	}
+	if len(gateReasons) > 0 {
+		summaryParts = append(summaryParts, fmt.Sprintf("gate_reasons %d", len(gateReasons)))
+	}
+	if len(deferredReasons) > 0 {
+		summaryParts = append(summaryParts, fmt.Sprintf("deferred %d", len(deferredReasons)))
+	}
+	summary := fmt.Sprintf("%s. %s", strings.Join(summaryParts, ", "), strings.TrimSpace(item.Summary))
 	body := strings.TrimSpace(fmt.Sprintf(`
 Trader: %s
 Run ID: %s
@@ -586,7 +745,28 @@ Critic model: %s
 Source trader: %s
 Source strategy: %s
 Applied strategy version: %s
+Proposal type: %s
+Critic recommended action: %s
+Config validation status: %s
+Backlog items created: %d
 Summary: %s
+Proposal rationale:
+%s
+
+Gate reasons:
+%s
+
+Deferred reasons:
+%s
+
+Critic blocking issues:
+%s
+
+Config patch paths:
+%s
+
+Prompt patch paths:
+%s
 
 Config patch:
 %s
@@ -597,15 +777,24 @@ Prompt patch:
 Validation:
 %s
 
-Metadata:
+Proposal:
 %s
-`, item.TraderID, item.ID, blankToValue(item.Trigger, "unknown"), blankToValue(item.Status, "unknown"), blankToValue(item.PrimaryModelName, AutonomousOptimizerDefaultModelName), blankToValue(item.CriticModelName, AutonomousOptimizerDefaultModelName), blankToValue(item.SourceTraderID, "n/a"), blankToValue(item.SourceStrategyID, "n/a"), blankToValue(item.AppliedStrategyVersionID, "n/a"), strings.TrimSpace(item.Summary), semanticMemoryCompactJSON(item.ConfigPatchJSON, 2400), semanticMemoryCompactJSON(item.PromptPatchJSON, 2400), semanticMemoryCompactJSON(item.ValidationJSON, 2400), semanticMemoryCompactJSON(item.MetadataJSON, 3200)))
+`, item.TraderID, item.ID, blankToValue(item.Trigger, "unknown"), blankToValue(item.Status, "unknown"), blankToValue(item.PrimaryModelName, AutonomousOptimizerDefaultModelName), blankToValue(item.CriticModelName, AutonomousOptimizerDefaultModelName), blankToValue(item.SourceTraderID, "n/a"), blankToValue(item.SourceStrategyID, "n/a"), blankToValue(item.AppliedStrategyVersionID, "n/a"), blankToValue(proposalType, "n/a"), blankToValue(criticAction, "n/a"), blankToValue(configValidationStatus, "n/a"), backlogItemsCreated, strings.TrimSpace(item.Summary), semanticMemoryJoinStringsForBody(proposalRationale, "n/a", 6), semanticMemoryJoinStringsForBody(gateReasons, "n/a", 6), semanticMemoryJoinStringsForBody(deferredReasons, "n/a", 4), semanticMemoryJoinStringsForBody(criticBlockingIssues, "n/a", 6), semanticMemoryJoinStringsForBody(configPatchPaths, "n/a", 12), semanticMemoryJoinStringsForBody(promptPatchKeys, "n/a", 12), semanticMemoryCompactJSON(item.ConfigPatchJSON, 1600), semanticMemoryCompactJSON(item.PromptPatchJSON, 1600), semanticMemoryCompactJSON(item.ValidationJSON, 1600), semanticMemoryCompactJSON(semanticMemoryMarshalJSON(proposal), 1600)))
 	metadata := semanticMemoryMarshalJSON(map[string]any{
 		"status":                      item.Status,
 		"trigger":                     item.Trigger,
 		"primary_model_name":          item.PrimaryModelName,
 		"critic_model_name":           item.CriticModelName,
 		"applied_strategy_version_id": item.AppliedStrategyVersionID,
+		"proposal_type":               proposalType,
+		"critic_recommended_action":   criticAction,
+		"config_validation_status":    configValidationStatus,
+		"gate_reasons":                gateReasons,
+		"deferred_reasons":            deferredReasons,
+		"config_patch_paths":          configPatchPaths,
+		"config_patch_keys":           configPatchKeys,
+		"prompt_patch_keys":           promptPatchKeys,
+		"backlog_items_created":       backlogItemsCreated,
 	})
 	return &SemanticMemoryDocument{
 		UserID:            item.UserID,
@@ -812,6 +1001,564 @@ Attribution non-target after:
 	}
 }
 
+func buildSemanticMemoryDecisionRecordSummaryDocument(userID string, record *DecisionRecord) *SemanticMemoryDocument {
+	if record == nil {
+		return nil
+	}
+	candidateSymbols := make([]string, 0, len(record.CandidateDetails))
+	selectionBuckets := make([]string, 0, len(record.CandidateDetails))
+	rejectReasons := make([]string, 0, len(record.CandidateDetails))
+	candidateSources := make([]string, 0, len(record.CandidateDetails))
+	sessions := []string{}
+	trendRegimes := []string{}
+	volatilityRegimes := []string{}
+	oiRegimes := []string{}
+	actionTypes := make([]string, 0, len(record.Decisions))
+	actionSymbols := make([]string, 0, len(record.Decisions))
+	terminalStatuses := make([]string, 0, len(record.Decisions))
+	actionLines := make([]string, 0, len(record.Decisions))
+	openCount := 0
+	closeCount := 0
+	holdCount := 0
+	waitCount := 0
+
+	for _, candidate := range record.CandidateDetails {
+		if symbol := strings.ToUpper(strings.TrimSpace(candidate.Symbol)); symbol != "" {
+			candidateSymbols = append(candidateSymbols, symbol)
+		}
+		if bucket := strings.TrimSpace(candidate.SelectionBucket); bucket != "" {
+			selectionBuckets = append(selectionBuckets, bucket)
+		}
+		rejectReasons = append(rejectReasons, candidate.RejectReasons...)
+		candidateSources = append(candidateSources, candidate.Sources...)
+		if candidate.MarketContext != nil {
+			if value := strings.TrimSpace(candidate.MarketContext.SessionBucket); value != "" {
+				sessions = append(sessions, value)
+			}
+			if value := strings.TrimSpace(candidate.MarketContext.TrendRegime); value != "" {
+				trendRegimes = append(trendRegimes, value)
+			}
+			if value := strings.TrimSpace(candidate.MarketContext.VolatilityRegime); value != "" {
+				volatilityRegimes = append(volatilityRegimes, value)
+			}
+			if value := strings.TrimSpace(candidate.MarketContext.OIRegime); value != "" {
+				oiRegimes = append(oiRegimes, value)
+			}
+		}
+	}
+
+	for _, action := range record.Decisions {
+		actionType := strings.TrimSpace(action.Action)
+		if actionType == "" {
+			continue
+		}
+		actionTypes = append(actionTypes, actionType)
+		if symbol := strings.ToUpper(strings.TrimSpace(action.Symbol)); symbol != "" {
+			actionSymbols = append(actionSymbols, symbol)
+		}
+		rejectReasons = append(rejectReasons, action.RejectReasons...)
+		if action.Execution != nil {
+			if value := strings.TrimSpace(action.Execution.TerminalStatus); value != "" {
+				terminalStatuses = append(terminalStatuses, value)
+			}
+		}
+		if action.MarketContext != nil {
+			if value := strings.TrimSpace(action.MarketContext.SessionBucket); value != "" {
+				sessions = append(sessions, value)
+			}
+			if value := strings.TrimSpace(action.MarketContext.TrendRegime); value != "" {
+				trendRegimes = append(trendRegimes, value)
+			}
+			if value := strings.TrimSpace(action.MarketContext.VolatilityRegime); value != "" {
+				volatilityRegimes = append(volatilityRegimes, value)
+			}
+			if value := strings.TrimSpace(action.MarketContext.OIRegime); value != "" {
+				oiRegimes = append(oiRegimes, value)
+			}
+		}
+		switch {
+		case strings.HasPrefix(actionType, "open_"):
+			openCount++
+		case strings.HasPrefix(actionType, "close_"):
+			closeCount++
+		case actionType == "hold":
+			holdCount++
+		case actionType == "wait":
+			waitCount++
+		}
+		line := fmt.Sprintf("%s %s conf=%d", strings.ToUpper(actionType), strings.ToUpper(strings.TrimSpace(action.Symbol)), action.Confidence)
+		if reasoning := strings.TrimSpace(action.Reasoning); reasoning != "" {
+			line += " reason=" + reasoning
+		}
+		if reasons := semanticMemoryJoinStringsForBody(action.RejectReasons, "", 3); reasons != "" {
+			line += " rejects=" + reasons
+		}
+		if action.Execution != nil && strings.TrimSpace(action.Execution.TerminalStatus) != "" {
+			line += " exec=" + strings.TrimSpace(action.Execution.TerminalStatus)
+		}
+		actionLines = append(actionLines, line)
+	}
+
+	candidateSymbols = semanticMemoryUniqueSortedStrings(candidateSymbols)
+	selectionBuckets = semanticMemoryUniqueSortedStrings(selectionBuckets)
+	rejectReasons = semanticMemoryUniqueSortedStrings(rejectReasons)
+	candidateSources = semanticMemoryUniqueSortedStrings(candidateSources)
+	sessions = semanticMemoryUniqueSortedStrings(sessions)
+	trendRegimes = semanticMemoryUniqueSortedStrings(trendRegimes)
+	volatilityRegimes = semanticMemoryUniqueSortedStrings(volatilityRegimes)
+	oiRegimes = semanticMemoryUniqueSortedStrings(oiRegimes)
+	actionTypes = semanticMemoryUniqueSortedStrings(actionTypes)
+	actionSymbols = semanticMemoryUniqueSortedStrings(actionSymbols)
+	terminalStatuses = semanticMemoryUniqueSortedStrings(terminalStatuses)
+
+	title := fmt.Sprintf("Decision cycle %d %s", record.CycleNumber, blankToValue(strings.Join(actionTypes, "/"), "no_action"))
+	summary := fmt.Sprintf(
+		"Trader %s cycle %d with %d candidates, %d opens, %d holds, %d waits, %d closes. Buckets %s. Reject reasons %s.",
+		record.TraderID,
+		record.CycleNumber,
+		len(record.CandidateDetails),
+		openCount,
+		holdCount,
+		waitCount,
+		closeCount,
+		semanticMemoryJoinStringsForBody(selectionBuckets, "n/a", 4),
+		semanticMemoryJoinStringsForBody(rejectReasons, "none", 4),
+	)
+	body := strings.TrimSpace(fmt.Sprintf(`
+Trader: %s
+Cycle number: %d
+Timestamp: %s
+Candidate metadata version: %d
+Candidate count: %d
+Decision count: %d
+Action mix: open=%d hold=%d wait=%d close=%d
+Candidate symbols: %s
+Action symbols: %s
+Selection buckets: %s
+Reject reasons: %s
+Candidate sources: %s
+Sessions: %s
+Trend regimes: %s
+Volatility regimes: %s
+OI regimes: %s
+Terminal statuses: %s
+Account snapshot: balance=%.2f available=%.2f positions=%d margin_used_pct=%.2f
+
+Actions:
+%s
+`,
+		record.TraderID,
+		record.CycleNumber,
+		record.Timestamp.UTC().Format(time.RFC3339),
+		record.CandidateMetaVer,
+		len(record.CandidateDetails),
+		len(record.Decisions),
+		openCount,
+		holdCount,
+		waitCount,
+		closeCount,
+		semanticMemoryJoinStringsForBody(candidateSymbols, "n/a", 10),
+		semanticMemoryJoinStringsForBody(actionSymbols, "n/a", 10),
+		semanticMemoryJoinStringsForBody(selectionBuckets, "n/a", 8),
+		semanticMemoryJoinStringsForBody(rejectReasons, "none", 8),
+		semanticMemoryJoinStringsForBody(candidateSources, "n/a", 6),
+		semanticMemoryJoinStringsForBody(sessions, "n/a", 4),
+		semanticMemoryJoinStringsForBody(trendRegimes, "n/a", 4),
+		semanticMemoryJoinStringsForBody(volatilityRegimes, "n/a", 4),
+		semanticMemoryJoinStringsForBody(oiRegimes, "n/a", 4),
+		semanticMemoryJoinStringsForBody(terminalStatuses, "n/a", 4),
+		record.AccountState.TotalBalance,
+		record.AccountState.AvailableBalance,
+		record.AccountState.PositionCount,
+		record.AccountState.MarginUsedPct,
+		semanticMemoryJoinStringsForBody(actionLines, "n/a", 8),
+	))
+	metadata := semanticMemoryMarshalJSON(map[string]any{
+		"cycle_number":         record.CycleNumber,
+		"action_types":         actionTypes,
+		"symbols":              semanticMemoryUniqueSortedStrings(append(append([]string{}, candidateSymbols...), actionSymbols...)),
+		"selection_buckets":    selectionBuckets,
+		"reject_reasons":       rejectReasons,
+		"candidate_sources":    candidateSources,
+		"sessions":             sessions,
+		"trend_regimes":        trendRegimes,
+		"volatility_regimes":   volatilityRegimes,
+		"oi_regimes":           oiRegimes,
+		"terminal_statuses":    terminalStatuses,
+		"open_decision_count":  openCount,
+		"hold_decision_count":  holdCount,
+		"wait_decision_count":  waitCount,
+		"close_decision_count": closeCount,
+	})
+	return &SemanticMemoryDocument{
+		UserID:            strings.TrimSpace(userID),
+		TraderID:          record.TraderID,
+		DocType:           SemanticMemoryDocTypeDecisionRecordSummary,
+		SourceID:          fmt.Sprintf("%s:%d", record.TraderID, record.CycleNumber),
+		SourceUpdatedAt:   record.Timestamp.UTC(),
+		Title:             title,
+		Summary:           summary,
+		Body:              body,
+		MetadataJSON:      metadata,
+		EmbeddingProvider: SemanticMemoryDefaultEmbeddingProvider,
+		EmbeddingModel:    SemanticMemoryDefaultEmbeddingModel,
+		EmbeddingStatus:   SemanticMemoryEmbeddingStatusPending,
+	}
+}
+
+func buildSemanticMemorySymbolBehaviorPriorDocument(item *DealReviewSymbolBehaviorPrior) *SemanticMemoryDocument {
+	if item == nil {
+		return nil
+	}
+
+	evidenceCaseIDs := make([]string, 0, len(item.Evidence))
+	for _, evidence := range item.Evidence {
+		caseID := strings.TrimSpace(evidence.CaseID)
+		if caseID == "" {
+			continue
+		}
+		evidenceCaseIDs = append(evidenceCaseIDs, caseID)
+	}
+	decisionCycles := make([]string, 0, len(item.DecisionEvidence))
+	for _, evidence := range item.DecisionEvidence {
+		if evidence.CycleNumber <= 0 {
+			continue
+		}
+		decisionCycles = append(decisionCycles, strconv.Itoa(evidence.CycleNumber))
+	}
+
+	evidenceCaseIDs = semanticMemoryUniqueSortedStrings(evidenceCaseIDs)
+	decisionCycles = semanticMemoryUniqueSortedStrings(decisionCycles)
+	sourceUpdatedAt := item.BuiltAt.UTC()
+	if sourceUpdatedAt.IsZero() {
+		sourceUpdatedAt = item.UpdatedAt.UTC()
+	}
+	if sourceUpdatedAt.IsZero() {
+		sourceUpdatedAt = item.LastObservedAt.UTC()
+	}
+
+	title := fmt.Sprintf(
+		"Symbol prior %s %s %s",
+		strings.ToUpper(strings.TrimSpace(item.Symbol)),
+		strings.ToLower(strings.TrimSpace(item.Side)),
+		blankToValue(item.ValidationLabel, item.Status),
+	)
+	summary := fmt.Sprintf(
+		"Bias %s, status %s, validation %s. Avg PnL %+.4f (%+.2f%%) across %d deals with contradiction %.0f%%.",
+		blankToValue(item.BehaviorBias, "mixed"),
+		blankToValue(item.Status, "unknown"),
+		blankToValue(item.ValidationLabel, "n/a"),
+		item.AvgPnL,
+		item.AvgPnLPct,
+		item.SampleCount,
+		item.ContradictionScore*100,
+	)
+	body := strings.TrimSpace(fmt.Sprintf(`
+Trader: %s
+Prior ID: %s
+Symbol: %s
+Side: %s
+Behavior bias: %s
+Recommended action: %s
+Status: %s
+Validation label: %s
+Validation alert: %s
+Regime signature: %s
+Open selection bucket: %s
+Open regimes: trend=%s volatility=%s oi=%s
+Samples: total=%d training=%d holdout=%d recent=%d
+Win/loss/flat: %d / %d / %d
+PnL: net=%+.8f avg=%+.8f avg_pct=%+.2f%% expectancy=%+.8f
+MFE/MAE: avg_mfe_pct=%+.2f%% avg_mae_pct=%+.2f%%
+Give-back: rate=%.2f%% avg=%.2f%%
+Decision evidence: %d opens across %d cycles, avg confidence %.2f%%
+Scores: contradiction=%.0f%% confidence=%.0f%% stability=%.0f%% recency=%.0f%% composite=%.0f%% drift=%.0f%%
+False-positive score: %.0f%%
+False-negative score: %.0f%%
+Validation summary: %s
+Signal cluster key: %s
+Signal clusters: %s
+Signal tags: %s
+Evidence case IDs: %s
+Decision cycles: %s
+Summary: %s
+`,
+		item.TraderID,
+		item.ID,
+		strings.ToUpper(strings.TrimSpace(item.Symbol)),
+		strings.ToUpper(strings.TrimSpace(item.Side)),
+		blankToValue(item.BehaviorBias, "mixed"),
+		blankToValue(item.RecommendedAction, "observe"),
+		blankToValue(item.Status, "unknown"),
+		blankToValue(item.ValidationLabel, "n/a"),
+		blankToValue(item.ValidationAlert, "n/a"),
+		blankToValue(item.RegimeSignature, "n/a"),
+		blankToValue(item.OpenSelectionBucket, "n/a"),
+		blankToValue(item.OpenTrendRegime, "n/a"),
+		blankToValue(item.OpenVolatilityRegime, "n/a"),
+		blankToValue(item.OpenOIRegime, "n/a"),
+		item.SampleCount,
+		item.TrainingSampleCount,
+		item.ValidationSampleCount,
+		item.RecentSampleCount,
+		item.WinningDeals,
+		item.LosingDeals,
+		item.FlatDeals,
+		item.NetPnL,
+		item.AvgPnL,
+		item.AvgPnLPct,
+		item.Expectancy,
+		item.AvgMFEPct,
+		item.AvgMAEPct,
+		item.GiveBackRate*100,
+		item.AvgGiveBackPct,
+		item.DecisionOpenCount,
+		item.DecisionCycleCount,
+		item.AvgDecisionConfidence,
+		item.ContradictionScore*100,
+		item.ConfidenceScore*100,
+		item.StabilityScore*100,
+		item.RecencyWeight*100,
+		item.CompositeScore*100,
+		item.DriftScore*100,
+		item.FalsePositiveScore*100,
+		item.FalseNegativeScore*100,
+		blankToValue(item.ValidationSummary, "n/a"),
+		blankToValue(item.SignalClusterKey, "n/a"),
+		semanticMemoryJoinStringsForBody(item.SignalClusters, "none", 8),
+		semanticMemoryJoinStringsForBody(item.SignalTags, "none", 8),
+		semanticMemoryJoinStringsForBody(evidenceCaseIDs, "none", 8),
+		semanticMemoryJoinStringsForBody(decisionCycles, "none", 8),
+		blankToValue(item.Summary, "n/a"),
+	))
+	metadata := semanticMemoryMarshalJSON(map[string]any{
+		"prior_id":               item.ID,
+		"symbol":                 strings.ToUpper(strings.TrimSpace(item.Symbol)),
+		"side":                   strings.ToUpper(strings.TrimSpace(item.Side)),
+		"status":                 item.Status,
+		"validation_label":       item.ValidationLabel,
+		"behavior_bias":          item.BehaviorBias,
+		"recommended_action":     item.RecommendedAction,
+		"open_selection_bucket":  item.OpenSelectionBucket,
+		"open_trend_regime":      item.OpenTrendRegime,
+		"open_volatility_regime": item.OpenVolatilityRegime,
+		"open_oi_regime":         item.OpenOIRegime,
+		"regime_signature":       item.RegimeSignature,
+		"signal_cluster_key":     item.SignalClusterKey,
+		"signal_clusters":        item.SignalClusters,
+		"signal_tags":            item.SignalTags,
+		"evidence_case_ids":      evidenceCaseIDs,
+		"decision_cycles":        decisionCycles,
+		"sample_count":           item.SampleCount,
+		"decision_cycle_count":   item.DecisionCycleCount,
+		"decision_open_count":    item.DecisionOpenCount,
+		"false_positive_score":   item.FalsePositiveScore,
+		"false_negative_score":   item.FalseNegativeScore,
+	})
+	return &SemanticMemoryDocument{
+		UserID:            item.UserID,
+		TraderID:          item.TraderID,
+		DocType:           SemanticMemoryDocTypeSymbolBehaviorPrior,
+		SourceID:          buildSemanticMemorySymbolBehaviorPriorSourceID(item),
+		SourceUpdatedAt:   sourceUpdatedAt,
+		Title:             title,
+		Summary:           summary,
+		Body:              body,
+		MetadataJSON:      metadata,
+		EmbeddingProvider: SemanticMemoryDefaultEmbeddingProvider,
+		EmbeddingModel:    SemanticMemoryDefaultEmbeddingModel,
+		EmbeddingStatus:   SemanticMemoryEmbeddingStatusPending,
+	}
+}
+
+func buildSemanticMemoryLearnedPatternDocument(item *DealReviewLearnedPattern) *SemanticMemoryDocument {
+	if item == nil {
+		return nil
+	}
+
+	evidenceCaseIDs := make([]string, 0, len(item.Evidence))
+	for _, evidence := range item.Evidence {
+		caseID := strings.TrimSpace(evidence.CaseID)
+		if caseID == "" {
+			continue
+		}
+		evidenceCaseIDs = append(evidenceCaseIDs, caseID)
+	}
+	evidenceCaseIDs = semanticMemoryUniqueSortedStrings(evidenceCaseIDs)
+
+	sourceUpdatedAt := item.BuiltAt.UTC()
+	if sourceUpdatedAt.IsZero() {
+		sourceUpdatedAt = item.UpdatedAt.UTC()
+	}
+	if sourceUpdatedAt.IsZero() {
+		sourceUpdatedAt = item.LastObservedAt.UTC()
+	}
+
+	scopeLabel := strings.ReplaceAll(blankToValue(item.ScopeType, "pattern"), "_", " ")
+	title := fmt.Sprintf(
+		"Learned pattern %s %s %s",
+		scopeLabel,
+		strings.ToLower(strings.TrimSpace(item.PatternClass)),
+		blankToValue(item.ValidationLabel, item.Status),
+	)
+	summary := fmt.Sprintf(
+		"%s %s pattern on %s. Validation %s, recommended use %s. Avg PnL %+.2f%% across %d samples.",
+		blankToValue(item.ScopeType, "pattern"),
+		blankToValue(item.PatternClass, "edge"),
+		blankToValue(strings.ToUpper(strings.TrimSpace(item.Side)), "unknown side"),
+		blankToValue(item.ValidationLabel, "n/a"),
+		blankToValue(item.RecommendedUse, "review_hint"),
+		item.AvgPnLPct,
+		item.SampleCount,
+	)
+	body := strings.TrimSpace(fmt.Sprintf(`
+Trader: %s
+Pattern ID: %s
+Stable source ID: %s
+Scope: %s
+Scope key: %s
+Symbol: %s
+Side: %s
+Pattern class: %s
+Status: %s
+Validation label: %s
+Recommended use: %s
+Validation alert: %s
+Pattern signature: %s
+Regime signature: %s
+Feature set: %s
+Pattern order: %d
+Feature count: %d
+Samples: total=%d training=%d holdout=%d recent=%d
+Support / contradict: %d / %d
+Win/loss/flat: %d / %d / %d
+PnL: net=%+.8f avg=%+.8f avg_pct=%+.2f%% expectancy=%+.8f
+Lift: win_rate=%+.2f%% avg_pct=%+.2f%%
+MFE/MAE: avg_mfe_pct=%+.2f%% avg_mae_pct=%+.2f%%
+Give-back: rate=%.2f%% avg=%.2f%%
+Scores: confidence=%.0f%% stability=%.0f%% drift=%.0f%% recency=%.0f%% composite=%.0f%%
+False-positive score: %.0f%%
+Reverse-risk score: %.0f%%
+Evidence case IDs: %s
+Summary: %s
+`,
+		item.TraderID,
+		item.ID,
+		buildSemanticMemoryLearnedPatternSourceID(item),
+		blankToValue(item.ScopeType, "n/a"),
+		blankToValue(item.ScopeKey, "n/a"),
+		blankToValue(strings.ToUpper(strings.TrimSpace(item.Symbol)), "n/a"),
+		blankToValue(strings.ToUpper(strings.TrimSpace(item.Side)), "n/a"),
+		blankToValue(item.PatternClass, "n/a"),
+		blankToValue(item.Status, "n/a"),
+		blankToValue(item.ValidationLabel, "n/a"),
+		blankToValue(item.RecommendedUse, "n/a"),
+		blankToValue(item.ValidationAlert, "n/a"),
+		blankToValue(item.PatternSignature, "n/a"),
+		blankToValue(item.RegimeSignature, "n/a"),
+		semanticMemoryJoinStringsForBody(item.FeatureSet, "none", 12),
+		item.PatternOrder,
+		item.FeatureCount,
+		item.SampleCount,
+		item.TrainingSampleCount,
+		item.ValidationSampleCount,
+		item.RecentSampleCount,
+		item.SupportCount,
+		item.ContradictCount,
+		item.WinningDeals,
+		item.LosingDeals,
+		item.FlatDeals,
+		item.NetPnL,
+		item.AvgPnL,
+		item.AvgPnLPct,
+		item.Expectancy,
+		item.LiftWinRate*100,
+		item.LiftAvgPnLPct,
+		item.AvgMFEPct,
+		item.AvgMAEPct,
+		item.GiveBackRate*100,
+		item.AvgGiveBackPct,
+		item.ConfidenceScore*100,
+		item.StabilityScore*100,
+		item.DriftScore*100,
+		item.RecencyWeight*100,
+		item.CompositeScore*100,
+		item.FalsePositiveScore*100,
+		item.ReverseRiskScore*100,
+		semanticMemoryJoinStringsForBody(evidenceCaseIDs, "none", 8),
+		blankToValue(item.Summary, "n/a"),
+	))
+	metadata := semanticMemoryMarshalJSON(map[string]any{
+		"pattern_id":               item.ID,
+		"scope_type":               item.ScopeType,
+		"scope_key":                item.ScopeKey,
+		"symbol":                   strings.ToUpper(strings.TrimSpace(item.Symbol)),
+		"side":                     strings.ToUpper(strings.TrimSpace(item.Side)),
+		"status":                   item.Status,
+		"validation_label":         item.ValidationLabel,
+		"pattern_class":            item.PatternClass,
+		"recommended_use":          item.RecommendedUse,
+		"pattern_signature":        item.PatternSignature,
+		"regime_signature":         item.RegimeSignature,
+		"feature_set":              item.FeatureSet,
+		"feature_count":            item.FeatureCount,
+		"sample_count":             item.SampleCount,
+		"support_count":            item.SupportCount,
+		"validation_sample_count":  item.ValidationSampleCount,
+		"recent_sample_count":      item.RecentSampleCount,
+		"composite_score":          item.CompositeScore,
+		"confidence_score":         item.ConfidenceScore,
+		"drift_score":              item.DriftScore,
+		"false_positive_score":     item.FalsePositiveScore,
+		"reverse_risk_score":       item.ReverseRiskScore,
+		"evidence_case_ids":        evidenceCaseIDs,
+	})
+	return &SemanticMemoryDocument{
+		UserID:            item.UserID,
+		TraderID:          item.TraderID,
+		DocType:           SemanticMemoryDocTypeLearnedPattern,
+		SourceID:          buildSemanticMemoryLearnedPatternSourceID(item),
+		SourceUpdatedAt:   sourceUpdatedAt,
+		Title:             title,
+		Summary:           summary,
+		Body:              body,
+		MetadataJSON:      metadata,
+		EmbeddingProvider: SemanticMemoryDefaultEmbeddingProvider,
+		EmbeddingModel:    SemanticMemoryDefaultEmbeddingModel,
+		EmbeddingStatus:   SemanticMemoryEmbeddingStatusPending,
+	}
+}
+
+func buildSemanticMemorySymbolBehaviorPriorSourceID(item *DealReviewSymbolBehaviorPrior) string {
+	if item == nil {
+		return ""
+	}
+	parts := []string{
+		strings.ToUpper(strings.TrimSpace(item.Symbol)),
+		strings.ToUpper(strings.TrimSpace(item.Side)),
+		normalizeDealReviewSymbolPriorDimension(item.OpenSelectionBucket),
+		normalizeDealReviewSymbolPriorDimension(item.OpenTrendRegime),
+		normalizeDealReviewSymbolPriorDimension(item.OpenVolatilityRegime),
+		normalizeDealReviewSymbolPriorDimension(item.OpenOIRegime),
+	}
+	return strings.Join(parts, "::")
+}
+
+func buildSemanticMemoryLearnedPatternSourceID(item *DealReviewLearnedPattern) string {
+	if item == nil {
+		return ""
+	}
+	parts := []string{
+		strings.TrimSpace(item.ScopeType),
+		strings.TrimSpace(item.ScopeKey),
+		strings.ToUpper(strings.TrimSpace(item.Symbol)),
+		strings.ToUpper(strings.TrimSpace(item.Side)),
+		strings.TrimSpace(item.PatternClass),
+		strings.TrimSpace(item.PatternSignature),
+	}
+	return strings.Join(parts, "::")
+}
+
 func normalizeSemanticMemoryDocType(value string) string {
 	switch strings.TrimSpace(value) {
 	case SemanticMemoryDocTypeAutonomousOptimizerRun:
@@ -820,6 +1567,12 @@ func normalizeSemanticMemoryDocType(value string) string {
 		return SemanticMemoryDocTypeOptimizerBacklogItem
 	case SemanticMemoryDocTypeStrategyVersion:
 		return SemanticMemoryDocTypeStrategyVersion
+	case SemanticMemoryDocTypeDecisionRecordSummary:
+		return SemanticMemoryDocTypeDecisionRecordSummary
+	case SemanticMemoryDocTypeSymbolBehaviorPrior:
+		return SemanticMemoryDocTypeSymbolBehaviorPrior
+	case SemanticMemoryDocTypeLearnedPattern:
+		return SemanticMemoryDocTypeLearnedPattern
 	default:
 		return SemanticMemoryDocTypeDealReviewCase
 	}
@@ -902,6 +1655,30 @@ func semanticMemoryParseJSONObject(raw string) map[string]any {
 		return map[string]any{}
 	}
 	return parsed
+}
+
+func semanticMemoryNestedJSONObject(raw map[string]any, path ...string) map[string]any {
+	current := raw
+	for _, segment := range path {
+		if len(current) == 0 {
+			return map[string]any{}
+		}
+		value, ok := current[segment]
+		if !ok || value == nil {
+			return map[string]any{}
+		}
+		next, ok := value.(map[string]any)
+		if ok {
+			current = next
+			continue
+		}
+		if text, ok := value.(string); ok {
+			current = semanticMemoryParseJSONObject(text)
+			continue
+		}
+		return map[string]any{}
+	}
+	return current
 }
 
 func semanticMemoryMetadataString(raw map[string]any, key string) string {
@@ -1027,6 +1804,141 @@ func semanticMemoryMetadataStringSlice(raw map[string]any, key string) []string 
 	}
 }
 
+func semanticMemoryStringSliceValue(raw any) []string {
+	switch typed := raw.(type) {
+	case nil:
+		return nil
+	case []string:
+		result := make([]string, 0, len(typed))
+		for _, item := range typed {
+			item = strings.TrimSpace(item)
+			if item == "" {
+				continue
+			}
+			result = append(result, item)
+		}
+		return semanticMemoryUniqueSortedStrings(result)
+	case []any:
+		result := make([]string, 0, len(typed))
+		for _, item := range typed {
+			text := strings.TrimSpace(fmt.Sprintf("%v", item))
+			if text == "" || text == "<nil>" {
+				continue
+			}
+			result = append(result, text)
+		}
+		return semanticMemoryUniqueSortedStrings(result)
+	case string:
+		if items := semanticMemoryNormalizeJSONArray(typed); len(items) > 0 {
+			return semanticMemoryUniqueSortedStrings(items)
+		}
+		typed = strings.TrimSpace(typed)
+		if typed == "" {
+			return nil
+		}
+		return []string{typed}
+	default:
+		text := strings.TrimSpace(fmt.Sprintf("%v", typed))
+		if text == "" || text == "<nil>" {
+			return nil
+		}
+		return []string{text}
+	}
+}
+
+func semanticMemoryUniqueSortedStrings(items []string) []string {
+	if len(items) == 0 {
+		return nil
+	}
+	seen := make(map[string]string, len(items))
+	for _, item := range items {
+		item = strings.TrimSpace(item)
+		if item == "" {
+			continue
+		}
+		key := strings.ToLower(item)
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = item
+	}
+	if len(seen) == 0 {
+		return nil
+	}
+	result := make([]string, 0, len(seen))
+	for _, item := range seen {
+		result = append(result, item)
+	}
+	sort.Strings(result)
+	return result
+}
+
+func semanticMemoryFlattenJSONPaths(value any, prefix string) []string {
+	paths := semanticMemoryFlattenJSONPathsInto(nil, value, strings.TrimSpace(prefix))
+	return semanticMemoryUniqueSortedStrings(paths)
+}
+
+func semanticMemoryFlattenJSONPathsInto(paths []string, value any, prefix string) []string {
+	switch typed := value.(type) {
+	case map[string]any:
+		if len(typed) == 0 {
+			if prefix != "" {
+				paths = append(paths, prefix)
+			}
+			return paths
+		}
+		keys := make([]string, 0, len(typed))
+		for key := range typed {
+			keys = append(keys, key)
+		}
+		sort.Strings(keys)
+		for _, key := range keys {
+			next := key
+			if prefix != "" {
+				next = prefix + "." + key
+			}
+			paths = semanticMemoryFlattenJSONPathsInto(paths, typed[key], next)
+		}
+		return paths
+	case []any:
+		if prefix == "" {
+			return paths
+		}
+		if len(typed) == 0 {
+			return append(paths, prefix+"[]")
+		}
+		hasObject := false
+		for _, item := range typed {
+			if _, ok := item.(map[string]any); ok {
+				hasObject = true
+			}
+			paths = semanticMemoryFlattenJSONPathsInto(paths, item, prefix+"[]")
+		}
+		if !hasObject {
+			paths = append(paths, prefix+"[]")
+		}
+		return paths
+	default:
+		if prefix != "" {
+			paths = append(paths, prefix)
+		}
+		return paths
+	}
+}
+
+func semanticMemoryJoinStringsForBody(items []string, fallback string, limit int) string {
+	items = semanticMemoryUniqueSortedStrings(items)
+	if len(items) == 0 {
+		return fallback
+	}
+	if limit > 0 && len(items) > limit {
+		clipped := append([]string{}, items[:limit]...)
+		clipped = append(clipped, fmt.Sprintf("+%d more", len(items)-limit))
+		return strings.Join(clipped, "; ")
+	}
+	return strings.Join(items, "; ")
+}
+
 func semanticMemoryNormalizeJSONArray(value string) []string {
 	var raw []string
 	if err := json.Unmarshal([]byte(strings.TrimSpace(value)), &raw); err != nil {
@@ -1048,4 +1960,25 @@ func blankToValue(value, fallback string) string {
 		return fallback
 	}
 	return strings.TrimSpace(value)
+}
+
+func semanticMemoryShouldIndexDecisionRecordSummary(record *DecisionRecord) bool {
+	if record == nil || record.CandidateMetaVer <= 0 {
+		return false
+	}
+	if len(record.Decisions) == 0 {
+		return false
+	}
+	meaningful := false
+	for _, action := range record.Decisions {
+		actionType := strings.TrimSpace(action.Action)
+		if actionType == "" {
+			continue
+		}
+		meaningful = true
+		if strings.HasPrefix(actionType, "open_") || strings.HasPrefix(actionType, "close_") || actionType == "hold" || actionType == "wait" {
+			return true
+		}
+	}
+	return meaningful
 }

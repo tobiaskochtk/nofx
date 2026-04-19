@@ -520,7 +520,23 @@ func (s *Server) runAutonomousOptimizerCycle(cfg *store.AutonomousOptimizerConfi
 
 	recentRuns, _ := s.store.AutonomousOptimizer().ListRuns(cfg.UserID, cfg.TraderID, 8)
 	recentRuns = filterAutonomousOptimizerRunsExcluding(recentRuns, run.ID)
-	payload, err := buildAutonomousOptimizerReviewPayload(cfg, traderCfg, strategyRecord, strategyCfg, bundle, recentRuns)
+	symbolPriorPayload, symbolPriorErr := s.loadAutonomousOptimizerSymbolBehaviorPriorPayload(cfg, bundle)
+	if symbolPriorErr != nil {
+		logger.Warnf("⚠️ Failed to load autonomous optimizer symbol priors for trader %s: %v", cfg.TraderID, symbolPriorErr)
+		metadata["symbol_behavior_priors_error"] = symbolPriorErr.Error()
+	}
+	if symbolPriorPayload != nil {
+		metadata["symbol_behavior_priors"] = symbolPriorPayload
+	}
+	learnedPatternPayload, learnedPatternErr := s.loadAutonomousOptimizerLearnedPatternPayload(cfg, bundle)
+	if learnedPatternErr != nil {
+		logger.Warnf("⚠️ Failed to load autonomous optimizer learned patterns for trader %s: %v", cfg.TraderID, learnedPatternErr)
+		metadata["learned_patterns_error"] = learnedPatternErr.Error()
+	}
+	if learnedPatternPayload != nil {
+		metadata["learned_patterns"] = learnedPatternPayload
+	}
+	payload, err := buildAutonomousOptimizerReviewPayload(cfg, traderCfg, strategyRecord, strategyCfg, bundle, recentRuns, symbolPriorPayload, learnedPatternPayload)
 	if err != nil {
 		return nil, err
 	}
@@ -600,11 +616,22 @@ func (s *Server) runAutonomousOptimizerCycle(cfg *store.AutonomousOptimizerConfi
 		"replay_message_limit":      proposalConversation.ReplayMessageLimit,
 	}
 
-	createdBacklogCount, backlogErr := s.saveAutonomousOptimizerBacklogFindings(cfg, run.ID, proposal.BacklogItems, proposal.ExecutiveSummary)
+	synthesizedBacklogItems := buildAutonomousOptimizerLearnedPatternBacklogProposals(learnedPatternPayload)
+	if len(synthesizedBacklogItems) > 0 {
+		metadata["learned_pattern_backlog_suggestions"] = map[string]any{
+			"count": len(synthesizedBacklogItems),
+			"items": synthesizedBacklogItems,
+		}
+	}
+	combinedBacklogItems := append([]autonomousOptimizerBacklogProposal{}, proposal.BacklogItems...)
+	combinedBacklogItems = append(combinedBacklogItems, synthesizedBacklogItems...)
+	createdBacklogCount, backlogErr := s.saveAutonomousOptimizerBacklogFindings(cfg, run.ID, combinedBacklogItems, proposal.ExecutiveSummary)
 	if backlogErr != nil {
 		logger.Warnf("⚠️ Failed to persist autonomous optimizer backlog findings for trader %s: %v", cfg.TraderID, backlogErr)
 	}
 	metadata["backlog_items_created"] = createdBacklogCount
+	metadata["backlog_items_ai_suggested"] = len(proposal.BacklogItems)
+	metadata["backlog_items_synthesized_from_learned_patterns"] = len(synthesizedBacklogItems)
 
 	criticSystemPrompt, criticUserPrompt, err := buildAutonomousOptimizerCriticPrompt(cfg, payload, proposal)
 	if err != nil {
@@ -1209,6 +1236,23 @@ func (s *Server) saveAutonomousOptimizerBacklogFindings(cfg *store.AutonomousOpt
 		if strings.TrimSpace(proposal.Title) == "" {
 			continue
 		}
+		metadata := map[string]any{
+			"run_id":         runID,
+			"review_summary": clipDealReviewAIScanText(reviewSummary, 500),
+		}
+		for key, value := range sanitizeAutonomousOptimizerJSONMap(proposal.Metadata) {
+			metadata[key] = value
+		}
+		evidenceJSON := "[]"
+		if len(proposal.Evidence) > 0 {
+			if raw, marshalErr := json.Marshal(sanitizeAutonomousOptimizerJSONObjectArray(proposal.Evidence)); marshalErr == nil {
+				evidenceJSON = string(raw)
+			}
+		}
+		metadataJSON := "{}"
+		if raw, marshalErr := json.Marshal(metadata); marshalErr == nil {
+			metadataJSON = string(raw)
+		}
 		item := &store.AutonomousOptimizerBacklogItem{
 			UserID:             cfg.UserID,
 			TraderID:           cfg.TraderID,
@@ -1225,11 +1269,8 @@ func (s *Server) saveAutonomousOptimizerBacklogFindings(cfg *store.AutonomousOpt
 			AIGenerated:        true,
 			UserEdited:         false,
 			MergedFindingCount: 1,
-			MetadataJSON: fmt.Sprintf(
-				`{"run_id":%q,"review_summary":%q}`,
-				runID,
-				clipDealReviewAIScanText(reviewSummary, 500),
-			),
+			EvidenceJSON:       evidenceJSON,
+			MetadataJSON:       metadataJSON,
 		}
 		key := autonomousOptimizerBacklogMergeKey(item.Category, item.Title)
 		if current := index[key]; current != nil {
@@ -1241,6 +1282,8 @@ func (s *Server) saveAutonomousOptimizerBacklogFindings(cfg *store.AutonomousOpt
 			current.Urgency = maxAutonomousOptimizerValue(current.Urgency, item.Urgency)
 			current.RecurrenceCount += item.RecurrenceCount
 			current.MergedFindingCount++
+			current.EvidenceJSON = mergeAutonomousOptimizerBacklogEvidenceJSON(current.EvidenceJSON, item.EvidenceJSON)
+			current.MetadataJSON = mergeAutonomousOptimizerBacklogMetadataJSON(current.MetadataJSON, item.MetadataJSON)
 			current.CompositeScore = buildAutonomousOptimizerBacklogScore(current)
 			if err := s.store.AutonomousOptimizer().SaveBacklogItem(current); err != nil {
 				return created, err
@@ -1430,6 +1473,18 @@ func parseAutonomousOptimizerJSONObject(body string) map[string]any {
 	out := map[string]any{}
 	if err := json.Unmarshal([]byte(trimmed), &out); err != nil {
 		return map[string]any{}
+	}
+	return out
+}
+
+func parseAutonomousOptimizerJSONArray(body string) []map[string]any {
+	trimmed := strings.TrimSpace(body)
+	if trimmed == "" {
+		return nil
+	}
+	out := make([]map[string]any, 0)
+	if err := json.Unmarshal([]byte(trimmed), &out); err != nil {
+		return nil
 	}
 	return out
 }
@@ -1766,6 +1821,51 @@ func autonomousOptimizerCooldownEnd(cfg *store.AutonomousOptimizerConfig, runs [
 
 func autonomousOptimizerBacklogMergeKey(category, title string) string {
 	return strings.TrimSpace(strings.ToLower(category)) + "::" + strings.TrimSpace(strings.ToLower(title))
+}
+
+func mergeAutonomousOptimizerBacklogEvidenceJSON(currentJSON, incomingJSON string) string {
+	current := parseAutonomousOptimizerJSONArray(currentJSON)
+	incoming := parseAutonomousOptimizerJSONArray(incomingJSON)
+	if len(current) == 0 && len(incoming) == 0 {
+		return "[]"
+	}
+	out := make([]map[string]any, 0, len(current)+len(incoming))
+	seen := map[string]struct{}{}
+	appendItems := func(items []map[string]any) {
+		for _, item := range items {
+			raw, _ := json.Marshal(item)
+			key := string(raw)
+			if key == "" {
+				continue
+			}
+			if _, ok := seen[key]; ok {
+				continue
+			}
+			seen[key] = struct{}{}
+			out = append(out, item)
+		}
+	}
+	appendItems(current)
+	appendItems(incoming)
+	if raw, err := json.Marshal(out); err == nil {
+		return string(raw)
+	}
+	return "[]"
+}
+
+func mergeAutonomousOptimizerBacklogMetadataJSON(currentJSON, incomingJSON string) string {
+	current := parseAutonomousOptimizerJSONObject(currentJSON)
+	incoming := parseAutonomousOptimizerJSONObject(incomingJSON)
+	if len(current) == 0 && len(incoming) == 0 {
+		return "{}"
+	}
+	for key, value := range incoming {
+		current[key] = value
+	}
+	if raw, err := json.Marshal(current); err == nil {
+		return string(raw)
+	}
+	return "{}"
 }
 
 func maxAutonomousOptimizerValue(left, right float64) float64 {

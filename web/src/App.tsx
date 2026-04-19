@@ -17,6 +17,7 @@ import { StrategyMarketPage } from './pages/StrategyMarketPage'
 import { DataPage } from './pages/DataPage'
 import { DealReviewPage } from './pages/DealReviewPage'
 import { AutonomousOptimizerPage } from './pages/AutonomousOptimizerPage'
+import { PatternLabPage } from './pages/PatternLabPage'
 import { SemanticMemoryPage } from './pages/SemanticMemoryPage'
 import { BeginnerOnboardingPage } from './pages/BeginnerOnboardingPage'
 import { LoginRequiredOverlay } from './components/auth/LoginRequiredOverlay'
@@ -46,6 +47,7 @@ type Page =
   | 'strategy'
   | 'strategy-market'
   | 'deal-review'
+  | 'pattern-lab'
   | 'optimizer'
   | 'memory'
   | 'data'
@@ -70,6 +72,7 @@ function App() {
     if (path === '/strategy-market' || hash === 'strategy-market')
       return 'strategy-market'
     if (path === '/deal-review' || hash === 'deal-review') return 'deal-review'
+    if (path === '/pattern-lab' || hash === 'pattern-lab') return 'pattern-lab'
     if (path === '/optimizer' || hash === 'optimizer') return 'optimizer'
     if (path === '/memory' || hash === 'memory') return 'memory'
     if (path === '/data' || hash === 'data') return 'data'
@@ -93,6 +96,7 @@ function App() {
       competition: '/competition',
       'strategy-market': '/strategy-market',
       'deal-review': '/deal-review',
+      'pattern-lab': '/pattern-lab',
       optimizer: '/optimizer',
       memory: '/memory',
       data: '/data',
@@ -176,6 +180,8 @@ function App() {
         setCurrentPage('strategy-market')
       } else if (path === '/deal-review' || hash === 'deal-review') {
         setCurrentPage('deal-review')
+      } else if (path === '/pattern-lab' || hash === 'pattern-lab') {
+        setCurrentPage('pattern-lab')
       } else if (path === '/optimizer' || hash === 'optimizer') {
         setCurrentPage('optimizer')
       } else if (path === '/memory' || hash === 'memory') {
@@ -376,6 +382,10 @@ function App() {
       setCurrentPage('competition')
     } else if (route === '/traders') {
       setCurrentPage('traders')
+    } else if (route === '/deal-review') {
+      setCurrentPage('deal-review')
+    } else if (route === '/pattern-lab') {
+      setCurrentPage('pattern-lab')
     } else if (route === '/optimizer') {
       setCurrentPage('optimizer')
     } else if (route === '/memory') {
@@ -563,6 +573,20 @@ function App() {
               <StrategyMarketPage />
             ) : currentPage === 'deal-review' ? (
               <DealReviewPage
+                traders={traders}
+                tradersError={tradersError}
+                selectedTraderId={selectedTraderId}
+                onTraderSelect={(traderId) => {
+                  setSelectedTraderId(traderId)
+                  const trader = traders?.find((t) => t.trader_id === traderId)
+                  if (trader) {
+                    const slug = getTraderSlug(trader)
+                    setSelectedTraderSlug(slug)
+                  }
+                }}
+              />
+            ) : currentPage === 'pattern-lab' ? (
+              <PatternLabPage
                 traders={traders}
                 tradersError={tradersError}
                 selectedTraderId={selectedTraderId}

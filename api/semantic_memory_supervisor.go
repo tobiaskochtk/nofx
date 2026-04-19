@@ -15,6 +15,7 @@ import (
 const (
 	semanticMemoryRefreshInterval       = 15 * time.Minute
 	semanticMemoryRefreshEmbeddingLimit = 250
+	semanticMemoryDecisionSummaryLimit  = 150
 )
 
 type semanticMemoryRefreshScope struct {
@@ -65,11 +66,24 @@ func (s *Server) ProcessPendingSemanticMemoryRefresh() error {
 		if strings.TrimSpace(scope.UserID) == "" || strings.TrimSpace(scope.TraderID) == "" {
 			continue
 		}
-		backfillResult, backfillErr := s.store.SemanticMemory().BackfillDocuments(scope.UserID, scope.TraderID, nil, 0)
-		if backfillErr != nil {
-			logger.Warnf("⚠️ Semantic memory backfill failed for trader %s (%s): %v", fallbackSemanticMemoryTraderName(scope.Name, scope.TraderID), scope.TraderID, backfillErr)
+		coreBackfillResult, coreBackfillErr := s.store.SemanticMemory().BackfillDocuments(scope.UserID, scope.TraderID, nil, 0)
+		if coreBackfillErr != nil {
+			logger.Warnf("⚠️ Semantic memory core backfill failed for trader %s (%s): %v", fallbackSemanticMemoryTraderName(scope.Name, scope.TraderID), scope.TraderID, coreBackfillErr)
+		}
+
+		decisionBackfillResult, decisionBackfillErr := s.store.SemanticMemory().BackfillDocuments(
+			scope.UserID,
+			scope.TraderID,
+			[]string{store.SemanticMemoryDocTypeDecisionRecordSummary},
+			semanticMemoryDecisionSummaryLimit,
+		)
+		if decisionBackfillErr != nil {
+			logger.Warnf("⚠️ Semantic memory decision-summary backfill failed for trader %s (%s): %v", fallbackSemanticMemoryTraderName(scope.Name, scope.TraderID), scope.TraderID, decisionBackfillErr)
+		}
+		if coreBackfillErr != nil && decisionBackfillErr != nil {
 			continue
 		}
+		backfillResult := mergeSemanticMemoryBackfillResults(coreBackfillResult, decisionBackfillResult)
 
 		embeddedDocs := 0
 		embeddedTokens := 0
@@ -133,6 +147,28 @@ func (s *Server) ProcessPendingSemanticMemoryRefresh() error {
 	}
 
 	return nil
+}
+
+func mergeSemanticMemoryBackfillResults(results ...*store.SemanticMemoryBackfillResult) *store.SemanticMemoryBackfillResult {
+	merged := &store.SemanticMemoryBackfillResult{
+		Run: &store.SemanticMemorySyncRun{},
+	}
+	haveAny := false
+	for _, result := range results {
+		if result == nil || result.Run == nil {
+			continue
+		}
+		haveAny = true
+		merged.Run.TotalDocuments += result.Run.TotalDocuments
+		merged.Run.InsertedDocuments += result.Run.InsertedDocuments
+		merged.Run.UpdatedDocuments += result.Run.UpdatedDocuments
+		merged.Run.UnchangedDocuments += result.Run.UnchangedDocuments
+		merged.Run.FailedDocuments += result.Run.FailedDocuments
+	}
+	if !haveAny {
+		return nil
+	}
+	return merged
 }
 
 func collectSemanticMemoryRefreshScopes(traders []*store.Trader) []semanticMemoryRefreshScope {

@@ -195,6 +195,7 @@ export interface RiskControlConfig {
   min_confidence: number // Min AI confidence to open position (AI guided)
   trailing_stop?: TrailingStopConfig
   adaptive_reentry_guard?: AdaptiveReentryGuardConfig
+  learned_pattern_live_guard?: LearnedPatternLiveGuardConfig
 }
 
 export type TrailingStopMode = 'lock_profit' | 'trail_offset'
@@ -222,4 +223,17 @@ export interface AdaptiveReentryGuardConfig {
   min_recent_trades: number
   same_symbol_loss_cooldown_minutes: number
   pair_loss_lookback_hours: number
+}
+
+export interface LearnedPatternLiveGuardConfig {
+  enabled: boolean
+  mode?: 'monitor' | 'hard_block'
+  require_confirmed_label?: boolean
+  min_composite_score?: number
+  min_confidence_score?: number
+  min_sample_count?: number
+  min_match_score?: number
+  max_false_positive_score?: number
+  max_drift_score?: number
+  min_validation_support_score?: number
 }

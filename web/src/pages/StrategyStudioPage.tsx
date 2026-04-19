@@ -34,6 +34,7 @@ import type {
   Strategy,
   StrategyConfig,
   AIModel,
+  LearnedPatternLiveGuardConfig,
   SignalProviderConfig,
   TrailingStopConfig,
   TrailingStopTier,
@@ -101,6 +102,24 @@ function normalizeSignalProvider(
   }
 }
 
+function normalizeLearnedPatternLiveGuard(
+  config?: LearnedPatternLiveGuardConfig
+): LearnedPatternLiveGuardConfig {
+  return {
+    enabled: config?.enabled ?? false,
+    mode: config?.mode === 'hard_block' ? 'hard_block' : 'monitor',
+    require_confirmed_label: config?.require_confirmed_label ?? true,
+    min_composite_score: config?.min_composite_score ?? 0.85,
+    min_confidence_score: config?.min_confidence_score ?? 0.9,
+    min_sample_count: config?.min_sample_count ?? 8,
+    min_match_score: config?.min_match_score ?? 0.8,
+    max_false_positive_score: config?.max_false_positive_score ?? 0.1,
+    max_drift_score: config?.max_drift_score ?? 0.15,
+    min_validation_support_score:
+      config?.min_validation_support_score ?? 0.6,
+  }
+}
+
 function normalizeStrategyConfig(config: StrategyConfig): StrategyConfig {
   return {
     ...config,
@@ -114,6 +133,9 @@ function normalizeStrategyConfig(config: StrategyConfig): StrategyConfig {
     risk_control: {
       ...config.risk_control,
       trailing_stop: normalizeTrailingStop(config.risk_control.trailing_stop),
+      learned_pattern_live_guard: normalizeLearnedPatternLiveGuard(
+        config.risk_control.learned_pattern_live_guard
+      ),
     },
     signal_provider: normalizeSignalProvider(config.signal_provider),
   }

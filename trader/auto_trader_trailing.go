@@ -46,6 +46,7 @@ func (at *AutoTrader) startTrailingStopMonitor() {
 		defer ticker.Stop()
 
 		logger.Infof("🎯 Started trailing-stop monitor (every %ds)", cfg.CheckIntervalSec)
+		at.updateTrailingStops()
 
 		for {
 			select {
@@ -70,6 +71,25 @@ func (at *AutoTrader) updateTrailingStops() {
 		logger.Infof("⚠️ Trailing stop: failed to get positions: %v", err)
 		return
 	}
+
+	at.updateTrailingStopsWithPositions(positions, time.Now().UTC())
+}
+
+func (at *AutoTrader) updateTrailingStopsWithPositions(positions []map[string]interface{}, checkTime time.Time) {
+	cfg := at.trailingStopConfig()
+	if !cfg.Enabled || len(positions) == 0 {
+		return
+	}
+	if checkTime.IsZero() {
+		checkTime = time.Now().UTC()
+	}
+	nowMs := checkTime.UTC().UnixMilli()
+	if nowMs <= 0 {
+		nowMs = time.Now().UTC().UnixMilli()
+	}
+
+	at.trailingStopEvalMu.Lock()
+	defer at.trailingStopEvalMu.Unlock()
 
 	for _, pos := range positions {
 		symbol, _ := pos["symbol"].(string)
@@ -125,7 +145,6 @@ func (at *AutoTrader) updateTrailingStops() {
 		}
 
 		activeTier := cfg.Tiers[activeTierIndex]
-		nowMs := time.Now().UTC().UnixMilli()
 		if !state.HasActivated {
 			if cfg.FirstTightenDelaySec > 0 && positionStartMs > 0 {
 				minAllowedUpdateMs := positionStartMs + int64(cfg.FirstTightenDelaySec)*1000

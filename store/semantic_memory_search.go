@@ -2,6 +2,8 @@ package store
 
 import (
 	"fmt"
+	"net/url"
+	"sort"
 	"strings"
 	"time"
 )
@@ -107,6 +109,16 @@ func (s *SemanticMemoryStore) FindSimilarDocumentsBySource(userID, traderID, doc
 	if limit <= 0 || limit > 50 {
 		limit = 8
 	}
+	candidateLimit := limit
+	if normalizeSemanticMemoryDocType(docType) == SemanticMemoryDocTypeAutonomousOptimizerRun {
+		candidateLimit = limit * 4
+		if candidateLimit < 20 {
+			candidateLimit = 20
+		}
+		if candidateLimit > 50 {
+			candidateLimit = 50
+		}
+	}
 
 	whereClauses := []string{
 		"d.user_id = ?",
@@ -127,7 +139,7 @@ func (s *SemanticMemoryStore) FindSimilarDocumentsBySource(userID, traderID, doc
 	whereClauses = append(whereClauses, filterClauses...)
 	args = append(args, filterArgs...)
 	args = append([]any{doc.ID}, args...)
-	args = append(args, limit)
+	args = append(args, candidateLimit)
 
 	query := fmt.Sprintf(`
 		SELECT
@@ -167,20 +179,121 @@ func (s *SemanticMemoryStore) FindSimilarDocumentsBySource(userID, traderID, doc
 		return nil, err
 	}
 
+	type rankedHit struct {
+		doc        *SemanticMemoryDocument
+		score      float64
+		distance   float64
+		sourceLink string
+	}
 	result := &SemanticMemorySimilarityResult{
 		QueryDocument: doc,
-		Items:         make([]*SemanticMemorySearchHit, 0, len(rows)),
+		Items:         make([]*SemanticMemorySearchHit, 0, minInt(limit, len(rows))),
 	}
+	ranked := make([]rankedHit, 0, len(rows))
 	for idx := range rows {
 		hitDoc := rows[idx].toDocument()
+		score := semanticMemorySearchCompositeScore(doc, hitDoc, rows[idx].SimilarityScore)
+		ranked = append(ranked, rankedHit{
+			doc:        hitDoc,
+			score:      score,
+			distance:   rows[idx].Distance,
+			sourceLink: semanticMemorySourceLink(hitDoc),
+		})
+	}
+	sort.SliceStable(ranked, func(i, j int) bool {
+		if ranked[i].score == ranked[j].score {
+			return ranked[i].doc.UpdatedAt.After(ranked[j].doc.UpdatedAt)
+		}
+		return ranked[i].score > ranked[j].score
+	})
+	for idx := 0; idx < len(ranked) && idx < limit; idx++ {
 		result.Items = append(result.Items, &SemanticMemorySearchHit{
-			Document:        hitDoc,
-			SimilarityScore: rows[idx].SimilarityScore,
-			Distance:        rows[idx].Distance,
-			SourceLink:      semanticMemorySourceLink(hitDoc),
+			Document:        ranked[idx].doc,
+			SimilarityScore: ranked[idx].score,
+			Distance:        ranked[idx].distance,
+			SourceLink:      ranked[idx].sourceLink,
 		})
 	}
 	return result, nil
+}
+
+func semanticMemorySearchCompositeScore(queryDoc, hitDoc *SemanticMemoryDocument, vectorScore float64) float64 {
+	score := clamp01(vectorScore)
+	switch normalizeSemanticMemoryDocType(queryDoc.DocType) {
+	case SemanticMemoryDocTypeAutonomousOptimizerRun:
+		metaScore := semanticMemorySearchOptimizerRunMetadataScore(queryDoc, hitDoc)
+		return clamp01(score*0.60 + metaScore*0.40)
+	case SemanticMemoryDocTypeSymbolBehaviorPrior:
+		metaScore := semanticMemorySearchSymbolBehaviorPriorMetadataScore(queryDoc, hitDoc)
+		return clamp01(score*0.62 + metaScore*0.38)
+	case SemanticMemoryDocTypeLearnedPattern:
+		metaScore := semanticMemorySearchLearnedPatternMetadataScore(queryDoc, hitDoc)
+		return clamp01(score*0.62 + metaScore*0.38)
+	default:
+		return score
+	}
+}
+
+func semanticMemorySearchOptimizerRunMetadataScore(queryDoc, hitDoc *SemanticMemoryDocument) float64 {
+	if queryDoc == nil || hitDoc == nil {
+		return 0
+	}
+	queryMeta := semanticMemoryParseJSONObject(queryDoc.MetadataJSON)
+	hitMeta := semanticMemoryParseJSONObject(hitDoc.MetadataJSON)
+	score := 0.10 * semanticMemoryBenchmarkExactMatch(queryMeta, hitMeta, "status")
+	score += 0.06 * semanticMemoryBenchmarkExactMatch(queryMeta, hitMeta, "trigger")
+	score += 0.06 * semanticMemoryBenchmarkExactMatch(queryMeta, hitMeta, "primary_model_name")
+	score += 0.06 * semanticMemoryBenchmarkExactMatch(queryMeta, hitMeta, "critic_model_name")
+	score += 0.16 * semanticMemoryBenchmarkExactMatch(queryMeta, hitMeta, "proposal_type")
+	score += 0.14 * semanticMemoryBenchmarkExactMatch(queryMeta, hitMeta, "critic_recommended_action")
+	score += 0.12 * semanticMemoryBenchmarkExactMatch(queryMeta, hitMeta, "config_validation_status")
+	score += 0.12 * semanticMemoryBenchmarkArrayOverlap(queryMeta, hitMeta, "gate_reasons")
+	score += 0.08 * semanticMemoryBenchmarkArrayOverlap(queryMeta, hitMeta, "deferred_reasons")
+	score += 0.06 * semanticMemoryBenchmarkArrayOverlap(queryMeta, hitMeta, "config_patch_paths")
+	score += 0.02 * semanticMemoryBenchmarkArrayOverlap(queryMeta, hitMeta, "prompt_patch_keys")
+	score += 0.02 * semanticMemoryBenchmarkLexicalOverlap(queryDoc, hitDoc)
+	return clamp01(score)
+}
+
+func semanticMemorySearchSymbolBehaviorPriorMetadataScore(queryDoc, hitDoc *SemanticMemoryDocument) float64 {
+	if queryDoc == nil || hitDoc == nil {
+		return 0
+	}
+	queryMeta := semanticMemoryParseJSONObject(queryDoc.MetadataJSON)
+	hitMeta := semanticMemoryParseJSONObject(hitDoc.MetadataJSON)
+	score := 0.18 * semanticMemoryBenchmarkExactMatch(queryMeta, hitMeta, "symbol")
+	score += 0.08 * semanticMemoryBenchmarkExactMatch(queryMeta, hitMeta, "side")
+	score += 0.08 * semanticMemoryBenchmarkExactMatch(queryMeta, hitMeta, "status")
+	score += 0.12 * semanticMemoryBenchmarkExactMatch(queryMeta, hitMeta, "validation_label")
+	score += 0.10 * semanticMemoryBenchmarkExactMatch(queryMeta, hitMeta, "behavior_bias")
+	score += 0.08 * semanticMemoryBenchmarkExactMatch(queryMeta, hitMeta, "recommended_action")
+	score += 0.08 * semanticMemoryBenchmarkExactMatch(queryMeta, hitMeta, "open_selection_bucket")
+	score += 0.07 * semanticMemoryBenchmarkExactMatch(queryMeta, hitMeta, "open_trend_regime")
+	score += 0.05 * semanticMemoryBenchmarkExactMatch(queryMeta, hitMeta, "open_volatility_regime")
+	score += 0.05 * semanticMemoryBenchmarkExactMatch(queryMeta, hitMeta, "open_oi_regime")
+	score += 0.09 * semanticMemoryBenchmarkArrayOverlap(queryMeta, hitMeta, "signal_tags")
+	score += 0.02 * semanticMemoryBenchmarkLexicalOverlap(queryDoc, hitDoc)
+	return clamp01(score)
+}
+
+func semanticMemorySearchLearnedPatternMetadataScore(queryDoc, hitDoc *SemanticMemoryDocument) float64 {
+	if queryDoc == nil || hitDoc == nil {
+		return 0
+	}
+	queryMeta := semanticMemoryParseJSONObject(queryDoc.MetadataJSON)
+	hitMeta := semanticMemoryParseJSONObject(hitDoc.MetadataJSON)
+	score := 0.14 * semanticMemoryBenchmarkExactMatch(queryMeta, hitMeta, "symbol")
+	score += 0.08 * semanticMemoryBenchmarkExactMatch(queryMeta, hitMeta, "side")
+	score += 0.08 * semanticMemoryBenchmarkExactMatch(queryMeta, hitMeta, "scope_type")
+	score += 0.12 * semanticMemoryBenchmarkExactMatch(queryMeta, hitMeta, "pattern_class")
+	score += 0.12 * semanticMemoryBenchmarkExactMatch(queryMeta, hitMeta, "validation_label")
+	score += 0.08 * semanticMemoryBenchmarkExactMatch(queryMeta, hitMeta, "recommended_use")
+	score += 0.12 * semanticMemoryBenchmarkExactMatch(queryMeta, hitMeta, "pattern_signature")
+	score += 0.06 * semanticMemoryBenchmarkExactMatch(queryMeta, hitMeta, "regime_signature")
+	score += 0.14 * semanticMemoryBenchmarkArrayOverlap(queryMeta, hitMeta, "feature_set")
+	score += 0.04 * semanticMemoryBenchmarkArrayOverlap(queryMeta, hitMeta, "evidence_case_ids")
+	score += 0.02 * semanticMemoryBenchmarkLexicalOverlap(queryDoc, hitDoc)
+	return clamp01(score)
 }
 
 func (r semanticMemorySearchRow) toDocument() *SemanticMemoryDocument {
@@ -265,7 +378,57 @@ func semanticMemorySourceLink(doc *SemanticMemoryDocument) string {
 		return fmt.Sprintf("/optimizer?backlog_id=%s", strings.TrimSpace(doc.SourceID))
 	case SemanticMemoryDocTypeStrategyVersion:
 		return fmt.Sprintf("/deal-review?strategy_version_id=%s", strings.TrimSpace(doc.SourceID))
+	case SemanticMemoryDocTypeDecisionRecordSummary:
+		return "/dashboard"
+	case SemanticMemoryDocTypeSymbolBehaviorPrior:
+		meta := semanticMemoryParseJSONObject(doc.MetadataJSON)
+		priorID := semanticMemoryMetadataString(meta, "prior_id")
+		symbol := semanticMemoryMetadataString(meta, "symbol")
+		side := semanticMemoryMetadataString(meta, "side")
+		if priorID == "" {
+			priorID = strings.TrimSpace(doc.SourceID)
+		}
+		path := fmt.Sprintf("/deal-review?symbol_prior_id=%s", priorID)
+		if symbol != "" {
+			path += "&symbol=" + strings.ToUpper(strings.TrimSpace(symbol))
+		}
+		if side != "" {
+			path += "&side=" + strings.ToUpper(strings.TrimSpace(side))
+		}
+		return path
+	case SemanticMemoryDocTypeLearnedPattern:
+		meta := semanticMemoryParseJSONObject(doc.MetadataJSON)
+		params := url.Values{}
+		if patternID := semanticMemoryMetadataString(meta, "pattern_id"); patternID != "" {
+			params.Set("pattern_id", patternID)
+		}
+		if scopeType := semanticMemoryMetadataString(meta, "scope_type"); scopeType != "" {
+			params.Set("scope_type", scopeType)
+		}
+		if patternClass := semanticMemoryMetadataString(meta, "pattern_class"); patternClass != "" {
+			params.Set("pattern_class", patternClass)
+		}
+		if validationLabel := semanticMemoryMetadataString(meta, "validation_label"); validationLabel != "" {
+			params.Set("validation_label", validationLabel)
+		}
+		if symbol := semanticMemoryMetadataString(meta, "symbol"); symbol != "" {
+			params.Set("symbol", strings.ToUpper(strings.TrimSpace(symbol)))
+		}
+		if side := semanticMemoryMetadataString(meta, "side"); side != "" {
+			params.Set("side", strings.ToUpper(strings.TrimSpace(side)))
+		}
+		if encoded := params.Encode(); encoded != "" {
+			return "/pattern-lab?" + encoded
+		}
+		return "/pattern-lab"
 	default:
 		return fmt.Sprintf("/deal-review?case_id=%s", strings.TrimSpace(doc.SourceID))
 	}
+}
+
+func minInt(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
 }

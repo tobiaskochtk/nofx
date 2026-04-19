@@ -712,6 +712,441 @@ func TestBuildAutonomousOptimizerStarvationMetrics(t *testing.T) {
 	}
 }
 
+func TestBuildAutonomousOptimizerSymbolBehaviorPriorPayload(t *testing.T) {
+	base := time.Now().UTC().Add(-3 * time.Hour)
+	bundle := &autonomousOptimizerWindowBundle{
+		Cases: []store.DealReviewCaseDetail{
+			{
+				Case: store.DealReviewCase{
+					Status:               store.DealReviewCaseStatusClosed,
+					Symbol:               "RAVEUSDT",
+					Side:                 "LONG",
+					OpenSelectionBucket:  "breakout",
+					OpenTrendRegime:      "uptrend",
+					OpenVolatilityRegime: "high",
+					OpenOIRegime:         "rising",
+					RealizedPnL:          -1.4,
+					ExitTimeMs:           base.UnixMilli(),
+				},
+			},
+		},
+		BucketReview: &store.TraderBucketReview{
+			RecentOpenExecutions: []store.TraderOpenExecution{
+				{
+					Symbol:           "SOONUSDT",
+					Side:             "LONG",
+					TrendRegime:      "uptrend",
+					VolatilityRegime: "high",
+					OIRegime:         "rising",
+				},
+				{
+					Symbol:           "FLIPUSDT",
+					Side:             "LONG",
+					TrendRegime:      "uptrend",
+					VolatilityRegime: "high",
+					OIRegime:         "rising",
+				},
+			},
+			OpportunitySymbols: []store.TraderSymbolSummary{
+				{Symbol: "DUSTUSDT", CandidateCount: 4},
+			},
+		},
+	}
+
+	priors := []store.DealReviewSymbolBehaviorPrior{
+		{
+			Symbol:                "RAVEUSDT",
+			Side:                  "LONG",
+			Status:                store.DealReviewSymbolBehaviorPriorStatusCandidate,
+			BehaviorBias:          store.DealReviewSymbolBehaviorBiasNegative,
+			ValidationLabel:       store.DealReviewSymbolBehaviorValidationLabelConfirmed,
+			ValidationAlert:       "Still confirmed.",
+			RecommendedAction:     "penalize_setup",
+			OpenSelectionBucket:   "breakout",
+			OpenTrendRegime:       "uptrend",
+			OpenVolatilityRegime:  "high",
+			OpenOIRegime:          "rising",
+			RegimeSignature:       "bucket=breakout | trend=uptrend | volatility=high | oi=rising",
+			SampleCount:           9,
+			WinRate:               0.22,
+			LossRate:              0.78,
+			AvgPnLPct:             -1.4,
+			CompositeScore:        0.74,
+			ContradictionScore:    0.79,
+			DecisionOpenCount:     4,
+			DecisionCycleCount:    3,
+			AvgDecisionConfidence: 76,
+			SignalTags:            []string{"oi_up", "ema_align"},
+			Evidence: []store.DealReviewSymbolBehaviorPriorEvidence{
+				{CaseID: "case-rave-1"},
+				{CaseID: "case-rave-2"},
+			},
+			Summary: "RAVEUSDT long underperformed.",
+		},
+		{
+			Symbol:                "SOONUSDT",
+			Side:                  "LONG",
+			Status:                store.DealReviewSymbolBehaviorPriorStatusCandidate,
+			BehaviorBias:          store.DealReviewSymbolBehaviorBiasNegative,
+			ValidationLabel:       store.DealReviewSymbolBehaviorValidationLabelFalsePositive,
+			ValidationAlert:       "Old edge looks wrong now.",
+			RecommendedAction:     "penalize_setup",
+			OpenSelectionBucket:   "breakout",
+			OpenTrendRegime:       "uptrend",
+			OpenVolatilityRegime:  "high",
+			OpenOIRegime:          "rising",
+			RegimeSignature:       "bucket=breakout | trend=uptrend | volatility=high | oi=rising",
+			SampleCount:           6,
+			WinRate:               0.35,
+			LossRate:              0.65,
+			AvgPnLPct:             -0.6,
+			CompositeScore:        0.58,
+			ContradictionScore:    0.52,
+			DecisionOpenCount:     3,
+			DecisionCycleCount:    2,
+			AvgDecisionConfidence: 71,
+			FalsePositiveScore:    0.84,
+			SignalTags:            []string{"fresh", "breakout"},
+			Summary:               "SOONUSDT long is noisy.",
+		},
+		{
+			Symbol:               "DUSTUSDT",
+			Side:                 "SHORT",
+			Status:               store.DealReviewSymbolBehaviorPriorStatusCandidate,
+			BehaviorBias:         store.DealReviewSymbolBehaviorBiasNegative,
+			RecommendedAction:    "observe",
+			OpenSelectionBucket:  "mean_revert",
+			OpenTrendRegime:      "sideways",
+			OpenVolatilityRegime: "medium",
+			OpenOIRegime:         "flat",
+			RegimeSignature:      "bucket=mean_revert | trend=sideways | volatility=medium | oi=flat",
+			SampleCount:          5,
+			WinRate:              0.4,
+			LossRate:             0.6,
+			AvgPnLPct:            -0.2,
+			CompositeScore:       0.42,
+			ContradictionScore:   0.22,
+			DecisionOpenCount:    0,
+			DecisionCycleCount:   0,
+			Summary:              "DUSTUSDT short lacks detail.",
+		},
+		{
+			Symbol:                 "FLIPUSDT",
+			Side:                   "LONG",
+			Status:                 store.DealReviewSymbolBehaviorPriorStatusExpired,
+			BehaviorBias:           store.DealReviewSymbolBehaviorBiasNegative,
+			ValidationLabel:        store.DealReviewSymbolBehaviorValidationLabelFalseNegativeRisk,
+			ValidationAlert:        "Recent window points the other way.",
+			RecommendedAction:      "observe",
+			OpenSelectionBucket:    "breakout",
+			OpenTrendRegime:        "uptrend",
+			OpenVolatilityRegime:   "high",
+			OpenOIRegime:           "rising",
+			RegimeSignature:        "bucket=breakout | trend=uptrend | volatility=high | oi=rising",
+			SampleCount:            8,
+			WinRate:                0.25,
+			LossRate:               0.75,
+			AvgPnLPct:              -0.9,
+			CompositeScore:         0.66,
+			ContradictionScore:     0.61,
+			DecisionOpenCount:      2,
+			DecisionCycleCount:     2,
+			AvgDecisionConfidence:  73,
+			ValidationSampleCount:  2,
+			ValidationSupportCount: 2,
+			ValidationSupportScore: 0.82,
+			RecentSampleCount:      2,
+			RecentSupportCount:     0,
+			RecentSupportScore:     0.0,
+			RecentAvgPnLPct:        0.95,
+			DriftScore:             0.88,
+			FalseNegativeScore:     0.79,
+			SignalTags:             []string{"breakout", "crowded"},
+			Summary:                "FLIPUSDT long recently reversed.",
+		},
+	}
+
+	payload := buildAutonomousOptimizerSymbolBehaviorPriorPayload(priors, bundle)
+	if payload == nil {
+		t.Fatal("payload = nil, want summary")
+	}
+	if payload.AvailableCount != 4 || payload.RelevantCount != 4 {
+		t.Fatalf("payload counts = %#v, want 4 available and 4 relevant", payload)
+	}
+	if payload.ConfigCandidateCount != 1 || payload.PromptOnlyCount != 2 || payload.BacklogCandidateCount != 1 {
+		t.Fatalf("implication counts = %#v, want 1 config / 2 prompt / 1 backlog", payload)
+	}
+	if payload.ConfirmedCount != 1 || payload.FalsePositiveCount != 1 || payload.FalseNegativeRiskCount != 1 {
+		t.Fatalf("payload health counts = %#v, want one confirmed / false positive / false negative risk", payload)
+	}
+	if len(payload.Items) != 4 {
+		t.Fatalf("len(payload.Items) = %d, want 4", len(payload.Items))
+	}
+	if payload.Items[0].Symbol != "FLIPUSDT" || payload.Items[0].ValidationLabel != store.DealReviewSymbolBehaviorValidationLabelFalseNegativeRisk {
+		t.Fatalf("payload.Items[0] = %#v, want FLIPUSDT reverse-risk alert first", payload.Items[0])
+	}
+	if payload.Items[0].ImplicationType != "prompt_only" || payload.Items[0].RecentExecutionMatches != 1 {
+		t.Fatalf("payload.Items[0] health implication = %#v, want prompt_only with recent execution relevance", payload.Items[0])
+	}
+	if payload.Items[1].Symbol != "SOONUSDT" || payload.Items[1].ValidationLabel != store.DealReviewSymbolBehaviorValidationLabelFalsePositive {
+		t.Fatalf("payload.Items[1] = %#v, want SOONUSDT false-positive alert second", payload.Items[1])
+	}
+	if payload.Items[1].ImplicationType != "prompt_only" {
+		t.Fatalf("payload.Items[1] implication = %#v, want prompt_only false-positive anti-evidence", payload.Items[1])
+	}
+	if payload.Items[2].Symbol != "RAVEUSDT" || payload.Items[2].ImplicationType != "config_candidate" {
+		t.Fatalf("payload.Items[2] = %#v, want RAVEUSDT config candidate after health alerts", payload.Items[2])
+	}
+	if payload.Items[2].CurrentWindowMatchType != "closed_case" || payload.Items[2].ClosedCaseMatchCount != 1 {
+		t.Fatalf("payload.Items[2] match = %#v, want one closed-case match", payload.Items[2])
+	}
+	if payload.Items[3].Symbol != "DUSTUSDT" || payload.Items[3].ImplicationType != "missing_data_backlog" {
+		t.Fatalf("payload.Items[3] = %#v, want DUSTUSDT backlog last", payload.Items[3])
+	}
+	if payload.Items[3].CurrentWindowMatchType != "opportunity_symbol" || payload.Items[3].OpportunitySymbolHits != 4 {
+		t.Fatalf("payload.Items[3] match = %#v, want opportunity-symbol evidence", payload.Items[3])
+	}
+	if len(payload.Notes) == 0 {
+		t.Fatalf("payload.Notes = %#v, want non-empty notes", payload.Notes)
+	}
+}
+
+func TestBuildAutonomousOptimizerLearnedPatternPayload(t *testing.T) {
+	patterns := []store.DealReviewLearnedPattern{
+		{
+			ID:                     "pattern-rave",
+			ScopeType:              store.DealReviewLearnedPatternScopeSymbol,
+			Symbol:                 "RAVEUSDT",
+			Side:                   "LONG",
+			PatternClass:           store.DealReviewLearnedPatternClassPositiveEdge,
+			Status:                 "validated",
+			ValidationLabel:        store.DealReviewLearnedPatternValidationLabelConfirmed,
+			RecommendedUse:         store.DealReviewLearnedPatternRecommendedUseConfigCand,
+			PatternSignature:       "bucket:breakout + trend:uptrend",
+			FeatureCount:           2,
+			FeatureSet:             []string{"bucket:breakout", "trend:uptrend"},
+			SampleCount:            8,
+			SupportCount:           6,
+			ContradictCount:        2,
+			WinRate:                0.75,
+			LossRate:               0.25,
+			AvgPnLPct:              1.4,
+			LiftAvgPnLPct:          0.8,
+			Expectancy:             0.52,
+			ConfidenceScore:        0.81,
+			StabilityScore:         0.74,
+			CompositeScore:         0.84,
+			TrainingSampleCount:    5,
+			ValidationSampleCount:  2,
+			ValidationSupportCount: 2,
+			ValidationSupportScore: 0.72,
+			RecentSampleCount:      3,
+			RecentSupportCount:     2,
+			RecentSupportScore:     0.68,
+			Summary:                "RAVEUSDT breakout longs kept following through.",
+			Evidence: []store.DealReviewLearnedPatternEvidence{
+				{CaseID: "case-rave-1"},
+			},
+		},
+		{
+			ID:                     "pattern-soon",
+			ScopeType:              store.DealReviewLearnedPatternScopeSymbol,
+			Symbol:                 "SOONUSDT",
+			Side:                   "LONG",
+			PatternClass:           store.DealReviewLearnedPatternClassNegativeEdge,
+			Status:                 "validated",
+			ValidationLabel:        store.DealReviewLearnedPatternValidationLabelFalsePositive,
+			RecommendedUse:         store.DealReviewLearnedPatternRecommendedUseMonitorOnly,
+			PatternSignature:       "bucket:breakout + trend:uptrend + oi:falling",
+			FeatureCount:           3,
+			FeatureSet:             []string{"bucket:breakout", "oi:falling", "trend:uptrend"},
+			SampleCount:            7,
+			SupportCount:           5,
+			ContradictCount:        2,
+			WinRate:                0.29,
+			LossRate:               0.71,
+			AvgPnLPct:              -1.1,
+			LiftAvgPnLPct:          -0.7,
+			Expectancy:             -0.44,
+			ConfidenceScore:        0.77,
+			StabilityScore:         0.69,
+			DriftScore:             0.21,
+			CompositeScore:         0.79,
+			FalsePositiveScore:     0.83,
+			TrainingSampleCount:    4,
+			ValidationSampleCount:  2,
+			ValidationSupportCount: 2,
+			ValidationSupportScore: 0.76,
+			RecentSampleCount:      3,
+			RecentSupportCount:     2,
+			RecentSupportScore:     0.72,
+			Summary:                "SOONUSDT breakout longs repeatedly failed.",
+			ValidationAlert:        "Recent holdout still flags this as a false positive.",
+			Evidence: []store.DealReviewLearnedPatternEvidence{
+				{CaseID: "case-soon-1"},
+			},
+		},
+		{
+			ID:                     "pattern-asia",
+			ScopeType:              store.DealReviewLearnedPatternScopeTraderLocal,
+			Side:                   "LONG",
+			PatternClass:           store.DealReviewLearnedPatternClassNegativeEdge,
+			Status:                 "validated",
+			ValidationLabel:        store.DealReviewLearnedPatternValidationLabelReverseRisk,
+			RecommendedUse:         store.DealReviewLearnedPatternRecommendedUseReviewHint,
+			PatternSignature:       "session:asia + trend:sideways",
+			FeatureCount:           2,
+			FeatureSet:             []string{"session:asia", "trend:sideways"},
+			SampleCount:            6,
+			SupportCount:           4,
+			ContradictCount:        2,
+			WinRate:                0.33,
+			LossRate:               0.67,
+			AvgPnLPct:              -0.6,
+			LiftAvgPnLPct:          -0.3,
+			Expectancy:             -0.2,
+			ConfidenceScore:        0.64,
+			StabilityScore:         0.61,
+			CompositeScore:         0.71,
+			ReverseRiskScore:       0.88,
+			TrainingSampleCount:    4,
+			ValidationSampleCount:  1,
+			ValidationSupportCount: 1,
+			ValidationSupportScore: 0.57,
+			RecentSampleCount:      2,
+			RecentSupportCount:     1,
+			RecentSupportScore:     0.51,
+			Summary:                "Asia sideways longs keep flipping into losses.",
+		},
+		{
+			ID:                     "pattern-eth-short",
+			ScopeType:              store.DealReviewLearnedPatternScopeSymbol,
+			Symbol:                 "ETHUSDT",
+			Side:                   "SHORT",
+			PatternClass:           store.DealReviewLearnedPatternClassPositiveEdge,
+			Status:                 "observed",
+			ValidationLabel:        store.DealReviewLearnedPatternValidationLabelCandidate,
+			RecommendedUse:         store.DealReviewLearnedPatternRecommendedUseReviewHint,
+			PatternSignature:       "bucket:mean_revert + trend:downtrend",
+			FeatureCount:           2,
+			FeatureSet:             []string{"bucket:mean_revert", "trend:downtrend"},
+			SampleCount:            4,
+			SupportCount:           3,
+			ContradictCount:        1,
+			WinRate:                0.75,
+			LossRate:               0.25,
+			AvgPnLPct:              0.8,
+			LiftAvgPnLPct:          0.4,
+			Expectancy:             0.22,
+			ConfidenceScore:        0.55,
+			StabilityScore:         0.48,
+			CompositeScore:         0.58,
+			TrainingSampleCount:    3,
+			ValidationSampleCount:  1,
+			ValidationSupportCount: 1,
+			ValidationSupportScore: 0.50,
+			RecentSampleCount:      1,
+			RecentSupportCount:     1,
+			RecentSupportScore:     0.50,
+			Summary:                "ETH mean reversion shorts look promising but still need evidence.",
+		},
+	}
+
+	bundle := &autonomousOptimizerWindowBundle{
+		Cases: []store.DealReviewCaseDetail{
+			{
+				Case: store.DealReviewCase{
+					Status:               store.DealReviewCaseStatusClosed,
+					Symbol:               "RAVEUSDT",
+					Side:                 "LONG",
+					RealizedPnL:          1.12,
+					OpenSelectionBucket:  "breakout",
+					OpenTrendRegime:      "uptrend",
+					OpenVolatilityRegime: "high",
+				},
+			},
+			{
+				Case: store.DealReviewCase{
+					Status:               store.DealReviewCaseStatusClosed,
+					Symbol:               "SOONUSDT",
+					Side:                 "LONG",
+					RealizedPnL:          -0.92,
+					OpenSelectionBucket:  "breakout",
+					OpenTrendRegime:      "uptrend",
+					OpenVolatilityRegime: "high",
+					OpenOIRegime:         "falling",
+				},
+			},
+		},
+		BucketReview: &store.TraderBucketReview{
+			RecentOpenExecutions: []store.TraderOpenExecution{
+				{
+					Symbol:           "TAOUSDT",
+					Side:             "LONG",
+					TrendRegime:      "sideways",
+					SessionBucket:    "asia",
+					TerminalStatus:   "submitted",
+					VolatilityRegime: "medium",
+				},
+			},
+			OpportunitySymbols: []store.TraderSymbolSummary{
+				{Symbol: "SOONUSDT", CandidateCount: 4},
+				{Symbol: "ETHUSDT", CandidateCount: 2},
+			},
+		},
+	}
+
+	payload := buildAutonomousOptimizerLearnedPatternPayload(patterns, bundle)
+	if payload == nil {
+		t.Fatal("payload = nil, want summary")
+	}
+	if payload.AvailableCount != 4 {
+		t.Fatalf("payload.AvailableCount = %d, want 4", payload.AvailableCount)
+	}
+	if payload.PositiveCount != 2 || payload.NegativeCount != 2 {
+		t.Fatalf("payload polarity counts = %#v, want 2 positive / 2 negative", payload)
+	}
+	if payload.ConfigCandidateCount != 1 || payload.MonitorOnlyCount != 1 || payload.ReviewHintCount != 2 {
+		t.Fatalf("payload use counts = %#v, want 1 config / 1 monitor / 2 review", payload)
+	}
+	if payload.FalsePositiveCount != 1 || payload.ReverseRiskCount != 1 || payload.ConfirmedCount != 1 {
+		t.Fatalf("payload health counts = %#v, want one false positive / reverse risk / confirmed", payload)
+	}
+	if payload.RelevantCount != 4 {
+		t.Fatalf("payload.RelevantCount = %d, want 4", payload.RelevantCount)
+	}
+	if len(payload.Items) != 4 {
+		t.Fatalf("len(payload.Items) = %d, want 4", len(payload.Items))
+	}
+	if payload.Items[0].PatternID != "pattern-asia" || payload.Items[0].ImplicationType != "anti_evidence" {
+		t.Fatalf("payload.Items[0] = %#v, want reverse-risk anti-evidence first", payload.Items[0])
+	}
+	if payload.Items[0].CurrentWindowMatchType != "recent_open_execution" || payload.Items[0].RecentExecutionMatchCount != 1 {
+		t.Fatalf("payload.Items[0] match = %#v, want one recent execution match", payload.Items[0])
+	}
+	if payload.Items[1].PatternID != "pattern-soon" || payload.Items[1].ImplicationType != "anti_evidence" {
+		t.Fatalf("payload.Items[1] = %#v, want false-positive anti-pattern second", payload.Items[1])
+	}
+	if payload.Items[1].CurrentWindowMatchType != "closed_case" || payload.Items[1].ClosedCaseMatchCount != 1 {
+		t.Fatalf("payload.Items[1] match = %#v, want one closed-case match", payload.Items[1])
+	}
+	if payload.Items[2].PatternID != "pattern-rave" || payload.Items[2].ImplicationType != "config_candidate" {
+		t.Fatalf("payload.Items[2] = %#v, want RAVEUSDT config candidate third", payload.Items[2])
+	}
+	if payload.Items[2].CurrentWindowNetPnL != 1.12 {
+		t.Fatalf("payload.Items[2].CurrentWindowNetPnL = %.2f, want 1.12", payload.Items[2].CurrentWindowNetPnL)
+	}
+	if payload.Items[3].PatternID != "pattern-eth-short" || payload.Items[3].CurrentWindowMatchType != "opportunity_symbol" {
+		t.Fatalf("payload.Items[3] = %#v, want ETH opportunity-symbol background item last", payload.Items[3])
+	}
+	if len(payload.TopPositivePatterns) == 0 || len(payload.TopNegativePatterns) == 0 || len(payload.TopSymbolOverrides) == 0 {
+		t.Fatalf("payload top watchlists = %#v, want non-empty summary watchlists", payload)
+	}
+	if len(payload.Notes) == 0 {
+		t.Fatalf("payload.Notes = %#v, want non-empty notes", payload.Notes)
+	}
+}
+
 func TestBuildAutonomousOptimizerTrailingStopTelemetry(t *testing.T) {
 	base := time.Now().UTC().Add(-2 * time.Hour)
 	cases := []store.DealReviewCaseDetail{
@@ -799,6 +1234,200 @@ func TestBuildAutonomousOptimizerTrailingStopTelemetry(t *testing.T) {
 	}
 	if telemetry.SampleUpdates[0].PositionID != 1 || telemetry.SampleUpdates[0].PreUpdateUnrealizedPnLPct != 0.3 {
 		t.Fatalf("SampleUpdates[0] = %#v, want position 1 with pre-update uPnL pct 0.3", telemetry.SampleUpdates[0])
+	}
+}
+
+func TestBuildAutonomousOptimizerLearnedPatternBacklogProposalsSynthesizesActionableFindings(t *testing.T) {
+	payload := &autonomousOptimizerLearnedPatternPayload{
+		Items: []autonomousOptimizerLearnedPatternEvidence{
+			{
+				PatternID:                   "pattern-guard",
+				ScopeType:                   store.DealReviewLearnedPatternScopeSymbol,
+				Symbol:                      "RAVEUSDT",
+				Side:                        "LONG",
+				PatternClass:                store.DealReviewLearnedPatternClassNegativeEdge,
+				ValidationLabel:             store.DealReviewLearnedPatternValidationLabelReverseRisk,
+				ImplicationType:             "anti_evidence",
+				CurrentWindowMatchType:      "recent_open_execution",
+				RecentExecutionMatchCount:   1,
+				OpportunitySymbolMatchCount: 2,
+				ReverseRiskScore:            0.91,
+				CompositeScore:              0.74,
+				FeatureSet:                  []string{"bucket:breakout", "oi:flat"},
+				EvidenceCaseIDs:             []string{"case-1"},
+				Summary:                     "Breakout longs on RAVEUSDT reversed despite strong prompt confidence.",
+			},
+			{
+				PatternID:              "pattern-drift",
+				ScopeType:              store.DealReviewLearnedPatternScopeTraderLocal,
+				Side:                   "SHORT",
+				PatternClass:           store.DealReviewLearnedPatternClassPositiveEdge,
+				ValidationLabel:        store.DealReviewLearnedPatternValidationLabelDrifting,
+				ImplicationType:        "monitor_only",
+				CurrentWindowMatchType: "closed_case",
+				ClosedCaseMatchCount:   1,
+				DriftScore:             0.83,
+				CompositeScore:         0.61,
+				FeatureSet:             []string{"bucket:mean_revert", "session:asia"},
+				ValidationAlert:        "Recent windows no longer confirm the older short edge.",
+			},
+			{
+				PatternID:              "pattern-coverage",
+				ScopeType:              store.DealReviewLearnedPatternScopeTraderLocal,
+				Side:                   "LONG",
+				PatternClass:           store.DealReviewLearnedPatternClassPositiveEdge,
+				ValidationLabel:        store.DealReviewLearnedPatternValidationLabelCandidate,
+				ImplicationType:        "review_hint",
+				CurrentWindowMatchType: "opportunity_symbol",
+				SampleCount:            6,
+				SupportCount:           5,
+				CompositeScore:         0.67,
+				ConfidenceScore:        0.63,
+				ValidationSampleCount:  1,
+				RecentSampleCount:      0,
+				FeatureSet:             []string{"bucket:momentum", "trend:uptrend"},
+				Summary:                "Momentum longs look promising but holdout coverage is still thin.",
+			},
+		},
+	}
+
+	proposals := buildAutonomousOptimizerLearnedPatternBacklogProposals(payload)
+	if len(proposals) != 3 {
+		t.Fatalf("len(proposals) = %d, want 3", len(proposals))
+	}
+
+	categories := map[string]autonomousOptimizerBacklogProposal{}
+	for _, proposal := range proposals {
+		categories[proposal.Category] = proposal
+		if len(proposal.Evidence) == 0 {
+			t.Fatalf("proposal %q evidence = %#v, want synthesized evidence", proposal.Title, proposal.Evidence)
+		}
+		if len(proposal.Metadata) == 0 {
+			t.Fatalf("proposal %q metadata = %#v, want synthesized metadata", proposal.Title, proposal.Metadata)
+		}
+	}
+	if guard, ok := categories["missing_risk_control"]; !ok {
+		t.Fatalf("missing_risk_control proposal not found in %#v", proposals)
+	} else if guard.Metadata["pattern_id"] != "pattern-guard" {
+		t.Fatalf("guard metadata pattern_id = %#v, want pattern-guard", guard.Metadata["pattern_id"])
+	}
+	if drift, ok := categories["missing_review_metric"]; !ok {
+		t.Fatalf("missing_review_metric proposal not found in %#v", proposals)
+	} else if drift.Metadata["derived_goal"] == nil {
+		t.Fatalf("drift proposal metadata = %#v, want derived_goal", drift.Metadata)
+	}
+}
+
+func TestSaveAutonomousOptimizerBacklogFindingsMergesLearnedPatternEvidence(t *testing.T) {
+	sqlDB, err := sql.Open("sqlite", filepath.Join(t.TempDir(), "autonomous-optimizer-backlog-merge.db"))
+	if err != nil {
+		t.Fatalf("sql.Open() error = %v", err)
+	}
+	t.Cleanup(func() { _ = sqlDB.Close() })
+
+	gdb, err := gorm.Open(gormsqlite.Dialector{Conn: sqlDB}, &gorm.Config{
+		Logger: gormlogger.Default.LogMode(gormlogger.Silent),
+		NowFunc: func() time.Time {
+			return time.Now().UTC()
+		},
+	})
+	if err != nil {
+		t.Fatalf("gorm.Open() error = %v", err)
+	}
+
+	root, err := store.NewFromGorm(gdb)
+	if err != nil {
+		t.Fatalf("store.NewFromGorm() error = %v", err)
+	}
+	if err := gdb.AutoMigrate(&store.AutonomousOptimizerBacklogItem{}); err != nil {
+		t.Fatalf("AutoMigrate() error = %v", err)
+	}
+	server := &Server{store: root}
+	cfg := &store.AutonomousOptimizerConfig{UserID: "user-1", TraderID: "trader-1"}
+
+	first := []autonomousOptimizerBacklogProposal{
+		{
+			Title:              "Encode symbol anti-pattern guard",
+			Category:           "missing_prompt_instruction",
+			Description:        "Teach the optimizer to avoid the repeated anti-pattern.",
+			ExpectedImpact:     "Reduce repeated exposure.",
+			Confidence:         0.72,
+			ImplementationCost: 0.30,
+			Urgency:            0.65,
+			RecurrenceCount:    1,
+			Evidence: []map[string]any{
+				{"pattern_id": "pattern-a", "source": "learned_pattern"},
+			},
+			Metadata: map[string]any{
+				"source_kind":  "learned_pattern_synthesis",
+				"derived_goal": "encode_guard",
+			},
+		},
+	}
+	created, err := server.saveAutonomousOptimizerBacklogFindings(cfg, "run-a", first, "first summary")
+	if err != nil {
+		t.Fatalf("saveAutonomousOptimizerBacklogFindings(first) error = %v", err)
+	}
+	if created != 1 {
+		t.Fatalf("created(first) = %d, want 1", created)
+	}
+
+	second := []autonomousOptimizerBacklogProposal{
+		{
+			Title:              "Encode symbol anti-pattern guard",
+			Category:           "missing_prompt_instruction",
+			Description:        "Refine the same guard with the newest evidence.",
+			ExpectedImpact:     "Reduce repeated exposure.",
+			Confidence:         0.84,
+			ImplementationCost: 0.32,
+			Urgency:            0.78,
+			RecurrenceCount:    2,
+			Evidence: []map[string]any{
+				{"pattern_id": "pattern-b", "source": "learned_pattern"},
+			},
+			Metadata: map[string]any{
+				"source_kind":  "learned_pattern_synthesis",
+				"derived_goal": "encode_guard",
+				"pattern_id":   "pattern-b",
+			},
+		},
+	}
+	created, err = server.saveAutonomousOptimizerBacklogFindings(cfg, "run-b", second, "second summary")
+	if err != nil {
+		t.Fatalf("saveAutonomousOptimizerBacklogFindings(second) error = %v", err)
+	}
+	if created != 0 {
+		t.Fatalf("created(second) = %d, want 0 merged into existing backlog item", created)
+	}
+
+	items, err := root.AutonomousOptimizer().ListBacklog(cfg.UserID, cfg.TraderID, 10)
+	if err != nil {
+		t.Fatalf("ListBacklog() error = %v", err)
+	}
+	if len(items) != 1 {
+		t.Fatalf("len(items) = %d, want 1 merged backlog item", len(items))
+	}
+	item := items[0]
+	if item.MergedFindingCount != 2 {
+		t.Fatalf("MergedFindingCount = %d, want 2", item.MergedFindingCount)
+	}
+	if item.RecurrenceCount != 3 {
+		t.Fatalf("RecurrenceCount = %d, want 3", item.RecurrenceCount)
+	}
+
+	evidence := parseAutonomousOptimizerJSONArray(item.EvidenceJSON)
+	if len(evidence) != 2 {
+		t.Fatalf("len(evidence) = %d, want 2 merged evidence items", len(evidence))
+	}
+	metadata := parseAutonomousOptimizerJSONObject(item.MetadataJSON)
+	if autonomousOptimizerString(metadata["run_id"]) != "run-b" {
+		t.Fatalf("metadata run_id = %#v, want run-b", metadata["run_id"])
+	}
+	if autonomousOptimizerString(metadata["derived_goal"]) != "encode_guard" {
+		t.Fatalf("metadata derived_goal = %#v, want encode_guard", metadata["derived_goal"])
+	}
+	if autonomousOptimizerString(metadata["pattern_id"]) != "pattern-b" {
+		t.Fatalf("metadata pattern_id = %#v, want pattern-b", metadata["pattern_id"])
 	}
 }
 
@@ -1288,6 +1917,9 @@ func TestBuildAutonomousOptimizerLatestGateFeedback(t *testing.T) {
 			"approved":           false,
 			"recommended_action": "block_apply",
 			"summary":            "The proposal is directionally valid but still too broad.",
+			"symbol_prior_references": []string{
+				"RAVEUSDT|LONG|breakout|uptrend|high|rising",
+			},
 			"blocking_issues": []string{
 				"Evidence is still mixed across symbols.",
 			},
@@ -1304,6 +1936,9 @@ func TestBuildAutonomousOptimizerLatestGateFeedback(t *testing.T) {
 		"proposal": map[string]any{
 			"proposal_type":   "config_patch",
 			"expected_effect": "Reduce repeated same-symbol loss loops.",
+			"symbol_prior_references": []string{
+				"RAVEUSDT|LONG|breakout|uptrend|high|rising",
+			},
 			"rationale": []string{
 				"Repeated losses cluster on the same symbols after prior exits.",
 			},
@@ -1333,9 +1968,15 @@ func TestBuildAutonomousOptimizerLatestGateFeedback(t *testing.T) {
 	if got := autonomousOptimizerString(critic["recommended_action"]); got != "block_apply" {
 		t.Fatalf("feedback.critic.recommended_action = %q, want block_apply", got)
 	}
+	if refs := autonomousOptimizerStringSlice(critic["symbol_prior_references"]); len(refs) != 1 {
+		t.Fatalf("feedback.critic.symbol_prior_references = %#v, want 1 item", refs)
+	}
 	proposal := parseAutonomousOptimizerNestedObject(feedback, "proposal")
 	if got := autonomousOptimizerString(proposal["proposal_type"]); got != "config_patch" {
 		t.Fatalf("feedback.proposal.proposal_type = %q, want config_patch", got)
+	}
+	if refs := autonomousOptimizerStringSlice(proposal["symbol_prior_references"]); len(refs) != 1 {
+		t.Fatalf("feedback.proposal.symbol_prior_references = %#v, want 1 item", refs)
 	}
 }
 

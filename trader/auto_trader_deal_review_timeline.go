@@ -43,6 +43,7 @@ func (at *AutoTrader) captureDealReviewPricePoints() {
 		return
 	}
 
+	capturedAt := time.Now().UTC()
 	positions, err := at.trader.GetPositions()
 	if err != nil {
 		logger.Infof("⚠️ Deal-review price monitor: failed to get positions: %v", err)
@@ -54,9 +55,13 @@ func (at *AutoTrader) captureDealReviewPricePoints() {
 		return
 	}
 
-	if err := at.store.DealReview().CaptureLivePositionPricePoints(at.userID, at.id, snapshots, time.Now().UTC(), "platform"); err != nil {
+	if err := at.store.DealReview().CaptureLivePositionPricePoints(at.userID, at.id, snapshots, capturedAt, "platform"); err != nil {
 		logger.Infof("⚠️ Deal-review price monitor: failed to capture position price points: %v", err)
 	}
+
+	// Re-evaluate trailing on the exact same live snapshot that feeds the review graph,
+	// so protective stop moves stay aligned with the stored platform path.
+	at.updateTrailingStopsWithPositions(positions, capturedAt)
 }
 
 func buildDealReviewPositionSnapshots(positions []map[string]interface{}) []store.PositionSnapshot {

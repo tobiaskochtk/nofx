@@ -433,6 +433,12 @@ type RiskControlConfig struct {
 
 	// Strategy-configurable adaptive same-symbol re-entry guard (CODE ENFORCED)
 	AdaptiveReentryGuard AdaptiveReentryGuardConfig `json:"adaptive_reentry_guard,omitempty"`
+
+	// Strategy-configurable learned symbol-behavior live guard (CODE ENFORCED when mode=hard_block)
+	SymbolBehaviorLiveGuard SymbolBehaviorLiveGuardConfig `json:"symbol_behavior_live_guard,omitempty"`
+
+	// Strategy-configurable learned-pattern live guard (CODE ENFORCED when mode=hard_block)
+	LearnedPatternLiveGuard LearnedPatternLiveGuardConfig `json:"learned_pattern_live_guard,omitempty"`
 }
 
 const (
@@ -448,6 +454,27 @@ const (
 	DefaultAdaptiveReentryMinRecentTrades               = 4
 	DefaultAdaptiveReentrySameSymbolLossCooldownMinutes = 180
 	DefaultAdaptiveReentryPairLossLookbackHours         = 12
+
+	SymbolBehaviorLiveGuardModeMonitor   = "monitor"
+	SymbolBehaviorLiveGuardModeHardBlock = "hard_block"
+
+	LearnedPatternLiveGuardModeMonitor   = "monitor"
+	LearnedPatternLiveGuardModeHardBlock = "hard_block"
+
+	DefaultSymbolBehaviorLiveGuardMinConfidenceScore = 0.90
+	DefaultSymbolBehaviorLiveGuardMinSampleCount     = 8
+	DefaultSymbolBehaviorLiveGuardMinMatchScore      = 0.75
+	DefaultSymbolBehaviorLiveGuardMaxFalsePositive   = 0.15
+	DefaultSymbolBehaviorLiveGuardMaxDriftScore      = 0.20
+	DefaultSymbolBehaviorLiveGuardMinContradiction   = 0.80
+
+	DefaultLearnedPatternLiveGuardMinCompositeScore         = 0.85
+	DefaultLearnedPatternLiveGuardMinConfidenceScore        = 0.90
+	DefaultLearnedPatternLiveGuardMinSampleCount            = 8
+	DefaultLearnedPatternLiveGuardMinMatchScore             = 0.80
+	DefaultLearnedPatternLiveGuardMaxFalsePositiveScore     = 0.10
+	DefaultLearnedPatternLiveGuardMaxDriftScore             = 0.15
+	DefaultLearnedPatternLiveGuardMinValidationSupportScore = 0.60
 )
 
 // TrailingStopConfig controls the runtime trailing-stop monitor for a strategy.
@@ -477,6 +504,35 @@ type AdaptiveReentryGuardConfig struct {
 	MinRecentTrades               int  `json:"min_recent_trades,omitempty"`
 	SameSymbolLossCooldownMinutes int  `json:"same_symbol_loss_cooldown_minutes,omitempty"`
 	PairLossLookbackHours         int  `json:"pair_loss_lookback_hours,omitempty"`
+}
+
+// SymbolBehaviorLiveGuardConfig controls whether learned negative symbol priors can
+// influence live execution after the AI has already proposed an entry.
+type SymbolBehaviorLiveGuardConfig struct {
+	Enabled               bool    `json:"enabled"`
+	Mode                  string  `json:"mode,omitempty"`
+	RequireConfirmedLabel bool    `json:"require_confirmed_label,omitempty"`
+	MinConfidenceScore    float64 `json:"min_confidence_score,omitempty"`
+	MinSampleCount        int     `json:"min_sample_count,omitempty"`
+	MinMatchScore         float64 `json:"min_match_score,omitempty"`
+	MaxFalsePositiveScore float64 `json:"max_false_positive_score,omitempty"`
+	MaxDriftScore         float64 `json:"max_drift_score,omitempty"`
+	MinContradictionScore float64 `json:"min_contradiction_score,omitempty"`
+}
+
+// LearnedPatternLiveGuardConfig controls whether confirmed negative learned patterns
+// can influence live execution after the AI has already proposed an entry.
+type LearnedPatternLiveGuardConfig struct {
+	Enabled                   bool    `json:"enabled"`
+	Mode                      string  `json:"mode,omitempty"`
+	RequireConfirmedLabel     bool    `json:"require_confirmed_label,omitempty"`
+	MinCompositeScore         float64 `json:"min_composite_score,omitempty"`
+	MinConfidenceScore        float64 `json:"min_confidence_score,omitempty"`
+	MinSampleCount            int     `json:"min_sample_count,omitempty"`
+	MinMatchScore             float64 `json:"min_match_score,omitempty"`
+	MaxFalsePositiveScore     float64 `json:"max_false_positive_score,omitempty"`
+	MaxDriftScore             float64 `json:"max_drift_score,omitempty"`
+	MinValidationSupportScore float64 `json:"min_validation_support_score,omitempty"`
 }
 
 // DefaultTrailingStopTiers returns the default stepped trailing levels.
@@ -510,6 +566,37 @@ func DefaultAdaptiveReentryGuardConfig() AdaptiveReentryGuardConfig {
 		MinRecentTrades:               DefaultAdaptiveReentryMinRecentTrades,
 		SameSymbolLossCooldownMinutes: DefaultAdaptiveReentrySameSymbolLossCooldownMinutes,
 		PairLossLookbackHours:         DefaultAdaptiveReentryPairLossLookbackHours,
+	}
+}
+
+// DefaultSymbolBehaviorLiveGuardConfig keeps live symbol-prior influence opt-in and conservative.
+func DefaultSymbolBehaviorLiveGuardConfig() SymbolBehaviorLiveGuardConfig {
+	return SymbolBehaviorLiveGuardConfig{
+		Enabled:               false,
+		Mode:                  SymbolBehaviorLiveGuardModeMonitor,
+		RequireConfirmedLabel: true,
+		MinConfidenceScore:    DefaultSymbolBehaviorLiveGuardMinConfidenceScore,
+		MinSampleCount:        DefaultSymbolBehaviorLiveGuardMinSampleCount,
+		MinMatchScore:         DefaultSymbolBehaviorLiveGuardMinMatchScore,
+		MaxFalsePositiveScore: DefaultSymbolBehaviorLiveGuardMaxFalsePositive,
+		MaxDriftScore:         DefaultSymbolBehaviorLiveGuardMaxDriftScore,
+		MinContradictionScore: DefaultSymbolBehaviorLiveGuardMinContradiction,
+	}
+}
+
+// DefaultLearnedPatternLiveGuardConfig keeps live learned-pattern influence opt-in and conservative.
+func DefaultLearnedPatternLiveGuardConfig() LearnedPatternLiveGuardConfig {
+	return LearnedPatternLiveGuardConfig{
+		Enabled:                   false,
+		Mode:                      LearnedPatternLiveGuardModeMonitor,
+		RequireConfirmedLabel:     true,
+		MinCompositeScore:         DefaultLearnedPatternLiveGuardMinCompositeScore,
+		MinConfidenceScore:        DefaultLearnedPatternLiveGuardMinConfidenceScore,
+		MinSampleCount:            DefaultLearnedPatternLiveGuardMinSampleCount,
+		MinMatchScore:             DefaultLearnedPatternLiveGuardMinMatchScore,
+		MaxFalsePositiveScore:     DefaultLearnedPatternLiveGuardMaxFalsePositiveScore,
+		MaxDriftScore:             DefaultLearnedPatternLiveGuardMaxDriftScore,
+		MinValidationSupportScore: DefaultLearnedPatternLiveGuardMinValidationSupportScore,
 	}
 }
 
@@ -586,6 +673,87 @@ func normalizeAdaptiveReentryGuardConfig(cfg AdaptiveReentryGuardConfig) Adaptiv
 	return normalized
 }
 
+func normalizeSymbolBehaviorLiveGuardMode(mode string) string {
+	switch strings.ToLower(strings.TrimSpace(mode)) {
+	case "", SymbolBehaviorLiveGuardModeMonitor:
+		return SymbolBehaviorLiveGuardModeMonitor
+	case SymbolBehaviorLiveGuardModeHardBlock:
+		return SymbolBehaviorLiveGuardModeHardBlock
+	default:
+		return ""
+	}
+}
+
+func normalizeLearnedPatternLiveGuardMode(mode string) string {
+	switch strings.ToLower(strings.TrimSpace(mode)) {
+	case "", LearnedPatternLiveGuardModeMonitor:
+		return LearnedPatternLiveGuardModeMonitor
+	case LearnedPatternLiveGuardModeHardBlock:
+		return LearnedPatternLiveGuardModeHardBlock
+	default:
+		return ""
+	}
+}
+
+func normalizeSymbolBehaviorLiveGuardConfig(cfg SymbolBehaviorLiveGuardConfig) SymbolBehaviorLiveGuardConfig {
+	normalized := cfg
+	if mode := normalizeSymbolBehaviorLiveGuardMode(normalized.Mode); mode != "" {
+		normalized.Mode = mode
+	} else {
+		normalized.Mode = SymbolBehaviorLiveGuardModeMonitor
+	}
+	if normalized.MinConfidenceScore <= 0 {
+		normalized.MinConfidenceScore = DefaultSymbolBehaviorLiveGuardMinConfidenceScore
+	}
+	if normalized.MinSampleCount <= 0 {
+		normalized.MinSampleCount = DefaultSymbolBehaviorLiveGuardMinSampleCount
+	}
+	if normalized.MinMatchScore <= 0 {
+		normalized.MinMatchScore = DefaultSymbolBehaviorLiveGuardMinMatchScore
+	}
+	if normalized.MaxFalsePositiveScore <= 0 {
+		normalized.MaxFalsePositiveScore = DefaultSymbolBehaviorLiveGuardMaxFalsePositive
+	}
+	if normalized.MaxDriftScore <= 0 {
+		normalized.MaxDriftScore = DefaultSymbolBehaviorLiveGuardMaxDriftScore
+	}
+	if normalized.MinContradictionScore <= 0 {
+		normalized.MinContradictionScore = DefaultSymbolBehaviorLiveGuardMinContradiction
+	}
+	return normalized
+}
+
+func normalizeLearnedPatternLiveGuardConfig(cfg LearnedPatternLiveGuardConfig) LearnedPatternLiveGuardConfig {
+	normalized := cfg
+	if mode := normalizeLearnedPatternLiveGuardMode(normalized.Mode); mode != "" {
+		normalized.Mode = mode
+	} else {
+		normalized.Mode = LearnedPatternLiveGuardModeMonitor
+	}
+	if normalized.MinCompositeScore <= 0 {
+		normalized.MinCompositeScore = DefaultLearnedPatternLiveGuardMinCompositeScore
+	}
+	if normalized.MinConfidenceScore <= 0 {
+		normalized.MinConfidenceScore = DefaultLearnedPatternLiveGuardMinConfidenceScore
+	}
+	if normalized.MinSampleCount <= 0 {
+		normalized.MinSampleCount = DefaultLearnedPatternLiveGuardMinSampleCount
+	}
+	if normalized.MinMatchScore <= 0 {
+		normalized.MinMatchScore = DefaultLearnedPatternLiveGuardMinMatchScore
+	}
+	if normalized.MaxFalsePositiveScore <= 0 {
+		normalized.MaxFalsePositiveScore = DefaultLearnedPatternLiveGuardMaxFalsePositiveScore
+	}
+	if normalized.MaxDriftScore <= 0 {
+		normalized.MaxDriftScore = DefaultLearnedPatternLiveGuardMaxDriftScore
+	}
+	if normalized.MinValidationSupportScore <= 0 {
+		normalized.MinValidationSupportScore = DefaultLearnedPatternLiveGuardMinValidationSupportScore
+	}
+	return normalized
+}
+
 // EffectiveTrailingStop returns the trailing-stop config with defaults applied.
 func (c RiskControlConfig) EffectiveTrailingStop() TrailingStopConfig {
 	return normalizeTrailingStopConfig(c.TrailingStop)
@@ -594,6 +762,16 @@ func (c RiskControlConfig) EffectiveTrailingStop() TrailingStopConfig {
 // EffectiveAdaptiveReentryGuard returns the re-entry guard config with defaults applied.
 func (c RiskControlConfig) EffectiveAdaptiveReentryGuard() AdaptiveReentryGuardConfig {
 	return normalizeAdaptiveReentryGuardConfig(c.AdaptiveReentryGuard)
+}
+
+// EffectiveSymbolBehaviorLiveGuard returns the live symbol-prior guard config with defaults applied.
+func (c RiskControlConfig) EffectiveSymbolBehaviorLiveGuard() SymbolBehaviorLiveGuardConfig {
+	return normalizeSymbolBehaviorLiveGuardConfig(c.SymbolBehaviorLiveGuard)
+}
+
+// EffectiveLearnedPatternLiveGuard returns the live learned-pattern guard config with defaults applied.
+func (c RiskControlConfig) EffectiveLearnedPatternLiveGuard() LearnedPatternLiveGuardConfig {
+	return normalizeLearnedPatternLiveGuardConfig(c.LearnedPatternLiveGuard)
 }
 
 // NewStrategyStore creates a new StrategyStore
@@ -692,6 +870,8 @@ func GetDefaultStrategyConfig(lang string) StrategyConfig {
 			MinConfidence:                75,  // Min 75% confidence (AI guided)
 			TrailingStop:                 DefaultTrailingStopConfig(),
 			AdaptiveReentryGuard:         DefaultAdaptiveReentryGuardConfig(),
+			SymbolBehaviorLiveGuard:      DefaultSymbolBehaviorLiveGuardConfig(),
+			LearnedPatternLiveGuard:      DefaultLearnedPatternLiveGuardConfig(),
 		},
 	}
 

@@ -159,6 +159,7 @@ type AutoTrader struct {
 	peakPnLCacheMutex             sync.RWMutex       // Cache read-write lock
 	trailingStopState             map[string]*trailingStopPositionState
 	trailingStopStateMu           sync.RWMutex
+	trailingStopEvalMu            sync.Mutex
 	unsupportedCandidateSymbols   map[string]int64
 	unsupportedCandidateSymbolsMu sync.RWMutex
 	lastBalanceSyncTime           time.Time  // Last balance sync time

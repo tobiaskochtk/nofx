@@ -521,3 +521,152 @@ func TestUpdateTrailingStopsPersistsDealReviewTrailingUpdate(t *testing.T) {
 		t.Fatal("expected trailing update to protect breakeven for the tightened short stop")
 	}
 }
+
+func TestCaptureDealReviewPricePointsAlsoEvaluatesTrailingStops(t *testing.T) {
+	sqlDB, err := sql.Open("sqlite", filepath.Join(t.TempDir(), "trailing-price-monitor.db"))
+	if err != nil {
+		t.Fatalf("sql.Open() error = %v", err)
+	}
+	t.Cleanup(func() { _ = sqlDB.Close() })
+
+	gdb, err := gorm.Open(gormsqlite.Dialector{Conn: sqlDB}, &gorm.Config{
+		Logger: gormlogger.Default.LogMode(gormlogger.Silent),
+		NowFunc: func() time.Time {
+			return time.Now().UTC()
+		},
+	})
+	if err != nil {
+		t.Fatalf("gorm.Open() error = %v", err)
+	}
+
+	st, err := store.NewFromGorm(gdb)
+	if err != nil {
+		t.Fatalf("store.NewFromGorm() error = %v", err)
+	}
+	if err := st.GormDB().AutoMigrate(
+		&store.Trader{},
+		&store.TraderPosition{},
+		&store.DealReviewCase{},
+		&store.DealReviewEvent{},
+		&store.DealReviewMarketPointRecord{},
+		&store.DealReviewTrailingUpdateRecord{},
+	); err != nil {
+		t.Fatalf("AutoMigrate() error = %v", err)
+	}
+
+	traderRecord := &store.Trader{
+		ID:             "price-monitor-trader",
+		UserID:         "price-monitor-user",
+		Name:           "Price Monitor Trader",
+		AIModelID:      "model-price-monitor",
+		ExchangeID:     "exchange-price-monitor",
+		InitialBalance: 1000,
+	}
+	if err := st.Trader().Create(traderRecord); err != nil {
+		t.Fatalf("Trader().Create() error = %v", err)
+	}
+
+	entryTime := time.Now().UTC().Add(-2 * time.Minute).UnixMilli()
+	position := &store.TraderPosition{
+		TraderID:      traderRecord.ID,
+		ExchangeID:    traderRecord.ExchangeID,
+		ExchangeType:  "bybit",
+		Symbol:        "SIRENUSDT",
+		Side:          "LONG",
+		EntryQuantity: 1,
+		Quantity:      1,
+		EntryPrice:    100,
+		EntryOrderID:  "entry-siren-price-monitor-1",
+		EntryTime:     entryTime,
+		Leverage:      5,
+		Status:        "OPEN",
+		CreatedAt:     entryTime,
+		UpdatedAt:     entryTime,
+	}
+	if err := st.Position().Create(position); err != nil {
+		t.Fatalf("Position().Create() error = %v", err)
+	}
+
+	var caseRec store.DealReviewCase
+	if err := st.GormDB().Where("position_id = ?", position.ID).First(&caseRec).Error; err != nil {
+		t.Fatalf("load synced deal review case error = %v", err)
+	}
+	caseRec.OpenStopLoss = 0
+	caseRec.OpenTakeProfit = 0
+	if err := st.GormDB().Save(&caseRec).Error; err != nil {
+		t.Fatalf("reset synced deal review case targets error = %v", err)
+	}
+
+	strategyConfig := store.GetDefaultStrategyConfig("en")
+	strategyConfig.RiskControl.TrailingStop.Enabled = true
+	strategyConfig.RiskControl.TrailingStop.UpdateThresholdPct = 0.05
+	strategyConfig.RiskControl.TrailingStop.Tiers = []store.TrailingStopTier{
+		{
+			TriggerProfitPct: 1.0,
+			Mode:             store.TrailingStopModeLockProfit,
+			LockProfitPct:    0.4,
+		},
+	}
+
+	mockTrader := &mockTrailingTrader{
+		positions: []map[string]interface{}{
+			{
+				"symbol":           "SIRENUSDT",
+				"side":             "long",
+				"entryPrice":       100.0,
+				"markPrice":        102.0,
+				"positionAmt":      1.0,
+				"leverage":         5.0,
+				"unRealizedProfit": 2.0,
+			},
+		},
+	}
+
+	at := &AutoTrader{
+		id:                  traderRecord.ID,
+		exchange:            "bybit",
+		exchangeID:          traderRecord.ExchangeID,
+		config:              AutoTraderConfig{StrategyConfig: &strategyConfig},
+		trader:              mockTrader,
+		store:               st,
+		userID:              traderRecord.UserID,
+		trailingStopState:   make(map[string]*trailingStopPositionState),
+		trailingStopStateMu: sync.RWMutex{},
+	}
+
+	at.captureDealReviewPricePoints()
+
+	if mockTrader.stopLossCalls != 1 {
+		t.Fatalf("SetStopLoss calls = %d, want 1 when platform snapshot crosses the trailing threshold", mockTrader.stopLossCalls)
+	}
+
+	var marketPoints []store.DealReviewMarketPointRecord
+	if err := st.GormDB().
+		Where("trader_id = ? AND position_id = ?", traderRecord.ID, position.ID).
+		Find(&marketPoints).Error; err != nil {
+		t.Fatalf("query market points error = %v", err)
+	}
+	if len(marketPoints) != 1 {
+		t.Fatalf("market points len = %d, want 1", len(marketPoints))
+	}
+
+	var updates []store.DealReviewTrailingUpdateRecord
+	if err := st.GormDB().
+		Where("trader_id = ? AND position_id = ?", traderRecord.ID, position.ID).
+		Order("timestamp_ms ASC, id ASC").
+		Find(&updates).Error; err != nil {
+		t.Fatalf("query trailing updates error = %v", err)
+	}
+	if len(updates) != 1 {
+		t.Fatalf("trailing updates len = %d, want 1", len(updates))
+	}
+	if updates[0].DealID != caseRec.ID {
+		t.Fatalf("deal_id = %q, want %q", updates[0].DealID, caseRec.ID)
+	}
+	if updates[0].PreviousStopPrice != 0 {
+		t.Fatalf("previous_stop_price = %.2f, want 0.00 for a sync-style open case without stored SL/TP", updates[0].PreviousStopPrice)
+	}
+	if math.Abs(updates[0].NewStopPrice-100.08) > 0.000001 {
+		t.Fatalf("new_stop_price = %.8f, want 100.08000000", updates[0].NewStopPrice)
+	}
+}

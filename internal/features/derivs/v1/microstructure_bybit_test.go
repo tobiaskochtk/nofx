@@ -17,6 +17,9 @@ func TestParseBybitLiqMessage_AllLiquidationV5(t *testing.T) {
 		t.Fatalf("expected 1 event, got %d", len(events))
 	}
 	ev := events[0]
+	if ev.symbol != "BTCUSDT" {
+		t.Fatalf("expected symbol BTCUSDT, got %q", ev.symbol)
+	}
 	if ev.price <= 0 || ev.size <= 0 {
 		t.Fatalf("expected positive price/size, got price=%f size=%f", ev.price, ev.size)
 	}

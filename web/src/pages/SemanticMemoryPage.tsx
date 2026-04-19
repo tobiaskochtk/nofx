@@ -21,9 +21,12 @@ interface SemanticMemoryPageProps {
 const docScopeOptions = [
   { value: 'all', label: 'All corpora' },
   { value: 'deal_review_case', label: 'Deal review cases' },
+  { value: 'symbol_behavior_prior', label: 'Learned symbol priors' },
+  { value: 'learned_pattern', label: 'Learned patterns' },
   { value: 'autonomous_optimizer_run', label: 'Optimizer runs' },
   { value: 'autonomous_optimizer_backlog_item', label: 'Optimizer backlog' },
   { value: 'strategy_version', label: 'Strategy versions' },
+  { value: 'decision_record_summary', label: 'Decision cycle summaries' },
 ]
 
 const outcomeOptions = [
@@ -34,8 +37,8 @@ const outcomeOptions = [
   { value: 'open', label: 'Open' },
 ]
 
-const runStatusOptions = [
-  { value: '', label: 'Any run status' },
+const statusOptions = [
+  { value: '', label: 'Any status' },
   { value: 'blocked_by_gate', label: 'Blocked by gate' },
   { value: 'deferred_for_next_window', label: 'Deferred' },
   { value: 'auto_applied', label: 'Auto applied' },
@@ -45,6 +48,11 @@ const runStatusOptions = [
   { value: 'kept', label: 'Kept' },
   { value: 'backlog_only', label: 'Backlog only' },
   { value: 'insufficient_evidence', label: 'Insufficient evidence' },
+  { value: 'observed', label: 'Prior observed' },
+  { value: 'candidate', label: 'Prior candidate' },
+  { value: 'validated', label: 'Prior validated' },
+  { value: 'rejected', label: 'Prior rejected' },
+  { value: 'expired', label: 'Prior expired' },
 ]
 
 function normalizeTime(value?: string): string {
@@ -371,9 +379,10 @@ export function SemanticMemoryPage({
               </h1>
               <p className="text-sm text-nofx-text-muted mt-2 max-w-3xl">
                 Search across the internal pgvector corpus for similar review cases,
-                optimizer runs, and backlog findings. Use this to find prior edge
-                failures, repeated gate blocks, and strategy lessons before changing
-                a trader again.
+                learned symbol priors, optimizer runs, backlog findings, and decision
+                cycle summaries. Use this to find repeated edge failures, validated
+                symbol behavior, gate blocks, and strategy lessons before changing a
+                trader again.
               </p>
             </div>
             <div className="w-full lg:w-80">
@@ -788,7 +797,7 @@ export function SemanticMemoryPage({
               <NofxSelect value={outcome} onChange={setOutcome} options={outcomeOptions} />
             </div>
             <div className="h-11 rounded-lg border border-white/10 px-3 flex items-center bg-black/20">
-              <NofxSelect value={runStatus} onChange={setRunStatus} options={runStatusOptions} />
+              <NofxSelect value={runStatus} onChange={setRunStatus} options={statusOptions} />
             </div>
             <button
               onClick={submitSearch}
@@ -821,7 +830,8 @@ export function SemanticMemoryPage({
 
           {!searchResult ? (
             <div className="text-sm text-nofx-text-muted">
-              Run a query to retrieve semantically similar cases, optimizer runs, or backlog items.
+              Run a query to retrieve semantically similar cases, learned priors,
+              optimizer runs, decision cycles, or backlog items.
             </div>
           ) : searchResult.items.length === 0 ? (
             <div className="text-sm text-nofx-text-muted">

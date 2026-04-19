@@ -32,6 +32,13 @@ func (at *AutoTrader) executeDecisionWithRecord(decision *kernel.Decision, actio
 func (at *AutoTrader) executeOpenLongWithRecord(decision *kernel.Decision, actionRecord *store.DecisionAction, record *store.DecisionRecord) error {
 	logger.Infof("  📈 Open long: %s", decision.Symbol)
 
+	if err := at.enforceSymbolBehaviorLiveGuard(record, actionRecord); err != nil {
+		return err
+	}
+	if err := at.enforceLearnedPatternLiveGuard(record, actionRecord); err != nil {
+		return err
+	}
+
 	// ⚠️ Get current positions for multiple checks
 	positions, err := at.trader.GetPositions()
 	if err != nil {
@@ -153,6 +160,13 @@ func (at *AutoTrader) executeOpenLongWithRecord(decision *kernel.Decision, actio
 // executeOpenShortWithRecord executes open short position and records detailed information
 func (at *AutoTrader) executeOpenShortWithRecord(decision *kernel.Decision, actionRecord *store.DecisionAction, record *store.DecisionRecord) error {
 	logger.Infof("  📉 Open short: %s", decision.Symbol)
+
+	if err := at.enforceSymbolBehaviorLiveGuard(record, actionRecord); err != nil {
+		return err
+	}
+	if err := at.enforceLearnedPatternLiveGuard(record, actionRecord); err != nil {
+		return err
+	}
 
 	// ⚠️ Get current positions for multiple checks
 	positions, err := at.trader.GetPositions()

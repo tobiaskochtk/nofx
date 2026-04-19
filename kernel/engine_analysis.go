@@ -295,6 +295,17 @@ func isContextLengthError(err error) bool {
 		(strings.Contains(msg, "requested ") && strings.Contains(msg, "tokens"))
 }
 
+func logMarketDataFetchIssue(subject string, err error) {
+	if err == nil {
+		return
+	}
+	if market.IsExpectedDataMiss(err) {
+		logger.Debugf("Skipping %s due to expected market-data miss: %v", subject, err)
+		return
+	}
+	logger.Infof("⚠️  Failed to fetch %s: %v", subject, err)
+}
+
 // ============================================================================
 // Market Data Fetching
 // ============================================================================
@@ -332,7 +343,7 @@ func fetchMarketDataWithStrategy(ctx *Context, engine *StrategyEngine) error {
 	if _, exists := ctx.MarketDataMap[benchmarkSymbol]; !exists {
 		benchmarkData, err := market.GetWithTimeframes(benchmarkSymbol, timeframes, primaryTimeframe, klineCount)
 		if err != nil {
-			logger.Infof("⚠️  Failed to fetch benchmark market data for %s: %v", benchmarkSymbol, err)
+			logMarketDataFetchIssue(fmt.Sprintf("benchmark market data for %s", benchmarkSymbol), err)
 		} else {
 			ctx.MarketDataMap[benchmarkSymbol] = benchmarkData
 		}
@@ -342,7 +353,7 @@ func fetchMarketDataWithStrategy(ctx *Context, engine *StrategyEngine) error {
 	for _, pos := range ctx.Positions {
 		data, err := market.GetWithTimeframes(pos.Symbol, timeframes, primaryTimeframe, klineCount)
 		if err != nil {
-			logger.Infof("⚠️  Failed to fetch market data for position %s: %v", pos.Symbol, err)
+			logMarketDataFetchIssue(fmt.Sprintf("market data for position %s", pos.Symbol), err)
 			continue
 		}
 		ctx.MarketDataMap[pos.Symbol] = data
@@ -363,7 +374,7 @@ func fetchMarketDataWithStrategy(ctx *Context, engine *StrategyEngine) error {
 
 		data, err := market.GetWithTimeframes(coin.Symbol, timeframes, primaryTimeframe, klineCount)
 		if err != nil {
-			logger.Infof("⚠️  Failed to fetch market data for %s: %v", coin.Symbol, err)
+			logMarketDataFetchIssue(fmt.Sprintf("market data for %s", coin.Symbol), err)
 			continue
 		}
 
@@ -374,7 +385,7 @@ func fetchMarketDataWithStrategy(ctx *Context, engine *StrategyEngine) error {
 			oiValue := data.OpenInterest.Latest * data.CurrentPrice
 			oiValueInMillions := oiValue / 1_000_000
 			if oiValueInMillions < minOIThresholdMillions {
-				logger.Infof("⚠️  %s OI value too low (%.2fM USD < %.1fM), skipping coin",
+				logger.Debugf("Skipping %s because OI value is too low (%.2fM USD < %.1fM)",
 					coin.Symbol, oiValueInMillions, minOIThresholdMillions)
 				continue
 			}

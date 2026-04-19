@@ -257,6 +257,46 @@ Returns review-assist suggestions only; it does not auto-label the deal.`,
 				`:id = trader_id from GET /api/my-traders.
 Query params match GET /api/traders/:id/deal-review/cases.`,
 				s.handleTraderDealReviewAnomalies)
+			s.routeWithSchema(protected, "GET", "/traders/:id/deal-review/symbol-priors", "List learned symbol behavior priors for a trader",
+				`:id = trader_id from GET /api/my-traders.
+Query params:
+  symbol=<string>
+  side=LONG|SHORT
+  status=observed|candidate|validated|rejected|expired
+  signal_cluster=<normalized cluster label>
+  limit=<int, default 12, max 100>
+Returns persisted review-first symbol+side+regime priors derived from closed deal-review cases.`,
+				s.handleTraderDealReviewSymbolBehaviorPriors)
+			s.routeWithSchema(protected, "GET", "/traders/:id/deal-review/learned-patterns", "List learned indicator/context patterns for a trader",
+				`:id = trader_id from GET /api/my-traders.
+Query params:
+  symbol=<string>
+  side=LONG|SHORT
+  scope_type=trader_local|symbol
+  pattern_class=positive_edge|negative_edge
+  validation_label=confirmed|candidate|insufficient_evidence|false_positive|reverse_risk|drifting|expired
+  feature=<normalized feature token like bucket_breakout or trend_uptrend>
+  limit=<int, default 24, max 100>
+Returns replayed learned patterns derived from persisted closed deal-review cases using normalized structured features.`,
+				s.handleTraderDealReviewLearnedPatterns)
+			s.routeWithSchema(protected, "GET", "/traders/:id/deal-review/symbol-prior-live-guard-events", "List recent live symbol-prior guard evaluations for a trader",
+				`:id = trader_id from GET /api/my-traders.
+Query params:
+  symbol=<string>
+  side=LONG|SHORT
+  effect=no_match|matched_not_qualified|monitor_only|hard_blocked
+  limit=<int, default 20, max 100>
+Returns recent pre-execution live-guard evaluations plus the trader's effective symbol-prior guard config.`,
+				s.handleTraderDealReviewSymbolBehaviorLiveGuardEvents)
+			s.routeWithSchema(protected, "GET", "/traders/:id/deal-review/learned-pattern-live-guard-events", "List recent live learned-pattern guard evaluations for a trader",
+				`:id = trader_id from GET /api/my-traders.
+Query params:
+  symbol=<string>
+  side=LONG|SHORT
+  effect=no_match|matched_not_qualified|monitor_only|hard_blocked
+  limit=<int, default 20, max 100>
+Returns recent pre-execution learned-pattern live-guard evaluations plus the trader's effective learned-pattern guard config.`,
+				s.handleTraderDealReviewLearnedPatternLiveGuardEvents)
 			s.routeWithSchema(protected, "GET", "/traders/:id/deal-review/ai-scans", "List saved AI scans for a trader's deal-review module",
 				`:id = trader_id from GET /api/my-traders.
 Query params:
@@ -526,6 +566,23 @@ StrategyConfig fields:
   risk_control.min_position_size: minimum USDT per trade (default 12)
   risk_control.min_risk_reward_ratio: minimum profit/loss ratio required (default 3 = 3:1)
   risk_control.min_confidence: minimum AI confidence to open position (default 75, range 60-90)
+  risk_control.symbol_behavior_live_guard.enabled: enable learned symbol-prior monitoring / veto
+  risk_control.symbol_behavior_live_guard.mode: "monitor" | "hard_block" (hard_block requires explicit opt-in)
+  risk_control.symbol_behavior_live_guard.min_confidence_score: prior confidence threshold 0-1 (default 0.90)
+  risk_control.symbol_behavior_live_guard.min_sample_count: minimum learned prior sample count (default 8)
+  risk_control.symbol_behavior_live_guard.min_match_score: regime-match threshold 0-1 (default 0.75)
+  risk_control.symbol_behavior_live_guard.max_false_positive_score: maximum tolerated false-positive score 0-1 (default 0.15)
+  risk_control.symbol_behavior_live_guard.max_drift_score: maximum tolerated drift score 0-1 (default 0.20)
+  risk_control.symbol_behavior_live_guard.min_contradiction_score: minimum contradiction strength 0-1 (default 0.80)
+  risk_control.learned_pattern_live_guard.enabled: enable learned-pattern monitoring / veto
+  risk_control.learned_pattern_live_guard.mode: "monitor" | "hard_block" (hard_block requires explicit opt-in)
+  risk_control.learned_pattern_live_guard.min_composite_score: minimum composite score 0-1 (default 0.85)
+  risk_control.learned_pattern_live_guard.min_confidence_score: minimum pattern confidence 0-1 (default 0.90)
+  risk_control.learned_pattern_live_guard.min_sample_count: minimum learned-pattern sample count (default 8)
+  risk_control.learned_pattern_live_guard.min_match_score: runtime match threshold 0-1 (default 0.80)
+  risk_control.learned_pattern_live_guard.max_false_positive_score: maximum tolerated false-positive score 0-1 (default 0.10)
+  risk_control.learned_pattern_live_guard.max_drift_score: maximum tolerated drift score 0-1 (default 0.15)
+  risk_control.learned_pattern_live_guard.min_validation_support_score: minimum validation support 0-1 (default 0.60)
   prompt_sections.role_definition: describe the AI's trading persona and goal
   prompt_sections.trading_frequency: guidelines on how often to trade
   prompt_sections.entry_standards: conditions that must align before entering a position

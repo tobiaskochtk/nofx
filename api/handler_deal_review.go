@@ -26,6 +26,44 @@ type dealReviewListResponse struct {
 	Total   int64                           `json:"total"`
 }
 
+type dealReviewSymbolBehaviorPriorListResponse struct {
+	Items       []store.DealReviewSymbolBehaviorPrior                `json:"items"`
+	Summary     *store.DealReviewSymbolBehaviorPriorReportingSummary `json:"summary,omitempty"`
+	Refreshed   bool                                                 `json:"refreshed"`
+	GeneratedAt time.Time                                            `json:"generated_at"`
+}
+
+type dealReviewLearnedPatternListResponse struct {
+	Items       []store.DealReviewLearnedPattern                `json:"items"`
+	Summary     *store.DealReviewLearnedPatternReportingSummary `json:"summary,omitempty"`
+	Refreshed   bool                                            `json:"refreshed"`
+	GeneratedAt time.Time                                       `json:"generated_at"`
+}
+
+type dealReviewSymbolBehaviorLiveGuardStatusResponse struct {
+	StrategyID   string                              `json:"strategy_id,omitempty"`
+	StrategyName string                              `json:"strategy_name,omitempty"`
+	Config       store.SymbolBehaviorLiveGuardConfig `json:"config"`
+}
+
+type dealReviewSymbolBehaviorLiveGuardEventListResponse struct {
+	Items   []store.DealReviewSymbolBehaviorLiveGuardEvent       `json:"items"`
+	Summary *store.DealReviewSymbolBehaviorLiveGuardEventSummary `json:"summary,omitempty"`
+	Guard   *dealReviewSymbolBehaviorLiveGuardStatusResponse     `json:"guard,omitempty"`
+}
+
+type dealReviewLearnedPatternLiveGuardStatusResponse struct {
+	StrategyID   string                              `json:"strategy_id,omitempty"`
+	StrategyName string                              `json:"strategy_name,omitempty"`
+	Config       store.LearnedPatternLiveGuardConfig `json:"config"`
+}
+
+type dealReviewLearnedPatternLiveGuardEventListResponse struct {
+	Items   []store.DealReviewLearnedPatternLiveGuardEvent       `json:"items"`
+	Summary *store.DealReviewLearnedPatternLiveGuardEventSummary `json:"summary,omitempty"`
+	Guard   *dealReviewLearnedPatternLiveGuardStatusResponse     `json:"guard,omitempty"`
+}
+
 type dealReviewAIScanRequest struct {
 	ModelID                string   `json:"model_id"`
 	OverrideModelName      string   `json:"override_model_name"`
@@ -223,6 +261,24 @@ func (s *Server) handleTraderDealReviewCaseDetail(c *gin.Context) {
 	if err != nil {
 		SafeNotFound(c, "Deal review case")
 		return
+	}
+	if _, err := s.store.DealReview().RefreshSymbolBehaviorPriorsIfStale(userID, traderID); err != nil {
+		logger.Warnf("⚠️ Failed to refresh symbol behavior priors for %s: %v", traderID, err)
+	} else {
+		if priors, priErr := s.store.DealReview().ListMatchingSymbolBehaviorPriors(userID, traderID, &detail.Case, 5); priErr != nil {
+			logger.Warnf("⚠️ Failed to load matching symbol behavior priors for %s/%s: %v", traderID, caseID, priErr)
+		} else {
+			detail.SymbolBehaviorPriors = priors
+		}
+	}
+	if _, err := s.store.DealReview().RefreshLearnedPatternsIfStale(userID, traderID); err != nil {
+		logger.Warnf("⚠️ Failed to refresh learned patterns for %s: %v", traderID, err)
+	} else {
+		if patterns, patternErr := s.store.DealReview().ListMatchingLearnedPatterns(userID, traderID, &detail.Case, 6); patternErr != nil {
+			logger.Warnf("⚠️ Failed to load matching learned patterns for %s/%s: %v", traderID, caseID, patternErr)
+		} else {
+			detail.LearnedPatterns = patterns
+		}
 	}
 	c.JSON(http.StatusOK, detail)
 }
@@ -1205,6 +1261,188 @@ func (s *Server) handleTraderDealReviewAnomalies(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, anomalies)
+}
+
+func (s *Server) handleTraderDealReviewSymbolBehaviorPriors(c *gin.Context) {
+	userID := c.GetString("user_id")
+	traderID := c.Param("id")
+	if _, err := s.store.Trader().Get(userID, traderID); err != nil {
+		SafeNotFound(c, "Trader")
+		return
+	}
+
+	limit := 12
+	if raw := strings.TrimSpace(c.DefaultQuery("limit", "12")); raw != "" {
+		if parsed, err := strconv.Atoi(raw); err == nil && parsed > 0 && parsed <= 100 {
+			limit = parsed
+		}
+	}
+
+	refreshResult, err := s.store.DealReview().RefreshSymbolBehaviorPriorsIfStale(userID, traderID)
+	if err != nil {
+		SafeInternalError(c, "Failed to rebuild symbol behavior priors", err)
+		return
+	}
+
+	items, err := s.store.DealReview().ListSymbolBehaviorPriors(userID, traderID, store.DealReviewSymbolBehaviorPriorFilter{
+		Symbol:        c.Query("symbol"),
+		Side:          c.Query("side"),
+		Status:        c.Query("status"),
+		SignalCluster: c.Query("signal_cluster"),
+		Limit:         limit,
+	})
+	if err != nil {
+		SafeInternalError(c, "Failed to fetch symbol behavior priors", err)
+		return
+	}
+	c.JSON(http.StatusOK, dealReviewSymbolBehaviorPriorListResponse{
+		Items:       items,
+		Summary:     store.BuildDealReviewSymbolBehaviorPriorReportingSummary(items),
+		Refreshed:   refreshResult != nil && refreshResult.Rebuilt,
+		GeneratedAt: refreshResult.GeneratedAt,
+	})
+}
+
+func (s *Server) handleTraderDealReviewLearnedPatterns(c *gin.Context) {
+	userID := c.GetString("user_id")
+	traderID := c.Param("id")
+	if _, err := s.store.Trader().Get(userID, traderID); err != nil {
+		SafeNotFound(c, "Trader")
+		return
+	}
+
+	limit := 24
+	if raw := strings.TrimSpace(c.DefaultQuery("limit", "24")); raw != "" {
+		if parsed, err := strconv.Atoi(raw); err == nil && parsed > 0 && parsed <= 100 {
+			limit = parsed
+		}
+	}
+
+	refreshResult, err := s.store.DealReview().RefreshLearnedPatternsIfStale(userID, traderID)
+	if err != nil {
+		SafeInternalError(c, "Failed to rebuild learned patterns", err)
+		return
+	}
+
+	items, err := s.store.DealReview().ListLearnedPatterns(userID, traderID, store.DealReviewLearnedPatternFilter{
+		PatternID:       c.Query("pattern_id"),
+		Symbol:          c.Query("symbol"),
+		Side:            c.Query("side"),
+		ScopeType:       c.Query("scope_type"),
+		PatternClass:    c.Query("pattern_class"),
+		ValidationLabel: c.Query("validation_label"),
+		Feature:         c.Query("feature"),
+		Limit:           limit,
+	})
+	if err != nil {
+		SafeInternalError(c, "Failed to fetch learned patterns", err)
+		return
+	}
+
+	generatedAt := time.Time{}
+	if refreshResult != nil {
+		generatedAt = refreshResult.GeneratedAt
+	}
+	c.JSON(http.StatusOK, dealReviewLearnedPatternListResponse{
+		Items:       items,
+		Summary:     store.BuildDealReviewLearnedPatternReportingSummary(items),
+		Refreshed:   refreshResult != nil && refreshResult.Rebuilt,
+		GeneratedAt: generatedAt,
+	})
+}
+
+func (s *Server) handleTraderDealReviewSymbolBehaviorLiveGuardEvents(c *gin.Context) {
+	userID := c.GetString("user_id")
+	traderID := c.Param("id")
+	traderCfg, err := s.store.Trader().Get(userID, traderID)
+	if err != nil {
+		SafeNotFound(c, "Trader")
+		return
+	}
+
+	limit := 20
+	if raw := strings.TrimSpace(c.DefaultQuery("limit", "20")); raw != "" {
+		if parsed, err := strconv.Atoi(raw); err == nil && parsed > 0 && parsed <= 100 {
+			limit = parsed
+		}
+	}
+
+	items, err := s.store.DealReview().ListSymbolBehaviorLiveGuardEvents(
+		userID,
+		traderID,
+		store.DealReviewSymbolBehaviorLiveGuardEventFilter{
+			Symbol: c.Query("symbol"),
+			Side:   c.Query("side"),
+			Effect: c.Query("effect"),
+			Limit:  limit,
+		},
+	)
+	if err != nil {
+		SafeInternalError(c, "Failed to fetch symbol-prior live guard events", err)
+		return
+	}
+
+	var guard *dealReviewSymbolBehaviorLiveGuardStatusResponse
+	if strategyCfg, strategyRecord, err := s.loadStrategyForTrader(userID, traderCfg); err == nil && strategyCfg != nil {
+		guard = &dealReviewSymbolBehaviorLiveGuardStatusResponse{
+			StrategyID:   strategyRecord.ID,
+			StrategyName: strategyRecord.Name,
+			Config:       strategyCfg.RiskControl.EffectiveSymbolBehaviorLiveGuard(),
+		}
+	}
+
+	c.JSON(http.StatusOK, dealReviewSymbolBehaviorLiveGuardEventListResponse{
+		Items:   items,
+		Summary: store.BuildDealReviewSymbolBehaviorLiveGuardEventSummary(items),
+		Guard:   guard,
+	})
+}
+
+func (s *Server) handleTraderDealReviewLearnedPatternLiveGuardEvents(c *gin.Context) {
+	userID := c.GetString("user_id")
+	traderID := c.Param("id")
+	traderCfg, err := s.store.Trader().Get(userID, traderID)
+	if err != nil {
+		SafeNotFound(c, "Trader")
+		return
+	}
+
+	limit := 20
+	if raw := strings.TrimSpace(c.DefaultQuery("limit", "20")); raw != "" {
+		if parsed, err := strconv.Atoi(raw); err == nil && parsed > 0 && parsed <= 100 {
+			limit = parsed
+		}
+	}
+
+	items, err := s.store.DealReview().ListLearnedPatternLiveGuardEvents(
+		userID,
+		traderID,
+		store.DealReviewLearnedPatternLiveGuardEventFilter{
+			Symbol: c.Query("symbol"),
+			Side:   c.Query("side"),
+			Effect: c.Query("effect"),
+			Limit:  limit,
+		},
+	)
+	if err != nil {
+		SafeInternalError(c, "Failed to fetch learned-pattern live guard events", err)
+		return
+	}
+
+	var guard *dealReviewLearnedPatternLiveGuardStatusResponse
+	if strategyCfg, strategyRecord, err := s.loadStrategyForTrader(userID, traderCfg); err == nil && strategyCfg != nil {
+		guard = &dealReviewLearnedPatternLiveGuardStatusResponse{
+			StrategyID:   strategyRecord.ID,
+			StrategyName: strategyRecord.Name,
+			Config:       strategyCfg.RiskControl.EffectiveLearnedPatternLiveGuard(),
+		}
+	}
+
+	c.JSON(http.StatusOK, dealReviewLearnedPatternLiveGuardEventListResponse{
+		Items:   items,
+		Summary: store.BuildDealReviewLearnedPatternLiveGuardEventSummary(items),
+		Guard:   guard,
+	})
 }
 
 func (s *Server) handleTraderDealReviewStrategyVersions(c *gin.Context) {

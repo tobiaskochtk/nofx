@@ -531,6 +531,380 @@ export interface DealReviewPriceTimeline {
   summary: DealReviewPriceTimelineSummary
 }
 
+export interface DealReviewSymbolBehaviorPriorEvidence {
+  case_id: string
+  position_id: number
+  outcome: string
+  realized_pnl: number
+  realized_pnl_pct: number
+  close_reason?: string
+  exit_origin?: string
+  open_cycle_number?: number
+  exit_time_ms: number
+}
+
+export interface DealReviewSymbolBehaviorPrior {
+  id: string
+  user_id: string
+  trader_id: string
+  symbol: string
+  side: string
+  status: string
+  behavior_bias: string
+  recommended_action: string
+  open_selection_bucket: string
+  open_trend_regime: string
+  open_volatility_regime: string
+  open_oi_regime: string
+  regime_signature: string
+  sample_count: number
+  winning_deals: number
+  losing_deals: number
+  flat_deals: number
+  win_rate: number
+  loss_rate: number
+  net_pnl: number
+  avg_pnl: number
+  avg_pnl_pct: number
+  expectancy: number
+  avg_mfe_pct: number
+  avg_mae_pct: number
+  give_back_rate: number
+  avg_give_back_pct: number
+  avg_hold_ms: number
+  decision_cycle_count: number
+  decision_open_count: number
+  avg_decision_confidence: number
+  training_sample_count: number
+  validation_sample_count: number
+  validation_support_count: number
+  validation_contradict_count: number
+  validation_avg_pnl_pct: number
+  validation_support_score: number
+  recent_sample_count: number
+  recent_support_count: number
+  recent_contradict_count: number
+  recent_avg_pnl_pct: number
+  recent_support_score: number
+  drift_score: number
+  contradiction_score: number
+  confidence_score: number
+  recency_weight: number
+  stability_score: number
+  composite_score: number
+  summary: string
+  validation_summary: string
+  signal_cluster_key?: string
+  validation_label?: string
+  validation_alert?: string
+  false_positive_score?: number
+  false_negative_score?: number
+  first_observed_at?: string
+  last_observed_at?: string
+  built_at?: string
+  created_at: string
+  updated_at: string
+  evidence?: DealReviewSymbolBehaviorPriorEvidence[]
+  signal_tags?: string[]
+  signal_clusters?: string[]
+  decision_evidence?: DealReviewSymbolBehaviorDecisionEvidence[]
+  match_score?: number
+}
+
+export interface DealReviewSymbolBehaviorDecisionEvidence {
+  cycle_number: number
+  timestamp: string
+  action: string
+  confidence: number
+  reasoning?: string
+  candidate_sources?: string[]
+  signal_tags?: string[]
+  signal_cluster_key?: string
+  signal_clusters?: string[]
+  terminal_status?: string
+}
+
+export interface DealReviewSymbolBehaviorClusterSummary {
+  cluster_label: string
+  prior_count: number
+  symbol_count: number
+  sample_count: number
+  decision_open_count: number
+  confirmed_count: number
+  false_positive_count: number
+  false_negative_risk_count: number
+  drifting_count: number
+  negative_bias_count: number
+  positive_bias_count: number
+  avg_pnl_pct: number
+  avg_contradiction_score: number
+  avg_composite_score: number
+  avg_validation_support_score: number
+  top_symbols?: string[]
+}
+
+export interface DealReviewSymbolBehaviorPriorSummary {
+  total_count: number
+  status_counts?: Record<string, number>
+  label_counts?: Record<string, number>
+  confirmed_count: number
+  false_positive_count: number
+  false_negative_risk_count: number
+  drifting_count: number
+  insufficient_evidence_count: number
+  top_false_positives?: DealReviewSymbolBehaviorPrior[]
+  top_false_negative_risks?: DealReviewSymbolBehaviorPrior[]
+  top_drifting?: DealReviewSymbolBehaviorPrior[]
+  top_signal_clusters?: DealReviewSymbolBehaviorClusterSummary[]
+  notes?: string[]
+}
+
+export interface DealReviewSymbolBehaviorPriorListResponse {
+  items: DealReviewSymbolBehaviorPrior[]
+  summary?: DealReviewSymbolBehaviorPriorSummary
+  refreshed: boolean
+  generated_at: string
+}
+
+export interface DealReviewSymbolBehaviorLiveGuardConfig {
+  enabled: boolean
+  mode?: string
+  require_confirmed_label?: boolean
+  min_confidence_score?: number
+  min_sample_count?: number
+  min_match_score?: number
+  max_false_positive_score?: number
+  max_drift_score?: number
+  min_contradiction_score?: number
+}
+
+export interface DealReviewSymbolBehaviorLiveGuardEvent {
+  id: string
+  user_id: string
+  trader_id: string
+  cycle_number: number
+  decision_timestamp: string
+  action: string
+  symbol: string
+  side: string
+  selection_bucket?: string
+  trend_regime?: string
+  volatility_regime?: string
+  oi_regime?: string
+  policy_mode?: string
+  effect: string
+  decision_confidence: number
+  match_score: number
+  matched_prior_id?: string
+  matched_prior_key?: string
+  matched_prior_status?: string
+  matched_prior_validation_label?: string
+  matched_prior_bias?: string
+  matched_prior_sample_count?: number
+  matched_prior_confidence_score?: number
+  matched_prior_drift_score?: number
+  matched_prior_false_positive_score?: number
+  matched_prior_contradiction_score?: number
+  summary?: string
+  block_reason?: string
+  created_at: string
+  updated_at: string
+}
+
+export interface DealReviewSymbolBehaviorLiveGuardEventSummary {
+  total_visible: number
+  hard_blocked_count: number
+  monitor_only_count: number
+  matched_unqualified_count: number
+  no_match_count: number
+  latest_decision_timestamp?: string
+}
+
+export interface DealReviewSymbolBehaviorLiveGuardStatus {
+  strategy_id?: string
+  strategy_name?: string
+  config: DealReviewSymbolBehaviorLiveGuardConfig
+}
+
+export interface DealReviewSymbolBehaviorLiveGuardEventListResponse {
+  items: DealReviewSymbolBehaviorLiveGuardEvent[]
+  summary?: DealReviewSymbolBehaviorLiveGuardEventSummary
+  guard?: DealReviewSymbolBehaviorLiveGuardStatus
+}
+
+export interface DealReviewLearnedPatternLiveGuardConfig {
+  enabled: boolean
+  mode?: string
+  require_confirmed_label?: boolean
+  min_composite_score?: number
+  min_confidence_score?: number
+  min_sample_count?: number
+  min_match_score?: number
+  max_false_positive_score?: number
+  max_drift_score?: number
+  min_validation_support_score?: number
+}
+
+export interface DealReviewLearnedPatternLiveGuardEvent {
+  id: string
+  user_id: string
+  trader_id: string
+  cycle_number: number
+  decision_timestamp: string
+  action: string
+  symbol: string
+  side: string
+  selection_bucket?: string
+  trend_regime?: string
+  volatility_regime?: string
+  oi_regime?: string
+  policy_mode?: string
+  effect: string
+  decision_confidence: number
+  match_score: number
+  matched_pattern_id?: string
+  matched_pattern_scope_type?: string
+  matched_pattern_class?: string
+  matched_pattern_signature?: string
+  matched_pattern_validation_label?: string
+  matched_pattern_recommended_use?: string
+  matched_pattern_sample_count?: number
+  matched_pattern_composite_score?: number
+  matched_pattern_confidence_score?: number
+  matched_pattern_validation_support_score?: number
+  matched_pattern_false_positive_score?: number
+  matched_pattern_drift_score?: number
+  summary?: string
+  block_reason?: string
+  created_at: string
+  updated_at: string
+}
+
+export interface DealReviewLearnedPatternLiveGuardEventSummary {
+  total_visible: number
+  hard_blocked_count: number
+  monitor_only_count: number
+  matched_unqualified_count: number
+  no_match_count: number
+  latest_decision_timestamp?: string
+}
+
+export interface DealReviewLearnedPatternLiveGuardStatus {
+  strategy_id?: string
+  strategy_name?: string
+  config: DealReviewLearnedPatternLiveGuardConfig
+}
+
+export interface DealReviewLearnedPatternLiveGuardEventListResponse {
+  items: DealReviewLearnedPatternLiveGuardEvent[]
+  summary?: DealReviewLearnedPatternLiveGuardEventSummary
+  guard?: DealReviewLearnedPatternLiveGuardStatus
+}
+
+export interface DealReviewLearnedPatternEvidence {
+  case_id: string
+  position_id: number
+  symbol: string
+  side: string
+  outcome: string
+  realized_pnl: number
+  realized_pnl_pct: number
+  hold_duration_ms: number
+  observed_at?: string
+}
+
+export interface DealReviewLearnedPattern {
+  id: string
+  user_id: string
+  trader_id: string
+  scope_type: string
+  scope_key: string
+  symbol: string
+  side: string
+  pattern_class: string
+  status: string
+  validation_label: string
+  recommended_use: string
+  pattern_signature: string
+  regime_signature: string
+  pattern_order: number
+  feature_count: number
+  sample_count: number
+  winning_deals: number
+  losing_deals: number
+  flat_deals: number
+  support_count: number
+  contradict_count: number
+  win_rate: number
+  loss_rate: number
+  net_pnl: number
+  avg_pnl: number
+  avg_pnl_pct: number
+  expectancy: number
+  avg_mfe_pct: number
+  avg_mae_pct: number
+  give_back_rate: number
+  avg_give_back_pct: number
+  avg_hold_ms: number
+  baseline_win_rate: number
+  baseline_avg_pnl_pct: number
+  lift_win_rate: number
+  lift_avg_pnl_pct: number
+  training_sample_count: number
+  validation_sample_count: number
+  validation_support_count: number
+  validation_contradict_count: number
+  validation_avg_pnl_pct: number
+  validation_support_score: number
+  recent_sample_count: number
+  recent_support_count: number
+  recent_contradict_count: number
+  recent_avg_pnl_pct: number
+  recent_support_score: number
+  confidence_score: number
+  stability_score: number
+  drift_score: number
+  recency_weight: number
+  composite_score: number
+  false_positive_score: number
+  reverse_risk_score: number
+  summary: string
+  validation_alert: string
+  first_observed_at?: string
+  last_observed_at?: string
+  built_at?: string
+  created_at: string
+  updated_at: string
+  feature_set?: string[]
+  evidence?: DealReviewLearnedPatternEvidence[]
+  match_score?: number
+}
+
+export interface DealReviewLearnedPatternSummary {
+  total_count: number
+  positive_count: number
+  negative_count: number
+  confirmed_count: number
+  candidate_count: number
+  false_positive_count: number
+  reverse_risk_count: number
+  drifting_count: number
+  expired_count: number
+  class_counts?: Record<string, number>
+  label_counts?: Record<string, number>
+  top_positive_patterns?: DealReviewLearnedPattern[]
+  top_negative_patterns?: DealReviewLearnedPattern[]
+  top_symbol_overrides?: DealReviewLearnedPattern[]
+  notes?: string[]
+}
+
+export interface DealReviewLearnedPatternListResponse {
+  items: DealReviewLearnedPattern[]
+  summary?: DealReviewLearnedPatternSummary
+  refreshed: boolean
+  generated_at: string
+}
+
 export interface DealReviewCaseDetail {
   case: DealReviewCase
   trader_name: string
@@ -540,6 +914,8 @@ export interface DealReviewCaseDetail {
   open?: DealReviewEventDetail
   close?: DealReviewEventDetail
   price_timeline?: DealReviewPriceTimeline
+  symbol_behavior_priors?: DealReviewSymbolBehaviorPrior[]
+  learned_patterns?: DealReviewLearnedPattern[]
   classifier_assist?: DealReviewClassifierAssist
   ai_classifier_assist?: DealReviewClassifierAssist
 }
@@ -1111,6 +1487,26 @@ export interface DealReviewAnomalyExitUncertainty {
   share_pct: number
 }
 
+export interface DealReviewAnomalySymbolEdgeFailure {
+  symbol: string
+  side: string
+  regime_signature: string
+  open_selection_bucket?: string
+  open_trend_regime?: string
+  open_volatility_regime?: string
+  open_oi_regime?: string
+  slice_deals: number
+  slice_net_pnl: number
+  historical_deals: number
+  decision_open_count: number
+  avg_decision_confidence: number
+  avg_pnl_pct: number
+  contradiction_score: number
+  recommended_action: string
+  signal_tags?: string[]
+  summary?: string
+}
+
 export interface DealReviewAnomalySummary {
   closed_deals: number
   worst_symbols?: DealReviewAnomalySymbol[]
@@ -1122,6 +1518,7 @@ export interface DealReviewAnomalySummary {
   oversized_loss_hotspots?: DealReviewAnomalySizing[]
   close_reason_quality?: DealReviewAnomalyCloseReasonQuality[]
   exit_uncertainty?: DealReviewAnomalyExitUncertainty[]
+  symbol_edge_failures?: DealReviewAnomalySymbolEdgeFailure[]
   notes?: string[]
 }
 

@@ -46,36 +46,196 @@ type autonomousOptimizerCycleResult struct {
 }
 
 type autonomousOptimizerProposalResult struct {
-	ExecutiveSummary string                               `json:"executive_summary"`
-	ProposalType     string                               `json:"proposal_type"`
-	Rationale        []string                             `json:"rationale,omitempty"`
-	ExpectedEffect   string                               `json:"expected_effect,omitempty"`
-	EvidenceStrength float64                              `json:"evidence_strength,omitempty"`
-	Confidence       float64                              `json:"confidence,omitempty"`
-	ConfigPatch      map[string]any                       `json:"config_patch,omitempty"`
-	PromptPatch      map[string]any                       `json:"prompt_patch,omitempty"`
-	BacklogItems     []autonomousOptimizerBacklogProposal `json:"backlog_items,omitempty"`
-	PauseReason      string                               `json:"pause_reason,omitempty"`
+	ExecutiveSummary   string                               `json:"executive_summary"`
+	ProposalType       string                               `json:"proposal_type"`
+	Rationale          []string                             `json:"rationale,omitempty"`
+	ExpectedEffect     string                               `json:"expected_effect,omitempty"`
+	EvidenceStrength   float64                              `json:"evidence_strength,omitempty"`
+	Confidence         float64                              `json:"confidence,omitempty"`
+	SymbolPriorRefs    []string                             `json:"symbol_prior_references,omitempty"`
+	LearnedPatternRefs []string                             `json:"learned_pattern_references,omitempty"`
+	ConfigPatch        map[string]any                       `json:"config_patch,omitempty"`
+	PromptPatch        map[string]any                       `json:"prompt_patch,omitempty"`
+	BacklogItems       []autonomousOptimizerBacklogProposal `json:"backlog_items,omitempty"`
+	PauseReason        string                               `json:"pause_reason,omitempty"`
 }
 
 type autonomousOptimizerBacklogProposal struct {
-	Title              string  `json:"title"`
-	Category           string  `json:"category"`
-	Description        string  `json:"description"`
-	ExpectedImpact     string  `json:"expected_impact"`
-	Confidence         float64 `json:"confidence"`
-	ImplementationCost float64 `json:"implementation_cost"`
-	Urgency            float64 `json:"urgency"`
-	RecurrenceCount    int     `json:"recurrence_count"`
+	Title              string           `json:"title"`
+	Category           string           `json:"category"`
+	Description        string           `json:"description"`
+	ExpectedImpact     string           `json:"expected_impact"`
+	Confidence         float64          `json:"confidence"`
+	ImplementationCost float64          `json:"implementation_cost"`
+	Urgency            float64          `json:"urgency"`
+	RecurrenceCount    int              `json:"recurrence_count"`
+	Evidence           []map[string]any `json:"evidence,omitempty"`
+	Metadata           map[string]any   `json:"metadata,omitempty"`
 }
 
 type autonomousOptimizerCriticResult struct {
-	Approved          bool     `json:"approved"`
-	Confidence        float64  `json:"confidence"`
-	RecommendedAction string   `json:"recommended_action"`
-	Summary           string   `json:"summary"`
-	BlockingIssues    []string `json:"blocking_issues,omitempty"`
-	Warnings          []string `json:"warnings,omitempty"`
+	Approved           bool     `json:"approved"`
+	Confidence         float64  `json:"confidence"`
+	RecommendedAction  string   `json:"recommended_action"`
+	Summary            string   `json:"summary"`
+	SymbolPriorRefs    []string `json:"symbol_prior_references,omitempty"`
+	LearnedPatternRefs []string `json:"learned_pattern_references,omitempty"`
+	BlockingIssues     []string `json:"blocking_issues,omitempty"`
+	Warnings           []string `json:"warnings,omitempty"`
+}
+
+type autonomousOptimizerSymbolPriorEvidence struct {
+	PriorKey               string   `json:"prior_key"`
+	Symbol                 string   `json:"symbol"`
+	Side                   string   `json:"side"`
+	Status                 string   `json:"status"`
+	BehaviorBias           string   `json:"behavior_bias"`
+	ValidationLabel        string   `json:"validation_label,omitempty"`
+	ValidationAlert        string   `json:"validation_alert,omitempty"`
+	RecommendedAction      string   `json:"recommended_action"`
+	RegimeSignature        string   `json:"regime_signature"`
+	SampleCount            int      `json:"sample_count"`
+	WinRate                float64  `json:"win_rate"`
+	LossRate               float64  `json:"loss_rate"`
+	AvgPnLPct              float64  `json:"avg_pnl_pct"`
+	CompositeScore         float64  `json:"composite_score"`
+	ContradictionScore     float64  `json:"contradiction_score"`
+	DecisionOpenCount      int      `json:"decision_open_count"`
+	DecisionCycleCount     int      `json:"decision_cycle_count"`
+	AvgDecisionConfidence  float64  `json:"avg_decision_confidence"`
+	TrainingSampleCount    int      `json:"training_sample_count"`
+	ValidationSampleCount  int      `json:"validation_sample_count"`
+	ValidationSupportCount int      `json:"validation_support_count"`
+	ValidationSupportScore float64  `json:"validation_support_score"`
+	ValidationAvgPnLPct    float64  `json:"validation_avg_pnl_pct"`
+	RecentSampleCount      int      `json:"recent_sample_count"`
+	RecentSupportCount     int      `json:"recent_support_count"`
+	RecentSupportScore     float64  `json:"recent_support_score"`
+	RecentAvgPnLPct        float64  `json:"recent_avg_pnl_pct"`
+	DriftScore             float64  `json:"drift_score"`
+	FalsePositiveScore     float64  `json:"false_positive_score"`
+	FalseNegativeScore     float64  `json:"false_negative_score"`
+	CurrentWindowMatchType string   `json:"current_window_match_type"`
+	ClosedCaseMatchCount   int      `json:"closed_case_match_count"`
+	RecentExecutionMatches int      `json:"recent_execution_match_count"`
+	OpportunitySymbolHits  int      `json:"opportunity_symbol_match_count"`
+	CurrentWindowNetPnL    float64  `json:"current_window_net_pnl"`
+	ImplicationType        string   `json:"implication_type"`
+	ImplicationSummary     string   `json:"implication_summary"`
+	SignalTags             []string `json:"signal_tags,omitempty"`
+	EvidenceCaseIDs        []string `json:"evidence_case_ids,omitempty"`
+	Summary                string   `json:"summary,omitempty"`
+}
+
+type autonomousOptimizerSymbolClusterEvidence struct {
+	ClusterLabel              string   `json:"cluster_label"`
+	PriorCount                int      `json:"prior_count"`
+	SymbolCount               int      `json:"symbol_count"`
+	SampleCount               int      `json:"sample_count"`
+	DecisionOpenCount         int      `json:"decision_open_count"`
+	ConfirmedCount            int      `json:"confirmed_count"`
+	FalsePositiveCount        int      `json:"false_positive_count"`
+	FalseNegativeRiskCount    int      `json:"false_negative_risk_count"`
+	DriftingCount             int      `json:"drifting_count"`
+	NegativeBiasCount         int      `json:"negative_bias_count"`
+	PositiveBiasCount         int      `json:"positive_bias_count"`
+	AvgPnLPct                 float64  `json:"avg_pnl_pct"`
+	AvgContradictionScore     float64  `json:"avg_contradiction_score"`
+	AvgCompositeScore         float64  `json:"avg_composite_score"`
+	AvgValidationSupportScore float64  `json:"avg_validation_support_score"`
+	TopSymbols                []string `json:"top_symbols,omitempty"`
+	SuggestedUse              string   `json:"suggested_use,omitempty"`
+}
+
+type autonomousOptimizerSymbolPriorPayload struct {
+	AvailableCount         int                                        `json:"available_count"`
+	CandidateCount         int                                        `json:"candidate_count"`
+	ValidatedCount         int                                        `json:"validated_count"`
+	RelevantCount          int                                        `json:"relevant_count"`
+	ConfirmedCount         int                                        `json:"confirmed_count"`
+	FalsePositiveCount     int                                        `json:"false_positive_count"`
+	FalseNegativeRiskCount int                                        `json:"false_negative_risk_count"`
+	DriftingCount          int                                        `json:"drifting_count"`
+	ConfigCandidateCount   int                                        `json:"config_candidate_count"`
+	PromptOnlyCount        int                                        `json:"prompt_only_count"`
+	BacklogCandidateCount  int                                        `json:"backlog_candidate_count"`
+	Items                  []autonomousOptimizerSymbolPriorEvidence   `json:"items,omitempty"`
+	ClusterRollups         []autonomousOptimizerSymbolClusterEvidence `json:"cluster_rollups,omitempty"`
+	Notes                  []string                                   `json:"notes,omitempty"`
+}
+
+type autonomousOptimizerLearnedPatternEvidence struct {
+	PatternID                   string   `json:"pattern_id"`
+	ScopeType                   string   `json:"scope_type"`
+	Symbol                      string   `json:"symbol,omitempty"`
+	Side                        string   `json:"side"`
+	PatternClass                string   `json:"pattern_class"`
+	Status                      string   `json:"status,omitempty"`
+	ValidationLabel             string   `json:"validation_label,omitempty"`
+	RecommendedUse              string   `json:"recommended_use,omitempty"`
+	PatternSignature            string   `json:"pattern_signature,omitempty"`
+	RegimeSignature             string   `json:"regime_signature,omitempty"`
+	PatternOrder                int      `json:"pattern_order,omitempty"`
+	FeatureCount                int      `json:"feature_count,omitempty"`
+	FeatureSet                  []string `json:"feature_set,omitempty"`
+	SampleCount                 int      `json:"sample_count"`
+	SupportCount                int      `json:"support_count"`
+	ContradictCount             int      `json:"contradict_count"`
+	WinRate                     float64  `json:"win_rate"`
+	LossRate                    float64  `json:"loss_rate"`
+	AvgPnLPct                   float64  `json:"avg_pnl_pct"`
+	LiftAvgPnLPct               float64  `json:"lift_avg_pnl_pct"`
+	Expectancy                  float64  `json:"expectancy"`
+	AvgMFEPct                   float64  `json:"avg_mfe_pct"`
+	AvgMAEPct                   float64  `json:"avg_mae_pct"`
+	GiveBackRate                float64  `json:"give_back_rate"`
+	AvgGiveBackPct              float64  `json:"avg_give_back_pct"`
+	ConfidenceScore             float64  `json:"confidence_score"`
+	StabilityScore              float64  `json:"stability_score"`
+	DriftScore                  float64  `json:"drift_score"`
+	CompositeScore              float64  `json:"composite_score"`
+	FalsePositiveScore          float64  `json:"false_positive_score"`
+	ReverseRiskScore            float64  `json:"reverse_risk_score"`
+	TrainingSampleCount         int      `json:"training_sample_count"`
+	ValidationSampleCount       int      `json:"validation_sample_count"`
+	ValidationSupportCount      int      `json:"validation_support_count"`
+	ValidationSupportScore      float64  `json:"validation_support_score"`
+	RecentSampleCount           int      `json:"recent_sample_count"`
+	RecentSupportCount          int      `json:"recent_support_count"`
+	RecentSupportScore          float64  `json:"recent_support_score"`
+	CurrentWindowMatchType      string   `json:"current_window_match_type"`
+	ClosedCaseMatchCount        int      `json:"closed_case_match_count"`
+	RecentExecutionMatchCount   int      `json:"recent_execution_match_count"`
+	OpportunitySymbolMatchCount int      `json:"opportunity_symbol_match_count"`
+	CurrentWindowNetPnL         float64  `json:"current_window_net_pnl"`
+	ImplicationType             string   `json:"implication_type"`
+	ImplicationSummary          string   `json:"implication_summary"`
+	EvidenceCaseIDs             []string `json:"evidence_case_ids,omitempty"`
+	Summary                     string   `json:"summary,omitempty"`
+	ValidationAlert             string   `json:"validation_alert,omitempty"`
+}
+
+type autonomousOptimizerLearnedPatternPayload struct {
+	AvailableCount       int                                         `json:"available_count"`
+	RelevantCount        int                                         `json:"relevant_count"`
+	PositiveCount        int                                         `json:"positive_count"`
+	NegativeCount        int                                         `json:"negative_count"`
+	ConfirmedCount       int                                         `json:"confirmed_count"`
+	CandidateCount       int                                         `json:"candidate_count"`
+	FalsePositiveCount   int                                         `json:"false_positive_count"`
+	ReverseRiskCount     int                                         `json:"reverse_risk_count"`
+	DriftingCount        int                                         `json:"drifting_count"`
+	ExpiredCount         int                                         `json:"expired_count"`
+	ConfigCandidateCount int                                         `json:"config_candidate_count"`
+	PromptOnlyCount      int                                         `json:"prompt_only_count"`
+	ReviewHintCount      int                                         `json:"review_hint_count"`
+	MonitorOnlyCount     int                                         `json:"monitor_only_count"`
+	DoNotUseCount        int                                         `json:"do_not_use_count"`
+	Items                []autonomousOptimizerLearnedPatternEvidence `json:"items,omitempty"`
+	TopPositivePatterns  []autonomousOptimizerLearnedPatternEvidence `json:"top_positive_patterns,omitempty"`
+	TopNegativePatterns  []autonomousOptimizerLearnedPatternEvidence `json:"top_negative_patterns,omitempty"`
+	TopSymbolOverrides   []autonomousOptimizerLearnedPatternEvidence `json:"top_symbol_overrides,omitempty"`
+	Notes                []string                                    `json:"notes,omitempty"`
 }
 
 type autonomousOptimizerPromptPatch struct {
@@ -710,7 +870,1189 @@ func autonomousOptimizerCanValidateConfigPatch(bundle *autonomousOptimizerWindow
 	return bundle.Metadata.ClosedDeals >= autonomousOptimizerMinClosedDealsForConfigProposal
 }
 
-func buildAutonomousOptimizerReviewPayload(cfg *store.AutonomousOptimizerConfig, traderCfg *store.Trader, strategyRecord *store.Strategy, strategyCfg *store.StrategyConfig, bundle *autonomousOptimizerWindowBundle, recentRuns []*store.AutonomousOptimizerRun) (map[string]any, error) {
+func (s *Server) loadAutonomousOptimizerSymbolBehaviorPriorPayload(cfg *store.AutonomousOptimizerConfig, bundle *autonomousOptimizerWindowBundle) (*autonomousOptimizerSymbolPriorPayload, error) {
+	if s == nil || s.store == nil || cfg == nil {
+		return &autonomousOptimizerSymbolPriorPayload{}, nil
+	}
+	if _, err := s.store.DealReview().RefreshSymbolBehaviorPriorsIfStale(cfg.UserID, cfg.TraderID); err != nil {
+		return nil, err
+	}
+	priors, err := s.store.DealReview().ListSymbolBehaviorPriors(
+		cfg.UserID,
+		cfg.TraderID,
+		store.DealReviewSymbolBehaviorPriorFilter{Limit: 100},
+	)
+	if err != nil {
+		return nil, err
+	}
+	return buildAutonomousOptimizerSymbolBehaviorPriorPayload(priors, bundle), nil
+}
+
+func buildAutonomousOptimizerSymbolBehaviorPriorPayload(priors []store.DealReviewSymbolBehaviorPrior, bundle *autonomousOptimizerWindowBundle) *autonomousOptimizerSymbolPriorPayload {
+	payload := &autonomousOptimizerSymbolPriorPayload{}
+	if len(priors) == 0 {
+		return payload
+	}
+	reportingSummary := store.BuildDealReviewSymbolBehaviorPriorReportingSummary(priors)
+	if reportingSummary != nil {
+		payload.ClusterRollups = buildAutonomousOptimizerSymbolClusterRollups(reportingSummary.TopSignalClusters)
+	}
+
+	caseMatchCounts := map[string]int{}
+	caseNetPnL := map[string]float64{}
+	recentExecutionCounts := map[string]int{}
+	opportunityCounts := map[string]int{}
+	strongCandidates := make([]autonomousOptimizerSymbolPriorEvidence, 0, len(priors))
+
+	if bundle != nil {
+		for _, detail := range bundle.Cases {
+			if !strings.EqualFold(detail.Case.Status, store.DealReviewCaseStatusClosed) {
+				continue
+			}
+			key := buildAutonomousOptimizerSymbolPriorKey(
+				detail.Case.Symbol,
+				detail.Case.Side,
+				detail.Case.OpenSelectionBucket,
+				detail.Case.OpenTrendRegime,
+				detail.Case.OpenVolatilityRegime,
+				detail.Case.OpenOIRegime,
+			)
+			if key == "" {
+				continue
+			}
+			caseMatchCounts[key]++
+			caseNetPnL[key] += detail.Case.RealizedPnL
+		}
+		if bundle.BucketReview != nil {
+			for _, item := range bundle.BucketReview.RecentOpenExecutions {
+				key := buildAutonomousOptimizerSymbolPriorRegimeKey(
+					item.Symbol,
+					item.Side,
+					item.TrendRegime,
+					item.VolatilityRegime,
+					item.OIRegime,
+				)
+				if key != "" {
+					recentExecutionCounts[key]++
+				}
+			}
+			for _, item := range bundle.BucketReview.OpportunitySymbols {
+				symbol := strings.ToUpper(strings.TrimSpace(item.Symbol))
+				if symbol == "" {
+					continue
+				}
+				opportunityCounts[symbol] += item.CandidateCount
+			}
+		}
+	}
+
+	for _, prior := range priors {
+		switch strings.TrimSpace(prior.ValidationLabel) {
+		case store.DealReviewSymbolBehaviorValidationLabelConfirmed:
+			payload.ConfirmedCount++
+		case store.DealReviewSymbolBehaviorValidationLabelFalsePositive:
+			payload.FalsePositiveCount++
+		case store.DealReviewSymbolBehaviorValidationLabelFalseNegativeRisk:
+			payload.FalseNegativeRiskCount++
+		case store.DealReviewSymbolBehaviorValidationLabelDrifting:
+			payload.DriftingCount++
+		}
+		switch strings.ToLower(strings.TrimSpace(prior.Status)) {
+		case store.DealReviewSymbolBehaviorPriorStatusCandidate:
+			payload.CandidateCount++
+		case store.DealReviewSymbolBehaviorPriorStatusValidated:
+			payload.ValidatedCount++
+		}
+		healthAlert := isAutonomousOptimizerSymbolPriorHealthAlert(&prior)
+		if prior.Status != store.DealReviewSymbolBehaviorPriorStatusCandidate &&
+			prior.Status != store.DealReviewSymbolBehaviorPriorStatusValidated &&
+			!healthAlert {
+			continue
+		}
+
+		payload.AvailableCount++
+		priorKey := buildAutonomousOptimizerSymbolPriorKey(
+			prior.Symbol,
+			prior.Side,
+			prior.OpenSelectionBucket,
+			prior.OpenTrendRegime,
+			prior.OpenVolatilityRegime,
+			prior.OpenOIRegime,
+		)
+		matchType := "global_background"
+		closedMatches := caseMatchCounts[priorKey]
+		recentMatches := recentExecutionCounts[buildAutonomousOptimizerSymbolPriorRegimeKey(
+			prior.Symbol,
+			prior.Side,
+			prior.OpenTrendRegime,
+			prior.OpenVolatilityRegime,
+			prior.OpenOIRegime,
+		)]
+		opportunityMatches := opportunityCounts[strings.ToUpper(strings.TrimSpace(prior.Symbol))]
+		switch {
+		case closedMatches > 0:
+			matchType = "closed_case"
+		case recentMatches > 0:
+			matchType = "recent_open_execution"
+		case opportunityMatches > 0:
+			matchType = "opportunity_symbol"
+		}
+
+		implicationType, implicationSummary := classifyAutonomousOptimizerSymbolPriorImplication(
+			&prior,
+			matchType,
+			closedMatches,
+			recentMatches,
+		)
+
+		item := autonomousOptimizerSymbolPriorEvidence{
+			PriorKey:               priorKey,
+			Symbol:                 prior.Symbol,
+			Side:                   prior.Side,
+			Status:                 prior.Status,
+			BehaviorBias:           prior.BehaviorBias,
+			ValidationLabel:        prior.ValidationLabel,
+			ValidationAlert:        clipDealReviewAIScanText(prior.ValidationAlert, 240),
+			RecommendedAction:      prior.RecommendedAction,
+			RegimeSignature:        prior.RegimeSignature,
+			SampleCount:            prior.SampleCount,
+			WinRate:                prior.WinRate,
+			LossRate:               prior.LossRate,
+			AvgPnLPct:              prior.AvgPnLPct,
+			CompositeScore:         prior.CompositeScore,
+			ContradictionScore:     prior.ContradictionScore,
+			DecisionOpenCount:      prior.DecisionOpenCount,
+			DecisionCycleCount:     prior.DecisionCycleCount,
+			AvgDecisionConfidence:  prior.AvgDecisionConfidence,
+			TrainingSampleCount:    prior.TrainingSampleCount,
+			ValidationSampleCount:  prior.ValidationSampleCount,
+			ValidationSupportCount: prior.ValidationSupportCount,
+			ValidationSupportScore: prior.ValidationSupportScore,
+			ValidationAvgPnLPct:    prior.ValidationAvgPnLPct,
+			RecentSampleCount:      prior.RecentSampleCount,
+			RecentSupportCount:     prior.RecentSupportCount,
+			RecentSupportScore:     prior.RecentSupportScore,
+			RecentAvgPnLPct:        prior.RecentAvgPnLPct,
+			DriftScore:             prior.DriftScore,
+			FalsePositiveScore:     prior.FalsePositiveScore,
+			FalseNegativeScore:     prior.FalseNegativeScore,
+			CurrentWindowMatchType: matchType,
+			ClosedCaseMatchCount:   closedMatches,
+			RecentExecutionMatches: recentMatches,
+			OpportunitySymbolHits:  opportunityMatches,
+			CurrentWindowNetPnL:    caseNetPnL[priorKey],
+			ImplicationType:        implicationType,
+			ImplicationSummary:     implicationSummary,
+			SignalTags:             limitAutonomousOptimizerStringSlice(prior.SignalTags, 6),
+			EvidenceCaseIDs:        buildAutonomousOptimizerPriorEvidenceCaseIDs(prior, 4),
+			Summary:                clipDealReviewAIScanText(prior.Summary, 320),
+		}
+
+		isRelevant := closedMatches > 0 || recentMatches > 0 || opportunityMatches > 0
+		isStrongBackground := !isRelevant && (prior.ContradictionScore >= 0.60 || prior.CompositeScore >= 0.70)
+		if isRelevant || isStrongBackground || healthAlert {
+			strongCandidates = append(strongCandidates, item)
+		}
+	}
+
+	sort.Slice(strongCandidates, func(i, j int) bool {
+		left := strongCandidates[i]
+		right := strongCandidates[j]
+		leftHealthRank := autonomousOptimizerSymbolPriorHealthRank(left.ValidationLabel)
+		rightHealthRank := autonomousOptimizerSymbolPriorHealthRank(right.ValidationLabel)
+		if leftHealthRank != rightHealthRank {
+			return leftHealthRank < rightHealthRank
+		}
+		leftMatchScore := left.ClosedCaseMatchCount*10 + left.RecentExecutionMatches*5 + minInt(left.OpportunitySymbolHits, 1)
+		rightMatchScore := right.ClosedCaseMatchCount*10 + right.RecentExecutionMatches*5 + minInt(right.OpportunitySymbolHits, 1)
+		if leftMatchScore != rightMatchScore {
+			return leftMatchScore > rightMatchScore
+		}
+		if left.ImplicationType != right.ImplicationType {
+			return autonomousOptimizerSymbolPriorImplicationRank(left.ImplicationType) < autonomousOptimizerSymbolPriorImplicationRank(right.ImplicationType)
+		}
+		if left.ContradictionScore != right.ContradictionScore {
+			return left.ContradictionScore > right.ContradictionScore
+		}
+		if left.CompositeScore != right.CompositeScore {
+			return left.CompositeScore > right.CompositeScore
+		}
+		return left.SampleCount > right.SampleCount
+	})
+	if len(strongCandidates) > 8 {
+		strongCandidates = strongCandidates[:8]
+	}
+	payload.Items = strongCandidates
+	payload.RelevantCount = len(strongCandidates)
+	for _, item := range strongCandidates {
+		switch item.ImplicationType {
+		case "config_candidate":
+			payload.ConfigCandidateCount++
+		case "prompt_only":
+			payload.PromptOnlyCount++
+		case "missing_data_backlog":
+			payload.BacklogCandidateCount++
+		}
+	}
+	payload.Notes = buildAutonomousOptimizerSymbolPriorNotes(payload)
+	return payload
+}
+
+func buildAutonomousOptimizerSymbolClusterRollups(items []store.DealReviewSymbolBehaviorClusterSummary) []autonomousOptimizerSymbolClusterEvidence {
+	if len(items) == 0 {
+		return nil
+	}
+	limit := len(items)
+	if limit > 6 {
+		limit = 6
+	}
+	out := make([]autonomousOptimizerSymbolClusterEvidence, 0, limit)
+	for _, item := range items[:limit] {
+		suggestedUse := "background_only"
+		switch {
+		case item.FalsePositiveCount > 0 || item.DriftingCount > 0:
+			suggestedUse = "anti_evidence_or_monitoring"
+		case item.NegativeBiasCount > item.PositiveBiasCount && item.AvgContradictionScore >= 0.45:
+			suggestedUse = "negative_pattern_cluster"
+		case item.PositiveBiasCount > item.NegativeBiasCount && item.ConfirmedCount > 0:
+			suggestedUse = "positive_pattern_cluster"
+		case item.FalseNegativeRiskCount > 0:
+			suggestedUse = "reverse_edge_watch"
+		}
+		out = append(out, autonomousOptimizerSymbolClusterEvidence{
+			ClusterLabel:              item.ClusterLabel,
+			PriorCount:                item.PriorCount,
+			SymbolCount:               item.SymbolCount,
+			SampleCount:               item.SampleCount,
+			DecisionOpenCount:         item.DecisionOpenCount,
+			ConfirmedCount:            item.ConfirmedCount,
+			FalsePositiveCount:        item.FalsePositiveCount,
+			FalseNegativeRiskCount:    item.FalseNegativeRiskCount,
+			DriftingCount:             item.DriftingCount,
+			NegativeBiasCount:         item.NegativeBiasCount,
+			PositiveBiasCount:         item.PositiveBiasCount,
+			AvgPnLPct:                 item.AvgPnLPct,
+			AvgContradictionScore:     item.AvgContradictionScore,
+			AvgCompositeScore:         item.AvgCompositeScore,
+			AvgValidationSupportScore: item.AvgValidationSupportScore,
+			TopSymbols:                limitAutonomousOptimizerStringSlice(item.TopSymbols, 4),
+			SuggestedUse:              suggestedUse,
+		})
+	}
+	return out
+}
+
+func buildAutonomousOptimizerPriorEvidenceCaseIDs(prior store.DealReviewSymbolBehaviorPrior, limit int) []string {
+	if len(prior.Evidence) == 0 || limit <= 0 {
+		return nil
+	}
+	ids := make([]string, 0, minInt(len(prior.Evidence), limit))
+	for _, item := range prior.Evidence {
+		caseID := strings.TrimSpace(item.CaseID)
+		if caseID == "" {
+			continue
+		}
+		ids = append(ids, caseID)
+		if len(ids) >= limit {
+			break
+		}
+	}
+	return ids
+}
+
+func limitAutonomousOptimizerStringSlice(items []string, limit int) []string {
+	if len(items) == 0 || limit <= 0 {
+		return nil
+	}
+	if len(items) > limit {
+		items = items[:limit]
+	}
+	out := make([]string, 0, len(items))
+	for _, item := range items {
+		if trimmed := strings.TrimSpace(item); trimmed != "" {
+			out = append(out, trimmed)
+		}
+	}
+	return out
+}
+
+func buildAutonomousOptimizerSymbolPriorNotes(payload *autonomousOptimizerSymbolPriorPayload) []string {
+	if payload == nil {
+		return nil
+	}
+	notes := make([]string, 0, 3)
+	if payload.ConfigCandidateCount > 0 {
+		notes = append(notes, fmt.Sprintf("%d symbol prior(s) are strong enough for narrow config-level consideration.", payload.ConfigCandidateCount))
+	}
+	if payload.PromptOnlyCount > 0 {
+		notes = append(notes, fmt.Sprintf("%d symbol prior(s) should influence prompt behavior first, not hard config changes.", payload.PromptOnlyCount))
+	}
+	if payload.BacklogCandidateCount > 0 {
+		notes = append(notes, fmt.Sprintf("%d symbol prior(s) suggest missing data or discriminator gaps and should bias toward backlog creation.", payload.BacklogCandidateCount))
+	}
+	if payload.FalsePositiveCount > 0 {
+		notes = append(notes, fmt.Sprintf("%d prior(s) now look like false positives and should be treated as anti-evidence, not config support.", payload.FalsePositiveCount))
+	}
+	if payload.FalseNegativeRiskCount > 0 {
+		notes = append(notes, fmt.Sprintf("%d prior(s) show reverse-edge risk; prefer narrow scans, prompt experiments, or monitoring over blunt config flips.", payload.FalseNegativeRiskCount))
+	}
+	if payload.DriftingCount > 0 {
+		notes = append(notes, fmt.Sprintf("%d prior(s) are drifting, which weakens confidence in any broad patch tied to them.", payload.DriftingCount))
+	}
+	if len(payload.ClusterRollups) > 0 {
+		top := payload.ClusterRollups[0]
+		notes = append(notes, fmt.Sprintf("Top normalized cluster %q spans %d prior(s), %d symbol(s), and %d samples; use it to judge whether the issue is broader than a single symbol.", top.ClusterLabel, top.PriorCount, top.SymbolCount, top.SampleCount))
+	}
+	return notes
+}
+
+func isAutonomousOptimizerSymbolPriorHealthAlert(prior *store.DealReviewSymbolBehaviorPrior) bool {
+	if prior == nil {
+		return false
+	}
+	switch strings.TrimSpace(prior.ValidationLabel) {
+	case store.DealReviewSymbolBehaviorValidationLabelFalsePositive,
+		store.DealReviewSymbolBehaviorValidationLabelFalseNegativeRisk,
+		store.DealReviewSymbolBehaviorValidationLabelDrifting:
+		return true
+	default:
+		return false
+	}
+}
+
+func autonomousOptimizerSymbolPriorHealthRank(value string) int {
+	switch strings.TrimSpace(value) {
+	case store.DealReviewSymbolBehaviorValidationLabelFalseNegativeRisk:
+		return 0
+	case store.DealReviewSymbolBehaviorValidationLabelFalsePositive:
+		return 1
+	case store.DealReviewSymbolBehaviorValidationLabelDrifting:
+		return 2
+	case store.DealReviewSymbolBehaviorValidationLabelConfirmed:
+		return 3
+	case store.DealReviewSymbolBehaviorValidationLabelCandidate:
+		return 4
+	default:
+		return 5
+	}
+}
+
+func autonomousOptimizerSymbolPriorImplicationRank(value string) int {
+	switch strings.TrimSpace(value) {
+	case "config_candidate":
+		return 0
+	case "prompt_only":
+		return 1
+	case "missing_data_backlog":
+		return 2
+	default:
+		return 9
+	}
+}
+
+func classifyAutonomousOptimizerSymbolPriorImplication(prior *store.DealReviewSymbolBehaviorPrior, matchType string, closedMatches, recentMatches int) (string, string) {
+	if prior == nil {
+		return "missing_data_backlog", "Prior is unavailable."
+	}
+	switch strings.TrimSpace(prior.ValidationLabel) {
+	case store.DealReviewSymbolBehaviorValidationLabelFalsePositive:
+		return "prompt_only", "This prior now looks like false-positive anti-evidence. Use it to avoid repeating the old assumption, not to justify a config patch."
+	case store.DealReviewSymbolBehaviorValidationLabelFalseNegativeRisk:
+		return "prompt_only", "Recent evidence points toward a reverse-edge risk. Prefer narrow prompt experiments, symbol-specific scans, or monitoring before any config flip."
+	case store.DealReviewSymbolBehaviorValidationLabelDrifting:
+		return "prompt_only", "This prior is drifting. Favor monitoring or narrow prompt caution instead of hard config changes."
+	}
+	highEvidence := prior.Status == store.DealReviewSymbolBehaviorPriorStatusValidated ||
+		(prior.SampleCount >= 8 &&
+			prior.CompositeScore >= 0.60 &&
+			(prior.ValidationSampleCount < 2 || prior.ValidationSupportScore >= 0.55) &&
+			(prior.DriftScore <= 0 || prior.DriftScore <= 0.55))
+	strongContradiction := prior.ContradictionScore >= 0.65
+	mediumContradiction := prior.ContradictionScore >= 0.45
+	repeatedOpens := prior.DecisionOpenCount >= 2
+	hasSignalDetail := len(prior.SignalTags) > 0
+	directWindowEvidence := closedMatches > 0 || recentMatches > 0
+
+	switch prior.BehaviorBias {
+	case store.DealReviewSymbolBehaviorBiasNegative:
+		if highEvidence && strongContradiction && repeatedOpens && directWindowEvidence {
+			return "config_candidate", "Strong negative symbol prior with direct window relevance; narrow config or risk-control changes are justified."
+		}
+		if (mediumContradiction || prior.LossRate >= 0.55) && (repeatedOpens || hasSignalDetail) {
+			return "prompt_only", "Negative symbol prior should tighten symbol-aware prompt guidance before broader config mutation."
+		}
+		return "missing_data_backlog", "Negative pattern exists, but evidence is indirect or underspecified; prefer backlog/data expansion."
+	case store.DealReviewSymbolBehaviorBiasPositive:
+		if highEvidence && directWindowEvidence && prior.RecommendedAction == "favor_setup" {
+			return "config_candidate", "Positive symbol prior is stable enough to consider a narrow config relaxation or weighting improvement."
+		}
+		if repeatedOpens || hasSignalDetail {
+			return "prompt_only", "Positive symbol prior is useful for prompt guidance, but not yet strong enough for a durable config change."
+		}
+		return "missing_data_backlog", "Positive prior exists, but it needs stronger signal detail before changing behavior."
+	default:
+		if matchType == "global_background" || !hasSignalDetail {
+			return "missing_data_backlog", "Mixed prior is too weak or generic; prefer backlog/data work."
+		}
+		return "prompt_only", "Mixed prior can inform prompt caution, but it does not justify a config change."
+	}
+}
+
+func buildAutonomousOptimizerSymbolPriorKey(symbol, side, selectionBucket, trend, volatility, oi string) string {
+	symbol = strings.ToUpper(strings.TrimSpace(symbol))
+	side = strings.ToUpper(strings.TrimSpace(side))
+	selectionBucket = normalizeAutonomousOptimizerSymbolPriorDimension(selectionBucket)
+	trend = normalizeAutonomousOptimizerSymbolPriorDimension(trend)
+	volatility = normalizeAutonomousOptimizerSymbolPriorDimension(volatility)
+	oi = normalizeAutonomousOptimizerSymbolPriorDimension(oi)
+	if symbol == "" || side == "" {
+		return ""
+	}
+	return strings.Join([]string{symbol, side, selectionBucket, trend, volatility, oi}, "|")
+}
+
+func buildAutonomousOptimizerSymbolPriorRegimeKey(symbol, side, trend, volatility, oi string) string {
+	symbol = strings.ToUpper(strings.TrimSpace(symbol))
+	side = strings.ToUpper(strings.TrimSpace(side))
+	trend = normalizeAutonomousOptimizerSymbolPriorDimension(trend)
+	volatility = normalizeAutonomousOptimizerSymbolPriorDimension(volatility)
+	oi = normalizeAutonomousOptimizerSymbolPriorDimension(oi)
+	if symbol == "" || side == "" {
+		return ""
+	}
+	return strings.Join([]string{symbol, side, trend, volatility, oi}, "|")
+}
+
+func normalizeAutonomousOptimizerSymbolPriorDimension(value string) string {
+	trimmed := strings.ToLower(strings.TrimSpace(value))
+	if trimmed == "" {
+		return "any"
+	}
+	return trimmed
+}
+
+func maxInt(a, b int) int {
+	if a > b {
+		return a
+	}
+	return b
+}
+
+func maxFloat(values ...float64) float64 {
+	best := 0.0
+	for _, value := range values {
+		if value > best {
+			best = value
+		}
+	}
+	return best
+}
+
+func blankAutonomousOptimizerText(values ...string) string {
+	for _, value := range values {
+		if trimmed := strings.TrimSpace(value); trimmed != "" {
+			return trimmed
+		}
+	}
+	return "n/a"
+}
+
+func (s *Server) loadAutonomousOptimizerLearnedPatternPayload(cfg *store.AutonomousOptimizerConfig, bundle *autonomousOptimizerWindowBundle) (*autonomousOptimizerLearnedPatternPayload, error) {
+	if s == nil || s.store == nil || cfg == nil {
+		return &autonomousOptimizerLearnedPatternPayload{}, nil
+	}
+	if _, err := s.store.DealReview().RefreshLearnedPatternsIfStale(cfg.UserID, cfg.TraderID); err != nil {
+		return nil, err
+	}
+	patterns, err := s.store.DealReview().ListLearnedPatterns(
+		cfg.UserID,
+		cfg.TraderID,
+		store.DealReviewLearnedPatternFilter{Limit: 100},
+	)
+	if err != nil {
+		return nil, err
+	}
+	return buildAutonomousOptimizerLearnedPatternPayload(patterns, bundle), nil
+}
+
+func buildAutonomousOptimizerLearnedPatternPayload(patterns []store.DealReviewLearnedPattern, bundle *autonomousOptimizerWindowBundle) *autonomousOptimizerLearnedPatternPayload {
+	payload := &autonomousOptimizerLearnedPatternPayload{}
+	if len(patterns) == 0 {
+		return payload
+	}
+
+	reportingSummary := store.BuildDealReviewLearnedPatternReportingSummary(patterns)
+	if reportingSummary != nil {
+		payload.PositiveCount = reportingSummary.PositiveCount
+		payload.NegativeCount = reportingSummary.NegativeCount
+		payload.ConfirmedCount = reportingSummary.ConfirmedCount
+		payload.CandidateCount = reportingSummary.CandidateCount
+		payload.FalsePositiveCount = reportingSummary.FalsePositiveCount
+		payload.ReverseRiskCount = reportingSummary.ReverseRiskCount
+		payload.DriftingCount = reportingSummary.DriftingCount
+		payload.ExpiredCount = reportingSummary.ExpiredCount
+		payload.Notes = append(payload.Notes, reportingSummary.Notes...)
+	}
+
+	closedCaseMatchCounts := map[string]int{}
+	closedCaseNetPnL := map[string]float64{}
+	recentExecutionMatchCounts := map[string]int{}
+	opportunitySymbolMatchCounts := map[string]int{}
+
+	if bundle != nil {
+		for _, detail := range bundle.Cases {
+			if !strings.EqualFold(detail.Case.Status, store.DealReviewCaseStatusClosed) {
+				continue
+			}
+			caseRec := detail.Case
+			for idx := range patterns {
+				matched, _ := store.MatchDealReviewLearnedPattern(&caseRec, &patterns[idx])
+				if !matched {
+					continue
+				}
+				closedCaseMatchCounts[patterns[idx].ID]++
+				closedCaseNetPnL[patterns[idx].ID] += caseRec.RealizedPnL
+			}
+		}
+		if bundle.BucketReview != nil {
+			for _, execution := range bundle.BucketReview.RecentOpenExecutions {
+				caseRec := buildAutonomousOptimizerLearnedPatternExecutionCase(execution)
+				for idx := range patterns {
+					matched, _ := store.MatchDealReviewLearnedPattern(&caseRec, &patterns[idx])
+					if matched {
+						recentExecutionMatchCounts[patterns[idx].ID]++
+					}
+				}
+			}
+			for _, symbolSummary := range bundle.BucketReview.OpportunitySymbols {
+				symbol := strings.ToUpper(strings.TrimSpace(symbolSummary.Symbol))
+				if symbol == "" {
+					continue
+				}
+				for idx := range patterns {
+					if patterns[idx].ScopeType != store.DealReviewLearnedPatternScopeSymbol {
+						continue
+					}
+					if strings.ToUpper(strings.TrimSpace(patterns[idx].Symbol)) != symbol {
+						continue
+					}
+					opportunitySymbolMatchCounts[patterns[idx].ID] += maxInt(symbolSummary.CandidateCount, symbolSummary.OpenDecisionCount)
+				}
+			}
+		}
+	}
+
+	lookup := make(map[string]autonomousOptimizerLearnedPatternEvidence, len(patterns))
+	strongCandidates := make([]autonomousOptimizerLearnedPatternEvidence, 0, len(patterns))
+	for _, pattern := range patterns {
+		payload.AvailableCount++
+		switch strings.TrimSpace(pattern.RecommendedUse) {
+		case store.DealReviewLearnedPatternRecommendedUseConfigCand:
+			payload.ConfigCandidateCount++
+		case store.DealReviewLearnedPatternRecommendedUsePromptHint:
+			payload.PromptOnlyCount++
+		case store.DealReviewLearnedPatternRecommendedUseReviewHint:
+			payload.ReviewHintCount++
+		case store.DealReviewLearnedPatternRecommendedUseMonitorOnly:
+			payload.MonitorOnlyCount++
+		case store.DealReviewLearnedPatternRecommendedUseExpiredIgnore:
+			payload.DoNotUseCount++
+		}
+
+		closedMatches := closedCaseMatchCounts[pattern.ID]
+		recentMatches := recentExecutionMatchCounts[pattern.ID]
+		opportunityMatches := opportunitySymbolMatchCounts[pattern.ID]
+		matchType := "global_background"
+		switch {
+		case closedMatches > 0:
+			matchType = "closed_case"
+		case recentMatches > 0:
+			matchType = "recent_open_execution"
+		case opportunityMatches > 0:
+			matchType = "opportunity_symbol"
+		}
+		implicationType, implicationSummary := classifyAutonomousOptimizerLearnedPatternImplication(
+			&pattern,
+			matchType,
+			closedMatches,
+			recentMatches,
+		)
+
+		item := buildAutonomousOptimizerLearnedPatternEvidence(
+			pattern,
+			matchType,
+			closedMatches,
+			recentMatches,
+			opportunityMatches,
+			closedCaseNetPnL[pattern.ID],
+			implicationType,
+			implicationSummary,
+		)
+		lookup[item.PatternID] = item
+
+		isRelevant := closedMatches > 0 || recentMatches > 0 || opportunityMatches > 0
+		isHealthAlert := isAutonomousOptimizerLearnedPatternHealthAlert(&pattern)
+		isStrongBackground := !isRelevant &&
+			(pattern.CompositeScore >= 0.72 ||
+				(pattern.ValidationLabel == store.DealReviewLearnedPatternValidationLabelConfirmed &&
+					pattern.ConfidenceScore >= 0.60 &&
+					pattern.SampleCount >= 4))
+		if isRelevant || isHealthAlert || isStrongBackground {
+			strongCandidates = append(strongCandidates, item)
+		}
+	}
+
+	sort.Slice(strongCandidates, func(i, j int) bool {
+		left := strongCandidates[i]
+		right := strongCandidates[j]
+		leftHealthRank := autonomousOptimizerLearnedPatternHealthRank(left.ValidationLabel)
+		rightHealthRank := autonomousOptimizerLearnedPatternHealthRank(right.ValidationLabel)
+		if leftHealthRank != rightHealthRank {
+			return leftHealthRank < rightHealthRank
+		}
+		leftMatchScore := left.ClosedCaseMatchCount*10 + left.RecentExecutionMatchCount*5 + minInt(left.OpportunitySymbolMatchCount, 1)
+		rightMatchScore := right.ClosedCaseMatchCount*10 + right.RecentExecutionMatchCount*5 + minInt(right.OpportunitySymbolMatchCount, 1)
+		if leftMatchScore != rightMatchScore {
+			return leftMatchScore > rightMatchScore
+		}
+		if left.ImplicationType != right.ImplicationType {
+			return autonomousOptimizerLearnedPatternImplicationRank(left.ImplicationType) < autonomousOptimizerLearnedPatternImplicationRank(right.ImplicationType)
+		}
+		if left.CompositeScore != right.CompositeScore {
+			return left.CompositeScore > right.CompositeScore
+		}
+		if left.ConfidenceScore != right.ConfidenceScore {
+			return left.ConfidenceScore > right.ConfidenceScore
+		}
+		return left.SampleCount > right.SampleCount
+	})
+	if len(strongCandidates) > 8 {
+		strongCandidates = strongCandidates[:8]
+	}
+	payload.Items = strongCandidates
+	payload.RelevantCount = len(strongCandidates)
+
+	if reportingSummary != nil {
+		payload.TopPositivePatterns = buildAutonomousOptimizerLearnedPatternEvidenceList(reportingSummary.TopPositivePatterns, lookup, 4)
+		payload.TopNegativePatterns = buildAutonomousOptimizerLearnedPatternEvidenceList(reportingSummary.TopNegativePatterns, lookup, 4)
+		payload.TopSymbolOverrides = buildAutonomousOptimizerLearnedPatternEvidenceList(reportingSummary.TopSymbolOverrides, lookup, 4)
+	}
+	payload.Notes = buildAutonomousOptimizerLearnedPatternNotes(payload)
+	return payload
+}
+
+func buildAutonomousOptimizerLearnedPatternExecutionCase(item store.TraderOpenExecution) store.DealReviewCase {
+	return store.DealReviewCase{
+		Symbol:               item.Symbol,
+		Side:                 item.Side,
+		OpenConfidence:       item.Confidence,
+		OpenTrendRegime:      item.TrendRegime,
+		OpenVolatilityRegime: item.VolatilityRegime,
+		OpenFundingRegime:    item.FundingRegime,
+		OpenOIRegime:         item.OIRegime,
+		OpenSessionBucket:    item.SessionBucket,
+		OpenLiquidityTier:    item.LiquidityTier,
+		OpenSpreadBucket:     item.SpreadBucket,
+		OpenSlippageBucket:   item.SlippageBucket,
+	}
+}
+
+func buildAutonomousOptimizerLearnedPatternEvidence(pattern store.DealReviewLearnedPattern, matchType string, closedMatches, recentMatches, opportunityMatches int, currentWindowNetPnL float64, implicationType, implicationSummary string) autonomousOptimizerLearnedPatternEvidence {
+	return autonomousOptimizerLearnedPatternEvidence{
+		PatternID:                   pattern.ID,
+		ScopeType:                   pattern.ScopeType,
+		Symbol:                      pattern.Symbol,
+		Side:                        pattern.Side,
+		PatternClass:                pattern.PatternClass,
+		Status:                      pattern.Status,
+		ValidationLabel:             pattern.ValidationLabel,
+		RecommendedUse:              pattern.RecommendedUse,
+		PatternSignature:            pattern.PatternSignature,
+		RegimeSignature:             pattern.RegimeSignature,
+		PatternOrder:                pattern.PatternOrder,
+		FeatureCount:                pattern.FeatureCount,
+		FeatureSet:                  limitAutonomousOptimizerStringSlice(pattern.FeatureSet, 8),
+		SampleCount:                 pattern.SampleCount,
+		SupportCount:                pattern.SupportCount,
+		ContradictCount:             pattern.ContradictCount,
+		WinRate:                     pattern.WinRate,
+		LossRate:                    pattern.LossRate,
+		AvgPnLPct:                   pattern.AvgPnLPct,
+		LiftAvgPnLPct:               pattern.LiftAvgPnLPct,
+		Expectancy:                  pattern.Expectancy,
+		AvgMFEPct:                   pattern.AvgMFEPct,
+		AvgMAEPct:                   pattern.AvgMAEPct,
+		GiveBackRate:                pattern.GiveBackRate,
+		AvgGiveBackPct:              pattern.AvgGiveBackPct,
+		ConfidenceScore:             pattern.ConfidenceScore,
+		StabilityScore:              pattern.StabilityScore,
+		DriftScore:                  pattern.DriftScore,
+		CompositeScore:              pattern.CompositeScore,
+		FalsePositiveScore:          pattern.FalsePositiveScore,
+		ReverseRiskScore:            pattern.ReverseRiskScore,
+		TrainingSampleCount:         pattern.TrainingSampleCount,
+		ValidationSampleCount:       pattern.ValidationSampleCount,
+		ValidationSupportCount:      pattern.ValidationSupportCount,
+		ValidationSupportScore:      pattern.ValidationSupportScore,
+		RecentSampleCount:           pattern.RecentSampleCount,
+		RecentSupportCount:          pattern.RecentSupportCount,
+		RecentSupportScore:          pattern.RecentSupportScore,
+		CurrentWindowMatchType:      matchType,
+		ClosedCaseMatchCount:        closedMatches,
+		RecentExecutionMatchCount:   recentMatches,
+		OpportunitySymbolMatchCount: opportunityMatches,
+		CurrentWindowNetPnL:         currentWindowNetPnL,
+		ImplicationType:             implicationType,
+		ImplicationSummary:          implicationSummary,
+		EvidenceCaseIDs:             buildAutonomousOptimizerLearnedPatternEvidenceCaseIDs(pattern, 4),
+		Summary:                     clipDealReviewAIScanText(pattern.Summary, 320),
+		ValidationAlert:             clipDealReviewAIScanText(pattern.ValidationAlert, 240),
+	}
+}
+
+func buildAutonomousOptimizerLearnedPatternEvidenceList(items []store.DealReviewLearnedPattern, lookup map[string]autonomousOptimizerLearnedPatternEvidence, limit int) []autonomousOptimizerLearnedPatternEvidence {
+	if len(items) == 0 || limit <= 0 {
+		return nil
+	}
+	out := make([]autonomousOptimizerLearnedPatternEvidence, 0, minInt(len(items), limit))
+	for _, item := range items {
+		if built, ok := lookup[item.ID]; ok {
+			out = append(out, built)
+		} else {
+			out = append(out, buildAutonomousOptimizerLearnedPatternEvidence(
+				item,
+				"global_background",
+				0,
+				0,
+				0,
+				0,
+				autonomousOptimizerLearnedPatternDefaultImplication(&item),
+				clipDealReviewAIScanText(item.Summary, 240),
+			))
+		}
+		if len(out) >= limit {
+			break
+		}
+	}
+	return out
+}
+
+func buildAutonomousOptimizerLearnedPatternEvidenceCaseIDs(pattern store.DealReviewLearnedPattern, limit int) []string {
+	if len(pattern.Evidence) == 0 || limit <= 0 {
+		return nil
+	}
+	out := make([]string, 0, minInt(len(pattern.Evidence), limit))
+	for _, item := range pattern.Evidence {
+		caseID := strings.TrimSpace(item.CaseID)
+		if caseID == "" {
+			continue
+		}
+		out = append(out, caseID)
+		if len(out) >= limit {
+			break
+		}
+	}
+	return out
+}
+
+func buildAutonomousOptimizerLearnedPatternNotes(payload *autonomousOptimizerLearnedPatternPayload) []string {
+	if payload == nil {
+		return nil
+	}
+	notes := make([]string, 0, 6)
+	if payload.ConfigCandidateCount > 0 {
+		notes = append(notes, fmt.Sprintf("%d learned pattern(s) are strong enough for narrow config-level consideration.", payload.ConfigCandidateCount))
+	}
+	if payload.PromptOnlyCount > 0 {
+		notes = append(notes, fmt.Sprintf("%d learned pattern(s) should bias prompt behavior before hard config changes.", payload.PromptOnlyCount))
+	}
+	if payload.MonitorOnlyCount > 0 {
+		notes = append(notes, fmt.Sprintf("%d learned pattern(s) are better treated as monitoring or caution signals for now.", payload.MonitorOnlyCount))
+	}
+	if payload.FalsePositiveCount > 0 || payload.ReverseRiskCount > 0 {
+		notes = append(notes, fmt.Sprintf("%d anti-pattern(s) currently act as false-positive or reverse-risk evidence.", payload.FalsePositiveCount+payload.ReverseRiskCount))
+	}
+	if payload.DriftingCount > 0 {
+		notes = append(notes, fmt.Sprintf("%d learned pattern(s) are drifting and should be handled conservatively.", payload.DriftingCount))
+	}
+	if payload.RelevantCount > 0 {
+		notes = append(notes, fmt.Sprintf("%d learned pattern(s) directly matched the current review window or recent executions.", payload.RelevantCount))
+	}
+	return dedupeSortedStrings(notes)
+}
+
+func buildAutonomousOptimizerLearnedPatternBacklogProposals(payload *autonomousOptimizerLearnedPatternPayload) []autonomousOptimizerBacklogProposal {
+	if payload == nil || len(payload.Items) == 0 {
+		return nil
+	}
+	proposals := make([]autonomousOptimizerBacklogProposal, 0, 4)
+	seen := map[string]struct{}{}
+	antiEvidenceCount := 0
+	driftCount := 0
+	coverageCount := 0
+
+	appendProposal := func(item autonomousOptimizerBacklogProposal) {
+		item = sanitizeAutonomousOptimizerBacklogProposal(item)
+		if item.Title == "" {
+			return
+		}
+		key := autonomousOptimizerBacklogMergeKey(item.Category, item.Title)
+		if _, ok := seen[key]; ok {
+			return
+		}
+		seen[key] = struct{}{}
+		proposals = append(proposals, item)
+	}
+
+	for _, item := range payload.Items {
+		if antiEvidenceCount < 2 {
+			if proposal, ok := buildAutonomousOptimizerLearnedPatternGuardBacklogProposal(item); ok {
+				appendProposal(proposal)
+				antiEvidenceCount++
+			}
+		}
+		if driftCount < 1 {
+			if proposal, ok := buildAutonomousOptimizerLearnedPatternDriftBacklogProposal(item); ok {
+				appendProposal(proposal)
+				driftCount++
+			}
+		}
+		if coverageCount < 1 {
+			if proposal, ok := buildAutonomousOptimizerLearnedPatternCoverageBacklogProposal(item); ok {
+				appendProposal(proposal)
+				coverageCount++
+			}
+		}
+		if len(proposals) >= 4 {
+			break
+		}
+	}
+	return proposals
+}
+
+func buildAutonomousOptimizerLearnedPatternGuardBacklogProposal(item autonomousOptimizerLearnedPatternEvidence) (autonomousOptimizerBacklogProposal, bool) {
+	if item.ImplicationType != "anti_evidence" {
+		return autonomousOptimizerBacklogProposal{}, false
+	}
+	directRelevance := item.ClosedCaseMatchCount > 0 || item.RecentExecutionMatchCount > 0
+	if !directRelevance && item.OpportunitySymbolMatchCount <= 0 {
+		return autonomousOptimizerBacklogProposal{}, false
+	}
+
+	category := "missing_prompt_instruction"
+	if item.ValidationLabel == store.DealReviewLearnedPatternValidationLabelReverseRisk ||
+		item.RecentExecutionMatchCount > 0 {
+		category = "missing_risk_control"
+	}
+	scopeLabel := buildAutonomousOptimizerLearnedPatternScopeLabel(item)
+	title := fmt.Sprintf("Encode %s learned anti-pattern guard", scopeLabel)
+	description := fmt.Sprintf(
+		"%s matched the latest review window as %s (%d closed-case, %d recent execution, %d opportunity matches). The optimizer should have a reusable guard against repeating this setup. Pattern summary: %s",
+		scopeLabel,
+		item.CurrentWindowMatchType,
+		item.ClosedCaseMatchCount,
+		item.RecentExecutionMatchCount,
+		item.OpportunitySymbolMatchCount,
+		blankAutonomousOptimizerText(item.Summary, item.ImplicationSummary),
+	)
+	expectedImpact := "Reduce repeated exposure to a learned anti-edge by encoding a reusable prompt or risk-control guard."
+	confidence := clampAutonomousOptimizerScore(maxFloat(
+		item.FalsePositiveScore,
+		item.ReverseRiskScore,
+		item.CompositeScore,
+	))
+	urgency := clampAutonomousOptimizerScore(maxFloat(
+		confidence,
+		autonomousOptimizerLearnedPatternWindowUrgency(item),
+	))
+	implementationCost := 0.34
+	if category == "missing_risk_control" {
+		implementationCost = 0.48
+	}
+	return autonomousOptimizerBacklogProposal{
+		Title:              title,
+		Category:           category,
+		Description:        clipDealReviewAIScanText(description, 900),
+		ExpectedImpact:     expectedImpact,
+		Confidence:         confidence,
+		ImplementationCost: implementationCost,
+		Urgency:            urgency,
+		RecurrenceCount:    maxInt(1, item.ClosedCaseMatchCount+item.RecentExecutionMatchCount),
+		Evidence:           []map[string]any{buildAutonomousOptimizerLearnedPatternEvidenceMap(item)},
+		Metadata: map[string]any{
+			"source_kind":         "learned_pattern_synthesis",
+			"derived_goal":        "encode_guard",
+			"pattern_id":          item.PatternID,
+			"validation_label":    item.ValidationLabel,
+			"implication_type":    item.ImplicationType,
+			"current_match_type":  item.CurrentWindowMatchType,
+			"feature_set":         item.FeatureSet,
+			"evidence_case_ids":   item.EvidenceCaseIDs,
+			"scope_type":          item.ScopeType,
+			"symbol":              item.Symbol,
+			"side":                item.Side,
+			"pattern_signature":   item.PatternSignature,
+			"regime_signature":    item.RegimeSignature,
+			"current_window_pnl":  item.CurrentWindowNetPnL,
+			"closed_case_matches": item.ClosedCaseMatchCount,
+		},
+	}, true
+}
+
+func buildAutonomousOptimizerLearnedPatternDriftBacklogProposal(item autonomousOptimizerLearnedPatternEvidence) (autonomousOptimizerBacklogProposal, bool) {
+	if item.ValidationLabel != store.DealReviewLearnedPatternValidationLabelDrifting {
+		return autonomousOptimizerBacklogProposal{}, false
+	}
+	if item.CurrentWindowMatchType == "global_background" && item.ClosedCaseMatchCount == 0 && item.RecentExecutionMatchCount == 0 {
+		return autonomousOptimizerBacklogProposal{}, false
+	}
+	scopeLabel := buildAutonomousOptimizerLearnedPatternScopeLabel(item)
+	description := fmt.Sprintf(
+		"%s is marked as drifting and still touched the latest window (%s). This should create stronger review telemetry so stale patterns expire or de-rank automatically before they bias future optimizer runs. Summary: %s",
+		scopeLabel,
+		item.CurrentWindowMatchType,
+		blankAutonomousOptimizerText(item.ValidationAlert, item.Summary),
+	)
+	return autonomousOptimizerBacklogProposal{
+		Title:              fmt.Sprintf("Add drift expiry monitor for %s learned pattern", scopeLabel),
+		Category:           "missing_review_metric",
+		Description:        clipDealReviewAIScanText(description, 900),
+		ExpectedImpact:     "Reduce stale-pattern reuse by surfacing drift and expiry pressure earlier in optimizer evidence.",
+		Confidence:         clampAutonomousOptimizerScore(maxFloat(item.DriftScore, item.CompositeScore)),
+		ImplementationCost: 0.28,
+		Urgency:            clampAutonomousOptimizerScore(maxFloat(item.DriftScore, autonomousOptimizerLearnedPatternWindowUrgency(item))),
+		RecurrenceCount:    maxInt(1, item.ClosedCaseMatchCount+item.RecentExecutionMatchCount),
+		Evidence:           []map[string]any{buildAutonomousOptimizerLearnedPatternEvidenceMap(item)},
+		Metadata: map[string]any{
+			"source_kind":        "learned_pattern_synthesis",
+			"derived_goal":       "drift_monitoring",
+			"pattern_id":         item.PatternID,
+			"validation_label":   item.ValidationLabel,
+			"current_match_type": item.CurrentWindowMatchType,
+			"scope_type":         item.ScopeType,
+			"symbol":             item.Symbol,
+			"side":               item.Side,
+			"feature_set":        item.FeatureSet,
+		},
+	}, true
+}
+
+func buildAutonomousOptimizerLearnedPatternCoverageBacklogProposal(item autonomousOptimizerLearnedPatternEvidence) (autonomousOptimizerBacklogProposal, bool) {
+	if item.PatternClass != store.DealReviewLearnedPatternClassPositiveEdge {
+		return autonomousOptimizerBacklogProposal{}, false
+	}
+	if item.ValidationLabel != store.DealReviewLearnedPatternValidationLabelCandidate &&
+		item.ValidationLabel != store.DealReviewLearnedPatternValidationLabelInsufficientEvidence {
+		return autonomousOptimizerBacklogProposal{}, false
+	}
+	if item.SampleCount < 4 || item.CompositeScore < 0.55 {
+		return autonomousOptimizerBacklogProposal{}, false
+	}
+	if item.ValidationSampleCount >= 2 && item.RecentSampleCount >= 2 {
+		return autonomousOptimizerBacklogProposal{}, false
+	}
+
+	scopeLabel := buildAutonomousOptimizerLearnedPatternScopeLabel(item)
+	description := fmt.Sprintf(
+		"%s looks directionally useful but still lacks enough holdout/recent coverage (validation=%d, recent=%d). Before this turns into a config candidate, the review stack should widen validation coverage or attach better discriminators. Summary: %s",
+		scopeLabel,
+		item.ValidationSampleCount,
+		item.RecentSampleCount,
+		blankAutonomousOptimizerText(item.Summary, item.ImplicationSummary),
+	)
+	return autonomousOptimizerBacklogProposal{
+		Title:              fmt.Sprintf("Expand validation coverage for %s learned pattern", scopeLabel),
+		Category:           "missing_review_metric",
+		Description:        clipDealReviewAIScanText(description, 900),
+		ExpectedImpact:     "Separate durable learned edges from small-sample noise before the optimizer promotes them into live patches.",
+		Confidence:         clampAutonomousOptimizerScore(maxFloat(item.CompositeScore, item.ConfidenceScore)),
+		ImplementationCost: 0.24,
+		Urgency:            clampAutonomousOptimizerScore(maxFloat(item.CompositeScore*0.85, autonomousOptimizerLearnedPatternWindowUrgency(item))),
+		RecurrenceCount:    maxInt(1, item.SupportCount),
+		Evidence:           []map[string]any{buildAutonomousOptimizerLearnedPatternEvidenceMap(item)},
+		Metadata: map[string]any{
+			"source_kind":             "learned_pattern_synthesis",
+			"derived_goal":            "validation_coverage",
+			"pattern_id":              item.PatternID,
+			"validation_label":        item.ValidationLabel,
+			"scope_type":              item.ScopeType,
+			"symbol":                  item.Symbol,
+			"side":                    item.Side,
+			"feature_set":             item.FeatureSet,
+			"validation_sample_count": item.ValidationSampleCount,
+			"recent_sample_count":     item.RecentSampleCount,
+			"sample_count":            item.SampleCount,
+		},
+	}, true
+}
+
+func buildAutonomousOptimizerLearnedPatternEvidenceMap(item autonomousOptimizerLearnedPatternEvidence) map[string]any {
+	return map[string]any{
+		"source":                         "learned_pattern",
+		"pattern_id":                     item.PatternID,
+		"scope_type":                     item.ScopeType,
+		"symbol":                         item.Symbol,
+		"side":                           item.Side,
+		"pattern_class":                  item.PatternClass,
+		"validation_label":               item.ValidationLabel,
+		"recommended_use":                item.RecommendedUse,
+		"implication_type":               item.ImplicationType,
+		"current_window_match_type":      item.CurrentWindowMatchType,
+		"closed_case_match_count":        item.ClosedCaseMatchCount,
+		"recent_execution_match_count":   item.RecentExecutionMatchCount,
+		"opportunity_symbol_match_count": item.OpportunitySymbolMatchCount,
+		"current_window_net_pnl":         item.CurrentWindowNetPnL,
+		"feature_set":                    item.FeatureSet,
+		"evidence_case_ids":              item.EvidenceCaseIDs,
+		"summary":                        item.Summary,
+		"validation_alert":               item.ValidationAlert,
+	}
+}
+
+func buildAutonomousOptimizerLearnedPatternScopeLabel(item autonomousOptimizerLearnedPatternEvidence) string {
+	symbol := strings.ToUpper(strings.TrimSpace(item.Symbol))
+	side := strings.ToUpper(strings.TrimSpace(item.Side))
+	if symbol != "" {
+		return strings.TrimSpace(symbol + " " + side)
+	}
+	if side != "" {
+		return strings.TrimSpace(strings.ToLower(strings.ReplaceAll(item.ScopeType, "_", " ")) + " " + side)
+	}
+	return strings.ToLower(strings.ReplaceAll(item.ScopeType, "_", " "))
+}
+
+func autonomousOptimizerLearnedPatternWindowUrgency(item autonomousOptimizerLearnedPatternEvidence) float64 {
+	matchWeight := float64(item.ClosedCaseMatchCount)*0.18 + float64(item.RecentExecutionMatchCount)*0.14
+	if item.OpportunitySymbolMatchCount > 0 {
+		matchWeight += 0.08
+	}
+	if item.CurrentWindowNetPnL < 0 {
+		matchWeight += 0.10
+	}
+	return clampAutonomousOptimizerScore(matchWeight)
+}
+
+func isAutonomousOptimizerLearnedPatternHealthAlert(pattern *store.DealReviewLearnedPattern) bool {
+	if pattern == nil {
+		return false
+	}
+	switch strings.TrimSpace(pattern.ValidationLabel) {
+	case store.DealReviewLearnedPatternValidationLabelFalsePositive,
+		store.DealReviewLearnedPatternValidationLabelReverseRisk,
+		store.DealReviewLearnedPatternValidationLabelDrifting:
+		return true
+	default:
+		return false
+	}
+}
+
+func autonomousOptimizerLearnedPatternHealthRank(value string) int {
+	switch strings.TrimSpace(value) {
+	case store.DealReviewLearnedPatternValidationLabelReverseRisk:
+		return 0
+	case store.DealReviewLearnedPatternValidationLabelFalsePositive:
+		return 1
+	case store.DealReviewLearnedPatternValidationLabelDrifting:
+		return 2
+	case store.DealReviewLearnedPatternValidationLabelConfirmed:
+		return 3
+	case store.DealReviewLearnedPatternValidationLabelCandidate:
+		return 4
+	case store.DealReviewLearnedPatternValidationLabelInsufficientEvidence:
+		return 5
+	case store.DealReviewLearnedPatternValidationLabelExpired:
+		return 6
+	default:
+		return 7
+	}
+}
+
+func autonomousOptimizerLearnedPatternImplicationRank(value string) int {
+	switch strings.TrimSpace(value) {
+	case "anti_evidence":
+		return 0
+	case "config_candidate":
+		return 1
+	case "prompt_only":
+		return 2
+	case "review_hint":
+		return 3
+	case "monitor_only":
+		return 4
+	case "do_not_use":
+		return 5
+	default:
+		return 9
+	}
+}
+
+func autonomousOptimizerLearnedPatternDefaultImplication(pattern *store.DealReviewLearnedPattern) string {
+	if pattern == nil {
+		return "review_hint"
+	}
+	switch strings.TrimSpace(pattern.RecommendedUse) {
+	case store.DealReviewLearnedPatternRecommendedUseConfigCand:
+		return "config_candidate"
+	case store.DealReviewLearnedPatternRecommendedUsePromptHint:
+		if pattern.PatternClass == store.DealReviewLearnedPatternClassNegativeEdge {
+			return "anti_evidence"
+		}
+		return "prompt_only"
+	case store.DealReviewLearnedPatternRecommendedUseMonitorOnly:
+		return "monitor_only"
+	case store.DealReviewLearnedPatternRecommendedUseExpiredIgnore:
+		return "do_not_use"
+	default:
+		if pattern.PatternClass == store.DealReviewLearnedPatternClassNegativeEdge {
+			return "anti_evidence"
+		}
+		return "review_hint"
+	}
+}
+
+func classifyAutonomousOptimizerLearnedPatternImplication(pattern *store.DealReviewLearnedPattern, matchType string, closedMatches, recentMatches int) (string, string) {
+	if pattern == nil {
+		return "review_hint", "Learned pattern is unavailable."
+	}
+	switch strings.TrimSpace(pattern.ValidationLabel) {
+	case store.DealReviewLearnedPatternValidationLabelFalsePositive:
+		return "anti_evidence", "This learned pattern now behaves like a false positive. Use it as anti-evidence and avoid repeating the old assumption."
+	case store.DealReviewLearnedPatternValidationLabelReverseRisk:
+		return "anti_evidence", "This learned pattern now leans in the opposite direction. Prefer caution, prompt narrowing, or monitoring over broader exposure."
+	case store.DealReviewLearnedPatternValidationLabelDrifting:
+		return "monitor_only", "This learned pattern is drifting. Keep it visible, but avoid hard live mutation unless newer evidence firms it up."
+	case store.DealReviewLearnedPatternValidationLabelExpired:
+		return "do_not_use", "This learned pattern has expired and should not justify a live patch."
+	}
+
+	directWindowEvidence := closedMatches > 0 || recentMatches > 0
+	switch strings.TrimSpace(pattern.RecommendedUse) {
+	case store.DealReviewLearnedPatternRecommendedUseConfigCand:
+		if directWindowEvidence {
+			return "config_candidate", "Confirmed learned edge with direct window relevance; a narrow config patch can be justified."
+		}
+		return "review_hint", "Strong learned edge exists, but the current window did not hit it directly. Treat it as bounded review context first."
+	case store.DealReviewLearnedPatternRecommendedUsePromptHint:
+		if pattern.PatternClass == store.DealReviewLearnedPatternClassNegativeEdge {
+			return "anti_evidence", "Confirmed negative learned pattern should tighten prompt behavior or block repeating the same setup."
+		}
+		return "prompt_only", "Pattern is best expressed as prompt guidance before any durable config change."
+	case store.DealReviewLearnedPatternRecommendedUseMonitorOnly:
+		return "monitor_only", "Pattern should stay visible as a monitoring signal, not as direct live patch support."
+	case store.DealReviewLearnedPatternRecommendedUseExpiredIgnore:
+		return "do_not_use", "Pattern should be ignored for live optimizer decisions."
+	default:
+		if pattern.PatternClass == store.DealReviewLearnedPatternClassNegativeEdge {
+			return "anti_evidence", "Negative learned pattern should count against repeating the same setup."
+		}
+		if matchType == "global_background" {
+			return "review_hint", "Positive learned pattern exists, but current-window relevance is indirect."
+		}
+		return "prompt_only", "Pattern supports tighter prompt guidance for the current setup."
+	}
+}
+
+func buildAutonomousOptimizerReviewPayload(cfg *store.AutonomousOptimizerConfig, traderCfg *store.Trader, strategyRecord *store.Strategy, strategyCfg *store.StrategyConfig, bundle *autonomousOptimizerWindowBundle, recentRuns []*store.AutonomousOptimizerRun, symbolBehaviorPriors *autonomousOptimizerSymbolPriorPayload, learnedPatterns *autonomousOptimizerLearnedPatternPayload) (map[string]any, error) {
 	basePayload, err := buildDealReviewAnalysisPayload(traderCfg, strategyRecord, strategyCfg, bundle.Filter, bundle.Cases, bundle.Summary)
 	if err != nil {
 		return nil, err
@@ -749,6 +2091,12 @@ func buildAutonomousOptimizerReviewPayload(cfg *store.AutonomousOptimizerConfig,
 	basePayload["current_prompt_bundle"] = buildAutonomousOptimizerPromptBundle(cfg, traderCfg, strategyCfg)
 	basePayload["recent_optimizer_runs"] = summarizeAutonomousOptimizerRuns(recentRuns)
 	basePayload["latest_gate_feedback"] = buildAutonomousOptimizerLatestGateFeedback(recentRuns)
+	if symbolBehaviorPriors != nil {
+		basePayload["symbol_behavior_priors"] = symbolBehaviorPriors
+	}
+	if learnedPatterns != nil {
+		basePayload["learned_patterns"] = learnedPatterns
+	}
 	return basePayload, nil
 }
 
@@ -766,6 +2114,8 @@ Return JSON only with this exact shape:
   "expected_effect": "string",
   "evidence_strength": 0.0,
   "confidence": 0.0,
+  "symbol_prior_references": ["prior_key"],
+  "learned_pattern_references": ["pattern_id"],
   "config_patch": {},
   "prompt_patch": {
     "strategy": {
@@ -811,6 +2161,27 @@ Rules:
 - Prefer prompt_patch over config_patch when the evidence is mostly low-trade / no-trade telemetry rather than realized deal outcomes.
 - Use decision_starvation_metrics and recent_optimizer_runs explicitly. Explain whether the main problem is bad executed trades, over-filtered inactivity, or repeated failure of the last optimizer changes.
 - Use latest_gate_feedback explicitly when it is present. If the last optimizer run was blocked, do not repeat the same patch unchanged. Either propose a materially narrower subset, switch to backlog_only, or explain why the new evidence is now different enough.
+- Use symbol_behavior_priors explicitly when present. If you rely on a prior, cite its exact prior_key in symbol_prior_references.
+- Use symbol_behavior_priors.cluster_rollups when present to detect normalized setup patterns that recur across multiple priors or symbols. Distinguish one bad symbol from a broader bad cluster.
+- Respect symbol_behavior_priors.items[].implication_type:
+  - prompt_only: use prompt_patch or backlog_only, not config_patch, unless separate non-prior evidence independently justifies the config change.
+  - config_candidate: a narrow config_patch may be justified, especially when current_window_match_type is closed_case or recent_open_execution.
+  - missing_data_backlog: prefer backlog_items for missing indicators, market data, regime metadata, or execution telemetry rather than forcing a live patch.
+- Use symbol_behavior_priors.items[].validation_label explicitly:
+  - false_positive: treat as anti-evidence. Do not use that prior to justify config changes; instead avoid repeating the old assumption, suggest rollback/monitoring, or create backlog if data is missing.
+  - false_negative_risk: recent evidence is leaning the other way. Prefer narrow prompt experiments, targeted scans, or symbol-specific monitoring rather than broad flips.
+  - drifting: the prior is weakening. Prefer monitoring or a narrow prompt caution instead of a hard config mutation.
+  - confirmed: the prior is still supportive evidence, but only within its symbol/regime scope.
+- Use learned_patterns explicitly when present. If you rely on a learned pattern, cite its exact pattern_id in learned_pattern_references.
+- Respect learned_patterns.items[].implication_type:
+  - anti_evidence: use it against repeating the setup, as a prompt constraint, or as a reason to avoid broad config relaxation.
+  - config_candidate: a narrow config_patch may be justified, especially when current_window_match_type is closed_case or recent_open_execution.
+  - prompt_only or review_hint: bias prompt behavior or narrow the review narrative before hard config changes.
+  - monitor_only or do_not_use: do not turn these into live config patches.
+- Treat learned_patterns.items[].validation_label=false_positive, reverse_risk, or drifting as caution or anti-evidence, not as support for aggressive config changes.
+- Treat learned_patterns.top_symbol_overrides as stronger evidence for symbol-specific exceptions than generic global intuition.
+- Treat current_window_match_type=opportunity_symbol or global_background as weaker evidence than direct closed_case matches.
+- If a cluster_rollup shows false_positive_count, false_negative_risk_count, or drifting_count concentration, prefer prompt caution, monitoring, or backlog work over broad config mutation unless direct closed-case evidence is stronger.
 - When inactivity is the problem, cite concrete reject reasons, confidence bands, sessions, or symbols from the supplied telemetry.
 - Use trailing_stop_telemetry when exit management is the issue. Distinguish profitable protective trailing exits from early loss-making stop tightening before proposing stop logic changes, and use sample_updates for first-tighten timing plus pre-update unrealized PnL context.
 - Use adaptive_cooldown_telemetry plus current risk_control settings when repeated same-symbol or same-regime re-entries are the issue. Compare blocked re-entry outcomes versus post-cooldown outcomes before tightening or loosening cooldowns, and prefer narrow cooldown controls over blunt reductions in trade frequency.
@@ -841,6 +2212,8 @@ Return JSON only with this exact shape:
   "confidence": 0.0,
   "recommended_action": "approve_apply|approve_backlog_only|block_apply|pause_optimizer",
   "summary": "string",
+  "symbol_prior_references": ["prior_key"],
+  "learned_pattern_references": ["pattern_id"],
   "blocking_issues": ["string"],
   "warnings": ["string"]
 }
@@ -850,6 +2223,17 @@ Rules:
 - Prompt patches may be approved on low-trade evidence when they are narrow and explicitly aimed at inactivity or decision quality.
 - Config patches need materially stronger evidence than prompt patches.
 - Use recent_optimizer_runs and decision_starvation_metrics to spot repeated loops, over-filtering, or attempts to fix the same issue without new evidence.
+- Use symbol_behavior_priors explicitly when present. If the proposal relies on them, cite the prior_key values you considered in symbol_prior_references.
+- Use symbol_behavior_priors.cluster_rollups when present to detect whether the proposal is overfitting one symbol or whether a normalized setup pattern actually recurs across multiple priors.
+- Block or downgrade proposals that turn prompt_only or missing_data_backlog priors into broad config patches without stronger independent evidence.
+- Treat config_candidate priors with direct closed_case or recent_open_execution matches as stronger than priors that only match opportunity_symbol or global_background context.
+- Treat validation_label=false_positive as anti-evidence against config patches built on that prior.
+- Treat validation_label=false_negative_risk as a reason to prefer monitoring, prompt-only experiments, or backlog notes unless there is separate direct evidence for a narrow change.
+- Treat validation_label=drifting as weaker than confirmed priors even when the older historical sample looked strong.
+- Use learned_patterns explicitly when present. If the proposal relies on them, cite pattern_id values in learned_pattern_references.
+- Treat learned_patterns.items[].implication_type=anti_evidence as a blocker against broad config relaxation or repeated exposure to the same setup.
+- Treat learned_patterns.items[].implication_type=config_candidate with direct closed_case or recent_open_execution matches as stronger than background-only pattern matches.
+- Treat learned_patterns.items[].validation_label=false_positive, reverse_risk, drifting, or expired as caution, anti-evidence, or do-not-use context rather than support for live mutation.
 - Never output markdown or code fences.`
 	if cfg != nil {
 		if extra := strings.TrimSpace(cfg.CriticPromptInstructions); extra != "" {
@@ -883,6 +2267,8 @@ func parseAutonomousOptimizerProposalResponse(response string) (*autonomousOptim
 	result.ExpectedEffect = strings.TrimSpace(result.ExpectedEffect)
 	result.PauseReason = strings.TrimSpace(result.PauseReason)
 	result.Rationale = filterNonEmptyStrings(result.Rationale)
+	result.SymbolPriorRefs = filterNonEmptyStrings(result.SymbolPriorRefs)
+	result.LearnedPatternRefs = filterNonEmptyStrings(result.LearnedPatternRefs)
 	result.EvidenceStrength = clampAutonomousOptimizerScore(result.EvidenceStrength)
 	result.Confidence = clampAutonomousOptimizerScore(result.Confidence)
 	result.ConfigPatch = sanitizeAutonomousOptimizerJSONMap(result.ConfigPatch)
@@ -915,6 +2301,8 @@ func parseAutonomousOptimizerCriticResponse(response string) (*autonomousOptimiz
 	result.RecommendedAction = normalizeAutonomousOptimizerCriticAction(result.RecommendedAction)
 	result.Summary = strings.TrimSpace(result.Summary)
 	result.Confidence = clampAutonomousOptimizerScore(result.Confidence)
+	result.SymbolPriorRefs = filterNonEmptyStrings(result.SymbolPriorRefs)
+	result.LearnedPatternRefs = filterNonEmptyStrings(result.LearnedPatternRefs)
 	result.BlockingIssues = filterNonEmptyStrings(result.BlockingIssues)
 	result.Warnings = filterNonEmptyStrings(result.Warnings)
 	raw, _ := json.Marshal(result)
@@ -1250,6 +2638,9 @@ func summarizeAutonomousOptimizerRuns(runs []*store.AutonomousOptimizerRun) []ma
 			if blockingIssues := autonomousOptimizerStringSlice(critic["blocking_issues"]); len(blockingIssues) > 0 {
 				entry["critic_blocking_issues"] = blockingIssues
 			}
+			if refs := autonomousOptimizerStringSlice(critic["symbol_prior_references"]); len(refs) > 0 {
+				entry["critic_symbol_prior_references"] = refs
+			}
 		}
 		promptValidation := parseAutonomousOptimizerNestedObject(validation, "prompt_validation")
 		if len(promptValidation) > 0 {
@@ -1314,8 +2705,9 @@ func buildAutonomousOptimizerLatestGateFeedback(runs []*store.AutonomousOptimize
 					autonomousOptimizerString(critic["summary"]),
 					240,
 				),
-				"blocking_issues": autonomousOptimizerStringSlice(critic["blocking_issues"]),
-				"warnings":        autonomousOptimizerStringSlice(critic["warnings"]),
+				"blocking_issues":         autonomousOptimizerStringSlice(critic["blocking_issues"]),
+				"warnings":                autonomousOptimizerStringSlice(critic["warnings"]),
+				"symbol_prior_references": autonomousOptimizerStringSlice(critic["symbol_prior_references"]),
 			}
 		}
 		if len(promptValidation) > 0 {
@@ -1347,6 +2739,9 @@ func buildAutonomousOptimizerLatestGateFeedback(runs []*store.AutonomousOptimize
 			if rationale := autonomousOptimizerStringSlice(proposal["rationale"]); len(rationale) > 0 {
 				proposalFeedback["rationale"] = rationale
 			}
+			if refs := autonomousOptimizerStringSlice(proposal["symbol_prior_references"]); len(refs) > 0 {
+				proposalFeedback["symbol_prior_references"] = refs
+			}
 			if len(proposalFeedback) > 0 {
 				feedback["proposal"] = proposalFeedback
 			}
@@ -1364,6 +2759,8 @@ func sanitizeAutonomousOptimizerBacklogProposal(item autonomousOptimizerBacklogP
 	item.Confidence = clampAutonomousOptimizerScore(item.Confidence)
 	item.ImplementationCost = clampAutonomousOptimizerScore(item.ImplementationCost)
 	item.Urgency = clampAutonomousOptimizerScore(item.Urgency)
+	item.Evidence = sanitizeAutonomousOptimizerJSONObjectArray(item.Evidence)
+	item.Metadata = sanitizeAutonomousOptimizerJSONMap(item.Metadata)
 	if item.RecurrenceCount <= 0 {
 		item.RecurrenceCount = 1
 	}
@@ -1408,6 +2805,24 @@ func sanitizeAutonomousOptimizerJSONMap(value map[string]any) map[string]any {
 	normalized := map[string]any{}
 	if err := json.Unmarshal(body, &normalized); err != nil {
 		return map[string]any{}
+	}
+	return normalized
+}
+
+func sanitizeAutonomousOptimizerJSONObjectArray(value []map[string]any) []map[string]any {
+	if len(value) == 0 {
+		return nil
+	}
+	body, err := json.Marshal(value)
+	if err != nil {
+		return nil
+	}
+	var normalized []map[string]any
+	if err := json.Unmarshal(body, &normalized); err != nil {
+		return nil
+	}
+	if len(normalized) == 0 {
+		return nil
 	}
 	return normalized
 }

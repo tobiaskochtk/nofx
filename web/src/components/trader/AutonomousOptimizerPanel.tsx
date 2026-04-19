@@ -773,6 +773,30 @@ export function AutonomousOptimizerPanel({
     selectedMetadata,
     'recent_optimizer_runs'
   )
+  const learnedPatternPayload = readNestedObject(
+    selectedMetadata,
+    'learned_patterns'
+  )
+  const learnedPatternItems = readNestedObjectArray(
+    learnedPatternPayload,
+    'items'
+  )
+  const learnedPatternTopPositive = readNestedObjectArray(
+    learnedPatternPayload,
+    'top_positive_patterns'
+  )
+  const learnedPatternTopNegative = readNestedObjectArray(
+    learnedPatternPayload,
+    'top_negative_patterns'
+  )
+  const learnedPatternTopOverrides = readNestedObjectArray(
+    learnedPatternPayload,
+    'top_symbol_overrides'
+  )
+  const learnedPatternNotes = readNestedStringArray(
+    learnedPatternPayload,
+    'notes'
+  )
   const proposalConversation = readNestedObject(
     selectedMetadata,
     'proposal_conversation'
@@ -838,6 +862,20 @@ export function AutonomousOptimizerPanel({
     'monitoring_source_snapshot',
     'avg_exit_efficiency_score'
   )
+  const proposalLearnedPatternRefs = readNestedStringArray(
+    selectedMetadata,
+    'proposal',
+    'learned_pattern_references'
+  )
+  const criticLearnedPatternRefs = readNestedStringArray(
+    selectedValidation,
+    'critic',
+    'learned_pattern_references'
+  )
+  const learnedPatternRefLookup = new Set([
+    ...proposalLearnedPatternRefs,
+    ...criticLearnedPatternRefs,
+  ])
 
   const saveConfig = async () => {
     if (!traderId) return
@@ -2278,6 +2316,508 @@ export function AutonomousOptimizerPanel({
                           </div>
                         </div>
                       ))}
+                    </div>
+                  )}
+                </div>
+
+                <div className="rounded-lg border border-white/10 bg-black/20 p-4">
+                  <div className="text-xs uppercase tracking-[0.2em] text-nofx-text-muted mb-3">
+                    Learned Pattern Evidence
+                  </div>
+                  {!learnedPatternPayload ? (
+                    <div className="text-sm text-nofx-text-muted">
+                      No learned-pattern evidence was attached to this optimizer
+                      run.
+                    </div>
+                  ) : (
+                    <div className="space-y-4">
+                      <div className="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-8 gap-3 text-sm">
+                        <div className="rounded-lg border border-white/10 bg-black/20 p-3">
+                          <div className="text-xs text-nofx-text-muted">
+                            Available
+                          </div>
+                          <div className="mt-1 font-semibold">
+                            {typeof readNestedNumber(
+                              learnedPatternPayload,
+                              'available_count'
+                            ) === 'number'
+                              ? Math.round(
+                                  readNestedNumber(
+                                    learnedPatternPayload,
+                                    'available_count'
+                                  ) || 0
+                                )
+                              : '-'}
+                          </div>
+                        </div>
+                        <div className="rounded-lg border border-white/10 bg-black/20 p-3">
+                          <div className="text-xs text-nofx-text-muted">
+                            Relevant
+                          </div>
+                          <div className="mt-1 font-semibold">
+                            {typeof readNestedNumber(
+                              learnedPatternPayload,
+                              'relevant_count'
+                            ) === 'number'
+                              ? Math.round(
+                                  readNestedNumber(
+                                    learnedPatternPayload,
+                                    'relevant_count'
+                                  ) || 0
+                                )
+                              : '-'}
+                          </div>
+                        </div>
+                        <div className="rounded-lg border border-white/10 bg-black/20 p-3">
+                          <div className="text-xs text-nofx-text-muted">
+                            Positive / Negative
+                          </div>
+                          <div className="mt-1 font-semibold">
+                            {typeof readNestedNumber(
+                              learnedPatternPayload,
+                              'positive_count'
+                            ) === 'number'
+                              ? Math.round(
+                                  readNestedNumber(
+                                    learnedPatternPayload,
+                                    'positive_count'
+                                  ) || 0
+                                )
+                              : '-'}{' '}
+                            /{' '}
+                            {typeof readNestedNumber(
+                              learnedPatternPayload,
+                              'negative_count'
+                            ) === 'number'
+                              ? Math.round(
+                                  readNestedNumber(
+                                    learnedPatternPayload,
+                                    'negative_count'
+                                  ) || 0
+                                )
+                              : '-'}
+                          </div>
+                        </div>
+                        <div className="rounded-lg border border-white/10 bg-black/20 p-3">
+                          <div className="text-xs text-nofx-text-muted">
+                            Confirmed
+                          </div>
+                          <div className="mt-1 font-semibold">
+                            {typeof readNestedNumber(
+                              learnedPatternPayload,
+                              'confirmed_count'
+                            ) === 'number'
+                              ? Math.round(
+                                  readNestedNumber(
+                                    learnedPatternPayload,
+                                    'confirmed_count'
+                                  ) || 0
+                                )
+                              : '-'}
+                          </div>
+                        </div>
+                        <div className="rounded-lg border border-white/10 bg-black/20 p-3">
+                          <div className="text-xs text-nofx-text-muted">
+                            Config candidates
+                          </div>
+                          <div className="mt-1 font-semibold">
+                            {typeof readNestedNumber(
+                              learnedPatternPayload,
+                              'config_candidate_count'
+                            ) === 'number'
+                              ? Math.round(
+                                  readNestedNumber(
+                                    learnedPatternPayload,
+                                    'config_candidate_count'
+                                  ) || 0
+                                )
+                              : '-'}
+                          </div>
+                        </div>
+                        <div className="rounded-lg border border-white/10 bg-black/20 p-3">
+                          <div className="text-xs text-nofx-text-muted">
+                            Prompt only
+                          </div>
+                          <div className="mt-1 font-semibold">
+                            {typeof readNestedNumber(
+                              learnedPatternPayload,
+                              'prompt_only_count'
+                            ) === 'number'
+                              ? Math.round(
+                                  readNestedNumber(
+                                    learnedPatternPayload,
+                                    'prompt_only_count'
+                                  ) || 0
+                                )
+                              : '-'}
+                          </div>
+                        </div>
+                        <div className="rounded-lg border border-white/10 bg-black/20 p-3">
+                          <div className="text-xs text-nofx-text-muted">
+                            False pos / reverse
+                          </div>
+                          <div className="mt-1 font-semibold">
+                            {typeof readNestedNumber(
+                              learnedPatternPayload,
+                              'false_positive_count'
+                            ) === 'number'
+                              ? Math.round(
+                                  readNestedNumber(
+                                    learnedPatternPayload,
+                                    'false_positive_count'
+                                  ) || 0
+                                )
+                              : '-'}{' '}
+                            /{' '}
+                            {typeof readNestedNumber(
+                              learnedPatternPayload,
+                              'reverse_risk_count'
+                            ) === 'number'
+                              ? Math.round(
+                                  readNestedNumber(
+                                    learnedPatternPayload,
+                                    'reverse_risk_count'
+                                  ) || 0
+                                )
+                              : '-'}
+                          </div>
+                        </div>
+                        <div className="rounded-lg border border-white/10 bg-black/20 p-3">
+                          <div className="text-xs text-nofx-text-muted">
+                            Drifting
+                          </div>
+                          <div className="mt-1 font-semibold">
+                            {typeof readNestedNumber(
+                              learnedPatternPayload,
+                              'drifting_count'
+                            ) === 'number'
+                              ? Math.round(
+                                  readNestedNumber(
+                                    learnedPatternPayload,
+                                    'drifting_count'
+                                  ) || 0
+                                )
+                              : '-'}
+                          </div>
+                        </div>
+                      </div>
+
+                      {(proposalLearnedPatternRefs.length > 0 ||
+                        criticLearnedPatternRefs.length > 0) && (
+                        <div className="grid grid-cols-1 xl:grid-cols-2 gap-3">
+                          <div className="rounded-lg border border-white/10 bg-black/20 p-3">
+                            <div className="text-xs text-nofx-text-muted mb-2">
+                              Proposal references
+                            </div>
+                            {proposalLearnedPatternRefs.length === 0 ? (
+                              <div className="text-sm text-nofx-text-muted">
+                                No learned pattern was explicitly cited by the
+                                proposer.
+                              </div>
+                            ) : (
+                              <div className="flex flex-wrap gap-2">
+                                {proposalLearnedPatternRefs.map((item) => (
+                                  <span
+                                    key={item}
+                                    className="inline-flex px-2 py-1 rounded-full border border-sky-400/20 bg-sky-500/10 text-[11px] text-sky-300"
+                                  >
+                                    {item.slice(0, 12)}
+                                  </span>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                          <div className="rounded-lg border border-white/10 bg-black/20 p-3">
+                            <div className="text-xs text-nofx-text-muted mb-2">
+                              Critic references
+                            </div>
+                            {criticLearnedPatternRefs.length === 0 ? (
+                              <div className="text-sm text-nofx-text-muted">
+                                No learned pattern was explicitly cited by the
+                                critic.
+                              </div>
+                            ) : (
+                              <div className="flex flex-wrap gap-2">
+                                {criticLearnedPatternRefs.map((item) => (
+                                  <span
+                                    key={item}
+                                    className="inline-flex px-2 py-1 rounded-full border border-emerald-400/20 bg-emerald-500/10 text-[11px] text-emerald-300"
+                                  >
+                                    {item.slice(0, 12)}
+                                  </span>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      )}
+
+                      {learnedPatternNotes.length > 0 && (
+                        <div className="space-y-2">
+                          {learnedPatternNotes.map((item) => (
+                            <div
+                              key={item}
+                              className="rounded-lg border border-white/10 bg-black/20 p-3 text-sm text-nofx-text-muted"
+                            >
+                              {item}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+
+                      <div className="grid grid-cols-1 xl:grid-cols-3 gap-3">
+                        {[
+                          {
+                            title: 'Top positive',
+                            items: learnedPatternTopPositive,
+                          },
+                          {
+                            title: 'Top anti-patterns',
+                            items: learnedPatternTopNegative,
+                          },
+                          {
+                            title: 'Symbol overrides',
+                            items: learnedPatternTopOverrides,
+                          },
+                        ].map((group) => (
+                          <div
+                            key={group.title}
+                            className="rounded-lg border border-white/10 bg-black/20 p-3"
+                          >
+                            <div className="text-xs text-nofx-text-muted mb-2">
+                              {group.title}
+                            </div>
+                            {group.items.length === 0 ? (
+                              <div className="text-sm text-nofx-text-muted">
+                                No items stored.
+                              </div>
+                            ) : (
+                              <div className="space-y-2">
+                                {group.items.slice(0, 3).map((item, index) => (
+                                  <div
+                                    key={`${group.title}-${String(
+                                      item.pattern_id || index
+                                    )}`}
+                                    className="rounded-lg border border-white/10 bg-white/[0.03] p-3"
+                                  >
+                                    <div className="flex flex-wrap items-center gap-2 text-sm">
+                                      <span className="font-semibold">
+                                        {typeof item.symbol === 'string' &&
+                                        item.symbol
+                                          ? item.symbol
+                                          : 'Trader-wide'}
+                                      </span>
+                                      <span className="text-nofx-text-muted">
+                                        {formatLabel(
+                                          typeof item.side === 'string'
+                                            ? item.side
+                                            : ''
+                                        )}
+                                      </span>
+                                      <span
+                                        className={`inline-flex px-2 py-1 rounded-full border text-[11px] ${statusToneClasses(
+                                          typeof item.validation_label ===
+                                            'string'
+                                            ? item.validation_label
+                                            : ''
+                                        )}`}
+                                      >
+                                        {formatLabel(
+                                          typeof item.validation_label ===
+                                            'string'
+                                            ? item.validation_label
+                                            : 'unknown'
+                                        )}
+                                      </span>
+                                    </div>
+                                    <div className="text-xs text-nofx-text-muted mt-2">
+                                      {typeof item.summary === 'string' &&
+                                      item.summary
+                                        ? item.summary
+                                        : typeof item.pattern_signature ===
+                                            'string' && item.pattern_signature
+                                          ? item.pattern_signature
+                                          : 'No summary stored'}
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+
+                      {learnedPatternItems.length === 0 ? (
+                        <div className="text-sm text-nofx-text-muted">
+                          No current-window learned-pattern matches were stored
+                          for this run.
+                        </div>
+                      ) : (
+                        <div className="space-y-3">
+                          {learnedPatternItems.map((item, index) => {
+                            const patternId =
+                              typeof item.pattern_id === 'string'
+                                ? item.pattern_id
+                                : ''
+                            return (
+                              <div
+                                key={`${patternId || index}`}
+                                className="rounded-lg border border-white/10 bg-black/20 p-4"
+                              >
+                                <div className="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-3">
+                                  <div className="min-w-0">
+                                    <div className="flex flex-wrap items-center gap-2">
+                                      <span className="font-semibold">
+                                        {typeof item.symbol === 'string' &&
+                                        item.symbol
+                                          ? item.symbol
+                                          : 'Trader-wide'}
+                                      </span>
+                                      <span className="text-nofx-text-muted">
+                                        {formatLabel(
+                                          typeof item.side === 'string'
+                                            ? item.side
+                                            : ''
+                                        )}
+                                      </span>
+                                      <span
+                                        className={`inline-flex px-2 py-1 rounded-full border text-[11px] ${statusToneClasses(
+                                          typeof item.validation_label ===
+                                            'string'
+                                            ? item.validation_label
+                                            : ''
+                                        )}`}
+                                      >
+                                        {formatLabel(
+                                          typeof item.validation_label ===
+                                            'string'
+                                            ? item.validation_label
+                                            : 'unknown'
+                                        )}
+                                      </span>
+                                      <span className="inline-flex px-2 py-1 rounded-full border border-white/10 bg-white/5 text-[11px] text-nofx-text-muted">
+                                        {formatLabel(
+                                          typeof item.implication_type ===
+                                            'string'
+                                            ? item.implication_type
+                                            : 'review_hint'
+                                        )}
+                                      </span>
+                                      {patternId &&
+                                        learnedPatternRefLookup.has(
+                                          patternId
+                                        ) && (
+                                          <span className="inline-flex px-2 py-1 rounded-full border border-nofx-gold/30 bg-nofx-gold/10 text-[11px] text-nofx-gold">
+                                            Cited
+                                          </span>
+                                        )}
+                                    </div>
+                                    <div className="text-sm mt-2">
+                                      {typeof item.summary === 'string' &&
+                                      item.summary
+                                        ? item.summary
+                                        : typeof item.pattern_signature ===
+                                            'string' && item.pattern_signature
+                                          ? item.pattern_signature
+                                          : 'No summary stored'}
+                                    </div>
+                                    {typeof item.implication_summary ===
+                                      'string' &&
+                                      item.implication_summary && (
+                                        <div className="text-sm text-sky-300 mt-2">
+                                          {item.implication_summary}
+                                        </div>
+                                      )}
+                                    {typeof item.validation_alert ===
+                                      'string' &&
+                                      item.validation_alert && (
+                                        <div className="text-sm text-amber-200 mt-2">
+                                          {item.validation_alert}
+                                        </div>
+                                      )}
+                                  </div>
+                                  <div className="text-xs text-nofx-text-muted">
+                                    {patternId ? `ID ${patternId.slice(0, 12)}` : '-'}
+                                  </div>
+                                </div>
+
+                                <div className="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-6 gap-3 mt-4 text-xs">
+                                  <div className="rounded-lg border border-white/10 bg-white/[0.03] p-3">
+                                    Match type
+                                    <div className="mt-1 font-semibold text-nofx-text-main">
+                                      {formatLabel(
+                                        typeof item.current_window_match_type ===
+                                          'string'
+                                          ? item.current_window_match_type
+                                          : 'unknown'
+                                      )}
+                                    </div>
+                                  </div>
+                                  <div className="rounded-lg border border-white/10 bg-white/[0.03] p-3">
+                                    Closed / recent
+                                    <div className="mt-1 font-semibold text-nofx-text-main">
+                                      {typeof item.closed_case_match_count ===
+                                      'number'
+                                        ? Math.round(
+                                            item.closed_case_match_count
+                                          )
+                                        : '-'}{' '}
+                                      /{' '}
+                                      {typeof item.recent_execution_match_count ===
+                                      'number'
+                                        ? Math.round(
+                                            item.recent_execution_match_count
+                                          )
+                                        : '-'}
+                                    </div>
+                                  </div>
+                                  <div className="rounded-lg border border-white/10 bg-white/[0.03] p-3">
+                                    Samples
+                                    <div className="mt-1 font-semibold text-nofx-text-main">
+                                      {typeof item.sample_count === 'number'
+                                        ? Math.round(item.sample_count)
+                                        : '-'}
+                                    </div>
+                                  </div>
+                                  <div className="rounded-lg border border-white/10 bg-white/[0.03] p-3">
+                                    Avg PnL / lift
+                                    <div className="mt-1 font-semibold text-nofx-text-main">
+                                      {formatNumber(item.avg_pnl_pct)}% /{' '}
+                                      {formatNumber(item.lift_avg_pnl_pct)}%
+                                    </div>
+                                  </div>
+                                  <div className="rounded-lg border border-white/10 bg-white/[0.03] p-3">
+                                    Composite / confidence
+                                    <div className="mt-1 font-semibold text-nofx-text-main">
+                                      {formatNumber(item.composite_score)} /{' '}
+                                      {formatNumber(item.confidence_score)}
+                                    </div>
+                                  </div>
+                                  <div className="rounded-lg border border-white/10 bg-white/[0.03] p-3">
+                                    Window net PnL
+                                    <div className="mt-1 font-semibold text-nofx-text-main">
+                                      {formatNumber(item.current_window_net_pnl)}
+                                    </div>
+                                  </div>
+                                </div>
+
+                                <div className="flex flex-wrap gap-2 mt-3">
+                                  {readStringArray(item.feature_set).map(
+                                    (feature) => (
+                                      <span
+                                        key={`${patternId}-${feature}`}
+                                        className="inline-flex px-2 py-1 rounded-full border border-white/10 bg-white/5 text-[11px] text-nofx-text-muted"
+                                      >
+                                        {feature}
+                                      </span>
+                                    )
+                                  )}
+                                </div>
+                              </div>
+                            )
+                          })}
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>

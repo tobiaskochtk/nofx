@@ -2,6 +2,7 @@ package market
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"math"
@@ -12,6 +13,8 @@ import (
 	"sync"
 	"time"
 )
+
+const marketDataPrimaryEmptyCooldown = 10 * time.Minute
 
 // FundingRateCache is the funding rate cache structure
 // Binance Funding Rate only updates every 8 hours, using 1-hour cache can significantly reduce API calls
@@ -33,10 +36,119 @@ type premiumIndexData struct {
 	Timestamp   int64
 }
 
+type PrimaryTimeframeEmptyError struct {
+	Symbol           string
+	PrimaryTimeframe string
+}
+
+func (e *PrimaryTimeframeEmptyError) Error() string {
+	return fmt.Sprintf("primary timeframe %s K-line data is empty for %s", e.PrimaryTimeframe, e.Symbol)
+}
+
+type MarketDataCooldownError struct {
+	Symbol           string
+	PrimaryTimeframe string
+	Until            time.Time
+}
+
+func (e *MarketDataCooldownError) Error() string {
+	return fmt.Sprintf("market data cooldown active for %s primary timeframe %s until %s",
+		e.Symbol,
+		e.PrimaryTimeframe,
+		e.Until.Format(time.RFC3339),
+	)
+}
+
+type marketDataMissCircuit struct {
+	mu               sync.Mutex
+	primaryCooldowns map[string]time.Time
+}
+
 var (
-	fundingRateMap sync.Map // map[string]*FundingRateCache
-	frCacheTTL     = 1 * time.Hour
+	fundingRateMap              sync.Map // map[string]*FundingRateCache
+	frCacheTTL                  = 1 * time.Hour
+	globalMarketDataMissCircuit = newMarketDataMissCircuit()
 )
+
+func newMarketDataMissCircuit() *marketDataMissCircuit {
+	return &marketDataMissCircuit{
+		primaryCooldowns: make(map[string]time.Time),
+	}
+}
+
+func IsExpectedDataMiss(err error) bool {
+	if err == nil {
+		return false
+	}
+	var primaryErr *PrimaryTimeframeEmptyError
+	if errors.As(err, &primaryErr) {
+		return true
+	}
+	var cooldownErr *MarketDataCooldownError
+	return errors.As(err, &cooldownErr)
+}
+
+func marketDataMissKey(symbol, primaryTimeframe string) string {
+	return strings.ToUpper(strings.TrimSpace(symbol)) + "|" + strings.TrimSpace(primaryTimeframe)
+}
+
+func (c *marketDataMissCircuit) cooldownUntil(symbol, primaryTimeframe string, now time.Time) (time.Time, bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	key := marketDataMissKey(symbol, primaryTimeframe)
+	until := c.primaryCooldowns[key]
+	if until.IsZero() {
+		return time.Time{}, false
+	}
+	if until.After(now) {
+		return until, true
+	}
+	delete(c.primaryCooldowns, key)
+	return time.Time{}, false
+}
+
+func (c *marketDataMissCircuit) markPrimaryEmpty(symbol, primaryTimeframe string, now time.Time) (time.Time, bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	key := marketDataMissKey(symbol, primaryTimeframe)
+	if until := c.primaryCooldowns[key]; !until.IsZero() && until.After(now) {
+		return until, false
+	}
+	until := now.Add(marketDataPrimaryEmptyCooldown)
+	c.primaryCooldowns[key] = until
+	return until, true
+}
+
+func (c *marketDataMissCircuit) clear(symbol, primaryTimeframe string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	delete(c.primaryCooldowns, marketDataMissKey(symbol, primaryTimeframe))
+}
+
+func marketDataFetchOrder(timeframes []string, primaryTimeframe string) []string {
+	ordered := make([]string, 0, len(timeframes)+1)
+	seen := make(map[string]struct{}, len(timeframes)+1)
+
+	appendUnique := func(tf string) {
+		tf = strings.TrimSpace(tf)
+		if tf == "" {
+			return
+		}
+		if _, exists := seen[tf]; exists {
+			return
+		}
+		seen[tf] = struct{}{}
+		ordered = append(ordered, tf)
+	}
+
+	appendUnique(primaryTimeframe)
+	for _, tf := range timeframes {
+		appendUnique(tf)
+	}
+	return ordered
+}
 
 // Get retrieves market data for the specified token (uses Binance data by default)
 func Get(symbol string) (*Data, error) {
@@ -187,6 +299,14 @@ func GetWithTimeframes(symbol string, timeframes []string, primaryTimeframe stri
 		timeframes = append([]string{primaryTimeframe}, timeframes...)
 	}
 
+	if until, cooledDown := globalMarketDataMissCircuit.cooldownUntil(symbol, primaryTimeframe, time.Now()); cooledDown {
+		return nil, &MarketDataCooldownError{
+			Symbol:           symbol,
+			PrimaryTimeframe: primaryTimeframe,
+			Until:            until,
+		}
+	}
+
 	// Store data for all timeframes
 	timeframeData := make(map[string]*TimeframeSeriesData)
 	var primaryKlines []Kline
@@ -195,7 +315,7 @@ func GetWithTimeframes(symbol string, timeframes []string, primaryTimeframe stri
 	isXyzAsset := IsXyzDexAsset(symbol)
 
 	// Get K-line data for each timeframe
-	for _, tf := range timeframes {
+	for _, tf := range marketDataFetchOrder(timeframes, primaryTimeframe) {
 		var klines []Kline
 		var err error
 
@@ -203,26 +323,44 @@ func GetWithTimeframes(symbol string, timeframes []string, primaryTimeframe stri
 			// Use Hyperliquid API for xyz dex assets
 			klines, err = getKlinesFromHyperliquid(symbol, tf, 200)
 			if err != nil {
-				logger.Infof("⚠️ Failed to get %s %s K-line from Hyperliquid: %v", symbol, tf, err)
+				if tf == primaryTimeframe {
+					return nil, fmt.Errorf("failed to fetch primary timeframe %s K-line from Hyperliquid for %s: %w", tf, symbol, err)
+				}
+				logger.Debugf("Skipping optional timeframe %s for %s after Hyperliquid fetch error: %v", tf, symbol, err)
 				continue
 			}
 		} else {
 			// Use CoinAnk for regular crypto assets (default to Binance)
 			klines, err = getKlinesFromCoinAnk(symbol, tf, "binance", 200)
 			if err != nil {
-				logger.Infof("⚠️ Failed to get %s %s K-line from CoinAnk: %v", symbol, tf, err)
+				if tf == primaryTimeframe {
+					return nil, fmt.Errorf("failed to fetch primary timeframe %s K-line from CoinAnk for %s: %w", tf, symbol, err)
+				}
+				logger.Debugf("Skipping optional timeframe %s for %s after CoinAnk fetch error: %v", tf, symbol, err)
 				continue
 			}
 		}
 
 		if len(klines) == 0 {
-			logger.Infof("⚠️ %s %s K-line data is empty", symbol, tf)
+			if tf == primaryTimeframe {
+				until, activated := globalMarketDataMissCircuit.markPrimaryEmpty(symbol, primaryTimeframe, time.Now())
+				if activated {
+					logger.Warnf("⚠️ %s primary timeframe %s K-line data is empty, suppressing retries until %s",
+						symbol, primaryTimeframe, until.Format(time.RFC3339))
+				}
+				return nil, &PrimaryTimeframeEmptyError{
+					Symbol:           symbol,
+					PrimaryTimeframe: primaryTimeframe,
+				}
+			}
+			logger.Debugf("Skipping optional timeframe %s for %s because K-line data is empty", tf, symbol)
 			continue
 		}
 
 		// Save primary timeframe K-lines for calculating base indicators
 		if tf == primaryTimeframe {
 			primaryKlines = klines
+			globalMarketDataMissCircuit.clear(symbol, primaryTimeframe)
 		}
 
 		// Calculate series data for this timeframe (use count from config)
@@ -232,7 +370,10 @@ func GetWithTimeframes(symbol string, timeframes []string, primaryTimeframe stri
 
 	// If primary timeframe data is empty, return error
 	if len(primaryKlines) == 0 {
-		return nil, fmt.Errorf("Primary timeframe %s K-line data is empty", primaryTimeframe)
+		return nil, &PrimaryTimeframeEmptyError{
+			Symbol:           symbol,
+			PrimaryTimeframe: primaryTimeframe,
+		}
 	}
 
 	// Data staleness detection

@@ -691,16 +691,18 @@ type DealReviewEventDetail struct {
 }
 
 type DealReviewCaseDetail struct {
-	Case                 DealReviewCase              `json:"case"`
-	TraderName           string                      `json:"trader_name"`
-	StrategyName         string                      `json:"strategy_name"`
-	Labels               []string                    `json:"labels,omitempty"`
-	OpenCandidateSources []string                    `json:"open_candidate_sources,omitempty"`
-	Open                 *DealReviewEventDetail      `json:"open,omitempty"`
-	Close                *DealReviewEventDetail      `json:"close,omitempty"`
-	PriceTimeline        *DealReviewPriceTimeline    `json:"price_timeline,omitempty"`
-	ClassifierAssist     *DealReviewClassifierAssist `json:"classifier_assist,omitempty"`
-	AIClassifierAssist   *DealReviewClassifierAssist `json:"ai_classifier_assist,omitempty"`
+	Case                 DealReviewCase                  `json:"case"`
+	TraderName           string                          `json:"trader_name"`
+	StrategyName         string                          `json:"strategy_name"`
+	Labels               []string                        `json:"labels,omitempty"`
+	OpenCandidateSources []string                        `json:"open_candidate_sources,omitempty"`
+	Open                 *DealReviewEventDetail          `json:"open,omitempty"`
+	Close                *DealReviewEventDetail          `json:"close,omitempty"`
+	PriceTimeline        *DealReviewPriceTimeline        `json:"price_timeline,omitempty"`
+	SymbolBehaviorPriors []DealReviewSymbolBehaviorPrior `json:"symbol_behavior_priors,omitempty"`
+	LearnedPatterns      []DealReviewLearnedPattern      `json:"learned_patterns,omitempty"`
+	ClassifierAssist     *DealReviewClassifierAssist     `json:"classifier_assist,omitempty"`
+	AIClassifierAssist   *DealReviewClassifierAssist     `json:"ai_classifier_assist,omitempty"`
 }
 
 type DealReviewPriceTimelinePoint struct {
@@ -944,6 +946,26 @@ type DealReviewAnomalyExitUncertainty struct {
 	SharePct          float64 `json:"share_pct"`
 }
 
+type DealReviewAnomalySymbolEdgeFailure struct {
+	Symbol                string   `json:"symbol"`
+	Side                  string   `json:"side"`
+	RegimeSignature       string   `json:"regime_signature"`
+	OpenSelectionBucket   string   `json:"open_selection_bucket,omitempty"`
+	OpenTrendRegime       string   `json:"open_trend_regime,omitempty"`
+	OpenVolatilityRegime  string   `json:"open_volatility_regime,omitempty"`
+	OpenOIRegime          string   `json:"open_oi_regime,omitempty"`
+	SliceDeals            int64    `json:"slice_deals"`
+	SliceNetPnL           float64  `json:"slice_net_pnl"`
+	HistoricalDeals       int      `json:"historical_deals"`
+	DecisionOpenCount     int      `json:"decision_open_count"`
+	AvgDecisionConfidence float64  `json:"avg_decision_confidence"`
+	AvgPnLPct             float64  `json:"avg_pnl_pct"`
+	ContradictionScore    float64  `json:"contradiction_score"`
+	RecommendedAction     string   `json:"recommended_action"`
+	SignalTags            []string `json:"signal_tags,omitempty"`
+	Summary               string   `json:"summary,omitempty"`
+}
+
 type DealReviewAnomalySummary struct {
 	ClosedDeals            int64                                 `json:"closed_deals"`
 	WorstSymbols           []DealReviewAnomalySymbol             `json:"worst_symbols,omitempty"`
@@ -955,6 +977,7 @@ type DealReviewAnomalySummary struct {
 	OversizedLossHotspots  []DealReviewAnomalySizing             `json:"oversized_loss_hotspots,omitempty"`
 	CloseReasonQuality     []DealReviewAnomalyCloseReasonQuality `json:"close_reason_quality,omitempty"`
 	ExitUncertainty        []DealReviewAnomalyExitUncertainty    `json:"exit_uncertainty,omitempty"`
+	SymbolEdgeFailures     []DealReviewAnomalySymbolEdgeFailure  `json:"symbol_edge_failures,omitempty"`
 	Notes                  []string                              `json:"notes,omitempty"`
 }
 
@@ -963,13 +986,16 @@ func NewDealReviewStore(db *gorm.DB) *DealReviewStore {
 }
 
 func (s *DealReviewStore) initTables() error {
-	if err := s.db.AutoMigrate(&DealReviewCase{}, &DealReviewEvent{}, &DealReviewAIScan{}, &DealReviewStrategyVersion{}, &DealReviewChallengerCompare{}, &DealReviewCyclePointRecord{}, &DealReviewMarketPointRecord{}, &DealReviewTrailingUpdateRecord{}, &DealReviewExitIntentRecord{}, &DealReviewClassifierFeedback{}, &DealReviewFilterPreset{}); err != nil {
+	if err := s.db.AutoMigrate(&DealReviewCase{}, &DealReviewEvent{}, &DealReviewAIScan{}, &DealReviewStrategyVersion{}, &DealReviewChallengerCompare{}, &DealReviewCyclePointRecord{}, &DealReviewMarketPointRecord{}, &DealReviewTrailingUpdateRecord{}, &DealReviewExitIntentRecord{}, &DealReviewClassifierFeedback{}, &DealReviewFilterPreset{}, &DealReviewSymbolBehaviorPrior{}, &DealReviewSymbolBehaviorLiveGuardEvent{}, &DealReviewPatternFeatureRecord{}, &DealReviewLearnedPattern{}, &DealReviewLearnedPatternLiveGuardEvent{}); err != nil {
 		return fmt.Errorf("failed to migrate deal review tables: %w", err)
 	}
 	if !s.db.Migrator().HasTable(&DealReviewExitIntentRecord{}) {
 		if err := s.db.AutoMigrate(&DealReviewExitIntentRecord{}); err != nil {
 			return fmt.Errorf("failed to migrate deal review exit intent table: %w", err)
 		}
+	}
+	if err := s.ensureSymbolBehaviorPriorColumns(); err != nil {
+		return fmt.Errorf("failed to ensure deal review symbol prior columns: %w", err)
 	}
 	return nil
 }
@@ -3004,6 +3030,11 @@ func (s *DealReviewStore) GetAnomalySummary(userID string, filter DealReviewList
 	sizingSymbols := map[string]*sizingAgg{}
 	closeReasonQuality := map[string]*closeReasonQualityAgg{}
 	exitUncertainty := map[string]*exitUncertaintyAgg{}
+	type symbolPriorSliceAgg struct {
+		Deals  int64
+		NetPnL float64
+	}
+	symbolPriorSliceMatches := map[string]*symbolPriorSliceAgg{}
 
 	for _, c := range cases {
 		symbol := strings.TrimSpace(strings.ToUpper(c.Symbol))
@@ -3116,6 +3147,16 @@ func (s *DealReviewStore) GetAnomalySummary(userID string, filter DealReviewList
 			size.NetPnL += c.RealizedPnL
 			size.RiskSizingScoreSum += c.RiskSizingScore
 			size.PlannedRiskPctSum += c.PlannedRiskPct
+		}
+
+		if key := dealReviewSymbolBehaviorPriorKeyForCase(&c); key != "" {
+			match := symbolPriorSliceMatches[key]
+			if match == nil {
+				match = &symbolPriorSliceAgg{}
+				symbolPriorSliceMatches[key] = match
+			}
+			match.Deals++
+			match.NetPnL += c.RealizedPnL
 		}
 	}
 
@@ -3308,6 +3349,64 @@ func (s *DealReviewStore) GetAnomalySummary(userID string, filter DealReviewList
 		return exitUncertaintyItems[i].Deals > exitUncertaintyItems[j].Deals
 	})
 
+	symbolEdgeFailures := make([]DealReviewAnomalySymbolEdgeFailure, 0)
+	if traderID := strings.TrimSpace(filter.TraderID); traderID != "" {
+		_, _ = s.RefreshSymbolBehaviorPriorsIfStale(userID, traderID)
+		priorFilter := DealReviewSymbolBehaviorPriorFilter{
+			Symbol: strings.TrimSpace(strings.ToUpper(filter.Symbol)),
+			Side:   normalizeDealReviewSide(filter.Side),
+			Limit:  500,
+		}
+		if priors, err := s.ListSymbolBehaviorPriors(userID, traderID, priorFilter); err == nil {
+			for _, prior := range priors {
+				if prior.BehaviorBias != DealReviewSymbolBehaviorBiasNegative {
+					continue
+				}
+				if prior.Status != DealReviewSymbolBehaviorPriorStatusCandidate && prior.Status != DealReviewSymbolBehaviorPriorStatusValidated {
+					continue
+				}
+				if prior.ContradictionScore < 0.35 && prior.LossRate < 0.55 && prior.AvgPnLPct > -0.50 {
+					continue
+				}
+				match := symbolPriorSliceMatches[dealReviewSymbolBehaviorPriorKeyForPrior(&prior)]
+				if match == nil || match.Deals == 0 {
+					continue
+				}
+				symbolEdgeFailures = append(symbolEdgeFailures, DealReviewAnomalySymbolEdgeFailure{
+					Symbol:                prior.Symbol,
+					Side:                  prior.Side,
+					RegimeSignature:       prior.RegimeSignature,
+					OpenSelectionBucket:   prior.OpenSelectionBucket,
+					OpenTrendRegime:       prior.OpenTrendRegime,
+					OpenVolatilityRegime:  prior.OpenVolatilityRegime,
+					OpenOIRegime:          prior.OpenOIRegime,
+					SliceDeals:            match.Deals,
+					SliceNetPnL:           match.NetPnL,
+					HistoricalDeals:       prior.SampleCount,
+					DecisionOpenCount:     prior.DecisionOpenCount,
+					AvgDecisionConfidence: prior.AvgDecisionConfidence,
+					AvgPnLPct:             prior.AvgPnLPct,
+					ContradictionScore:    prior.ContradictionScore,
+					RecommendedAction:     prior.RecommendedAction,
+					SignalTags:            append([]string(nil), prior.SignalTags...),
+					Summary:               prior.Summary,
+				})
+			}
+		}
+	}
+	sort.Slice(symbolEdgeFailures, func(i, j int) bool {
+		if symbolEdgeFailures[i].SliceDeals == symbolEdgeFailures[j].SliceDeals {
+			if symbolEdgeFailures[i].ContradictionScore == symbolEdgeFailures[j].ContradictionScore {
+				if symbolEdgeFailures[i].AvgPnLPct == symbolEdgeFailures[j].AvgPnLPct {
+					return symbolEdgeFailures[i].HistoricalDeals > symbolEdgeFailures[j].HistoricalDeals
+				}
+				return symbolEdgeFailures[i].AvgPnLPct < symbolEdgeFailures[j].AvgPnLPct
+			}
+			return symbolEdgeFailures[i].ContradictionScore > symbolEdgeFailures[j].ContradictionScore
+		}
+		return symbolEdgeFailures[i].SliceDeals > symbolEdgeFailures[j].SliceDeals
+	})
+
 	summary.WorstSymbols = truncateAnomalySymbols(worstSymbols, 5)
 	summary.OvertradedSymbols = truncateAnomalySymbols(overtraded, 5)
 	summary.WeakBuckets = truncateAnomalyBuckets(weakBuckets, 5)
@@ -3317,6 +3416,7 @@ func (s *DealReviewStore) GetAnomalySummary(userID string, filter DealReviewList
 	summary.OversizedLossHotspots = truncateAnomalySizings(oversizedLossHotspots, 5)
 	summary.CloseReasonQuality = truncateAnomalyCloseReasonQualities(closeReasonQualityItems, 5)
 	summary.ExitUncertainty = truncateAnomalyExitUncertainties(exitUncertaintyItems, 5)
+	summary.SymbolEdgeFailures = truncateAnomalySymbolEdgeFailures(symbolEdgeFailures, 5)
 	summary.Notes = buildAnomalyNotes(summary)
 	return summary, nil
 }
@@ -5363,6 +5463,13 @@ func truncateAnomalyExitUncertainties(items []DealReviewAnomalyExitUncertainty, 
 	return items[:n]
 }
 
+func truncateAnomalySymbolEdgeFailures(items []DealReviewAnomalySymbolEdgeFailure, n int) []DealReviewAnomalySymbolEdgeFailure {
+	if len(items) <= n {
+		return items
+	}
+	return items[:n]
+}
+
 func buildAnomalyNotes(summary *DealReviewAnomalySummary) []string {
 	notes := []string{}
 	if summary == nil {
@@ -5411,6 +5518,14 @@ func buildAnomalyNotes(summary *DealReviewAnomalySummary) []string {
 			summary.ExitUncertainty[0].Label,
 			summary.ExitUncertainty[0].ExitOrigin,
 			summary.ExitUncertainty[0].SharePct))
+	}
+	if len(summary.SymbolEdgeFailures) > 0 {
+		notes = append(notes, fmt.Sprintf("Repeated symbol-specific edge failure: %s %s matched %d filtered deals with %.1f%% contradiction and %.2f%% historical avg PnL.",
+			summary.SymbolEdgeFailures[0].Symbol,
+			summary.SymbolEdgeFailures[0].Side,
+			summary.SymbolEdgeFailures[0].SliceDeals,
+			summary.SymbolEdgeFailures[0].ContradictionScore*100,
+			summary.SymbolEdgeFailures[0].AvgPnLPct))
 	}
 	return notes
 }

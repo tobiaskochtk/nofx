@@ -192,6 +192,31 @@ func (at *AutoTrader) GetStatus() map[string]interface{} {
 			"same_symbol_loss_cooldown_minutes": reentryCfg.SameSymbolLossCooldownMinutes,
 			"pair_loss_lookback_hours":          reentryCfg.PairLossLookbackHours,
 		}
+		symbolPriorCfg := at.symbolBehaviorLiveGuardConfig()
+		result["symbol_behavior_live_guard"] = map[string]interface{}{
+			"enabled":                  symbolPriorCfg.Enabled,
+			"mode":                     symbolPriorCfg.Mode,
+			"require_confirmed_label":  symbolPriorCfg.RequireConfirmedLabel,
+			"min_confidence_score":     symbolPriorCfg.MinConfidenceScore,
+			"min_sample_count":         symbolPriorCfg.MinSampleCount,
+			"min_match_score":          symbolPriorCfg.MinMatchScore,
+			"max_false_positive_score": symbolPriorCfg.MaxFalsePositiveScore,
+			"max_drift_score":          symbolPriorCfg.MaxDriftScore,
+			"min_contradiction_score":  symbolPriorCfg.MinContradictionScore,
+		}
+		learnedPatternCfg := at.learnedPatternLiveGuardConfig()
+		result["learned_pattern_live_guard"] = map[string]interface{}{
+			"enabled":                      learnedPatternCfg.Enabled,
+			"mode":                         learnedPatternCfg.Mode,
+			"require_confirmed_label":      learnedPatternCfg.RequireConfirmedLabel,
+			"min_composite_score":          learnedPatternCfg.MinCompositeScore,
+			"min_confidence_score":         learnedPatternCfg.MinConfidenceScore,
+			"min_sample_count":             learnedPatternCfg.MinSampleCount,
+			"min_match_score":              learnedPatternCfg.MinMatchScore,
+			"max_false_positive_score":     learnedPatternCfg.MaxFalsePositiveScore,
+			"max_drift_score":              learnedPatternCfg.MaxDriftScore,
+			"min_validation_support_score": learnedPatternCfg.MinValidationSupportScore,
+		}
 	}
 
 	return result
