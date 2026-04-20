@@ -1,0 +1,35 @@
+derivs_v1:
+  enabled: true
+  symbols:
+    - "BTCUSDT"
+    - "BNBUSDT"
+    - "XRPUSDT"
+    - "DOGEUSDT"
+    - "LINKUSDT"
+    - "TRXUSDT"
+    - "LTCUSDT"
+    - "UNIUSDT"
+    - "ARBUSDT"
+    - "ETHUSDT"
+    - "AAVEUSDT"
+    - "AVAXUSDT"
+    - "ADAUSDT"
+    - "NEARUSDT"
+    - "SOLUSDT"
+  exchangesPerp: ["binanceusdm","bybit","okx","bitget"]
+  spotIndexExchanges: ["binance","kraken","coinbase"]
+  timings:
+    sample_interval: "1h"
+    oi_z_window_hours: 168
+    basis_z_window_hours: 336
+    funding_window_intervals: 21
+    min_history_hours: 24
+  smoothing_alpha: 0.11
+  timeouts_ms:
+    rest: 4000
+    ws: 5000
+  cache:
+    redis_addr: "redis:6379"
+    redis_password: ""
+    redis_db: 0
+    keyspace: "derivs:v1"

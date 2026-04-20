@@ -1,0 +1,1184 @@
+package kernel
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"net/http"
+	"nofx/logger"
+	"nofx/market"
+	"nofx/provider/hyperliquid"
+	"nofx/provider/nofxos"
+	"nofx/security"
+	"nofx/store"
+	"os"
+	"strings"
+	"sync"
+	"time"
+)
+
+// ============================================================================
+// Type Definitions
+// ============================================================================
+
+// PositionInfo position information
+type PositionInfo struct {
+	Symbol           string  `json:"symbol"`
+	Side             string  `json:"side"` // "long" or "short"
+	EntryPrice       float64 `json:"entry_price"`
+	MarkPrice        float64 `json:"mark_price"`
+	Quantity         float64 `json:"quantity"`
+	Leverage         int     `json:"leverage"`
+	UnrealizedPnL    float64 `json:"unrealized_pnl"`
+	UnrealizedPnLPct float64 `json:"unrealized_pnl_pct"`
+	PeakPnLPct       float64 `json:"peak_pnl_pct"` // Historical peak profit percentage
+	LiquidationPrice float64 `json:"liquidation_price"`
+	MarginUsed       float64 `json:"margin_used"`
+	UpdateTime       int64   `json:"update_time"` // Position update timestamp (milliseconds)
+}
+
+// AccountInfo account information
+type AccountInfo struct {
+	TotalEquity      float64 `json:"total_equity"`      // Account equity
+	AvailableBalance float64 `json:"available_balance"` // Available balance
+	UnrealizedPnL    float64 `json:"unrealized_pnl"`    // Unrealized profit/loss
+	TotalPnL         float64 `json:"total_pnl"`         // Total profit/loss
+	TotalPnLPct      float64 `json:"total_pnl_pct"`     // Total profit/loss percentage
+	MarginUsed       float64 `json:"margin_used"`       // Used margin
+	MarginUsedPct    float64 `json:"margin_used_pct"`   // Margin usage rate
+	PositionCount    int     `json:"position_count"`    // Number of positions
+}
+
+// CandidateCoin candidate coin (from coin pool)
+type CandidateCoin struct {
+	Symbol          string   `json:"symbol"`
+	Sources         []string `json:"sources"` // Sources: "ai500" and/or "oi_top"
+	SelectionBucket string   `json:"selection_bucket,omitempty"`
+}
+
+// OITopData open interest growth top data (for AI decision reference)
+type OITopData struct {
+	Rank              int     // OI Top ranking
+	OIDeltaPercent    float64 // Open interest change percentage (1 hour)
+	OIDeltaValue      float64 // Open interest change value
+	PriceDeltaPercent float64 // Price change percentage
+}
+
+// TradingStats trading statistics (for AI input)
+type TradingStats struct {
+	TotalTrades    int     `json:"total_trades"`     // Total number of trades (closed)
+	WinRate        float64 `json:"win_rate"`         // Win rate (%)
+	ProfitFactor   float64 `json:"profit_factor"`    // Profit factor
+	SharpeRatio    float64 `json:"sharpe_ratio"`     // Sharpe ratio
+	TotalPnL       float64 `json:"total_pnl"`        // Total profit/loss
+	AvgWin         float64 `json:"avg_win"`          // Average win
+	AvgLoss        float64 `json:"avg_loss"`         // Average loss
+	MaxDrawdownPct float64 `json:"max_drawdown_pct"` // Maximum drawdown (%)
+}
+
+// RecentExecutionRegime captures whether the last few closed trades show healthy follow-through or churn.
+type RecentExecutionRegime struct {
+	TradeCount         int     `json:"trade_count"`
+	WinRatePct         float64 `json:"win_rate_pct"`
+	AvgPnLPct          float64 `json:"avg_pnl_pct"`
+	ConsecutiveLosses  int     `json:"consecutive_losses"`
+	FollowThroughState string  `json:"follow_through_state"`
+	ChurnRisk          string  `json:"churn_risk"`
+}
+
+// RecentOrder recently completed order (for AI input)
+type RecentOrder struct {
+	Symbol        string  `json:"symbol"`        // Trading pair
+	Side          string  `json:"side"`          // long/short
+	EntryPrice    float64 `json:"entry_price"`   // Entry price
+	ExitPrice     float64 `json:"exit_price"`    // Exit price
+	RealizedPnL   float64 `json:"realized_pnl"`  // Realized profit/loss
+	PnLPct        float64 `json:"pnl_pct"`       // Profit/loss percentage
+	EntryTime     string  `json:"entry_time"`    // Entry time
+	ExitTime      string  `json:"exit_time"`     // Exit time
+	HoldDuration  string  `json:"hold_duration"` // Hold duration, e.g. "2h30m"
+	ExitTimestamp int64   `json:"-"`             // Unix timestamp in seconds for compact symbol memory
+}
+
+// ExecutionQuality summarizes order-book feasibility for a symbol.
+type ExecutionQuality struct {
+	SpreadBps         *float64 `json:"spread_bps,omitempty"`
+	LiqScore          *float64 `json:"liq_score,omitempty"`
+	DepthBidUSD1Pct   *float64 `json:"depth_bid_usd_1pct,omitempty"`
+	DepthAskUSD1Pct   *float64 `json:"depth_ask_usd_1pct,omitempty"`
+	BookImbalance1Pct *float64 `json:"book_imbalance_1pct,omitempty"`
+	SlippageEst25USD  *float64 `json:"slippage_est_25usd,omitempty"`
+	SlippageEst100USD *float64 `json:"slippage_est_100usd,omitempty"`
+}
+
+// VenueTradability summarizes whether the active exchange can realistically trade a symbol.
+type VenueTradability struct {
+	VenueSupported bool   `json:"venue_supported"`
+	OrderBookState string `json:"orderbook_state,omitempty"`
+	MinNotionalOK  *bool  `json:"min_notional_ok,omitempty"`
+	PriceSource    string `json:"price_source,omitempty"`
+}
+
+// Context trading context (complete information passed to AI)
+type Context struct {
+	CurrentTime           string                             `json:"current_time"`
+	RuntimeMinutes        int                                `json:"runtime_minutes"`
+	CallCount             int                                `json:"call_count"`
+	Exchange              string                             `json:"-"`
+	Account               AccountInfo                        `json:"account"`
+	Positions             []PositionInfo                     `json:"positions"`
+	CandidateCoins        []CandidateCoin                    `json:"candidate_coins"`
+	PromptVariant         string                             `json:"prompt_variant,omitempty"`
+	TradingStats          *TradingStats                      `json:"trading_stats,omitempty"`
+	RecentExecutionRegime *RecentExecutionRegime             `json:"recent_execution_regime,omitempty"`
+	RecentOrders          []RecentOrder                      `json:"recent_orders,omitempty"`
+	ExecutionQualityMap   map[string]*ExecutionQuality       `json:"-"`
+	VenueTradabilityMap   map[string]*VenueTradability       `json:"-"`
+	MarketDataMap         map[string]*market.Data            `json:"-"`
+	MultiTFMarket         map[string]map[string]*market.Data `json:"-"`
+	OITopDataMap          map[string]*OITopData              `json:"-"`
+	QuantDataMap          map[string]*QuantData              `json:"-"`
+	OIRankingData         *nofxos.OIRankingData              `json:"-"` // Market-wide OI ranking data
+	NetFlowRankingData    *nofxos.NetFlowRankingData         `json:"-"` // Market-wide fund flow ranking data
+	PriceRankingData      *nofxos.PriceRankingData           `json:"-"` // Market-wide price gainers/losers
+	BTCETHLeverage        int                                `json:"-"`
+	AltcoinLeverage       int                                `json:"-"`
+	BTCETHPosRatio        float64                            `json:"-"`
+	AltcoinPosRatio       float64                            `json:"-"`
+	MinPositionSize       float64                            `json:"-"`
+	MinConfidence         int                                `json:"-"`
+	Timeframes            []string                           `json:"-"`
+	EMAPeriods            []int                              `json:"-"`
+	RSIPeriods            []int                              `json:"-"`
+	FeatureFlagsSet       bool                               `json:"-"`
+	EnableF4              bool                               `json:"-"`
+	EnableF5              bool                               `json:"-"`
+	EnableF6              bool                               `json:"-"`
+	EnableF7              bool                               `json:"-"`
+}
+
+// Decision AI trading decision
+type Decision struct {
+	Symbol string `json:"symbol"`
+	Action string `json:"action"` // Standard: "open_long", "open_short", "close_long", "close_short", "hold", "wait"
+	// Grid actions: "place_buy_limit", "place_sell_limit", "cancel_order", "cancel_all_orders", "pause_grid", "resume_grid", "adjust_grid"
+
+	// Opening position parameters
+	Leverage        int     `json:"leverage,omitempty"`
+	PositionSizeUSD float64 `json:"position_size_usd,omitempty"`
+	StopLoss        float64 `json:"stop_loss,omitempty"`
+	TakeProfit      float64 `json:"take_profit,omitempty"`
+
+	// Grid trading parameters
+	Price      float64 `json:"price,omitempty"`       // Limit order price (for grid)
+	Quantity   float64 `json:"quantity,omitempty"`    // Order quantity (for grid)
+	LevelIndex int     `json:"level_index,omitempty"` // Grid level index
+	OrderID    string  `json:"order_id,omitempty"`    // Order ID (for cancel)
+
+	// Common parameters
+	Confidence int     `json:"confidence,omitempty"` // Confidence level (0-100)
+	RiskUSD    float64 `json:"risk_usd,omitempty"`   // Maximum USD risk
+	Reasoning  string  `json:"reasoning"`
+}
+
+// UnmarshalJSON supports both legacy execution actions and the newer
+// contract-style format:
+// {sym, action: HOLD|ENTER|EXIT, side, size_pct, leverage, confidence, reason_codes}.
+// Legacy stop fields (stop_loss/take_profit/sl_px/tp_px) are still accepted.
+func (d *Decision) UnmarshalJSON(data []byte) error {
+	type stopsTargets struct {
+		SL float64 `json:"sl"`
+		TP float64 `json:"tp"`
+	}
+	type rawDecision struct {
+		Symbol          string          `json:"symbol"`
+		Sym             string          `json:"sym"`
+		Action          string          `json:"action"`
+		Side            string          `json:"side"`
+		Leverage        int             `json:"leverage"`
+		Lev             int             `json:"lev"`
+		PositionSizeUSD float64         `json:"position_size_usd"`
+		SizePct         float64         `json:"size_pct"`
+		StopLoss        float64         `json:"stop_loss"`
+		SLPx            float64         `json:"sl_px"`
+		TakeProfit      float64         `json:"take_profit"`
+		TPPx            float64         `json:"tp_px"`
+		StopsTargets    stopsTargets    `json:"stops_targets"`
+		ConfidenceRaw   json.RawMessage `json:"confidence"`
+		RiskUSD         float64         `json:"risk_usd"`
+		Reasoning       string          `json:"reasoning"`
+		ReasonCodes     []string        `json:"reason_codes"`
+	}
+
+	var raw rawDecision
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+
+	d.Symbol = strings.ToUpper(strings.TrimSpace(raw.Symbol))
+	if d.Symbol == "" {
+		d.Symbol = strings.ToUpper(strings.TrimSpace(raw.Sym))
+	}
+
+	side := normalizeDecisionSide(raw.Side)
+	d.Action = normalizeDecisionAction(raw.Action, side)
+
+	d.Leverage = raw.Leverage
+	if d.Leverage == 0 {
+		d.Leverage = raw.Lev
+	}
+
+	d.PositionSizeUSD = raw.PositionSizeUSD
+	if d.PositionSizeUSD == 0 && raw.SizePct > 0 {
+		// Negative marker => interpreted in validateDecision as account-equity percentage.
+		d.PositionSizeUSD = -raw.SizePct
+	}
+
+	d.StopLoss = raw.StopLoss
+	if d.StopLoss == 0 {
+		if raw.SLPx != 0 {
+			d.StopLoss = raw.SLPx
+		} else if raw.StopsTargets.SL != 0 {
+			d.StopLoss = raw.StopsTargets.SL
+		}
+	}
+
+	d.TakeProfit = raw.TakeProfit
+	if d.TakeProfit == 0 {
+		if raw.TPPx != 0 {
+			d.TakeProfit = raw.TPPx
+		} else if raw.StopsTargets.TP != 0 {
+			d.TakeProfit = raw.StopsTargets.TP
+		}
+	}
+
+	d.Confidence = 0
+	if len(raw.ConfidenceRaw) > 0 {
+		var confFloat float64
+		if err := json.Unmarshal(raw.ConfidenceRaw, &confFloat); err == nil {
+			if confFloat <= 1 {
+				d.Confidence = int(confFloat*100 + 0.5)
+			} else {
+				d.Confidence = int(confFloat + 0.5)
+			}
+		} else {
+			var confInt int
+			if err := json.Unmarshal(raw.ConfidenceRaw, &confInt); err == nil {
+				d.Confidence = confInt
+			}
+		}
+	}
+
+	d.RiskUSD = raw.RiskUSD
+	d.Reasoning = strings.TrimSpace(raw.Reasoning)
+	if d.Reasoning == "" && len(raw.ReasonCodes) > 0 {
+		d.Reasoning = strings.Join(raw.ReasonCodes, ", ")
+	}
+
+	return nil
+}
+
+func normalizeDecisionAction(action, side string) string {
+	normalized := strings.ToUpper(strings.TrimSpace(action))
+	switch normalized {
+	case "ENTER":
+		switch side {
+		case "long":
+			return "open_long"
+		case "short":
+			return "open_short"
+		}
+	case "EXIT":
+		switch side {
+		case "long":
+			return "close_long"
+		case "short":
+			return "close_short"
+		}
+	case "HOLD":
+		return "hold"
+	case "WAIT", "SKIP", "NO_TRADE":
+		return "wait"
+	}
+
+	legacy := strings.ToLower(strings.TrimSpace(action))
+	switch legacy {
+	case "open_long", "open_short", "close_long", "close_short", "hold", "wait":
+		return legacy
+	default:
+		return legacy
+	}
+}
+
+func normalizeDecisionSide(side string) string {
+	switch strings.ToLower(strings.TrimSpace(side)) {
+	case "long", "buy":
+		return "long"
+	case "short", "sell":
+		return "short"
+	default:
+		return ""
+	}
+}
+
+// FullDecision AI's complete decision (including chain of thought)
+type FullDecision struct {
+	SystemPrompt        string     `json:"system_prompt"`
+	UserPrompt          string     `json:"user_prompt"`
+	CoTTrace            string     `json:"cot_trace"`
+	Decisions           []Decision `json:"decisions"`
+	RawResponse         string     `json:"raw_response"`
+	Timestamp           time.Time  `json:"timestamp"`
+	AIRequestDurationMs int64      `json:"ai_request_duration_ms,omitempty"`
+}
+
+// QuantData quantitative data structure (fund flow, position changes, price changes)
+type QuantData struct {
+	Symbol      string             `json:"symbol"`
+	Price       float64            `json:"price"`
+	Netflow     *NetflowData       `json:"netflow,omitempty"`
+	OI          map[string]*OIData `json:"oi,omitempty"`
+	PriceChange map[string]float64 `json:"price_change,omitempty"`
+}
+
+type NetflowData struct {
+	Institution *FlowTypeData `json:"institution,omitempty"`
+	Personal    *FlowTypeData `json:"personal,omitempty"`
+}
+
+type FlowTypeData struct {
+	Future map[string]float64 `json:"future,omitempty"`
+	Spot   map[string]float64 `json:"spot,omitempty"`
+}
+
+type OIData struct {
+	CurrentOI float64                 `json:"current_oi"`
+	Delta     map[string]*OIDeltaData `json:"delta,omitempty"`
+}
+
+type OIDeltaData struct {
+	OIDelta        float64 `json:"oi_delta"`
+	OIDeltaValue   float64 `json:"oi_delta_value"`
+	OIDeltaPercent float64 `json:"oi_delta_percent"`
+}
+
+// ============================================================================
+// StrategyEngine - Core Strategy Execution Engine
+// ============================================================================
+
+// StrategyEngine strategy execution engine
+type StrategyEngine struct {
+	config                  *store.StrategyConfig
+	nofxosClient            *nofxos.Client
+	unsupportedQuantSymbols map[string]time.Time
+	unsupportedQuantMu      sync.RWMutex
+}
+
+// NewStrategyEngine creates strategy execution engine.
+// claw402WalletKey is optional — if provided, nofxos data requests are routed through claw402.
+func NewStrategyEngine(config *store.StrategyConfig, claw402WalletKey ...string) *StrategyEngine {
+	provider := config.ResolveSignalProvider()
+	baseURL := provider.BaseURL
+	if baseURL == "" {
+		baseURL = nofxos.DefaultBaseURL
+		if provider.Type == store.SignalProviderSelfhostedAI500 {
+			logger.Warnf("⚠️ Selfhosted AI500 provider selected without base URL; falling back to %s", baseURL)
+		}
+	}
+	client := nofxos.NewClient(baseURL, provider.APIKey)
+
+	if provider.Type == store.SignalProviderSelfhostedAI500 {
+		logger.Infof("🔗 Signal data routed to selfhosted AI500 provider (%s)", baseURL)
+	} else {
+		// If claw402 wallet key is provided (from trader's AI config), route through claw402
+		walletKey := ""
+		if len(claw402WalletKey) > 0 {
+			walletKey = claw402WalletKey[0]
+		}
+		if walletKey == "" {
+			walletKey = os.Getenv("CLAW402_WALLET_KEY")
+		}
+		if walletKey != "" {
+			claw402URL := os.Getenv("CLAW402_URL")
+			if claw402URL == "" {
+				claw402URL = "https://claw402.ai"
+			}
+			claw402Client, err := nofxos.NewClaw402DataClient(claw402URL, walletKey, &logger.MCPLogger{})
+			if err == nil {
+				client.SetClaw402(claw402Client)
+				logger.Infof("🔗 NofxOS data routed through claw402 (%s)", claw402URL)
+			} else {
+				logger.Warnf("⚠️ Failed to init claw402 data client: %v (using direct nofxos.ai)", err)
+			}
+		}
+	}
+
+	return &StrategyEngine{
+		config:                  config,
+		nofxosClient:            client,
+		unsupportedQuantSymbols: make(map[string]time.Time),
+	}
+}
+
+// GetRiskControlConfig gets risk control configuration
+func (e *StrategyEngine) GetRiskControlConfig() store.RiskControlConfig {
+	return e.config.RiskControl
+}
+
+// GetLanguage returns the language from config or falls back to auto-detection
+func (e *StrategyEngine) GetLanguage() Language {
+	switch e.config.Language {
+	case "zh":
+		return LangChinese
+	case "en":
+		return LangEnglish
+	default:
+		// Fall back to auto-detection from prompt content for backward compatibility
+		return detectLanguage(e.config.PromptSections.RoleDefinition)
+	}
+}
+
+// GetConfig gets complete strategy configuration
+func (e *StrategyEngine) GetConfig() *store.StrategyConfig {
+	return e.config
+}
+
+// SetConfig swaps the effective runtime config used for prompt building without
+// changing the already-resolved signal-provider client.
+func (e *StrategyEngine) SetConfig(config *store.StrategyConfig) {
+	if config == nil {
+		return
+	}
+	e.config = config
+}
+
+// ============================================================================
+// Candidate Coins
+// ============================================================================
+
+// GetCandidateCoins gets candidate coins based on strategy configuration
+func (e *StrategyEngine) GetCandidateCoins() ([]CandidateCoin, error) {
+	var candidates []CandidateCoin
+	candidateMap := make(map[string]CandidateCoin)
+
+	coinSource := e.config.CoinSource
+
+	switch coinSource.SourceType {
+	case "static":
+		for _, symbol := range coinSource.StaticCoins {
+			symbol = market.Normalize(symbol)
+			candidates = append(candidates, CandidateCoin{
+				Symbol:  symbol,
+				Sources: []string{"static"},
+			})
+		}
+
+		return e.filterExcludedCoins(candidates), nil
+
+	case "ai500":
+		// Check use_ai500 flag; if false, fall back to static coins
+		if !coinSource.UseAI500 {
+			logger.Infof("⚠️  source_type is 'ai500' but use_ai500 is false, falling back to static coins")
+			for _, symbol := range coinSource.StaticCoins {
+				symbol = market.Normalize(symbol)
+				candidates = append(candidates, CandidateCoin{
+					Symbol:  symbol,
+					Sources: []string{"static"},
+				})
+			}
+			return e.filterExcludedCoins(candidates), nil
+		}
+		coins, err := e.getAI500Coins(coinSource.AI500Limit)
+		if err != nil {
+			return nil, err
+		}
+		// Empty list is a normal condition, return directly
+		return e.filterExcludedCoins(coins), nil
+
+	case "oi_top":
+		// Check use_oi_top flag; if false, fall back to static coins
+		if !coinSource.UseOITop {
+			logger.Infof("⚠️  source_type is 'oi_top' but use_oi_top is false, falling back to static coins")
+			for _, symbol := range coinSource.StaticCoins {
+				symbol = market.Normalize(symbol)
+				candidates = append(candidates, CandidateCoin{
+					Symbol:  symbol,
+					Sources: []string{"static"},
+				})
+			}
+			return e.filterExcludedCoins(candidates), nil
+		}
+		coins, err := e.getOITopCoins(coinSource.OITopLimit)
+		if err != nil {
+			return nil, err
+		}
+		// Empty list is a normal condition, return directly
+		return e.filterExcludedCoins(coins), nil
+
+	case "oi_low":
+		// OI decrease ranking, suitable for short positions
+		if !coinSource.UseOILow {
+			logger.Infof("⚠️  source_type is 'oi_low' but use_oi_low is false, falling back to static coins")
+			for _, symbol := range coinSource.StaticCoins {
+				symbol = market.Normalize(symbol)
+				candidates = append(candidates, CandidateCoin{
+					Symbol:  symbol,
+					Sources: []string{"static"},
+				})
+			}
+			return e.filterExcludedCoins(candidates), nil
+		}
+		coins, err := e.getOILowCoins(coinSource.OILowLimit)
+		if err != nil {
+			return nil, err
+		}
+		// Empty list is a normal condition, return directly
+		return e.filterExcludedCoins(coins), nil
+
+	case "hyper_all":
+		// All Hyperliquid perp coins
+		if !coinSource.UseHyperAll {
+			logger.Infof("⚠️  source_type is 'hyper_all' but use_hyper_all is false, falling back to static coins")
+			for _, symbol := range coinSource.StaticCoins {
+				symbol = market.Normalize(symbol)
+				candidates = append(candidates, CandidateCoin{
+					Symbol:  symbol,
+					Sources: []string{"static"},
+				})
+			}
+			return e.filterExcludedCoins(candidates), nil
+		}
+		coins, err := e.getHyperAllCoins()
+		if err != nil {
+			return nil, err
+		}
+		return e.filterExcludedCoins(coins), nil
+
+	case "hyper_main":
+		// Top N Hyperliquid coins by 24h volume
+		if !coinSource.UseHyperMain {
+			logger.Infof("⚠️  source_type is 'hyper_main' but use_hyper_main is false, falling back to static coins")
+			for _, symbol := range coinSource.StaticCoins {
+				symbol = market.Normalize(symbol)
+				candidates = append(candidates, CandidateCoin{
+					Symbol:  symbol,
+					Sources: []string{"static"},
+				})
+			}
+			return e.filterExcludedCoins(candidates), nil
+		}
+		coins, err := e.getHyperMainCoins(coinSource.HyperMainLimit)
+		if err != nil {
+			return nil, err
+		}
+		return e.filterExcludedCoins(coins), nil
+
+	case "mixed":
+		if coinSource.UseAI500 {
+			poolCoins, err := e.getAI500Coins(coinSource.AI500Limit)
+			if err != nil {
+				logger.Infof("⚠️  Failed to get AI500 coins: %v", err)
+			} else {
+				for _, coin := range poolCoins {
+					mergeCandidateCoin(candidateMap, coin)
+				}
+			}
+		}
+
+		if coinSource.UseOITop {
+			oiCoins, err := e.getOITopCoins(coinSource.OITopLimit)
+			if err != nil {
+				logger.Infof("⚠️  Failed to get OI Top: %v", err)
+			} else {
+				for _, coin := range oiCoins {
+					mergeCandidateCoin(candidateMap, coin)
+				}
+			}
+		}
+
+		if coinSource.UseOILow {
+			oiLowCoins, err := e.getOILowCoins(coinSource.OILowLimit)
+			if err != nil {
+				logger.Infof("⚠️  Failed to get OI Low: %v", err)
+			} else {
+				for _, coin := range oiLowCoins {
+					mergeCandidateCoin(candidateMap, coin)
+				}
+			}
+		}
+
+		if coinSource.UseHyperAll {
+			hyperCoins, err := e.getHyperAllCoins()
+			if err != nil {
+				logger.Infof("⚠️  Failed to get Hyperliquid All coins: %v", err)
+			} else {
+				for _, coin := range hyperCoins {
+					mergeCandidateCoin(candidateMap, coin)
+				}
+			}
+		}
+
+		if coinSource.UseHyperMain {
+			hyperMainCoins, err := e.getHyperMainCoins(coinSource.HyperMainLimit)
+			if err != nil {
+				logger.Infof("⚠️  Failed to get Hyperliquid Main coins: %v", err)
+			} else {
+				for _, coin := range hyperMainCoins {
+					mergeCandidateCoin(candidateMap, coin)
+				}
+			}
+		}
+
+		for _, symbol := range coinSource.StaticCoins {
+			symbol = market.Normalize(symbol)
+			mergeCandidateCoin(candidateMap, CandidateCoin{
+				Symbol:  symbol,
+				Sources: []string{"static"},
+			})
+		}
+
+		for _, coin := range candidateMap {
+			candidates = append(candidates, coin)
+		}
+		return e.filterExcludedCoins(candidates), nil
+
+	default:
+		return nil, fmt.Errorf("unknown coin source type: %s", coinSource.SourceType)
+	}
+}
+
+func mergeCandidateCoin(candidateMap map[string]CandidateCoin, coin CandidateCoin) {
+	symbol := market.Normalize(coin.Symbol)
+	if symbol == "" {
+		return
+	}
+	current, exists := candidateMap[symbol]
+	if !exists {
+		candidateMap[symbol] = CandidateCoin{
+			Symbol:          symbol,
+			Sources:         dedupeCandidateSources(coin.Sources),
+			SelectionBucket: strings.TrimSpace(coin.SelectionBucket),
+		}
+		return
+	}
+
+	current.Sources = mergeCandidateSources(current.Sources, coin.Sources)
+	if strings.TrimSpace(current.SelectionBucket) == "" {
+		current.SelectionBucket = strings.TrimSpace(coin.SelectionBucket)
+	}
+	candidateMap[symbol] = current
+}
+
+func mergeCandidateSources(existing, incoming []string) []string {
+	merged := append([]string(nil), existing...)
+	seen := make(map[string]struct{}, len(existing))
+	for _, source := range existing {
+		source = strings.TrimSpace(source)
+		if source == "" {
+			continue
+		}
+		seen[source] = struct{}{}
+	}
+	for _, source := range incoming {
+		source = strings.TrimSpace(source)
+		if source == "" {
+			continue
+		}
+		if _, exists := seen[source]; exists {
+			continue
+		}
+		seen[source] = struct{}{}
+		merged = append(merged, source)
+	}
+	return merged
+}
+
+func dedupeCandidateSources(sources []string) []string {
+	return mergeCandidateSources(nil, sources)
+}
+
+// filterExcludedCoins removes excluded coins from the candidates list
+func (e *StrategyEngine) filterExcludedCoins(candidates []CandidateCoin) []CandidateCoin {
+	if len(e.config.CoinSource.ExcludedCoins) == 0 {
+		return candidates
+	}
+
+	// Build excluded set for O(1) lookup
+	excluded := make(map[string]bool)
+	for _, coin := range e.config.CoinSource.ExcludedCoins {
+		normalized := market.Normalize(coin)
+		excluded[normalized] = true
+	}
+
+	// Filter out excluded coins
+	filtered := make([]CandidateCoin, 0, len(candidates))
+	for _, c := range candidates {
+		if !excluded[c.Symbol] {
+			filtered = append(filtered, c)
+		} else {
+			logger.Infof("🚫 Excluded coin: %s", c.Symbol)
+		}
+	}
+
+	return filtered
+}
+
+func (e *StrategyEngine) getAI500Coins(limit int) ([]CandidateCoin, error) {
+	if limit <= 0 {
+		limit = 30
+	}
+
+	coins, err := e.nofxosClient.GetTopRatedCoinData(limit)
+	if err != nil {
+		return nil, err
+	}
+
+	var candidates []CandidateCoin
+	for _, coin := range coins {
+		candidates = append(candidates, CandidateCoin{
+			Symbol:          market.Normalize(coin.Pair),
+			Sources:         []string{"ai500"},
+			SelectionBucket: strings.TrimSpace(coin.SelectionBucket),
+		})
+	}
+	return candidates, nil
+}
+
+func (e *StrategyEngine) getOITopCoins(limit int) ([]CandidateCoin, error) {
+	if limit <= 0 {
+		limit = 10
+	}
+
+	positions, err := e.nofxosClient.GetOITopPositions()
+	if err != nil {
+		return nil, err
+	}
+
+	var candidates []CandidateCoin
+	for i, pos := range positions {
+		if i >= limit {
+			break
+		}
+		symbol := market.Normalize(pos.Symbol)
+		candidates = append(candidates, CandidateCoin{
+			Symbol:  symbol,
+			Sources: []string{"oi_top"},
+		})
+	}
+	return candidates, nil
+}
+
+func (e *StrategyEngine) getOILowCoins(limit int) ([]CandidateCoin, error) {
+	if limit <= 0 {
+		limit = 10
+	}
+
+	positions, err := e.nofxosClient.GetOILowPositions()
+	if err != nil {
+		return nil, err
+	}
+
+	var candidates []CandidateCoin
+	for i, pos := range positions {
+		if i >= limit {
+			break
+		}
+		symbol := market.Normalize(pos.Symbol)
+		candidates = append(candidates, CandidateCoin{
+			Symbol:  symbol,
+			Sources: []string{"oi_low"},
+		})
+	}
+	return candidates, nil
+}
+
+// getHyperAllCoins returns all available Hyperliquid perpetual coins
+func (e *StrategyEngine) getHyperAllCoins() ([]CandidateCoin, error) {
+	ctx := context.Background()
+	symbols, err := hyperliquid.GetAllCoinSymbols(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get Hyperliquid coins: %w", err)
+	}
+
+	var candidates []CandidateCoin
+	for _, symbol := range symbols {
+		// Add USDT suffix for compatibility
+		normalizedSymbol := market.Normalize(symbol + "USDT")
+		candidates = append(candidates, CandidateCoin{
+			Symbol:  normalizedSymbol,
+			Sources: []string{"hyper_all"},
+		})
+	}
+	logger.Infof("✅ Loaded %d Hyperliquid coins (hyper_all)", len(candidates))
+	return candidates, nil
+}
+
+// getHyperMainCoins returns top N Hyperliquid coins by 24h volume
+func (e *StrategyEngine) getHyperMainCoins(limit int) ([]CandidateCoin, error) {
+	if limit <= 0 {
+		limit = 20
+	}
+
+	ctx := context.Background()
+	symbols, err := hyperliquid.GetMainCoinSymbols(ctx, limit)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get Hyperliquid main coins: %w", err)
+	}
+
+	var candidates []CandidateCoin
+	for _, symbol := range symbols {
+		// Add USDT suffix for compatibility
+		normalizedSymbol := market.Normalize(symbol + "USDT")
+		candidates = append(candidates, CandidateCoin{
+			Symbol:  normalizedSymbol,
+			Sources: []string{"hyper_main"},
+		})
+	}
+	logger.Infof("✅ Loaded %d Hyperliquid main coins (hyper_main) by 24h volume", len(candidates))
+	return candidates, nil
+}
+
+// ============================================================================
+// External & Quant Data
+// ============================================================================
+
+// FetchMarketData fetches market data based on strategy configuration
+func (e *StrategyEngine) FetchMarketData(symbol string) (*market.Data, error) {
+	return market.Get(symbol)
+}
+
+// FetchExternalData fetches external data sources
+func (e *StrategyEngine) FetchExternalData() (map[string]interface{}, error) {
+	externalData := make(map[string]interface{})
+
+	for _, source := range e.config.Indicators.ExternalDataSources {
+		data, err := e.fetchSingleExternalSource(source)
+		if err != nil {
+			logger.Infof("⚠️  Failed to fetch external data source [%s]: %v", source.Name, err)
+			continue
+		}
+		externalData[source.Name] = data
+	}
+
+	return externalData, nil
+}
+
+func (e *StrategyEngine) fetchSingleExternalSource(source store.ExternalDataSource) (interface{}, error) {
+	// SSRF Protection: Validate URL before making request
+	if err := security.ValidateURL(source.URL); err != nil {
+		return nil, fmt.Errorf("external source URL validation failed: %w", err)
+	}
+
+	timeout := time.Duration(source.RefreshSecs) * time.Second
+	if timeout == 0 {
+		timeout = 30 * time.Second
+	}
+
+	// Use SSRF-safe HTTP client
+	client := security.SafeHTTPClient(timeout)
+
+	req, err := http.NewRequest(source.Method, source.URL, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	for k, v := range source.Headers {
+		req.Header.Set(k, v)
+	}
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+
+	var result interface{}
+	if err := json.Unmarshal(body, &result); err != nil {
+		return nil, err
+	}
+
+	if source.DataPath != "" {
+		result = extractJSONPath(result, source.DataPath)
+	}
+
+	return result, nil
+}
+
+func extractJSONPath(data interface{}, path string) interface{} {
+	parts := strings.Split(path, ".")
+	current := data
+
+	for _, part := range parts {
+		if m, ok := current.(map[string]interface{}); ok {
+			current = m[part]
+		} else {
+			return nil
+		}
+	}
+
+	return current
+}
+
+// FetchQuantData fetches quantitative data for a single coin
+func (e *StrategyEngine) FetchQuantData(symbol string) (*QuantData, error) {
+	if !e.config.Indicators.EnableQuantData {
+		return nil, nil
+	}
+
+	// Use nofxos client with unified API key
+	include := "oi,price"
+	if e.config.Indicators.EnableQuantNetflow {
+		include = "netflow,oi,price"
+	}
+
+	nofxosData, err := e.nofxosClient.GetCoinData(symbol, include)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch quant data: %w", err)
+	}
+
+	if nofxosData == nil {
+		return nil, nil
+	}
+
+	// Convert nofxos.QuantData to kernel.QuantData
+	quantData := &QuantData{
+		Symbol:      nofxosData.Symbol,
+		Price:       nofxosData.Price,
+		PriceChange: nofxosData.PriceChange,
+	}
+
+	// Convert OI data
+	if nofxosData.OI != nil {
+		quantData.OI = make(map[string]*OIData)
+		for exchange, oiData := range nofxosData.OI {
+			if oiData != nil {
+				kData := &OIData{
+					CurrentOI: oiData.CurrentOI,
+				}
+				if oiData.Delta != nil {
+					kData.Delta = make(map[string]*OIDeltaData)
+					for dur, delta := range oiData.Delta {
+						if delta != nil {
+							kData.Delta[dur] = &OIDeltaData{
+								OIDelta:        delta.OIDelta,
+								OIDeltaValue:   delta.OIDeltaValue,
+								OIDeltaPercent: delta.OIDeltaPercent,
+							}
+						}
+					}
+				}
+				quantData.OI[exchange] = kData
+			}
+		}
+	}
+
+	// Convert Netflow data
+	if nofxosData.Netflow != nil {
+		quantData.Netflow = &NetflowData{}
+		if nofxosData.Netflow.Institution != nil {
+			quantData.Netflow.Institution = &FlowTypeData{
+				Future: nofxosData.Netflow.Institution.Future,
+				Spot:   nofxosData.Netflow.Institution.Spot,
+			}
+		}
+		if nofxosData.Netflow.Personal != nil {
+			quantData.Netflow.Personal = &FlowTypeData{
+				Future: nofxosData.Netflow.Personal.Future,
+				Spot:   nofxosData.Netflow.Personal.Spot,
+			}
+		}
+	}
+
+	return quantData, nil
+}
+
+// FetchQuantDataBatch batch fetches quantitative data
+func (e *StrategyEngine) FetchQuantDataBatch(symbols []string) map[string]*QuantData {
+	result := make(map[string]*QuantData)
+
+	if !e.config.Indicators.EnableQuantData {
+		return result
+	}
+
+	for _, symbol := range symbols {
+		if e.shouldSkipQuantDataSymbol(symbol) {
+			continue
+		}
+		data, err := e.FetchQuantData(symbol)
+		if err != nil {
+			if isQuantDataSymbolNotFoundError(err) {
+				e.markQuantDataSymbolUnsupported(symbol)
+				logger.Infof("ℹ️  Quantitative data unavailable for %s; suppressing retries for 6h", symbol)
+				continue
+			}
+			logger.Infof("⚠️  Failed to fetch quantitative data for %s: %v", symbol, err)
+			continue
+		}
+		if data != nil {
+			result[symbol] = data
+		}
+	}
+
+	return result
+}
+
+func (e *StrategyEngine) shouldSkipQuantDataSymbol(symbol string) bool {
+	normalized := strings.ToUpper(strings.TrimSpace(symbol))
+	if normalized == "" {
+		return false
+	}
+
+	e.unsupportedQuantMu.RLock()
+	until, ok := e.unsupportedQuantSymbols[normalized]
+	e.unsupportedQuantMu.RUnlock()
+	if !ok {
+		return false
+	}
+	if time.Now().Before(until) {
+		return true
+	}
+
+	e.unsupportedQuantMu.Lock()
+	delete(e.unsupportedQuantSymbols, normalized)
+	e.unsupportedQuantMu.Unlock()
+	return false
+}
+
+func (e *StrategyEngine) markQuantDataSymbolUnsupported(symbol string) {
+	normalized := strings.ToUpper(strings.TrimSpace(symbol))
+	if normalized == "" {
+		return
+	}
+
+	e.unsupportedQuantMu.Lock()
+	e.unsupportedQuantSymbols[normalized] = time.Now().Add(6 * time.Hour)
+	e.unsupportedQuantMu.Unlock()
+}
+
+func isQuantDataSymbolNotFoundError(err error) bool {
+	if err == nil {
+		return false
+	}
+
+	var apiErr *nofxos.APIError
+	if errors.As(err, &apiErr) && apiErr.StatusCode == http.StatusNotFound {
+		return true
+	}
+
+	return strings.Contains(strings.ToLower(err.Error()), "symbol not found")
+}
+
+// FetchOIRankingData fetches market-wide OI ranking data
+func (e *StrategyEngine) FetchOIRankingData() *nofxos.OIRankingData {
+	indicators := e.config.Indicators
+	if !indicators.EnableOIRanking {
+		return nil
+	}
+
+	duration := indicators.OIRankingDuration
+	if duration == "" {
+		duration = "1h"
+	}
+
+	limit := indicators.OIRankingLimit
+	if limit <= 0 {
+		limit = 10
+	}
+
+	logger.Infof("📊 Fetching OI ranking data (duration: %s, limit: %d)", duration, limit)
+
+	data, err := e.nofxosClient.GetOIRanking(duration, limit)
+	if err != nil {
+		logger.Warnf("⚠️  Failed to fetch OI ranking data: %v", err)
+		return nil
+	}
+
+	logger.Infof("✓ OI ranking data ready: %d top, %d low positions",
+		len(data.TopPositions), len(data.LowPositions))
+
+	return data
+}
+
+// FetchNetFlowRankingData fetches market-wide NetFlow ranking data
+func (e *StrategyEngine) FetchNetFlowRankingData() *nofxos.NetFlowRankingData {
+	indicators := e.config.Indicators
+	if !indicators.EnableNetFlowRanking {
+		return nil
+	}
+
+	duration := indicators.NetFlowRankingDuration
+	if duration == "" {
+		duration = "1h"
+	}
+
+	limit := indicators.NetFlowRankingLimit
+	if limit <= 0 {
+		limit = 10
+	}
+
+	logger.Infof("💰 Fetching NetFlow ranking data (duration: %s, limit: %d)", duration, limit)
+
+	data, err := e.nofxosClient.GetNetFlowRanking(duration, limit)
+	if err != nil {
+		logger.Warnf("⚠️  Failed to fetch NetFlow ranking data: %v", err)
+		return nil
+	}
+
+	logger.Infof("✓ NetFlow ranking data ready: inst_in=%d, inst_out=%d, retail_in=%d, retail_out=%d",
+		len(data.InstitutionFutureTop), len(data.InstitutionFutureLow),
+		len(data.PersonalFutureTop), len(data.PersonalFutureLow))
+
+	return data
+}
+
+// FetchPriceRankingData fetches market-wide price ranking data (gainers/losers)
+func (e *StrategyEngine) FetchPriceRankingData() *nofxos.PriceRankingData {
+	indicators := e.config.Indicators
+	if !indicators.EnablePriceRanking {
+		return nil
+	}
+
+	durations := indicators.PriceRankingDuration
+	if durations == "" {
+		durations = "1h"
+	}
+
+	limit := indicators.PriceRankingLimit
+	if limit <= 0 {
+		limit = 10
+	}
+
+	logger.Infof("📈 Fetching Price ranking data (durations: %s, limit: %d)", durations, limit)
+
+	data, err := e.nofxosClient.GetPriceRanking(durations, limit)
+	if err != nil {
+		logger.Warnf("⚠️  Failed to fetch Price ranking data: %v", err)
+		return nil
+	}
+
+	logger.Infof("✓ Price ranking data ready for %d durations", len(data.Durations))
+
+	return data
+}
+
+// ============================================================================
+// Helper Functions
+// ============================================================================
+
+// detectLanguage detects language from text content
+// Returns LangChinese if text contains Chinese characters, otherwise LangEnglish
+func detectLanguage(text string) Language {
+	for _, r := range text {
+		if r >= 0x4E00 && r <= 0x9FFF {
+			return LangChinese
+		}
+	}
+	return LangEnglish
+}

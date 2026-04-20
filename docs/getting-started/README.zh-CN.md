@@ -21,33 +21,12 @@
 
 **快速开始：**
 ```bash
-cp config.example.jsonc config.json
-./start.sh start --build
+cp config.json.example config.json
+./scripts/start.sh start --build
 ```
 
 ---
 
-### 🔧 PM2 部署
-
-**适合：** 进阶用户、开发环境、自定义设置
-
-- **中文文档：** [pm2-deploy.md](pm2-deploy.md)
-- **English:** [pm2-deploy.en.md](pm2-deploy.en.md)
-
-**优势：**
-- ✅ 直接进程控制
-- ✅ 更适合开发
-- ✅ 资源占用更低
-- ✅ 更灵活
-
-**快速开始：**
-```bash
-go build -o nofx
-cd web && npm install && npm run build
-pm2 start ecosystem.config.js
-```
-
----
 
 ## 🤖 AI 配置
 
@@ -75,7 +54,6 @@ pm2 start ecosystem.config.js
 - ✅ Go 1.21+
 - ✅ Node.js 18+
 - ✅ TA-Lib 库
-- ✅ PM2（可选）
 
 ---
 
@@ -118,7 +96,7 @@ pm2 start ecosystem.config.js
 **需要更多帮助？**
 - 📖 [常见问题](../guides/faq.zh-CN.md)
 - 💬 [Telegram 社区](https://t.me/nofx_dev_community)
-- 🐛 [GitHub Issues](https://github.com/tinkle-community/nofx/issues)
+- 🐛 [GitHub Issues](https://github.com/NoFxAiOS/nofx/issues)
 
 ---
 

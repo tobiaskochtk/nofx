@@ -17,15 +17,12 @@ Welcome to the NOFX documentation! This page helps you find the right documentat
 | [Getting Started Index (中文)](getting-started/README.zh-CN.md) | 所有部署选项 | All deployment options |
 | [Docker Deployment (EN)](getting-started/docker-deploy.en.md) | Deploy with Docker (recommended) | Docker 部署（推荐） |
 | [Docker Deployment (中文)](getting-started/docker-deploy.zh-CN.md) | Docker 部署指南（中文） | Docker deployment guide |
-| [PM2 Deployment (EN)](getting-started/pm2-deploy.en.md) | Deploy with PM2 process manager | PM2 进程管理器部署 |
-| [PM2 Deployment (中文)](getting-started/pm2-deploy.md) | PM2 部署指南（中文） | PM2 deployment guide |
 | [Custom API (EN)](getting-started/custom-api.en.md) | Connect custom AI API providers | 连接自定义 AI API |
 | [Custom API (中文)](getting-started/custom-api.md) | 连接自定义 AI API 提供商 | Custom AI provider guide |
 
 **Quick Links:**
 - 📖 See all options → [Getting Started](getting-started/README.md) / [快速开始](getting-started/README.zh-CN.md)
 - 🐳 Want easiest setup? → [Docker (EN)](getting-started/docker-deploy.en.md) / [Docker (中文)](getting-started/docker-deploy.zh-CN.md)
-- 🔧 Advanced user? → [PM2 (EN)](getting-started/pm2-deploy.en.md) / [PM2 (中文)](getting-started/pm2-deploy.md)
 - 🤖 Custom AI model? → [Custom API (EN)](getting-started/custom-api.en.md) / [自定义 API](getting-started/custom-api.md)
 
 ---
@@ -60,8 +57,8 @@ Welcome to the NOFX documentation! This page helps you find the right documentat
 
 **Get Involved:**
 - 💬 [Telegram Community](https://t.me/nofx_dev_community)
-- 🐦 [Twitter @nofx_ai](https://x.com/nofx_ai)
-- 🐛 [Report Issues](https://github.com/tinkle-community/nofx/issues)
+- 🐦 [Twitter @nofx_official](https://x.com/nofx_official)
+- 🐛 [Report Issues](https://github.com/NoFxAiOS/nofx/issues)
 
 ---
 
@@ -87,7 +84,7 @@ Welcome to the NOFX documentation! This page helps you find the right documentat
 | [Architecture Overview (EN)](architecture/README.md) | System architecture, modules, and design | 系统架构、模块和设计 |
 | [Architecture Overview (中文)](architecture/README.zh-CN.md) | 系统架构、模块和设计 | System architecture overview |
 | API Reference *(coming soon)* | HTTP API documentation | HTTP API 文档 |
-| Database Schema *(coming soon)* | SQLite database structure | SQLite 数据库结构 |
+| Database Schema *(coming soon)* | PostgreSQL runtime schema and migration notes | PostgreSQL 运行时数据库结构与迁移说明 |
 | Testing Guide *(coming soon)* | How to write tests | 如何编写测试 |
 
 ---
@@ -125,8 +122,8 @@ Welcome to the NOFX documentation! This page helps you find the right documentat
 
 ### I want to...
 - 🚀 **Get started quickly** → [Getting Started](getting-started/README.md) / [快速开始](getting-started/README.zh-CN.md)
-- 🐛 **Report a bug** → [GitHub Issues](https://github.com/tinkle-community/nofx/issues/new)
-- 💡 **Suggest a feature** → [Feature Request](https://github.com/tinkle-community/nofx/issues/new?template=feature_request.md)
+- 🐛 **Report a bug** → [GitHub Issues](https://github.com/NoFxAiOS/nofx/issues/new)
+- 💡 **Suggest a feature** → [Feature Request](https://github.com/NoFxAiOS/nofx/issues/new?template=feature_request.md)
 - 🔒 **Report security issue** → [Security Policy](../SECURITY.md)
 - 💰 **Claim a bounty** → [Bounty Guide](community/bounty-guide.md)
 - 🤝 **Contribute code** → [Contributing Guide](../CONTRIBUTING.md)
@@ -167,8 +164,8 @@ Welcome to the NOFX documentation! This page helps you find the right documentat
 
 1. **Search GitHub Issues** - Someone might have asked already
 2. **Join Telegram** - [NOFX Developer Community](https://t.me/nofx_dev_community)
-3. **Ask on Twitter** - Mention [@nofx_ai](https://x.com/nofx_ai)
-4. **Create an Issue** - [New Issue](https://github.com/tinkle-community/nofx/issues/new)
+3. **Ask on Twitter** - Mention [@nofx_official](https://x.com/nofx_official)
+4. **Create an Issue** - [New Issue](https://github.com/NoFxAiOS/nofx/issues/new)
 
 ---
 
@@ -189,4 +186,4 @@ Found an error or want to improve the docs?
 ---
 
 **Last Updated:** 2025-11-01
-**Maintained by:** [Tinkle Community](https://github.com/tinkle-community)
+**Maintained by:** [NOFX Community](https://github.com/NoFxAiOS)

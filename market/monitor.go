@@ -121,19 +121,19 @@ func (m *WSMonitor) Start(coins []string) {
 	// 初始化交易对
 	err := m.Initialize(coins)
 	if err != nil {
-		log.Fatalf("❌ 初始化币种: %v", err)
+		log.Printf("❌ 初始化币种失败: %v", err)
 		return
 	}
 
 	err = m.combinedClient.Connect()
 	if err != nil {
-		log.Fatalf("❌ 批量订阅流: %v", err)
+		log.Printf("❌ 批量订阅流失败: %v", err)
 		return
 	}
 	// 订阅所有交易对
 	err = m.subscribeAll()
 	if err != nil {
-		log.Fatalf("❌ 订阅币种交易对: %v", err)
+		log.Printf("❌ 订阅币种交易对失败: %v", err)
 		return
 	}
 }
@@ -159,7 +159,7 @@ func (m *WSMonitor) subscribeAll() error {
 	for _, st := range subKlineTime {
 		err := m.combinedClient.BatchSubscribeKlines(m.symbols, st)
 		if err != nil {
-			log.Fatalf("❌ 订阅3m K线: %v", err)
+			log.Printf("❌ 订阅 %s K线失败: %v", st, err)
 			return err
 		}
 	}
@@ -232,26 +232,39 @@ func (m *WSMonitor) processKlineUpdate(symbol string, wsData KlineWSData, _time 
 	klineDataMap.Store(symbol, klines)
 }
 
-func (m *WSMonitor) GetCurrentKlines(symbol string, _time string) ([]Kline, error) {
+func (m *WSMonitor) GetCurrentKlines(symbol string, duration string) ([]Kline, error) {
 	// 对每一个进来的symbol检测是否存在内类 是否的话就订阅它
-	value, exists := m.getKlineDataMap(_time).Load(symbol)
+	value, exists := m.getKlineDataMap(duration).Load(symbol)
 	if !exists {
 		// 如果Ws数据未初始化完成时,单独使用api获取 - 兼容性代码 (防止在未初始化完成是,已经有交易员运行)
 		apiClient := NewAPIClient()
-		klines, err := apiClient.GetKlines(symbol, _time, 100)
-		m.getKlineDataMap(_time).Store(strings.ToUpper(symbol), klines) //动态缓存进缓存
-		subStr := m.subscribeSymbol(symbol, _time)
+		klines, err := apiClient.GetKlines(symbol, duration, 100)
+		if err != nil {
+			return nil, fmt.Errorf("获取%v分钟K线失败: %v", duration, err)
+		}
+
+		// 动态缓存进缓存
+		m.getKlineDataMap(duration).Store(strings.ToUpper(symbol), klines)
+
+		// 订阅 WebSocket 流
+		subStr := m.subscribeSymbol(symbol, duration)
 		subErr := m.combinedClient.subscribeStreams(subStr)
 		log.Printf("动态订阅流: %v", subStr)
 		if subErr != nil {
-			return nil, fmt.Errorf("动态订阅%v分钟K线失败: %v", _time, subErr)
+			log.Printf("警告: 动态订阅%v分钟K线失败: %v (使用API数据)", duration, subErr)
 		}
-		if err != nil {
-			return nil, fmt.Errorf("获取%v分钟K线失败: %v", _time, err)
-		}
-		return klines, fmt.Errorf("symbol不存在")
+
+		// ✅ FIX: 返回深拷贝而非引用
+		result := make([]Kline, len(klines))
+		copy(result, klines)
+		return result, nil
 	}
-	return value.([]Kline), nil
+
+	// ✅ FIX: 返回深拷贝而非引用，避免并发竞态条件
+	klines := value.([]Kline)
+	result := make([]Kline, len(klines))
+	copy(result, klines)
+	return result, nil
 }
 
 func (m *WSMonitor) Close() {

@@ -1,101 +1,158 @@
 package mcp
 
 import (
+	"bufio"
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
 	"net/http"
 	"strings"
 	"time"
 )
 
-// Provider AI提供商类型
-type Provider string
-
 const (
-	ProviderDeepSeek Provider = "deepseek"
-	ProviderQwen     Provider = "qwen"
-	ProviderCustom   Provider = "custom"
+	ProviderCustom = "custom"
+
+	MCPClientTemperature = 0.5
 )
 
-// Client AI API配置
+var (
+	DefaultTimeout = 120 * time.Second
+
+	MaxRetryTimes = 3
+
+	retryableErrors = []string{
+		"EOF",
+		"timeout",
+		"connection reset",
+		"connection refused",
+		"temporary failure",
+		"no such host",
+		"stream error",   // HTTP/2 stream error
+		"INTERNAL_ERROR", // Server internal error
+		"status 502",     // Bad Gateway
+		"status 503",     // Service Unavailable
+		"status 520",     // Cloudflare origin error
+		"status 524",     // Cloudflare timeout
+	}
+
+	// TokenUsageCallback is called after each AI request with token usage info
+	TokenUsageCallback func(usage TokenUsage)
+)
+
+// TokenUsage represents token usage from AI API response
+type TokenUsage struct {
+	Provider         string // payment channel: "claw402" or native provider name
+	Model            string
+	PromptTokens     int
+	CompletionTokens int
+	TotalTokens      int
+}
+
+// Channel returns the payment channel category for telemetry.
+// Returns "claw402" or "native" based on the provider.
+func (u TokenUsage) Channel() string {
+	switch u.Provider {
+	case ProviderClaw402:
+		return "claw402"
+	default:
+		return "native"
+	}
+}
+
+// Client AI API configuration
 type Client struct {
-	Provider   Provider
+	Provider   string
 	APIKey     string
 	BaseURL    string
 	Model      string
-	Timeout    time.Duration
-	UseFullURL bool // 是否使用完整URL（不添加/chat/completions）
+	UseFullURL bool // Whether to use full URL (without appending /chat/completions)
+	MaxTokens  int  // Maximum tokens for AI response
+	Caller     CallerContext
+
+	HTTPClient *http.Client // Exported for sub-packages
+	Log        Logger       // Exported for sub-packages
+	Cfg        *Config      // Exported for sub-packages
+
+	// Hooks are used to implement dynamic dispatch (polymorphism)
+	// When provider.DeepSeekClient embeds Client, Hooks point to DeepSeekClient
+	// This way methods called in Call() are automatically dispatched to the overridden version
+	Hooks ClientHooks
 }
 
-func New() *Client {
-	// 默认配置
-	return &Client{
-		Provider: ProviderDeepSeek,
-		BaseURL:  "https://api.deepseek.com/v1",
-		Model:    "deepseek-chat",
-		Timeout:  120 * time.Second, // 增加到120秒，因为AI需要分析大量数据
-	}
+func usesMaxCompletionTokens(provider string) bool {
+	return provider == ProviderOpenAI || provider == ProviderCodex
 }
 
-// SetDeepSeekAPIKey 设置DeepSeek API密钥
-// customURL 为空时使用默认URL，customModel 为空时使用默认模型
-func (client *Client) SetDeepSeekAPIKey(apiKey string, customURL string, customModel string) {
-	client.Provider = ProviderDeepSeek
-	client.APIKey = apiKey
-	if customURL != "" {
-		client.BaseURL = customURL
-		log.Printf("🔧 [MCP] DeepSeek 使用自定义 BaseURL: %s", customURL)
-	} else {
-		client.BaseURL = "https://api.deepseek.com/v1"
-		log.Printf("🔧 [MCP] DeepSeek 使用默认 BaseURL: %s", client.BaseURL)
-	}
-	if customModel != "" {
-		client.Model = customModel
-		log.Printf("🔧 [MCP] DeepSeek 使用自定义 Model: %s", customModel)
-	} else {
-		client.Model = "deepseek-chat"
-		log.Printf("🔧 [MCP] DeepSeek 使用默认 Model: %s", client.Model)
-	}
-	// 打印 API Key 的前后各4位用于验证
-	if len(apiKey) > 8 {
-		log.Printf("🔧 [MCP] DeepSeek API Key: %s...%s", apiKey[:4], apiKey[len(apiKey)-4:])
-	}
+// New creates default client (backward compatible)
+//
+// Deprecated: Recommend using NewClient(...opts) for better flexibility
+func New() AIClient {
+	return NewClient()
 }
 
-// SetQwenAPIKey 设置阿里云Qwen API密钥
-// customURL 为空时使用默认URL，customModel 为空时使用默认模型
-func (client *Client) SetQwenAPIKey(apiKey string, customURL string, customModel string) {
-	client.Provider = ProviderQwen
-	client.APIKey = apiKey
-	if customURL != "" {
-		client.BaseURL = customURL
-		log.Printf("🔧 [MCP] Qwen 使用自定义 BaseURL: %s", customURL)
-	} else {
-		client.BaseURL = "https://dashscope.aliyuncs.com/compatible-mode/v1"
-		log.Printf("🔧 [MCP] Qwen 使用默认 BaseURL: %s", client.BaseURL)
+// NewClient creates client (supports options pattern)
+//
+// Usage examples:
+//
+//	// Basic usage (backward compatible)
+//	client := mcp.NewClient()
+//
+//	// Custom logger
+//	client := mcp.NewClient(mcp.WithLogger(customLogger))
+//
+//	// Custom timeout
+//	client := mcp.NewClient(mcp.WithTimeout(60*time.Second))
+//
+//	// Combine multiple options
+//	client := mcp.NewClient(
+//	    mcp.WithDeepSeekConfig("sk-xxx"),
+//	    mcp.WithLogger(customLogger),
+//	    mcp.WithTimeout(60*time.Second),
+//	)
+func NewClient(opts ...ClientOption) AIClient {
+	// 1. Create default config
+	cfg := DefaultConfig()
+
+	// 2. Apply user options
+	for _, opt := range opts {
+		opt(cfg)
 	}
-	if customModel != "" {
-		client.Model = customModel
-		log.Printf("🔧 [MCP] Qwen 使用自定义 Model: %s", customModel)
-	} else {
-		client.Model = "qwen-plus" // 可选: qwen-turbo, qwen-plus, qwen-max
-		log.Printf("🔧 [MCP] Qwen 使用默认 Model: %s", client.Model)
+
+	// 3. Create client instance
+	client := &Client{
+		Provider:   cfg.Provider,
+		APIKey:     cfg.APIKey,
+		BaseURL:    cfg.BaseURL,
+		Model:      cfg.Model,
+		MaxTokens:  cfg.MaxTokens,
+		UseFullURL: cfg.UseFullURL,
+		HTTPClient: cfg.HTTPClient,
+		Log:        cfg.Logger,
+		Cfg:        cfg,
 	}
-	// 打印 API Key 的前后各4位用于验证
-	if len(apiKey) > 8 {
-		log.Printf("🔧 [MCP] Qwen API Key: %s...%s", apiKey[:4], apiKey[len(apiKey)-4:])
+
+	// 4. Set default Provider (if not set)
+	if client.Provider == "" {
+		client.Provider = ProviderDeepSeek
+		client.BaseURL = DefaultDeepSeekBaseURL
+		client.Model = DefaultDeepSeekModel
 	}
+
+	// 5. Set hooks to point to self
+	client.Hooks = client
+
+	return client
 }
 
-// SetCustomAPI 设置自定义OpenAI兼容API
-func (client *Client) SetCustomAPI(apiURL, apiKey, modelName string) {
+// SetCustomAPI sets custom OpenAI-compatible API
+func (client *Client) SetAPIKey(apiKey, apiURL, customModel string) {
 	client.Provider = ProviderCustom
 	client.APIKey = apiKey
 
-	// 检查URL是否以#结尾，如果是则使用完整URL（不添加/chat/completions）
+	// Check if URL ends with #, if so use full URL (without appending /chat/completions)
 	if strings.HasSuffix(apiURL, "#") {
 		client.BaseURL = strings.TrimSuffix(apiURL, "#")
 		client.UseFullURL = true
@@ -104,187 +161,652 @@ func (client *Client) SetCustomAPI(apiURL, apiKey, modelName string) {
 		client.UseFullURL = false
 	}
 
-	client.Model = modelName
-	client.Timeout = 120 * time.Second
+	client.Model = customModel
 }
 
-// SetClient 设置完整的AI配置（高级用户）
-func (client *Client) SetClient(Client Client) {
-	if Client.Timeout == 0 {
-		Client.Timeout = 30 * time.Second
+func (client *Client) SetTimeout(timeout time.Duration) {
+	client.HTTPClient.Timeout = timeout
+	if client.Cfg != nil {
+		client.Cfg.Timeout = timeout
 	}
-	client = &Client
 }
 
-// CallWithMessages 使用 system + user prompt 调用AI API（推荐）
+// CallWithMessages template method - fixed retry flow (cannot be overridden)
 func (client *Client) CallWithMessages(systemPrompt, userPrompt string) (string, error) {
-	if client.APIKey == "" {
-		return "", fmt.Errorf("AI API密钥未设置，请先调用 SetDeepSeekAPIKey() 或 SetQwenAPIKey()")
+	if client.APIKey == "" && (client.Cfg == nil || !client.Cfg.AllowEmptyAPIKey) {
+		return "", fmt.Errorf("AI API key not set, please call SetAPIKey first")
 	}
 
-	// 重试配置
-	maxRetries := 3
+	// Fixed retry flow
 	var lastErr error
+	maxRetries := client.Cfg.MaxRetries
 
 	for attempt := 1; attempt <= maxRetries; attempt++ {
 		if attempt > 1 {
-			fmt.Printf("⚠️  AI API调用失败，正在重试 (%d/%d)...\n", attempt, maxRetries)
+			client.Log.Warnf("⚠️  AI API call failed, retrying (%d/%d)...", attempt, maxRetries)
 		}
 
-		result, err := client.callOnce(systemPrompt, userPrompt)
+		// Call the fixed single-call flow
+		result, err := client.Hooks.Call(systemPrompt, userPrompt)
 		if err == nil {
 			if attempt > 1 {
-				fmt.Printf("✓ AI API重试成功\n")
+				client.Log.Infof("✓ AI API retry succeeded")
 			}
 			return result, nil
 		}
 
 		lastErr = err
-		// 如果不是网络错误，不重试
-		if !isRetryableError(err) {
+		// Check if error is retryable via hooks (supports custom retry strategy)
+		if !client.Hooks.IsRetryableError(err) {
 			return "", err
 		}
 
-		// 重试前等待
+		// Wait before retry
 		if attempt < maxRetries {
-			waitTime := time.Duration(attempt) * 2 * time.Second
-			fmt.Printf("⏳ 等待%v后重试...\n", waitTime)
+			waitTime := client.Cfg.RetryWaitBase * time.Duration(attempt)
+			client.Log.Infof("⏳ Waiting %v before retry...", waitTime)
 			time.Sleep(waitTime)
 		}
 	}
 
-	return "", fmt.Errorf("重试%d次后仍然失败: %w", maxRetries, lastErr)
+	return "", fmt.Errorf("still failed after %d retries: %w", maxRetries, lastErr)
 }
 
-// callOnce 单次调用AI API（内部使用）
-func (client *Client) callOnce(systemPrompt, userPrompt string) (string, error) {
-	// 打印当前 AI 配置
-	log.Printf("📡 [MCP] AI 请求配置:")
-	log.Printf("   Provider: %s", client.Provider)
-	log.Printf("   BaseURL: %s", client.BaseURL)
-	log.Printf("   Model: %s", client.Model)
-	log.Printf("   UseFullURL: %v", client.UseFullURL)
-	if len(client.APIKey) > 8 {
-		log.Printf("   API Key: %s...%s", client.APIKey[:4], client.APIKey[len(client.APIKey)-4:])
-	}
+func (client *Client) SetAuthHeader(reqHeader http.Header) {
+	reqHeader.Set("Authorization", fmt.Sprintf("Bearer %s", client.APIKey))
+}
 
-	// 构建 messages 数组
+func (client *Client) BuildMCPRequestBody(systemPrompt, userPrompt string) map[string]any {
+	// Build messages array
 	messages := []map[string]string{}
 
-	// 如果有 system prompt，添加 system message
+	// If system prompt exists, add system message
 	if systemPrompt != "" {
 		messages = append(messages, map[string]string{
 			"role":    "system",
 			"content": systemPrompt,
 		})
 	}
-
-	// 添加 user message
+	// Add user message
 	messages = append(messages, map[string]string{
 		"role":    "user",
 		"content": userPrompt,
 	})
 
-	// 构建请求体
+	// Guard: truncate messages if they would exceed the model's context window
+	if client.Cfg.MaxContext > 0 {
+		truncated, removed := truncateMessages(messages, client.Cfg.MaxContext, client.MaxTokens)
+		if removed > 0 {
+			client.Log.Warnf("⚠️  [%s] Context guard: truncated %d oldest messages to fit within %d token limit",
+				client.String(), removed, client.Cfg.MaxContext)
+			messages = truncated
+		}
+	}
+
+	// Build request body
 	requestBody := map[string]interface{}{
 		"model":       client.Model,
 		"messages":    messages,
-		"temperature": 0.5, // 降低temperature以提高JSON格式稳定性
-		"max_tokens":  2000,
+		"temperature": client.Cfg.Temperature, // Use configured temperature
 	}
+	// OpenAI-compatible reasoning models use max_completion_tokens instead of max_tokens.
+	if usesMaxCompletionTokens(client.Provider) {
+		requestBody["max_completion_tokens"] = client.MaxTokens
+	} else {
+		requestBody["max_tokens"] = client.MaxTokens
+	}
+	return requestBody
+}
 
-	// 注意：response_format 参数仅 OpenAI 支持，DeepSeek/Qwen 不支持
-	// 我们通过强化 prompt 和后处理来确保 JSON 格式正确
-
+// MarshalRequestBody can be used to marshal the request body and can be overridden
+func (client *Client) MarshalRequestBody(requestBody map[string]any) ([]byte, error) {
 	jsonData, err := json.Marshal(requestBody)
 	if err != nil {
-		return "", fmt.Errorf("序列化请求失败: %w", err)
+		return nil, fmt.Errorf("failed to serialize request: %w", err)
+	}
+	return jsonData, nil
+}
+
+func (client *Client) ParseMCPResponse(body []byte) (string, error) {
+	r, err := client.ParseMCPResponseFull(body)
+	if err != nil {
+		return "", err
+	}
+	if strings.TrimSpace(r.Content) == "" && len(r.ToolCalls) == 0 {
+		return "", fmt.Errorf("API returned empty content")
+	}
+	return r.Content, nil
+}
+
+// ParseMCPResponseFull parses the OpenAI-format response body and returns both
+// the text content and any tool calls.
+func (client *Client) ParseMCPResponseFull(body []byte) (*LLMResponse, error) {
+	var result struct {
+		Choices []struct {
+			Message struct {
+				Content   string     `json:"content"`
+				ToolCalls []ToolCall `json:"tool_calls"`
+			} `json:"message"`
+		} `json:"choices"`
+		Usage struct {
+			PromptTokens     int `json:"prompt_tokens"`
+			CompletionTokens int `json:"completion_tokens"`
+			TotalTokens      int `json:"total_tokens"`
+		} `json:"usage"`
 	}
 
-	// 创建HTTP请求
-	var url string
+	if err := json.Unmarshal(body, &result); err != nil {
+		return nil, fmt.Errorf("failed to parse response: %w", err)
+	}
+
+	if len(result.Choices) == 0 {
+		return nil, fmt.Errorf("API returned empty response")
+	}
+
+	// Report token usage if callback is set
+	if TokenUsageCallback != nil && result.Usage.TotalTokens > 0 {
+		TokenUsageCallback(TokenUsage{
+			Provider:         client.Provider,
+			Model:            client.Model,
+			PromptTokens:     result.Usage.PromptTokens,
+			CompletionTokens: result.Usage.CompletionTokens,
+			TotalTokens:      result.Usage.TotalTokens,
+		})
+	}
+
+	msg := result.Choices[0].Message
+	return &LLMResponse{
+		Content:   msg.Content,
+		ToolCalls: msg.ToolCalls,
+	}, nil
+}
+
+func (client *Client) BuildUrl() string {
 	if client.UseFullURL {
-		// 使用完整URL，不添加/chat/completions
-		url = client.BaseURL
-	} else {
-		// 默认行为：添加/chat/completions
-		url = fmt.Sprintf("%s/chat/completions", client.BaseURL)
+		return client.BaseURL
 	}
-	log.Printf("📡 [MCP] 请求 URL: %s", url)
+	return fmt.Sprintf("%s/chat/completions", client.BaseURL)
+}
 
+func (client *Client) BuildRequest(url string, jsonData []byte) (*http.Request, error) {
+	// Create HTTP request
 	req, err := http.NewRequest("POST", url, bytes.NewBuffer(jsonData))
 	if err != nil {
-		return "", fmt.Errorf("创建请求失败: %w", err)
+		return nil, fmt.Errorf("fail to build request: %w", err)
 	}
 
 	req.Header.Set("Content-Type", "application/json")
 
-	// 根据不同的Provider设置认证方式
-	switch client.Provider {
-	case ProviderDeepSeek:
-		req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", client.APIKey))
-	case ProviderQwen:
-		// 阿里云Qwen使用API-Key认证
-		req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", client.APIKey))
-		// 注意：如果使用的不是兼容模式，可能需要不同的认证方式
-	default:
-		req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", client.APIKey))
+	// Set auth header via hooks (supports overriding)
+	client.Hooks.SetAuthHeader(req.Header)
+
+	return req, nil
+}
+
+// Call single AI API call (fixed flow, cannot be overridden)
+func (client *Client) Call(systemPrompt, userPrompt string) (string, error) {
+	// Print current AI configuration
+	client.Log.Infof("📡 [%s] Request AI Server: BaseURL: %s", client.String(), client.BaseURL)
+	client.Log.Debugf("[%s] UseFullURL: %v", client.String(), client.UseFullURL)
+	if len(client.APIKey) > 8 {
+		client.Log.Debugf("[%s]   API Key: %s...%s", client.String(), client.APIKey[:4], client.APIKey[len(client.APIKey)-4:])
 	}
 
-	// 发送请求
-	httpClient := &http.Client{Timeout: client.Timeout}
-	resp, err := httpClient.Do(req)
+	// Step 1: Build request body (via hooks for dynamic dispatch)
+	requestBody := client.Hooks.BuildMCPRequestBody(systemPrompt, userPrompt)
+
+	// Step 2: Serialize request body (via hooks for dynamic dispatch)
+	jsonData, err := client.Hooks.MarshalRequestBody(requestBody)
 	if err != nil {
-		return "", fmt.Errorf("发送请求失败: %w", err)
+		return "", err
+	}
+
+	// Step 3: Build URL (via hooks for dynamic dispatch)
+	url := client.Hooks.BuildUrl()
+	client.Log.Infof("📡 [MCP %s] Request URL: %s", client.String(), url)
+
+	// Step 4: Create HTTP request (fixed logic)
+	req, err := client.Hooks.BuildRequest(url, jsonData)
+	if err != nil {
+		return "", fmt.Errorf("failed to create request: %w", err)
+	}
+
+	// Step 5: Send HTTP request (fixed logic)
+	resp, err := client.HTTPClient.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("failed to send request: %w", err)
 	}
 	defer resp.Body.Close()
 
-	// 读取响应
+	// Step 6: Read response body (fixed logic)
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return "", fmt.Errorf("读取响应失败: %w", err)
+		return "", fmt.Errorf("failed to read response: %w", err)
 	}
 
+	// Step 7: Check HTTP status code (fixed logic)
 	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("API返回错误 (status %d): %s", resp.StatusCode, string(body))
+		return "", fmt.Errorf("API returned error (status %d): %s", resp.StatusCode, string(body))
 	}
 
-	// 解析响应
-	var result struct {
-		Choices []struct {
-			Message struct {
-				Content string `json:"content"`
-			} `json:"message"`
-		} `json:"choices"`
+	// Step 8: Parse response (via hooks for dynamic dispatch)
+	result, err := client.Hooks.ParseMCPResponse(body)
+	if err != nil {
+		return "", fmt.Errorf("fail to parse AI server response: %w", err)
 	}
 
-	if err := json.Unmarshal(body, &result); err != nil {
-		return "", fmt.Errorf("解析响应失败: %w", err)
-	}
-
-	if len(result.Choices) == 0 {
-		return "", fmt.Errorf("API返回空响应")
-	}
-
-	return result.Choices[0].Message.Content, nil
+	return result, nil
 }
 
-// isRetryableError 判断错误是否可重试
-func isRetryableError(err error) bool {
-	errStr := err.Error()
-	// 网络错误、超时、EOF等可以重试
-	retryableErrors := []string{
-		"EOF",
-		"timeout",
-		"connection reset",
-		"connection refused",
-		"temporary failure",
-		"no such host",
-	}
-	for _, retryable := range retryableErrors {
-		if strings.Contains(errStr, retryable) {
+func (client *Client) String() string {
+	return fmt.Sprintf("[Provider: %s, Model: %s]",
+		client.Provider, client.Model)
+}
+
+// BaseClient returns the underlying *Client (satisfies ClientEmbedder interface).
+func (c *Client) BaseClient() *Client { return c }
+
+// IsRetryableError determines if error is retryable (network errors, timeouts, etc.)
+func (client *Client) IsRetryableError(err error) bool {
+	errStr := strings.ToLower(err.Error())
+	// Network errors, timeouts, EOF, etc. can be retried
+	for _, retryable := range client.Cfg.RetryableErrors {
+		if strings.Contains(errStr, strings.ToLower(retryable)) {
 			return true
 		}
 	}
 	return false
+}
+
+// ============================================================
+// Builder Pattern API (Advanced Features)
+// ============================================================
+
+// CallWithRequest calls AI API using Request object (supports advanced features)
+func (client *Client) CallWithRequest(req *Request) (string, error) {
+	if client.APIKey == "" && (client.Cfg == nil || !client.Cfg.AllowEmptyAPIKey) {
+		return "", fmt.Errorf("AI API key not set, please call SetAPIKey first")
+	}
+
+	// If Model is not set in Request, use Client's Model
+	if req.Model == "" {
+		req.Model = client.Model
+	}
+
+	// Fixed retry flow
+	var lastErr error
+	maxRetries := client.Cfg.MaxRetries
+
+	for attempt := 1; attempt <= maxRetries; attempt++ {
+		if attempt > 1 {
+			client.Log.Warnf("⚠️  AI API call failed, retrying (%d/%d)...", attempt, maxRetries)
+		}
+
+		// Call single request
+		result, err := client.callWithRequest(req)
+		if err == nil {
+			if attempt > 1 {
+				client.Log.Infof("✓ AI API retry succeeded")
+			}
+			return result, nil
+		}
+
+		lastErr = err
+		// Check if error is retryable
+		if !client.Hooks.IsRetryableError(err) {
+			return "", err
+		}
+
+		// Wait before retry
+		if attempt < maxRetries {
+			waitTime := client.Cfg.RetryWaitBase * time.Duration(attempt)
+			client.Log.Infof("⏳ Waiting %v before retry...", waitTime)
+			time.Sleep(waitTime)
+		}
+	}
+
+	return "", fmt.Errorf("still failed after %d retries: %w", maxRetries, lastErr)
+}
+
+// CallWithRequestFull calls the AI API and returns both text content and tool calls.
+func (client *Client) CallWithRequestFull(req *Request) (*LLMResponse, error) {
+	if client.APIKey == "" && (client.Cfg == nil || !client.Cfg.AllowEmptyAPIKey) {
+		return nil, fmt.Errorf("AI API key not set, please call SetAPIKey first")
+	}
+	if req.Model == "" {
+		req.Model = client.Model
+	}
+
+	var lastErr error
+	maxRetries := client.Cfg.MaxRetries
+	for attempt := 1; attempt <= maxRetries; attempt++ {
+		if attempt > 1 {
+			client.Log.Warnf("⚠️  AI API call failed, retrying (%d/%d)...", attempt, maxRetries)
+		}
+		result, err := client.callWithRequestFull(req)
+		if err == nil {
+			return result, nil
+		}
+		lastErr = err
+		if !client.Hooks.IsRetryableError(err) {
+			return nil, err
+		}
+		if attempt < maxRetries {
+			waitTime := client.Cfg.RetryWaitBase * time.Duration(attempt)
+			time.Sleep(waitTime)
+		}
+	}
+	return nil, fmt.Errorf("still failed after %d retries: %w", maxRetries, lastErr)
+}
+
+// callWithRequestFull single call that returns LLMResponse (content + tool calls).
+func (client *Client) callWithRequestFull(req *Request) (*LLMResponse, error) {
+	client.Log.Infof("📡 [%s] Request AI Server (full): BaseURL: %s", client.String(), client.BaseURL)
+
+	requestBody := client.Hooks.BuildRequestBodyFromRequest(req)
+	jsonData, err := client.Hooks.MarshalRequestBody(requestBody)
+	if err != nil {
+		return nil, err
+	}
+
+	url := client.Hooks.BuildUrl()
+	httpReq, err := client.Hooks.BuildRequest(url, jsonData)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+
+	resp, err := client.HTTPClient.Do(httpReq)
+	if err != nil {
+		return nil, fmt.Errorf("failed to send request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read response: %w", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("API returned error (status %d): %s", resp.StatusCode, string(body))
+	}
+
+	return client.Hooks.ParseMCPResponseFull(body)
+}
+
+// callWithRequest single AI API call (using Request object)
+func (client *Client) callWithRequest(req *Request) (string, error) {
+	// Print current AI configuration
+	client.Log.Infof("📡 [%s] Request AI Server with Builder: BaseURL: %s", client.String(), client.BaseURL)
+	client.Log.Debugf("[%s] Messages count: %d", client.String(), len(req.Messages))
+
+	requestBody := client.Hooks.BuildRequestBodyFromRequest(req)
+
+	jsonData, err := client.Hooks.MarshalRequestBody(requestBody)
+	if err != nil {
+		return "", err
+	}
+
+	url := client.Hooks.BuildUrl()
+	client.Log.Infof("📡 [MCP %s] Request URL: %s", client.String(), url)
+
+	httpReq, err := client.Hooks.BuildRequest(url, jsonData)
+	if err != nil {
+		return "", fmt.Errorf("failed to create request: %w", err)
+	}
+
+	resp, err := client.HTTPClient.Do(httpReq)
+	if err != nil {
+		return "", fmt.Errorf("failed to send request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", fmt.Errorf("failed to read response: %w", err)
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("API returned error (status %d): %s", resp.StatusCode, string(body))
+	}
+
+	result, err := client.Hooks.ParseMCPResponse(body)
+	if err != nil {
+		return "", fmt.Errorf("fail to parse AI server response: %w", err)
+	}
+
+	return result, nil
+}
+
+// BuildRequestBodyFromRequest builds request body from Request object
+func (client *Client) BuildRequestBodyFromRequest(req *Request) map[string]any {
+	// Convert Message to API format — must use map[string]any to support
+	// tool-call messages (tool_calls, tool_call_id fields).
+	messages := make([]map[string]any, 0, len(req.Messages))
+	for _, msg := range req.Messages {
+		m := map[string]any{"role": msg.Role}
+		if len(msg.ToolCalls) > 0 {
+			// Assistant message that contains tool invocations.
+			// content must be null/omitted for OpenAI compatibility.
+			m["tool_calls"] = msg.ToolCalls
+		} else if msg.ToolCallID != "" {
+			// Tool result message (role="tool").
+			m["tool_call_id"] = msg.ToolCallID
+			m["content"] = msg.Content
+		} else {
+			m["content"] = msg.Content
+		}
+		messages = append(messages, m)
+	}
+
+	// Guard: truncate messages if they would exceed the model's context window
+	maxOut := client.MaxTokens
+	if req.MaxTokens != nil {
+		maxOut = *req.MaxTokens
+	}
+	if client.Cfg.MaxContext > 0 {
+		truncated, removed := truncateMessagesAny(messages, client.Cfg.MaxContext, maxOut)
+		if removed > 0 {
+			client.Log.Warnf("⚠️  [%s] Context guard: truncated %d oldest messages to fit within %d token limit",
+				client.String(), removed, client.Cfg.MaxContext)
+			messages = truncated
+		}
+	}
+
+	// Build basic request body
+	requestBody := map[string]interface{}{
+		"model":    req.Model,
+		"messages": messages,
+	}
+
+	// Add optional parameters (only add non-nil parameters)
+	if req.Temperature != nil {
+		requestBody["temperature"] = *req.Temperature
+	} else {
+		// If not set in Request, use Client's configuration
+		requestBody["temperature"] = client.Cfg.Temperature
+	}
+
+	// OpenAI newer models use max_completion_tokens instead of max_tokens
+	tokenKey := "max_tokens"
+	if usesMaxCompletionTokens(client.Provider) {
+		tokenKey = "max_completion_tokens"
+	}
+	if req.MaxTokens != nil {
+		requestBody[tokenKey] = *req.MaxTokens
+	} else {
+		// If not set in Request, use Client's MaxTokens
+		requestBody[tokenKey] = client.MaxTokens
+	}
+
+	if req.TopP != nil {
+		requestBody["top_p"] = *req.TopP
+	}
+
+	if req.FrequencyPenalty != nil {
+		requestBody["frequency_penalty"] = *req.FrequencyPenalty
+	}
+
+	if req.PresencePenalty != nil {
+		requestBody["presence_penalty"] = *req.PresencePenalty
+	}
+
+	if len(req.Stop) > 0 {
+		requestBody["stop"] = req.Stop
+	}
+
+	if len(req.Tools) > 0 {
+		requestBody["tools"] = req.Tools
+	}
+
+	if req.ToolChoice != "" {
+		requestBody["tool_choice"] = req.ToolChoice
+	}
+
+	if req.Stream {
+		requestBody["stream"] = true
+	}
+
+	return requestBody
+}
+
+// CallWithRequestStream streams the LLM response via SSE (Server-Sent Events).
+// onChunk is called with the full accumulated text so far after each received chunk.
+// Returns the complete final text when the stream ends.
+//
+// Idle timeout: if no chunk arrives for 30 seconds the stream is cancelled automatically.
+// This prevents the scanner from blocking indefinitely on a hung or stalled connection.
+func (client *Client) CallWithRequestStream(req *Request, onChunk func(string)) (string, error) {
+	if client.APIKey == "" && (client.Cfg == nil || !client.Cfg.AllowEmptyAPIKey) {
+		return "", fmt.Errorf("AI API key not set")
+	}
+	if req.Model == "" {
+		req.Model = client.Model
+	}
+	req.Stream = true
+
+	requestBody := client.Hooks.BuildRequestBodyFromRequest(req)
+	jsonData, err := client.Hooks.MarshalRequestBody(requestBody)
+	if err != nil {
+		return "", err
+	}
+
+	url := client.Hooks.BuildUrl()
+	httpReq, err := client.Hooks.BuildRequest(url, jsonData)
+	if err != nil {
+		return "", err
+	}
+
+	// Idle-timeout watchdog: cancel the request if no SSE line arrives for 60 seconds.
+	// This breaks the scanner out of an indefinitely blocking Read on a hung connection.
+	const idleTimeout = 60 * time.Second
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	resetCh := make(chan struct{}, 1)
+	go func() {
+		t := time.NewTimer(idleTimeout)
+		defer t.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-t.C:
+				cancel() // idle timeout: kill the connection
+				return
+			case <-resetCh:
+				// received a line — reset the idle timer
+				if !t.Stop() {
+					select {
+					case <-t.C:
+					default:
+					}
+				}
+				t.Reset(idleTimeout)
+			}
+		}
+	}()
+
+	httpReq = httpReq.WithContext(ctx)
+	resp, err := client.HTTPClient.Do(httpReq)
+	if err != nil {
+		return "", fmt.Errorf("streaming request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return "", fmt.Errorf("API error (status %d): %s", resp.StatusCode, string(body))
+	}
+
+	return ParseSSEStream(resp.Body, onChunk, func() {
+		select {
+		case resetCh <- struct{}{}:
+		default:
+		}
+	})
+}
+
+// ParseSSEStream reads an SSE response body, accumulates text deltas,
+// and calls onChunk with the full accumulated text after each chunk.
+// If onLine is non-nil, it is called after each raw SSE line is scanned
+// (useful for resetting idle-timeout watchdogs).
+// Returns the complete accumulated text.
+func ParseSSEStream(body io.Reader, onChunk func(string), onLine func()) (string, error) {
+	var accumulated strings.Builder
+	scanner := bufio.NewScanner(body)
+
+	for scanner.Scan() {
+		if onLine != nil {
+			onLine()
+		}
+
+		line := scanner.Text()
+		if !strings.HasPrefix(line, "data: ") {
+			continue
+		}
+		data := strings.TrimPrefix(line, "data: ")
+		if data == "[DONE]" {
+			break
+		}
+
+		var chunk struct {
+			Choices []struct {
+				Delta struct {
+					Content string `json:"content"`
+				} `json:"delta"`
+				FinishReason *string `json:"finish_reason"`
+			} `json:"choices"`
+			Usage *struct {
+				PromptTokens     int `json:"prompt_tokens"`
+				CompletionTokens int `json:"completion_tokens"`
+				TotalTokens      int `json:"total_tokens"`
+			} `json:"usage,omitempty"`
+		}
+		if err := json.Unmarshal([]byte(data), &chunk); err != nil {
+			continue // skip malformed chunks
+		}
+
+		if chunk.Usage != nil && chunk.Usage.TotalTokens > 0 {
+			fmt.Printf("📊 [TokenUsage] prompt=%d, completion=%d, total=%d\n",
+				chunk.Usage.PromptTokens, chunk.Usage.CompletionTokens, chunk.Usage.TotalTokens)
+		}
+
+		if len(chunk.Choices) == 0 {
+			continue
+		}
+
+		delta := chunk.Choices[0].Delta.Content
+		if delta == "" {
+			continue
+		}
+
+		accumulated.WriteString(delta)
+		if onChunk != nil {
+			onChunk(accumulated.String())
+		}
+	}
+
+	if err := scanner.Err(); err != nil {
+		return accumulated.String(), fmt.Errorf("stream interrupted: %w", err)
+	}
+
+	return accumulated.String(), nil
 }

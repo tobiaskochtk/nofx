@@ -1,0 +1,57 @@
+# docker/Dockerfile.dev
+# Development and testing container with Go toolchain
+
+ARG GO_VERSION=1.25-alpine
+ARG ALPINE_VERSION=3.20
+ARG TA_LIB_VERSION=0.4.0
+
+# ──────────────────────────────────────────────────────────────
+# TA-Lib Build Stage (shared across builds)
+# ──────────────────────────────────────────────────────────────
+FROM alpine:${ALPINE_VERSION} AS ta-lib-builder
+ARG TA_LIB_VERSION
+
+RUN apk update && apk add --no-cache \
+    wget tar make gcc g++ musl-dev autoconf automake
+
+RUN wget http://prdownloads.sourceforge.net/ta-lib/ta-lib-${TA_LIB_VERSION}-src.tar.gz && \
+    tar -xzf ta-lib-${TA_LIB_VERSION}-src.tar.gz && \
+    cd ta-lib && \
+    if [ "$(uname -m)" = "aarch64" ]; then \
+        CONFIG_GUESS=$(find /usr/share -name config.guess | head -1) && \
+        CONFIG_SUB=$(find /usr/share -name config.sub | head -1) && \
+        cp "$CONFIG_GUESS" config.guess && \
+        cp "$CONFIG_SUB" config.sub && \
+        chmod +x config.guess config.sub; \
+    fi && \
+    ./configure --prefix=/usr/local && \
+    make && make install && \
+    cd .. && rm -rf ta-lib ta-lib-${TA_LIB_VERSION}-src.tar.gz
+
+# ──────────────────────────────────────────────────────────────
+# Development Stage (Go toolchain + TA-Lib)
+# ──────────────────────────────────────────────────────────────
+FROM golang:${GO_VERSION}
+
+# Install development tools
+RUN apk update && apk add --no-cache \
+    git make gcc g++ musl-dev curl bash
+
+# Copy TA-Lib from builder
+COPY --from=ta-lib-builder /usr/local /usr/local
+
+# Set Go environment variables
+ENV GOROOT=/usr/local/go
+ENV PATH=$GOROOT/bin:$PATH
+ENV GOTOOLCHAIN=local
+ENV CGO_ENABLED=1
+ENV CGO_CFLAGS="-D_LARGEFILE64_SOURCE"
+
+WORKDIR /app
+
+# Pre-download dependencies (will be cached)
+COPY go.mod go.sum ./
+RUN go mod download
+
+# Keep container running for interactive use
+CMD ["sleep", "infinity"]

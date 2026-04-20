@@ -9,7 +9,6 @@ NOFX documentation has been reorganized into a structured `docs/` directory for 
 ### Deployment Guides
 - `DOCKER_DEPLOY.en.md` → `docs/getting-started/docker-deploy.en.md`
 - `DOCKER_DEPLOY.md` → `docs/getting-started/docker-deploy.zh-CN.md`
-- `PM2_DEPLOYMENT.md` → `docs/getting-started/pm2-deploy.md`
 - `CUSTOM_API.md` → `docs/getting-started/custom-api.md`
 
 ### Community Docs
@@ -42,7 +41,6 @@ nofx/
 ├── README.uk.md
 ├── DOCKER_DEPLOY.md
 ├── DOCKER_DEPLOY.en.md
-├── PM2_DEPLOYMENT.md
 ├── CUSTOM_API.md
 ├── HOW_TO_POST_BOUNTY.md
 ├── INTEGRATION_BOUNTY_HYPERLIQUID.md
@@ -101,7 +99,6 @@ Files GitHub needs to see:
 
 1. **`getting-started/`** - Deployment and setup
    - Docker deployment (EN/中文)
-   - PM2 deployment
    - Custom API configuration
 
 2. **`guides/`** - Usage guides and tutorials
@@ -146,7 +143,7 @@ Files GitHub needs to see:
 ```
 
 **GitHub URLs automatically redirect!**
-- Old: `github.com/tinkle-community/nofx/blob/main/DOCKER_DEPLOY.en.md`
+- Old: `github.com/NoFxAiOS/nofx/blob/main/DOCKER_DEPLOY.en.md`
 - Will redirect to: `github.com/.../docs/getting-started/docker-deploy.en.md`
 
 ## 🛠️ For Contributors
@@ -227,7 +224,7 @@ Closes #XXX
 3. Ask in [Telegram](https://t.me/nofx_dev_community)
 
 **Link broken?**
-- Report in [GitHub Issues](https://github.com/tinkle-community/nofx/issues)
+- Report in [GitHub Issues](https://github.com/NoFxAiOS/nofx/issues)
 - We'll fix it ASAP!
 
 **Want to contribute docs?**

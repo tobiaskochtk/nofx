@@ -85,7 +85,7 @@ git clone https://github.com/YOUR_USERNAME/nofx.git
 cd nofx
 
 # Add upstream remote
-git remote add upstream https://github.com/tinkle-community/nofx.git
+git remote add upstream https://github.com/NoFxAiOS/nofx.git
 ```
 
 ### 2. Create a Feature Branch
@@ -440,7 +440,7 @@ Reviewers will check:
 
 ### How It Works
 
-1. Check [open bounty issues](https://github.com/tinkle-community/nofx/labels/bounty)
+1. Check [open bounty issues](https://github.com/NoFxAiOS/nofx/labels/bounty)
 2. Comment to claim (first come, first served)
 3. Complete work within deadline
 4. Submit PR with bounty claim section filled
@@ -459,7 +459,7 @@ Reviewers will check:
 ## ❓ Questions?
 
 - **General questions:** Join our [Telegram Community](https://t.me/nofx_dev_community)
-- **Technical questions:** Open a [Discussion](https://github.com/tinkle-community/nofx/discussions)
+- **Technical questions:** Open a [Discussion](https://github.com/NoFxAiOS/nofx/discussions)
 - **Security issues:** See [Security Policy](SECURITY.md)
 - **Bug reports:** Use [Bug Report Template](.github/ISSUE_TEMPLATE/bug_report.md)
 
@@ -469,7 +469,6 @@ Reviewers will check:
 
 - [Project Roadmap](docs/roadmap/README.md)
 - [Architecture Documentation](docs/architecture/README.md)
-- [API Documentation](docs/api/README.md)
 - [Deployment Guide](docs/getting-started/docker-deploy.en.md)
 
 ---

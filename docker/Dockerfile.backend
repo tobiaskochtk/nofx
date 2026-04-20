@@ -56,15 +56,20 @@ RUN CGO_ENABLED=1 GOOS=linux \
 # ──────────────────────────────────────────────────────────────
 FROM alpine:${ALPINE_VERSION}
 
-RUN apk update && apk add --no-cache ca-certificates tzdata
+RUN apk update && apk add --no-cache ca-certificates tzdata redis nodejs npm git && \
+    npm install -g @openai/codex
 
 COPY --from=ta-lib-builder /usr/local /usr/local
 WORKDIR /app
 COPY --from=backend-builder /app/nofx .
+COPY --from=backend-builder /app/config/derivs_v1.yaml /app/config/derivs_v1.yaml
+COPY --from=backend-builder /app/prompts /app/prompts
+COPY docker/start-nofx.sh /usr/local/bin/start-nofx.sh
+RUN chmod +x /usr/local/bin/start-nofx.sh
 
 EXPOSE 8080
 
 HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
   CMD wget --no-verbose --tries=1 --spider http://localhost:8080/api/health || exit 1
 
-CMD ["./nofx"]
+CMD ["/usr/local/bin/start-nofx.sh"]

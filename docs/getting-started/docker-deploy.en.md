@@ -46,37 +46,34 @@ docker compose --version  # Docker 24+ includes this, no separate installation n
 
 ## 🚀 Quick Start (3 Steps)
 
-### Step 1: Prepare Configuration File
+### Step 1: Prepare `.env`
 
 ```bash
-# Copy configuration template
-cp config.example.jsonc config.json
+# Copy environment template
+cp .env.example .env
 
-# Edit configuration file with your API keys
-nano config.json  # or use any other editor
-
-⚠️ **Note**: Basic config.json is still needed for some settings, but ~~trader configurations~~ are now done through the web interface.
+# Edit environment variables
+nano .env  # or use any other editor
 ```
 
-**Required fields:**
-```json
-{
-  "traders": [
-    {
-      "id": "my_trader",
-      "name": "My AI Trader",
-      "ai_model": "deepseek",
-      "binance_api_key": "YOUR_BINANCE_API_KEY",       // ← Your Binance API Key
-      "binance_secret_key": "YOUR_BINANCE_SECRET_KEY", // ← Your Binance Secret Key
-      "deepseek_key": "YOUR_DEEPSEEK_API_KEY",         // ← Your DeepSeek API Key
-      "initial_balance": 1000.0,
-      "scan_interval_minutes": 3
-    }
-  ],
-  "use_default_coins": true,
-  "api_server_port": 8080
-}
+**Minimum required values:**
+```dotenv
+JWT_SECRET=your-long-random-jwt-secret
+DATA_ENCRYPTION_KEY=your-base64-encoded-32-byte-key
+DB_TYPE=postgres
+DB_HOST=postgres
+DB_PORT=5432
+DB_USER=nofx
+DB_PASSWORD=change-this-in-production
+DB_NAME=nofx
+DB_SSLMODE=disable
 ```
+
+> **Important**
+> - Docker deployments should keep `DB_TYPE=postgres` for the main runtime.
+> - `JWT_SECRET` protects user sessions.
+> - `DATA_ENCRYPTION_KEY` encrypts API keys and other secrets at rest.
+> - Change database passwords and secrets before exposing the stack beyond localhost.
 
 ### Step 2: One-Click Start
 
@@ -214,11 +211,11 @@ services:
 
 ## 📁 Data Persistence
 
-The system automatically persists data to local directories:
+The system automatically persists data to local directories and Docker volumes:
 
 - `./decision_logs/`: AI decision logs
 - `./coin_pool_cache/`: Coin pool cache
-- ~~`./config.json`: Configuration file (mounted)~~ (Deprecated)
+- `postgres-data`: Docker volume used by the PostgreSQL service
 
 **Data locations:**
 ```bash
@@ -226,11 +223,18 @@ The system automatically persists data to local directories:
 ls -la decision_logs/
 ls -la coin_pool_cache/
 
-# Backup data
-tar -czf backup_$(date +%Y%m%d).tar.gz decision_logs/ coin_pool_cache/ ~~config.json~~ trading.db
+# Backup files and environment
+tar -czf backup_$(date +%Y%m%d)_files.tar.gz decision_logs/ coin_pool_cache/ .env
+
+# Backup PostgreSQL
+docker compose exec -T postgres \
+  pg_dump -U "${DB_USER:-nofx}" -d "${DB_NAME:-nofx}" \
+  > backup_$(date +%Y%m%d)_postgres.sql
 
 # Restore data
-tar -xzf backup_20241029.tar.gz
+tar -xzf backup_20241029_files.tar.gz
+cat backup_20241029_postgres.sql | docker compose exec -T postgres \
+  psql -U "${DB_USER:-nofx}" -d "${DB_NAME:-nofx}"
 ```
 
 ## 🐛 Troubleshooting
@@ -260,16 +264,26 @@ lsof -i :3000  # frontend port
 kill -9 <PID>
 ```
 
-### Configuration File Not Found
+### Environment File Missing or Incomplete
 
 ```bash
-# ~~Ensure config.json exists~~
-# ~~ls -la config.json~~
+# Ensure .env exists
+ls -la .env
 
-# ~~If not exists, copy template~~
-# ~~cp config.example.jsonc config.json~~
+# If not, copy template
+cp .env.example .env
+```
 
-*Note: Now using SQLite database for configuration storage, no longer need config.json*
+Required database settings for Docker:
+
+```dotenv
+DB_TYPE=postgres
+DB_HOST=postgres
+DB_PORT=5432
+DB_USER=nofx
+DB_PASSWORD=change-this-in-production
+DB_NAME=nofx
+DB_SSLMODE=disable
 ```
 
 ### Health Check Failing
@@ -309,13 +323,13 @@ docker system prune -a --volumes
 
 ## 🔐 Security Recommendations
 
-1. ~~**Don't commit config.json to Git**~~
+1. **Don't commit `.env` or PostgreSQL backups to Git**
    ```bash
-   # ~~Ensure config.json is in .gitignore~~
-   # ~~echo "config.json" >> .gitignore~~
+   # Common sensitive files to ignore
+   echo ".env" >> .gitignore
+   echo "backup_*.sql" >> .gitignore
    ```
-   
-   *Note: Now using trading.db database, ensure not to commit sensitive data*
+   PostgreSQL dumps and `.env` files contain secrets. Treat them like credentials.
 
 2. **Use environment variables for sensitive data**
    ```yaml

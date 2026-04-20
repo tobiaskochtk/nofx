@@ -13,7 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - Documentation system with multi-language support (EN/CN/RU/UK)
-- Complete getting-started guides (Docker, PM2, Custom API)
+- Complete getting-started guides (Docker, Custom API)
 - Architecture documentation with system design details
 - User guides with FAQ and troubleshooting
 - Community documentation with bounty programs
@@ -196,7 +196,7 @@ When releasing a new version, move [Unreleased] items to a new version section w
 - [Documentation](docs/README.md)
 - [Contributing Guidelines](CONTRIBUTING.md)
 - [Security Policy](SECURITY.md)
-- [GitHub Repository](https://github.com/tinkle-community/nofx)
+- [GitHub Repository](https://github.com/NoFxAiOS/nofx)
 
 ---
 

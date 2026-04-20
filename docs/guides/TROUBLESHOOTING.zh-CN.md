@@ -226,7 +226,7 @@ docker info | grep -A 10 "Registry Mirrors"
 # 应该显示你配置的镜像源
 ```
 
-**相关 Issue:** [#168](https://github.com/tinkle-community/nofx/issues/168)
+**相关 Issue:** [#168](https://github.com/NoFxAiOS/nofx/issues/168)
 
 ---
 
@@ -340,7 +340,7 @@ environment:
 - 减少交易员数量
 - 增加决策间隔时间（例如从 1 分钟改为 3-5 分钟）
 
-**相关 Issue:** [#60](https://github.com/tinkle-community/nofx/issues/60)
+**相关 Issue:** [#60](https://github.com/NoFxAiOS/nofx/issues/60)
 
 ---
 
@@ -383,40 +383,39 @@ environment:
 
 #### ❌ `database is locked` 错误
 
-**原因:** SQLite 数据库被多个进程访问。
+**原因:** 这通常说明你还在使用旧的 SQLite 部署。当前 Docker 部署应使用 PostgreSQL，不再依赖 `data.db` 锁文件。
 
 **解决方案:**
 ```bash
-# 停止所有 NOFX 进程
-docker compose down
-# 或
-pkill nofx
-
-# 重启
-docker compose up -d
-# 或
-./nofx
+# 确认当前运行时已经切到 PostgreSQL
+docker compose exec nofx-trading printenv DB_TYPE
+docker compose ps postgres
+docker compose exec postgres pg_isready -U nofx -d nofx
 ```
+
+如果这是旧的 SQLite 安装，请先停止多余的 NOFX 进程，只保留一个写入实例，然后尽快迁移到 PostgreSQL。
 
 ---
 
 #### ❌ 交易员配置无法保存
 
 **检查:**
-1. **权限:**
+1. **PostgreSQL 容器状态**
    ```bash
-   ls -l config.db trading.db
-   # 应该对当前用户可写
+   docker compose ps postgres
+   docker compose exec postgres pg_isready -U nofx -d nofx
    ```
 
-2. **磁盘空间:**
+2. **直接检查数据库数据**
+   ```bash
+   ./scripts/view_pg_data.sh                        # 快速总览
+   docker compose exec postgres \
+     psql -U nofx -d nofx -c "SELECT COUNT(*) FROM traders;"
+   ```
+
+3. **磁盘空间**
    ```bash
    df -h  # 确保磁盘未满
-   ```
-
-3. **数据库完整性:**
-   ```bash
-   sqlite3 config.db "PRAGMA integrity_check;"
    ```
 
 ---
@@ -437,15 +436,9 @@ docker compose logs -f backend
 docker compose logs backend --tail=500 > backend_logs.txt
 ```
 
-**手动/PM2:**
+**手动运行:**
 ```bash
-# 运行 ./nofx 的终端会显示日志
-
-# PM2:
-pm2 logs nofx --lines 100
-
-# 保存到文件
-pm2 logs nofx --lines 500 > backend_logs.txt
+# 如果不是通过 Docker，而是手动运行 ./nofx，可直接在终端查看日志
 ```
 
 ---
@@ -532,13 +525,16 @@ docker compose restart frontend
 
 ```bash
 # 检查数据库中的交易员
-sqlite3 config.db "SELECT id, name, ai_model_id, exchange_id, is_running FROM traders;"
+docker compose exec postgres \
+  psql -U nofx -d nofx -c "SELECT id, name, ai_model_id, exchange_id, is_running FROM traders;"
 
 # 检查 AI 模型
-sqlite3 config.db "SELECT id, name, model_type, enabled FROM ai_models;"
+docker compose exec postgres \
+  psql -U nofx -d nofx -c "SELECT id, name, provider, enabled FROM ai_models;"
 
 # 检查系统配置
-sqlite3 config.db "SELECT key, value FROM system_config;"
+docker compose exec postgres \
+  psql -U nofx -d nofx -c "SELECT key, value FROM system_config;"
 ```
 
 ---
@@ -560,7 +556,7 @@ sqlite3 config.db "SELECT key, value FROM system_config;"
 
 3. **加入社区:**
    - [Telegram 开发者社区](https://t.me/nofx_dev_community)
-   - [GitHub Discussions](https://github.com/tinkle-community/nofx/discussions)
+   - [GitHub Discussions](https://github.com/NoFxAiOS/nofx/discussions)
 
 ---
 
@@ -572,12 +568,12 @@ sqlite3 config.db "SELECT key, value FROM system_config;"
 # 停止所有服务
 docker compose down
 
-# 备份数据库（以防万一）
-cp config.db config.db.backup
-cp trading.db trading.db.backup
+# 可选：备份 PostgreSQL 数据
+docker compose exec postgres \
+  pg_dump -U nofx -d nofx > backup_nofx.sql
 
-# 删除数据库（全新开始）
-rm config.db trading.db
+# 删除所有持久化卷（全新开始）
+docker compose down -v
 
 # 重启
 docker compose up -d --build

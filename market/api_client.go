@@ -6,6 +6,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"nofx/hook"
 	"strconv"
 	"time"
 )
@@ -19,10 +20,18 @@ type APIClient struct {
 }
 
 func NewAPIClient() *APIClient {
+	client := &http.Client{
+		Timeout: 30 * time.Second,
+	}
+
+	hookRes := hook.HookExec[hook.SetHttpClientResult](hook.SET_HTTP_CLIENT, client)
+	if hookRes != nil && hookRes.Error() == nil {
+		log.Printf("Using HTTP client set by Hook")
+		client = hookRes.GetResult()
+	}
+
 	return &APIClient{
-		client: &http.Client{
-			Timeout: 30 * time.Second,
-		},
+		client: client,
 	}
 }
 
@@ -74,6 +83,7 @@ func (c *APIClient) GetKlines(symbol, interval string, limit int) ([]Kline, erro
 	var klineResponses []KlineResponse
 	err = json.Unmarshal(body, &klineResponses)
 	if err != nil {
+		log.Printf("Failed to get K-line data, response content: %s", string(body))
 		return nil, err
 	}
 
@@ -81,7 +91,7 @@ func (c *APIClient) GetKlines(symbol, interval string, limit int) ([]Kline, erro
 	for _, kr := range klineResponses {
 		kline, err := parseKline(kr)
 		if err != nil {
-			log.Printf("解析K线数据失败: %v", err)
+			log.Printf("Failed to parse K-line data: %v", err)
 			continue
 		}
 		klines = append(klines, kline)
@@ -97,7 +107,7 @@ func parseKline(kr KlineResponse) (Kline, error) {
 		return kline, fmt.Errorf("invalid kline data")
 	}
 
-	// 解析各个字段
+	// Parse each field
 	kline.OpenTime = int64(kr[0].(float64))
 	kline.Open, _ = strconv.ParseFloat(kr[1].(string), 64)
 	kline.High, _ = strconv.ParseFloat(kr[2].(string), 64)

@@ -1,0 +1,127 @@
+{
+  "coin_source": {
+    "ai500_limit": 5,
+    "excluded_coins": [
+      "BTCUSDT",
+      "ETHUSDT"
+    ],
+    "oi_low_limit": 3,
+    "oi_top_limit": 5,
+    "source_type": "mixed",
+    "use_ai500": true,
+    "use_hyper_all": false,
+    "use_hyper_main": false,
+    "use_oi_low": true,
+    "use_oi_top": true
+  },
+  "indicators": {
+    "atr_periods": [
+      14
+    ],
+    "boll_periods": [
+      20
+    ],
+    "ema_periods": [
+      9,
+      21
+    ],
+    "enable_atr": true,
+    "enable_boll": true,
+    "enable_ema": true,
+    "enable_f4": true,
+    "enable_f5": true,
+    "enable_f6": true,
+    "enable_f7": true,
+    "enable_funding_rate": true,
+    "enable_macd": true,
+    "enable_netflow_ranking": true,
+    "enable_oi": true,
+    "enable_oi_ranking": true,
+    "enable_price_ranking": true,
+    "enable_quant_data": true,
+    "enable_quant_netflow": true,
+    "enable_quant_oi": true,
+    "enable_raw_klines": true,
+    "enable_rsi": true,
+    "enable_volume": true,
+    "klines": {
+      "enable_multi_timeframe": true,
+      "longer_count": 20,
+      "longer_timeframe": "1h",
+      "primary_count": 30,
+      "primary_timeframe": "5m",
+      "selected_timeframes": [
+        "3m",
+        "5m",
+        "15m",
+        "1h"
+      ]
+    },
+    "netflow_ranking_duration": "1h",
+    "netflow_ranking_limit": 10,
+    "nofxos_api_key": "cm_568c67eae410d912c54c",
+    "oi_ranking_duration": "1h",
+    "oi_ranking_limit": 10,
+    "price_ranking_duration": "1h,4h,24h",
+    "price_ranking_limit": 10,
+    "rsi_periods": [
+      7,
+      14
+    ]
+  },
+  "language": "en",
+  "prompt_sections": {
+    "decision_format": "# Decision Format\n\nWhen entering, include concise reason codes that reflect the strongest non-redundant confirmations. If passing on a repeat symbol or weak continuation setup, explicitly note whether the rejection was due to repeat-loss risk, weak OI confirmation, crowding, extension, or execution concerns.",
+    "decision_process": "# Decision Process\n\n1. Scan OI ranking and AI500 candidates for liquid tradable altcoins\n2. Check whether the setup is fresh or a repeat attempt in the same symbol/regime\n3. If there was a recent loss in the same symbol or same regime, require materially stronger confirmation before entering again\n4. Reject crowded continuation longs when OI is flat/falling, funding is long-crowded, setup is extended, or slippage/liquidity is mediocre\n5. Prefer setups with alignment across trend, confirmation quality, and execution quality rather than taking every momentum name\n6. If evidence is mixed, pass and wait for better confirmation instead of forcing a trade",
+    "entry_standards": "# Entry Standards\n\n- For long entries, require trend alignment plus at least one strong confirmation beyond price strength: rising/confirming OI, clear volume expansion, strong relative strength, or institutional inflow\n- Be much more selective on longs when OI is flat/falling, funding shows longs are crowded, setup is extended, or execution quality is only medium with notable slippage risk\n- Avoid immediate same-symbol re-entry after a loss unless the new setup has materially improved confirmation versus the prior failed attempt\n- Avoid repeating longs in the same regime after a recent loss when the new thesis is substantially the same\n- Treat funding divergence as a bonus, not a substitute for missing OI/volume confirmation",
+    "role_definition": "# You are an aggressive altcoin trader, but your edge comes from selective aggression rather than constant breakout chasing. Favor clean, asymmetric setups and avoid repeat-loss loops in the same symbol or same weak regime.",
+    "trading_frequency": "# Trading Frequency\n\n- Target active trading only when setup quality is clearly above threshold\n- Do not force the 3-8 trades/day target if confirmations are weak\n- Reduce activity after recent losses in the same symbol or same regime\n- Prefer fewer, cleaner trades over repeated attempts in the same momentum name"
+  },
+  "risk_control": {
+    "adaptive_reentry_guard": {
+      "enabled": false
+    },
+    "altcoin_max_leverage": 10,
+    "altcoin_max_position_value_ratio": 1,
+    "btc_eth_max_leverage": 5,
+    "btc_eth_max_position_value_ratio": 5,
+    "max_margin_usage": 0.85,
+    "max_positions": 3,
+    "min_confidence": 70,
+    "min_position_size": 12,
+    "min_risk_reward_ratio": 2.5,
+    "trailing_stop": {
+      "check_interval_sec": 30,
+      "enabled": true,
+      "tiers": [
+        {
+          "lock_profit_pct": 0.2,
+          "mode": "lock_profit",
+          "trigger_profit_pct": 0.5
+        },
+        {
+          "mode": "trail_offset",
+          "trail_offset_pct": 0.5,
+          "trigger_profit_pct": 1
+        },
+        {
+          "mode": "trail_offset",
+          "trail_offset_pct": 1,
+          "trigger_profit_pct": 3
+        },
+        {
+          "mode": "trail_offset",
+          "trail_offset_pct": 3,
+          "trigger_profit_pct": 10
+        }
+      ],
+      "update_threshold_pct": 0.3
+    }
+  },
+  "signal_provider": {
+    "api_key": "local-selfhosted-ai500-token",
+    "base_url": "http://selfhosted-ai500:8081",
+    "type": "selfhosted_ai500"
+  },
+  "strategy_type": "ai_trading"
+}

@@ -1,0 +1,84 @@
+# NOFX Stable Release Deployment
+# Production-ready stable version
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: nofx-postgres
+    restart: unless-stopped
+    ports:
+      - "${POSTGRES_BIND_IP:-127.0.0.1}:${POSTGRES_HOST_PORT:-15432}:5432"
+    environment:
+      - POSTGRES_USER=${DB_USER:-nofx}
+      - POSTGRES_PASSWORD=${DB_PASSWORD:-nofx}
+      - POSTGRES_DB=${DB_NAME:-nofx}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - /etc/localtime:/etc/localtime:ro
+    networks:
+      - nofx-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-nofx} -d ${DB_NAME:-nofx}"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 20s
+
+  nofx:
+    image: ghcr.io/nofxaios/nofx/nofx-backend:stable
+    container_name: nofx-trading
+    restart: unless-stopped
+    stop_grace_period: 30s
+    ports:
+      - "${NOFX_BACKEND_PORT:-8080}:8080"
+    volumes:
+      - ./data:/app/data
+      - /etc/localtime:/etc/localtime:ro
+    env_file:
+      - .env
+    environment:
+      - TZ=${TZ:-Asia/Shanghai}
+      - AI_MAX_TOKENS=8000
+      - DB_TYPE=${DB_TYPE:-postgres}
+      - DB_PATH=${DB_PATH:-/app/data/data.db}
+      - DB_HOST=${DB_HOST:-postgres}
+      - DB_PORT=${DB_PORT:-5432}
+      - DB_USER=${DB_USER:-nofx}
+      - DB_PASSWORD=${DB_PASSWORD:-nofx}
+      - DB_NAME=${DB_NAME:-nofx}
+      - DB_SSLMODE=${DB_SSLMODE:-disable}
+    networks:
+      - nofx-network
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8080/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+  nofx-frontend:
+    image: ghcr.io/nofxaios/nofx/nofx-frontend:stable
+    container_name: nofx-frontend
+    restart: unless-stopped
+    ports:
+      - "${NOFX_FRONTEND_PORT:-3000}:80"
+    networks:
+      - nofx-network
+    depends_on:
+      - nofx
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://127.0.0.1/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 5s
+
+networks:
+  nofx-network:
+    driver: bridge
+
+volumes:
+  postgres_data:

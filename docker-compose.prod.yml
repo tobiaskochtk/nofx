@@ -1,0 +1,133 @@
+# NOFX Production Deployment
+# 用户部署专用 - 使用官方预构建镜像
+#
+# 一键部署命令:
+# curl -fsSL https://raw.githubusercontent.com/NoFxAiOS/nofx/main/install.sh | bash
+#
+# 或手动部署:
+# curl -O https://raw.githubusercontent.com/NoFxAiOS/nofx/main/docker-compose.prod.yml
+# docker compose -f docker-compose.prod.yml up -d
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: nofx-postgres
+    restart: unless-stopped
+    ports:
+      - "${POSTGRES_BIND_IP:-127.0.0.1}:${POSTGRES_HOST_PORT:-15432}:5432"
+    environment:
+      - POSTGRES_USER=${DB_USER:-nofx}
+      - POSTGRES_PASSWORD=${DB_PASSWORD:-nofx}
+      - POSTGRES_DB=${DB_NAME:-nofx}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - /etc/localtime:/etc/localtime:ro
+    networks:
+      - nofx-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-nofx} -d ${DB_NAME:-nofx}"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 20s
+
+  selfhosted-ai500:
+    profiles: ["selfhosted-ai500"]
+    build:
+      context: .
+      dockerfile: ./services/selfhosted-ai500/Dockerfile
+    container_name: selfhosted-ai500
+    restart: unless-stopped
+    ports:
+      - "${SELFHOSTED_AI500_PORT:-8081}:8081"
+    volumes:
+      - ./data/selfhosted-ai500:/app/data
+      - /etc/localtime:/etc/localtime:ro
+    environment:
+      - SELFHOSTED_AI500_PORT=8081
+      - SELFHOSTED_AI500_AUTH_TOKEN=${SELFHOSTED_AI500_AUTH_TOKEN:-local-selfhosted-ai500-token}
+      - SELFHOSTED_AI500_DB_TYPE=${SELFHOSTED_AI500_DB_TYPE:-postgres}
+      - SELFHOSTED_AI500_DB_PATH=/app/data/selfhosted-ai500.db
+      - SELFHOSTED_AI500_DB_HOST=${SELFHOSTED_AI500_DB_HOST:-postgres}
+      - SELFHOSTED_AI500_DB_PORT=${SELFHOSTED_AI500_DB_PORT:-5432}
+      - SELFHOSTED_AI500_DB_USER=${SELFHOSTED_AI500_DB_USER:-nofx}
+      - SELFHOSTED_AI500_DB_PASSWORD=${SELFHOSTED_AI500_DB_PASSWORD:-nofx}
+      - SELFHOSTED_AI500_DB_NAME=${SELFHOSTED_AI500_DB_NAME:-nofx}
+      - SELFHOSTED_AI500_DB_SSLMODE=${SELFHOSTED_AI500_DB_SSLMODE:-disable}
+      - SELFHOSTED_AI500_EXCHANGES=${SELFHOSTED_AI500_EXCHANGES:-hyperliquid,binance,bybit}
+      - SELFHOSTED_AI500_REFRESH_SECS=${SELFHOSTED_AI500_REFRESH_SECS:-60}
+      - SELFHOSTED_AI500_UNIVERSE_LIMIT=${SELFHOSTED_AI500_UNIVERSE_LIMIT:-120}
+      - SELFHOSTED_AI500_SCORE_THRESHOLD=${SELFHOSTED_AI500_SCORE_THRESHOLD:-70}
+      - SELFHOSTED_AI500_BOOTSTRAP_CONCURRENCY=${SELFHOSTED_AI500_BOOTSTRAP_CONCURRENCY:-8}
+      - SELFHOSTED_AI500_SNAPSHOT_RETENTION_HOURS=${SELFHOSTED_AI500_SNAPSHOT_RETENTION_HOURS:-72}
+    networks:
+      - nofx-network
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8081/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+  nofx:
+    image: ghcr.io/nofxaios/nofx/nofx-backend:latest
+    container_name: nofx-trading
+    restart: unless-stopped
+    stop_grace_period: 30s
+    ports:
+      - "${NOFX_BACKEND_PORT:-8080}:8080"
+    volumes:
+      # Data directory for database and logs
+      - ./data:/app/data
+      - /etc/localtime:/etc/localtime:ro
+    env_file:
+      - .env
+    environment:
+      - TZ=${TZ:-Asia/Shanghai}
+      - AI_MAX_TOKENS=8000
+      - DB_TYPE=${DB_TYPE:-postgres}
+      - DB_PATH=${DB_PATH:-/app/data/data.db}
+      - DB_HOST=${DB_HOST:-postgres}
+      - DB_PORT=${DB_PORT:-5432}
+      - DB_USER=${DB_USER:-nofx}
+      - DB_PASSWORD=${DB_PASSWORD:-nofx}
+      - DB_NAME=${DB_NAME:-nofx}
+      - DB_SSLMODE=${DB_SSLMODE:-disable}
+    networks:
+      - nofx-network
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8080/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+  nofx-frontend:
+    image: ghcr.io/nofxaios/nofx/nofx-frontend:latest
+    container_name: nofx-frontend
+    restart: unless-stopped
+    ports:
+      - "${NOFX_FRONTEND_PORT:-3000}:80"
+    networks:
+      - nofx-network
+    depends_on:
+      - nofx
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://127.0.0.1/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 5s
+
+networks:
+  nofx-network:
+    driver: bridge
+
+volumes:
+  postgres_data:
