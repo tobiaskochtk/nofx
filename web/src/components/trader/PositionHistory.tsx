@@ -36,11 +36,18 @@ function formatDuration(minutes: number): string {
 }
 
 // Format date
-function formatDate(dateStr: string): string {
+function formatDate(dateStr: string, language: Language): string {
   if (!dateStr) return '-'
   const date = new Date(dateStr)
   if (isNaN(date.getTime())) return '-'
-  return date.toLocaleDateString('zh-CN', {
+  const locale =
+    language === 'zh'
+      ? 'zh-CN'
+      : language === 'de'
+        ? 'de-DE'
+        : 'en-US'
+
+  return date.toLocaleString(locale, {
     month: '2-digit',
     day: '2-digit',
     hour: '2-digit',
@@ -66,7 +73,7 @@ function StatCard({
   icon: string
   subtitle?: string
   metricKey?: string
-  language?: string
+  language?: Language
 }) {
   return (
     <div
@@ -109,7 +116,7 @@ function StatCard({
 }
 
 // Symbol Stats Row
-function SymbolStatsRow({ stat }: { stat: SymbolStats }) {
+function SymbolStatsRow({ stat, language }: { stat: SymbolStats; language: Language }) {
   const totalPnl = stat.total_pnl || 0
   const winRate = stat.win_rate || 0
   const pnlColor = totalPnl >= 0 ? '#0ECB81' : '#F6465D'
@@ -126,13 +133,13 @@ function SymbolStatsRow({ stat }: { stat: SymbolStats }) {
           {(stat.symbol || '').replace('USDT', '')}
         </span>
         <span className="text-xs" style={{ color: '#848E9C' }}>
-          {stat.total_trades || 0} trades
+          {stat.total_trades || 0} {t('positionHistory.trades', language).toLowerCase()}
         </span>
       </div>
       <div className="flex items-center gap-6">
         <div className="text-right">
           <div className="text-xs" style={{ color: '#848E9C' }}>
-            Win Rate
+            {t('positionHistory.winRate', language)}
           </div>
           <div className="font-mono font-semibold" style={{ color: winRateColor }}>
             {winRate.toFixed(1)}%
@@ -140,7 +147,7 @@ function SymbolStatsRow({ stat }: { stat: SymbolStats }) {
         </div>
         <div className="text-right min-w-[80px]">
           <div className="text-xs" style={{ color: '#848E9C' }}>
-            P&L
+            {t('positionHistory.pnl', language)}
           </div>
           <div className="font-mono font-semibold" style={{ color: pnlColor }}>
             {totalPnl >= 0 ? '+' : ''}
@@ -176,7 +183,7 @@ function DirectionStatsCard({ stat, language }: { stat: DirectionStats; language
           className="font-bold uppercase"
           style={{ color: iconColor }}
         >
-          {stat.side || 'Unknown'}
+          {stat.side || (language === 'de' ? 'Unbekannt' : language === 'zh' ? '未知' : 'Unknown')}
         </span>
       </div>
       <div className="grid grid-cols-4 gap-4">
@@ -230,7 +237,7 @@ function DirectionStatsCard({ stat, language }: { stat: DirectionStats; language
 }
 
 // Position Row Component
-function PositionRow({ position }: { position: HistoricalPosition }) {
+function PositionRow({ position, language }: { position: HistoricalPosition; language: Language }) {
   const side = position.side || ''
   const isLong = side.toUpperCase() === 'LONG'
   const realizedPnl = position.realized_pnl || 0
@@ -328,7 +335,7 @@ function PositionRow({ position }: { position: HistoricalPosition }) {
 
       {/* Exit Time */}
       <td className="py-3 px-4 text-right text-xs" style={{ color: '#848E9C' }}>
-        {formatDate(position.exit_time)}
+        {formatDate(position.exit_time, language)}
       </td>
     </tr>
   )
@@ -369,7 +376,15 @@ export function PositionHistory({ traderId }: PositionHistoryProps) {
         setSymbolStats(data.symbol_stats || [])
         setDirectionStats(data.direction_stats || [])
       } catch (err) {
-        setError(err instanceof Error ? err.message : 'Failed to load history')
+        setError(
+          err instanceof Error
+            ? err.message
+            : language === 'de'
+              ? 'Verlauf konnte nicht geladen werden'
+              : language === 'zh'
+                ? '历史记录加载失败'
+                : 'Failed to load history'
+        )
       } finally {
         setLoading(false)
       }
@@ -378,7 +393,7 @@ export function PositionHistory({ traderId }: PositionHistoryProps) {
     if (traderId) {
       fetchData()
     }
-  }, [traderId, pageSize])
+  }, [traderId, pageSize, language])
 
   // Get unique symbols for filter
   const uniqueSymbols = useMemo(() => {
@@ -644,12 +659,12 @@ export function PositionHistory({ traderId }: PositionHistoryProps) {
               {t('positionHistory.symbolPerformance', language)}
             </span>
           </div>
-          <div className="space-y-1">
-            {symbolStats.slice(0, 10).map((stat) => (
-              <SymbolStatsRow key={stat.symbol} stat={stat} />
-            ))}
+            <div className="space-y-1">
+              {symbolStats.slice(0, 10).map((stat) => (
+              <SymbolStatsRow key={stat.symbol} stat={stat} language={language} />
+              ))}
+            </div>
           </div>
-        </div>
       )}
 
       {/* Position List */}
@@ -796,7 +811,7 @@ export function PositionHistory({ traderId }: PositionHistoryProps) {
             </thead>
             <tbody>
               {filteredPositions.map((position) => (
-                <PositionRow key={position.id} position={position} />
+                <PositionRow key={position.id} position={position} language={language} />
               ))}
             </tbody>
           </table>
@@ -839,7 +854,7 @@ export function PositionHistory({ traderId }: PositionHistoryProps) {
             {/* Page size selector */}
             <div className="flex items-center gap-2">
               <span className="text-xs" style={{ color: '#848E9C' }}>
-                {language === 'zh' ? '每页' : 'Per page'}:
+                {language === 'zh' ? '每页' : language === 'de' ? 'Pro Seite' : 'Per page'}:
               </span>
               <NofxSelect
                 value={pageSize}

@@ -1045,7 +1045,8 @@ export function RiskControlEditor({
               </label>
               <p className="text-xs" style={{ color: '#848E9C' }}>
                 Uses confirmed anti-patterns as a late pre-execution check after
-                the AI already proposed an entry.
+                the AI already proposed an entry. Only patterns classified as
+                `monitoring_rule` can escalate into live monitoring or blocking.
               </p>
             </div>
             <label className="inline-flex items-center gap-2 cursor-pointer">

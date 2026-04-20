@@ -9,6 +9,7 @@ import (
 	"math"
 	"net"
 	"net/http"
+	storepkg "nofx/store"
 	"strconv"
 	"strings"
 	"sync"
@@ -18,43 +19,44 @@ import (
 )
 
 const (
-	binanceFuturesBase     = "https://fapi.binance.com"
-	binanceWSFutures       = "wss://fstream.binance.com/ws"
-	bybitWSLinear          = "wss://stream.bybit.com/v5/public/linear"
-	bybitLiqTopicPrefix    = "allLiquidation"
-	bybitLiqMax            = 200
-	takerInterval          = "5m"
-	takerLimit             = 200
-	liqLimit               = 300
-	liqFetchAttempts       = 2
-	liqFetchRetryDelay     = 200 * time.Millisecond
-	priceKlineLimit        = 200
-	microHTTPTimeout       = 4 * time.Second
-	zWindowShortBuckets    = 90
-	zWindowLongBuckets     = 360
-	slopeWindowShort       = 20
-	slopeWindowMid         = 60
-	atrPeriod              = 14
-	liqClusterBandPct      = 0.002
-	liqRiskAtrThreshold    = 1.0
-	liqFallbackAtrMultiple = 1.5
-	liqFallbackConf3m      = 0.1
-	liqFallbackConf15m     = 0.08
-	confirmationWindowMins = 15
-	avwapAnchorLookback    = 60
-	bbPeriod               = 20
-	rvShortWindow          = 20
-	rvLongWindow           = 80
-	liqVenueCooldown       = 2 * time.Minute
-	liqSymbolCooldown      = 3 * time.Minute
-	liqVenueTimeoutLimit   = 2
-	liqLogThrottleWindow   = 5 * time.Minute
-	liqEventRetention      = 30 * time.Minute
-	liqEventMaxPerSymbol   = 512
-	liqReconnectDelay      = 3 * time.Second
-	liqBybitHeartbeatEvery = 20 * time.Second
-	liqBybitReadDeadline   = 90 * time.Second
-	liqBinanceReadDeadline = 11 * time.Minute
+	binanceFuturesBase      = "https://fapi.binance.com"
+	binanceWSFutures        = "wss://fstream.binance.com/ws"
+	bybitWSLinear           = "wss://stream.bybit.com/v5/public/linear"
+	bybitLiqTopicPrefix     = "allLiquidation"
+	bybitLiqMax             = 200
+	takerInterval           = "5m"
+	takerLimit              = 200
+	liqLimit                = 300
+	liqFetchAttempts        = 2
+	liqFetchRetryDelay      = 200 * time.Millisecond
+	priceKlineLimit         = 200
+	microHTTPTimeout        = 4 * time.Second
+	zWindowShortBuckets     = 90
+	zWindowLongBuckets      = 360
+	slopeWindowShort        = 20
+	slopeWindowMid          = 60
+	atrPeriod               = 14
+	liqClusterBandPct       = 0.002
+	liqRiskAtrThreshold     = 1.0
+	liqFallbackAtrMultiple  = 1.5
+	liqFallbackConf3m       = 0.1
+	liqFallbackConf15m      = 0.08
+	confirmationWindowMins  = 15
+	avwapAnchorLookback     = 60
+	bbPeriod                = 20
+	rvShortWindow           = 20
+	rvLongWindow            = 80
+	liqVenueCooldown        = 2 * time.Minute
+	liqSymbolCooldown       = 3 * time.Minute
+	liqVenueTimeoutLimit    = 2
+	liqLogThrottleWindow    = 5 * time.Minute
+	liqEventRetention       = 30 * time.Minute
+	liqEventMaxPerSymbol    = 512
+	liqReconnectDelay       = 3 * time.Second
+	liqBybitHeartbeatEvery  = 20 * time.Second
+	liqBybitReadDeadline    = 90 * time.Second
+	liqBinanceReadDeadline  = 11 * time.Minute
+	liqPersistenceRetention = 6 * time.Hour
 )
 
 type microFetcher struct {
@@ -84,6 +86,16 @@ var globalLiqFetchCircuit = newLiqFetchCircuit()
 var globalMicroLogThrottle = newMicroLogThrottle()
 var globalBinanceLiqCollector = newSharedBinanceLiqCollector()
 var globalBybitLiqCollector = newSharedBybitLiqCollector()
+var globalLiqPersistence struct {
+	mu    sync.RWMutex
+	store *storepkg.DerivsLiquidationStore
+}
+var globalLiqPersistenceHydration = struct {
+	mu      sync.Mutex
+	symbols map[string]time.Time
+}{
+	symbols: make(map[string]time.Time),
+}
 
 func newLiqFetchCircuit() *liqFetchCircuit {
 	return &liqFetchCircuit{
@@ -107,7 +119,8 @@ func newLiqEventStore() *liqEventStore {
 
 func newSharedBinanceLiqCollector() *sharedBinanceLiqCollector {
 	return &sharedBinanceLiqCollector{
-		cache: newLiqEventStore(),
+		cache:          newLiqEventStore(),
+		watchedSymbols: make(map[string]struct{}),
 	}
 }
 
@@ -142,6 +155,18 @@ func shouldLogLiqVenueCooldown(venue string, now time.Time) bool {
 	return globalMicroLogThrottle.allow(key, now, liqVenueCooldown)
 }
 
+func SetLiquidationEventStore(store *storepkg.DerivsLiquidationStore) {
+	globalLiqPersistence.mu.Lock()
+	defer globalLiqPersistence.mu.Unlock()
+	globalLiqPersistence.store = store
+}
+
+func currentLiquidationEventStore() *storepkg.DerivsLiquidationStore {
+	globalLiqPersistence.mu.RLock()
+	defer globalLiqPersistence.mu.RUnlock()
+	return globalLiqPersistence.store
+}
+
 func (s *liqEventStore) add(events ...liqEvent) {
 	if len(events) == 0 {
 		return
@@ -158,7 +183,11 @@ func (s *liqEventStore) add(events ...liqEvent) {
 		}
 
 		event.symbol = symbol
-		history := append(s.bySymbol[symbol], event)
+		history := s.bySymbol[symbol]
+		if liqEventHistoryContains(history, event) {
+			continue
+		}
+		history = append(history, event)
 		history = trimLiqEventHistory(history, now)
 		s.bySymbol[symbol] = history
 	}
@@ -214,6 +243,107 @@ func trimLiqEventHistory(history []liqEvent, now time.Time) []liqEvent {
 	return trimmed
 }
 
+func liqEventHistoryContains(history []liqEvent, want liqEvent) bool {
+	for _, existing := range history {
+		if existing.ts == want.ts &&
+			existing.symbol == want.symbol &&
+			existing.side == want.side &&
+			existing.price == want.price &&
+			existing.size == want.size {
+			return true
+		}
+	}
+	return false
+}
+
+func markLiqPersistenceHydrated(symbol string, now time.Time) bool {
+	symbol = strings.ToUpper(strings.TrimSpace(symbol))
+	if symbol == "" {
+		return false
+	}
+
+	globalLiqPersistenceHydration.mu.Lock()
+	defer globalLiqPersistenceHydration.mu.Unlock()
+	if hydratedAt := globalLiqPersistenceHydration.symbols[symbol]; !hydratedAt.IsZero() && now.Sub(hydratedAt) < liqEventRetention {
+		return false
+	}
+	globalLiqPersistenceHydration.symbols[symbol] = now
+	return true
+}
+
+func hydrateLiquidationCacheSymbol(symbol string) {
+	if !markLiqPersistenceHydrated(symbol, time.Now()) {
+		return
+	}
+
+	store := currentLiquidationEventStore()
+	if store == nil {
+		return
+	}
+
+	events, err := store.ListRecent(symbol, time.Now().Add(-liqEventRetention), liqEventMaxPerSymbol)
+	if err != nil {
+		if shouldLogLiqWarning("persist-hydrate", symbol, time.Now(), liqLogThrottleWindow) {
+			log.Printf("[LiqCollector] failed to hydrate persisted liquidation events for %s: %v", symbol, err)
+		}
+		return
+	}
+	if len(events) == 0 {
+		return
+	}
+
+	bybitEvents := make([]liqEvent, 0, len(events))
+	binanceEvents := make([]liqEvent, 0, len(events))
+	for _, event := range events {
+		converted := liqEvent{
+			symbol: strings.ToUpper(strings.TrimSpace(event.Symbol)),
+			price:  event.Price,
+			size:   event.Size,
+			side:   event.Side,
+			ts:     event.EventTimestampMs,
+		}
+		switch strings.ToLower(strings.TrimSpace(event.Venue)) {
+		case "bybit":
+			bybitEvents = append(bybitEvents, converted)
+		case "binance":
+			binanceEvents = append(binanceEvents, converted)
+		}
+	}
+	globalBybitLiqCollector.cache.add(bybitEvents...)
+	globalBinanceLiqCollector.cache.add(binanceEvents...)
+}
+
+func persistLiquidationEvents(venue, topic string, events []liqEvent) {
+	store := currentLiquidationEventStore()
+	if store == nil || len(events) == 0 {
+		return
+	}
+
+	rows := make([]storepkg.DerivsLiquidationEvent, 0, len(events))
+	for _, event := range events {
+		symbol := strings.ToUpper(strings.TrimSpace(event.symbol))
+		if symbol == "" || event.ts <= 0 || event.price <= 0 || event.size <= 0 {
+			continue
+		}
+		rows = append(rows, storepkg.DerivsLiquidationEvent{
+			Venue:            strings.ToLower(strings.TrimSpace(venue)),
+			Symbol:           symbol,
+			EventTime:        time.UnixMilli(event.ts).UTC(),
+			EventTimestampMs: event.ts,
+			Side:             strings.ToUpper(strings.TrimSpace(event.side)),
+			Price:            event.price,
+			Size:             event.size,
+			SourceTopic:      strings.TrimSpace(topic),
+		})
+	}
+	if len(rows) == 0 {
+		return
+	}
+	if err := store.SaveBatch(rows); err != nil && shouldLogLiqWarning("persist-save", venue, time.Now(), liqLogThrottleWindow) {
+		log.Printf("[LiqCollector] failed to persist %s liquidation events: %v", venue, err)
+	}
+}
+
 func (c *sharedBinanceLiqCollector) ensureRunning() {
 	if c == nil {
 		return
@@ -221,6 +351,35 @@ func (c *sharedBinanceLiqCollector) ensureRunning() {
 	c.once.Do(func() {
 		go c.run()
 	})
+}
+
+func (c *sharedBinanceLiqCollector) ensureSymbol(symbol string) {
+	symbol = strings.ToUpper(strings.TrimSpace(symbol))
+	if symbol == "" {
+		return
+	}
+
+	c.ensureRunning()
+	c.mu.Lock()
+	_, exists := c.watchedSymbols[symbol]
+	if !exists {
+		c.watchedSymbols[symbol] = struct{}{}
+	}
+	c.mu.Unlock()
+	if !exists {
+		hydrateLiquidationCacheSymbol(symbol)
+	}
+}
+
+func (c *sharedBinanceLiqCollector) shouldTrackSymbol(symbol string) bool {
+	symbol = strings.ToUpper(strings.TrimSpace(symbol))
+	if symbol == "" {
+		return false
+	}
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	_, exists := c.watchedSymbols[symbol]
+	return exists
 }
 
 func (c *sharedBinanceLiqCollector) run() {
@@ -258,8 +417,9 @@ func (c *sharedBinanceLiqCollector) runOnce() error {
 		if err != nil {
 			return fmt.Errorf("binance ws read: %w", err)
 		}
-		if event := parseBinanceForceOrderMessage(message, ""); event != nil {
+		if event := parseBinanceForceOrderMessage(message, ""); event != nil && c.shouldTrackSymbol(event.symbol) {
 			c.cache.add(*event)
+			persistLiquidationEvents("binance", "!forceOrder@arr", []liqEvent{*event})
 		}
 	}
 }
@@ -288,6 +448,10 @@ func (c *sharedBybitLiqCollector) ensureSymbol(symbol string) {
 	}
 	conn := c.conn
 	c.mu.Unlock()
+
+	if !exists {
+		hydrateLiquidationCacheSymbol(symbol)
+	}
 
 	if !exists && conn != nil {
 		if err := c.subscribeTopics(conn, []string{fmt.Sprintf("%s.%s", bybitLiqTopicPrefix, symbol)}); err != nil &&
@@ -344,7 +508,9 @@ func (c *sharedBybitLiqCollector) runOnce() error {
 		if err != nil {
 			return fmt.Errorf("bybit ws read: %w", err)
 		}
-		c.cache.add(parseBybitLiqMessage(message, "")...)
+		events := parseBybitLiqMessage(message, "")
+		c.cache.add(events...)
+		persistLiquidationEvents("bybit", extractBybitTopic(message), events)
 	}
 }
 
@@ -451,6 +617,9 @@ type liqEventStore struct {
 type sharedBinanceLiqCollector struct {
 	once  sync.Once
 	cache *liqEventStore
+
+	mu             sync.RWMutex
+	watchedSymbols map[string]struct{}
 }
 
 type sharedBybitLiqCollector struct {
@@ -763,6 +932,7 @@ func (f *microFetcher) fetchLiquidations(symbol string) ([]liqEvent, liqFetchOut
 	}
 
 	globalBinanceLiqCollector.ensureRunning()
+	globalBinanceLiqCollector.ensureSymbol(symbol)
 	globalBybitLiqCollector.ensureRunning()
 	globalBybitLiqCollector.ensureSymbol(symbol)
 
@@ -874,6 +1044,14 @@ func parseBybitLiqMessage(raw []byte, want string) []liqEvent {
 	}
 
 	return toBybitLiqEvents(msg.Data, want)
+}
+
+func extractBybitTopic(raw []byte) string {
+	var msg bybitLiqWSMessage
+	if err := json.Unmarshal(raw, &msg); err != nil {
+		return ""
+	}
+	return strings.TrimSpace(msg.Topic)
 }
 
 func toBybitLiqEvents(src []bybitLiqItem, want string) []liqEvent {

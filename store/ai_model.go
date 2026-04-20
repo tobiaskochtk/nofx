@@ -240,11 +240,28 @@ func (s *AIModelStore) Update(userID, id string, enabled bool, apiKey, customAPI
 	if err := s.db.Where("provider = ?", provider).First(&refModel).Error; err == nil {
 		name = refModel.Name
 	} else {
-		if provider == "deepseek" {
+		switch provider {
+		case "deepseek":
 			name = "DeepSeek AI"
-		} else if provider == "qwen" {
+		case "qwen":
 			name = "Qwen AI"
-		} else {
+		case "openai":
+			name = "OpenAI"
+		case "codex":
+			name = "Codex"
+		case "claude":
+			name = "Claude AI"
+		case "gemini":
+			name = "Gemini AI"
+		case "grok":
+			name = "Grok AI"
+		case "kimi":
+			name = "Kimi AI"
+		case "minimax":
+			name = "MiniMax AI"
+		case "claw402":
+			name = "Claw402"
+		default:
 			name = provider + " AI"
 		}
 	}

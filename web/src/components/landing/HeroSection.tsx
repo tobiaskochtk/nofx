@@ -16,6 +16,7 @@ export default function HeroSection({ language }: HeroSectionProps) {
     end: stars,
     duration: 2000,
   })
+  const pickText = (values: Record<Language, string>) => values[language]
 
   return (
     <section className="relative min-h-screen flex items-center justify-center overflow-hidden pt-16">
@@ -80,6 +81,13 @@ export default function HeroSection({ language }: HeroSectionProps) {
                   {(animatedStars / 1000).toFixed(1)}K+
                 </span>{' '}
                 GitHub Stars
+              </>
+            ) : language === 'de' ? (
+              <>
+                <span className="font-bold tabular-nums">
+                  {(animatedStars / 1000).toFixed(1)}K+
+                </span>{' '}
+                GitHub-Stars in {daysOld} Tagen
               </>
             ) : (
               <>
@@ -188,9 +196,9 @@ export default function HeroSection({ language }: HeroSectionProps) {
         >
           {[
             { label: 'GitHub Stars', value: `${(stars / 1000).toFixed(1)}K+` },
-            { label: language === 'zh' ? '支持交易所' : 'Exchanges', value: '5+' },
-            { label: language === 'zh' ? 'AI 模型' : 'AI Models', value: '10+' },
-            { label: language === 'zh' ? '开源免费' : 'Open Source', value: '100%' },
+            { label: pickText({ zh: '支持交易所', en: 'Exchanges', de: 'Boersen', id: 'Exchanges' }), value: '5+' },
+            { label: pickText({ zh: 'AI 模型', en: 'AI Models', de: 'AI-Modelle', id: 'AI Models' }), value: '10+' },
+            { label: pickText({ zh: '开源免费', en: 'Open Source', de: 'Open Source', id: 'Open Source' }), value: '100%' },
           ].map((stat, index) => (
             <motion.div
               key={stat.label}

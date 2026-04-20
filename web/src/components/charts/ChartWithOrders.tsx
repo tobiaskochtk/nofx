@@ -11,6 +11,7 @@ import {
 import { useLanguage } from '../../contexts/LanguageContext'
 import { httpClient } from '../../lib/httpClient'
 import { t } from '../../i18n/translations'
+import { toDateTimeLocale } from '../../i18n/locale'
 
 // Order marker interface
 interface OrderMarker {
@@ -231,7 +232,7 @@ export function ChartWithOrders({
       localization: {
         timeFormatter: (time: number) => {
           const date = new Date(time * 1000)
-          return date.toLocaleString('zh-CN', {
+          return date.toLocaleString(toDateTimeLocale(language), {
             month: '2-digit',
             day: '2-digit',
             hour: '2-digit',
@@ -473,7 +474,7 @@ export function ChartWithOrders({
             }}
           >
             <div style={{ marginBottom: '6px', color: '#F0B90B', fontWeight: 'bold', fontSize: '11px' }}>
-              {new Date((tooltipData.time as number) * 1000).toLocaleString(language === 'zh' ? 'zh-CN' : 'en-US', {
+              {new Date((tooltipData.time as number) * 1000).toLocaleString(toDateTimeLocale(language), {
                 month: 'short',
                 day: 'numeric',
                 hour: '2-digit',

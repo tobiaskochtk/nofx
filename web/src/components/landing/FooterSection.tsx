@@ -7,6 +7,8 @@ interface FooterSectionProps {
 }
 
 export default function FooterSection({ language }: FooterSectionProps) {
+  const pickText = (values: Record<Language, string>) => values[language]
+
   const links = {
     social: [
       { name: 'GitHub', href: OFFICIAL_LINKS.github, icon: Github },
@@ -23,7 +25,12 @@ export default function FooterSection({ language }: FooterSectionProps) {
     ],
     resources: [
       {
-        name: language === 'zh' ? '文档' : 'Documentation',
+        name: pickText({
+          zh: '文档',
+          en: 'Documentation',
+          de: 'Dokumentation',
+          id: 'Documentation',
+        }),
         href: 'https://github.com/NoFxAiOS/nofx/blob/main/README.md',
       },
       { name: 'Issues', href: 'https://github.com/NoFxAiOS/nofx/issues' },

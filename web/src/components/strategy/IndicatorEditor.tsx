@@ -75,7 +75,12 @@ export function IndicatorEditor({
       if (current.length >= 4) {
         // Show toast notification
         const toast = document.createElement('div')
-        toast.textContent = language === 'zh' ? '最多选择 4 个时间维度' : 'Maximum 4 timeframes allowed'
+        toast.textContent =
+          language === 'zh'
+            ? '最多选择 4 个时间维度'
+            : language === 'de'
+              ? 'Maximal 4 Zeitfenster erlaubt'
+              : 'Maximum 4 timeframes allowed'
         toast.className = 'fixed top-4 left-1/2 -translate-x-1/2 px-4 py-2 rounded-lg text-sm z-50 shadow-lg'
         toast.style.cssText = 'background:#F6465D;color:#fff;'
         document.body.appendChild(toast)
@@ -649,7 +654,17 @@ export function IndicatorEditor({
                               color: isSelected ? categoryColors[category] : '#848E9C',
                               boxShadow: isPrimary ? `0 0 0 2px ${categoryColors[category]}` : undefined,
                             }}
-                            title={isPrimary ? `${tf.label} (Primary)` : tf.label}
+                            title={
+                              isPrimary
+                                ? `${tf.label} (${
+                                  language === 'zh'
+                                    ? '主周期'
+                                    : language === 'de'
+                                      ? 'Primär'
+                                      : 'Primary'
+                                })`
+                                : tf.label
+                            }
                           >
                             {tf.label}
                             {isPrimary && <span className="ml-0.5 text-[8px]">★</span>}

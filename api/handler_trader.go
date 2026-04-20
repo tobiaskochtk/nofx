@@ -351,9 +351,9 @@ func (s *Server) handleCreateTrader(c *gin.Context) {
 		), "trader.create.model_disabled", mapStringPairs("model_name", model.Name))
 		return
 	}
-	if model.APIKey == "" {
+	if !modelHasUsableCredentials(model) {
 		SafeBadRequestWithDetails(c, formatTraderCreationError(
-			fmt.Sprintf("AI 模型「%s」缺少 API Key 或支付凭证", model.Name),
+			fmt.Sprintf("AI 模型「%s」缺少 API Key、本地 Codex 鉴权或支付凭证", model.Name),
 			"请前往「设置 > 模型配置」补全模型凭证后，再重新创建机器人",
 		), "trader.create.model_missing_credentials", mapStringPairs("model_name", model.Name))
 		return

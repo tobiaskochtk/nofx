@@ -1,5 +1,9 @@
-import { createContext, useContext, useState, ReactNode } from 'react'
+import { createContext, useContext, useEffect, useState, ReactNode } from 'react'
 import type { Language } from '../i18n/translations'
+import {
+  isSupportedLanguage,
+  toDocumentLanguage,
+} from '../i18n/locale'
 
 interface LanguageContextType {
   language: Language
@@ -14,7 +18,7 @@ export function LanguageProvider({ children }: { children: ReactNode }) {
   // Initialize language from localStorage or default to English
   const [language, setLanguage] = useState<Language>(() => {
     const saved = localStorage.getItem('language')
-    return saved === 'en' || saved === 'zh' || saved === 'id' ? saved : 'en'
+    return isSupportedLanguage(saved) ? saved : 'en'
   })
 
   // Save language to localStorage whenever it changes
@@ -22,6 +26,10 @@ export function LanguageProvider({ children }: { children: ReactNode }) {
     setLanguage(lang)
     localStorage.setItem('language', lang)
   }
+
+  useEffect(() => {
+    document.documentElement.lang = toDocumentLanguage(language)
+  }, [language])
 
   return (
     <LanguageContext.Provider

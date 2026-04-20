@@ -384,23 +384,32 @@ func (at *AutoTrader) loadTrailingTargetsFromExchange(symbol, side string) (stop
 		return 0, false, 0, false
 	}
 
-	for _, order := range orders {
-		if !orderMatchesPositionSide(order, side) {
-			continue
+	entryPrice := 0.0
+	positions, err := at.trader.GetPositions()
+	if err == nil {
+		for _, pos := range positions {
+			rawSymbol, _ := pos["symbol"].(string)
+			if !strings.EqualFold(strings.TrimSpace(rawSymbol), strings.TrimSpace(symbol)) {
+				continue
+			}
+			if normalizeTrailingSide(pos["side"]) != normalizeTrailingSide(side) {
+				continue
+			}
+			if value, ok := floatValue(pos["entryPrice"]); ok && value > 0 {
+				entryPrice = value
+				break
+			}
 		}
-		triggerPrice := openOrderTriggerPrice(order)
-		if triggerPrice <= 0 {
-			continue
-		}
+	}
 
-		if isTakeProfitOrderType(order.Type) && !hasTakeProfit {
-			takeProfit = triggerPrice
-			hasTakeProfit = true
-		}
-		if isStopLossOrderType(order.Type) && !hasStopLoss {
-			stopLoss = triggerPrice
-			hasStopLoss = true
-		}
+	inferred := inferProtectionTargetsFromOpenOrders(side, entryPrice, orders)
+	if inferred.HasStopLoss {
+		stopLoss = inferred.StopLoss
+		hasStopLoss = true
+	}
+	if inferred.HasTakeProfit {
+		takeProfit = inferred.TakeProfit
+		hasTakeProfit = true
 	}
 
 	return stopLoss, hasStopLoss, takeProfit, hasTakeProfit

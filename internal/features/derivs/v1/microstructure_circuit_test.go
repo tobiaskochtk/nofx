@@ -119,6 +119,18 @@ func TestLiqEventStoreRecentKeepsNewestAndPrunesExpired(t *testing.T) {
 	}
 }
 
+func TestLiqEventStoreAddSkipsDuplicates(t *testing.T) {
+	store := newLiqEventStore()
+	now := time.Now()
+	event := liqEvent{symbol: "BTCUSDT", ts: now.UnixMilli(), side: "SELL", price: 65000, size: 3250}
+
+	store.add(event, event)
+	events := store.recent("BTCUSDT", now.Add(-time.Minute), 10)
+	if len(events) != 1 {
+		t.Fatalf("expected 1 cached event after duplicate add, got %d", len(events))
+	}
+}
+
 func TestParseBinanceForceOrderMessagePopulatesSymbol(t *testing.T) {
 	raw := []byte(`{
 		"e":"forceOrder",

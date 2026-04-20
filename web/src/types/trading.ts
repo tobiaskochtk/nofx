@@ -763,6 +763,7 @@ export interface DealReviewLearnedPatternLiveGuardEvent {
   decision_confidence: number
   match_score: number
   matched_pattern_id?: string
+  matched_pattern_stable_key?: string
   matched_pattern_scope_type?: string
   matched_pattern_class?: string
   matched_pattern_signature?: string
@@ -776,6 +777,7 @@ export interface DealReviewLearnedPatternLiveGuardEvent {
   matched_pattern_drift_score?: number
   summary?: string
   block_reason?: string
+  attribution?: DealReviewLearnedPatternLiveGuardEventAttribution
   created_at: string
   updated_at: string
 }
@@ -786,7 +788,34 @@ export interface DealReviewLearnedPatternLiveGuardEventSummary {
   monitor_only_count: number
   matched_unqualified_count: number
   no_match_count: number
+  correctly_blocked_count: number
+  overblocked_count: number
+  warning_confirmed_count: number
+  warning_not_confirmed_count: number
+  threshold_missed_loss_count: number
+  threshold_missed_profit_count: number
+  attribution_pending_count: number
+  followup_open_count: number
   latest_decision_timestamp?: string
+}
+
+export interface DealReviewLearnedPatternLiveGuardEventAttribution {
+  status?: string
+  summary?: string
+  resolved: boolean
+  horizon_hours?: number
+  next_attempt_cycle_number?: number
+  next_attempt_at?: string
+  next_attempt_action?: string
+  next_attempt_terminal_status?: string
+  next_attempt_failure_category?: string
+  followup_case_id?: string
+  followup_case_status?: string
+  followup_case_outcome?: string
+  followup_realized_pnl?: number
+  followup_realized_pnl_pct?: number
+  followup_entry_delay_ms?: number
+  followup_closed_at?: string
 }
 
 export interface DealReviewLearnedPatternLiveGuardStatus {
@@ -813,8 +842,232 @@ export interface DealReviewLearnedPatternEvidence {
   observed_at?: string
 }
 
+export interface DealReviewLearnedPatternLifecycle {
+  operational: boolean
+  status?: string
+  summary?: string
+  expiry_score?: number
+  rollback_score?: number
+  guard_window_hours?: number
+  recent_guard_event_count?: number
+  recent_qualified_guard_count?: number
+  recent_hard_blocked_count?: number
+  recent_monitor_only_count?: number
+  recent_matched_unqualified_count?: number
+  recent_guard_block_rate?: number
+  last_guard_event_at?: string
+  last_observed_to_guard_lag_hours?: number
+}
+
+export interface DealReviewLearnedPatternLifecycleTrend {
+  snapshot_count?: number
+  status_change_count?: number
+  first_captured_at?: string
+  last_captured_at?: string
+  last_status_change_at?: string
+  span_hours?: number
+  latest_status_duration_hours?: number
+  active_hours?: number
+  degrading_hours?: number
+  rollback_watch_hours?: number
+  expired_hours?: number
+  active_share?: number
+  degrading_share?: number
+  rollback_watch_share?: number
+  expired_share?: number
+  stale_guard_snapshot_count?: number
+  stale_guard_snapshot_share?: number
+  avg_observed_to_guard_lag_hours?: number
+  max_observed_to_guard_lag_hours?: number
+  fragile?: boolean
+  summary?: string
+}
+
+export interface DealReviewLearnedPatternLiveGuardAttributionRollup {
+  event_count?: number
+  qualified_event_count?: number
+  hard_blocked_count?: number
+  monitor_only_count?: number
+  matched_unqualified_count?: number
+  resolved_event_count?: number
+  protective_evidence_count?: number
+  overblocking_evidence_count?: number
+  correctly_blocked_count?: number
+  overblocked_count?: number
+  warning_confirmed_count?: number
+  warning_not_confirmed_count?: number
+  threshold_missed_loss_count?: number
+  threshold_missed_profit_count?: number
+  pending_count?: number
+  followup_open_count?: number
+  protective_rate?: number
+  overblocking_rate?: number
+  confidence_score?: number
+  attribution_label?: string
+  latest_event_at?: string
+  summary?: string
+}
+
+export interface DealReviewLearnedPatternLiveGuardAttributionDelta {
+  window_event_limit?: number
+  recent_event_count?: number
+  prior_event_count?: number
+  recent_resolved_event_count?: number
+  prior_resolved_event_count?: number
+  recent_protective_rate?: number
+  prior_protective_rate?: number
+  recent_overblocking_rate?: number
+  prior_overblocking_rate?: number
+  protective_rate_delta?: number
+  overblocking_rate_delta?: number
+  recent_attribution_label?: string
+  prior_attribution_label?: string
+  trend_label?: string
+  confidence_score?: number
+  summary?: string
+}
+
+export interface DealReviewLearnedPatternActionHint {
+  recommended_action?: string
+  priority_label?: string
+  reason_code?: string
+  confidence_score?: number
+  summary?: string
+  auto_note?: string
+}
+
+export interface DealReviewLearnedPatternLiveActionHint {
+  candidate_kind?: string
+  recommended_action?: string
+  priority_label?: string
+  confidence_score?: number
+  summary?: string
+}
+
+export interface DealReviewLearnedPatternLifecycleSnapshot {
+  id: string
+  user_id: string
+  trader_id: string
+  pattern_id?: string
+  pattern_stable_key?: string
+  pattern_signature?: string
+  pattern_class?: string
+  validation_label?: string
+  recommended_use?: string
+  lifecycle_status?: string
+  previous_status?: string
+  status_changed?: boolean
+  operational: boolean
+  expiry_score?: number
+  rollback_score?: number
+  recent_guard_event_count?: number
+  recent_qualified_guard_count?: number
+  recent_hard_blocked_count?: number
+  recent_monitor_only_count?: number
+  recent_matched_unqualified_count?: number
+  recent_guard_block_rate?: number
+  last_guard_event_at?: string
+  last_observed_to_guard_lag_hours?: number
+  summary?: string
+  snapshot_source?: string
+  source_event_id?: string
+  captured_at: string
+  created_at: string
+  updated_at: string
+}
+
+export interface DealReviewLearnedPatternManualControl {
+  id: string
+  user_id: string
+  trader_id: string
+  pattern_id?: string
+  pattern_stable_key?: string
+  pattern_signature?: string
+  pattern_class?: string
+  scope_type?: string
+  symbol?: string
+  side?: string
+  control_state: string
+  last_action: string
+  note?: string
+  base_recommended_use?: string
+  effective_recommended_use?: string
+  lifecycle_status?: string
+  applied_at: string
+  created_at: string
+  updated_at: string
+}
+
+export interface DealReviewLearnedPatternManualControlEvent {
+  id: string
+  user_id: string
+  trader_id: string
+  pattern_id?: string
+  pattern_stable_key?: string
+  pattern_signature?: string
+  pattern_class?: string
+  symbol?: string
+  side?: string
+  action: string
+  control_state: string
+  note?: string
+  base_recommended_use?: string
+  effective_recommended_use?: string
+  lifecycle_status?: string
+  applied_at: string
+  created_at: string
+  updated_at: string
+}
+
+export interface DealReviewLearnedPatternIntervention {
+  id: string
+  user_id: string
+  trader_id: string
+  pattern_id?: string
+  pattern_stable_key?: string
+  pattern_signature?: string
+  pattern_class?: string
+  scope_type?: string
+  symbol?: string
+  side?: string
+  event_type: string
+  event_status: string
+  trigger_fingerprint?: string
+  trigger_reason_code?: string
+  trigger_trend_label?: string
+  trigger_priority_label?: string
+  suggested_action?: string
+  applied_action?: string
+  accepted_suggestion: boolean
+  summary?: string
+  note?: string
+  action_hint_confidence_score?: number
+  delta_confidence_score?: number
+  recent_resolved_event_count?: number
+  prior_resolved_event_count?: number
+  recent_overblocking_rate?: number
+  prior_overblocking_rate?: number
+  recent_protective_rate?: number
+  prior_protective_rate?: number
+  lifecycle_status?: string
+  rollback_score?: number
+  expiry_score?: number
+  seen_count?: number
+  direct_live_action_candidate?: boolean
+  direct_live_action_kind?: string
+  direct_live_action_summary?: string
+  direct_live_action_confidence?: number
+  first_seen_at: string
+  last_seen_at: string
+  resolved_at?: string
+  source_manual_control_event_id?: string
+  created_at: string
+  updated_at: string
+}
+
 export interface DealReviewLearnedPattern {
   id: string
+  stable_key?: string
   user_id: string
   trader_id: string
   scope_type: string
@@ -875,9 +1128,20 @@ export interface DealReviewLearnedPattern {
   built_at?: string
   created_at: string
   updated_at: string
+  base_recommended_use?: string
   feature_set?: string[]
   evidence?: DealReviewLearnedPatternEvidence[]
   match_score?: number
+  lifecycle?: DealReviewLearnedPatternLifecycle
+  lifecycle_history?: DealReviewLearnedPatternLifecycleSnapshot[]
+  lifecycle_trend?: DealReviewLearnedPatternLifecycleTrend
+  live_guard_attribution?: DealReviewLearnedPatternLiveGuardAttributionRollup
+  live_guard_attribution_delta?: DealReviewLearnedPatternLiveGuardAttributionDelta
+  action_hint?: DealReviewLearnedPatternActionHint
+  live_action_hint?: DealReviewLearnedPatternLiveActionHint
+  manual_control?: DealReviewLearnedPatternManualControl
+  manual_control_history?: DealReviewLearnedPatternManualControlEvent[]
+  intervention_history?: DealReviewLearnedPatternIntervention[]
 }
 
 export interface DealReviewLearnedPatternSummary {
@@ -890,11 +1154,34 @@ export interface DealReviewLearnedPatternSummary {
   reverse_risk_count: number
   drifting_count: number
   expired_count: number
+  monitoring_rule_count: number
+  lifecycle_active_count: number
+  lifecycle_degrading_count: number
+  lifecycle_rollback_watch_count: number
+  lifecycle_expired_count: number
+  lifecycle_fragile_count: number
+  lifecycle_lagging_guard_count: number
+  live_guard_protective_count: number
+  live_guard_overblocking_count: number
+  live_guard_improving_count: number
+  live_guard_degrading_count: number
+  live_guard_newly_overblocking_count: number
+  direct_live_action_candidate_count: number
+  open_direct_live_action_count: number
+  rollback_candidate_count: number
+  suppression_candidate_count: number
   class_counts?: Record<string, number>
   label_counts?: Record<string, number>
   top_positive_patterns?: DealReviewLearnedPattern[]
   top_negative_patterns?: DealReviewLearnedPattern[]
   top_symbol_overrides?: DealReviewLearnedPattern[]
+  top_expiring_monitoring_rules?: DealReviewLearnedPattern[]
+  top_rollback_watch_patterns?: DealReviewLearnedPattern[]
+  top_fragile_monitoring_rules?: DealReviewLearnedPattern[]
+  top_overblocking_monitoring_rules?: DealReviewLearnedPattern[]
+  top_improving_monitoring_rules?: DealReviewLearnedPattern[]
+  top_degrading_monitoring_rules?: DealReviewLearnedPattern[]
+  top_direct_live_action_candidates?: DealReviewLearnedPattern[]
   notes?: string[]
 }
 
@@ -1789,9 +2076,52 @@ export interface AutonomousOptimizerTrailingStopTelemetry {
   avg_minutes_from_first_update_to_exit: number
   early_tightening_count: number
   early_tightening_loss_count: number
+  early_tightening_below_entry_count: number
+  early_tightening_protected_count: number
+  one_cycle_exit_count: number
+  early_tightening_one_cycle_exit_count: number
+  one_cycle_exit_threshold_sec: number
   first_update_audit_count: number
   breakeven_protected_count: number
+  tier_breakdown?: AutonomousOptimizerTrailingStopTierBreakdown[]
+  profit_band_breakdown?: AutonomousOptimizerTrailingStopProfitBandBreakdown[]
+  entry_protection_breakdown?: AutonomousOptimizerTrailingStopEntryProtectionBreakdown[]
   sample_updates?: AutonomousOptimizerTrailingStopUpdateAuditItem[]
+}
+
+export interface AutonomousOptimizerTrailingStopTierBreakdown {
+  tier_trigger_profit_pct?: number
+  trailing_mode?: string
+  audit_count: number
+  early_tightening_count: number
+  early_tightening_loss_count: number
+  loss_exit_count: number
+  profit_exit_count: number
+  below_entry_count: number
+  breakeven_or_better_count: number
+  one_cycle_exit_count: number
+  avg_pre_update_unrealized_pnl_pct?: number
+}
+
+export interface AutonomousOptimizerTrailingStopProfitBandBreakdown {
+  profit_band: string
+  audit_count: number
+  early_tightening_count: number
+  early_tightening_loss_count: number
+  loss_exit_count: number
+  profit_exit_count: number
+  one_cycle_exit_count: number
+  avg_minutes_to_first_update?: number
+}
+
+export interface AutonomousOptimizerTrailingStopEntryProtectionBreakdown {
+  entry_protection_state: string
+  audit_count: number
+  early_tightening_count: number
+  early_tightening_loss_count: number
+  loss_exit_count: number
+  profit_exit_count: number
+  one_cycle_exit_count: number
 }
 
 export interface AutonomousOptimizerTrailingStopUpdateAuditItem {
@@ -1799,14 +2129,18 @@ export interface AutonomousOptimizerTrailingStopUpdateAuditItem {
   symbol?: string
   side?: string
   close_reason?: string
+  update_source?: string
   trailing_mode?: string
   update_time_ms?: number
   minutes_to_first_update?: number
   minutes_from_update_to_exit?: number
   pre_update_unrealized_pnl?: number
   pre_update_unrealized_pnl_pct?: number
+  pre_update_profit_band?: string
   stop_profit_pct?: number
   protects_breakeven?: boolean
+  entry_protection_state?: string
+  exit_within_one_cycle?: boolean
   realized_pnl_pct?: number
   previous_stop_price?: number
   new_stop_price?: number

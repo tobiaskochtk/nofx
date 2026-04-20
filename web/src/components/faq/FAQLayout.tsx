@@ -15,6 +15,7 @@ interface FAQLayoutProps {
 export function FAQLayout({ language }: FAQLayoutProps) {
   const [searchTerm, setSearchTerm] = useState('')
   const [activeItemId, setActiveItemId] = useState<string | null>(null)
+  const pickText = (values: Record<Language, string>) => values[language]
 
   // Filter categories based on search term
   const filteredCategories = useMemo(() => {
@@ -79,9 +80,12 @@ export function FAQLayout({ language }: FAQLayoutProps) {
             <FAQSearchBar
               searchTerm={searchTerm}
               onSearchChange={setSearchTerm}
-              placeholder={
-                language === 'zh' ? '搜索常见问题...' : 'Search FAQ...'
-              }
+              placeholder={pickText({
+                zh: '搜索常见问题...',
+                en: 'Search FAQ...',
+                de: 'FAQ durchsuchen...',
+                id: 'Search FAQ...',
+              })}
             />
           </div>
         </div>
@@ -109,9 +113,12 @@ export function FAQLayout({ language }: FAQLayoutProps) {
             ) : (
               <div className="text-center py-12">
                 <p className="text-lg" style={{ color: '#848E9C' }}>
-                  {language === 'zh'
-                    ? '没有找到匹配的问题'
-                    : 'No matching questions found'}
+                  {pickText({
+                    zh: '没有找到匹配的问题',
+                    en: 'No matching questions found',
+                    de: 'Keine passenden Fragen gefunden',
+                    id: 'No matching questions found',
+                  })}
                 </p>
                 <button
                   onClick={() => setSearchTerm('')}
@@ -122,7 +129,12 @@ export function FAQLayout({ language }: FAQLayoutProps) {
                     color: '#0B0E11',
                   }}
                 >
-                  {language === 'zh' ? '清除搜索' : 'Clear Search'}
+                  {pickText({
+                    zh: '清除搜索',
+                    en: 'Clear Search',
+                    de: 'Suche leeren',
+                    id: 'Clear Search',
+                  })}
                 </button>
               </div>
             )}

@@ -5,6 +5,7 @@ import (
 	"nofx/auth"
 	"nofx/config"
 	"nofx/crypto"
+	derivsv1 "nofx/internal/features/derivs/v1"
 	"nofx/logger"
 	"nofx/manager"
 	_ "nofx/mcp/payment"
@@ -79,6 +80,8 @@ func main() {
 		logger.Fatalf("❌ Failed to initialize database: %v", err)
 	}
 	defer st.Close()
+
+	derivsv1.SetLiquidationEventStore(st.DerivsLiquidation())
 
 	if removed, refreshed, err := st.Position().CleanupRedundantClosedPnLPositions(); err != nil {
 		logger.Warnf("⚠️ Failed to clean redundant closed PnL positions: %v", err)

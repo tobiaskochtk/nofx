@@ -165,77 +165,179 @@ type autonomousOptimizerSymbolPriorPayload struct {
 }
 
 type autonomousOptimizerLearnedPatternEvidence struct {
-	PatternID                   string   `json:"pattern_id"`
-	ScopeType                   string   `json:"scope_type"`
-	Symbol                      string   `json:"symbol,omitempty"`
-	Side                        string   `json:"side"`
-	PatternClass                string   `json:"pattern_class"`
-	Status                      string   `json:"status,omitempty"`
-	ValidationLabel             string   `json:"validation_label,omitempty"`
-	RecommendedUse              string   `json:"recommended_use,omitempty"`
-	PatternSignature            string   `json:"pattern_signature,omitempty"`
-	RegimeSignature             string   `json:"regime_signature,omitempty"`
-	PatternOrder                int      `json:"pattern_order,omitempty"`
-	FeatureCount                int      `json:"feature_count,omitempty"`
-	FeatureSet                  []string `json:"feature_set,omitempty"`
-	SampleCount                 int      `json:"sample_count"`
-	SupportCount                int      `json:"support_count"`
-	ContradictCount             int      `json:"contradict_count"`
-	WinRate                     float64  `json:"win_rate"`
-	LossRate                    float64  `json:"loss_rate"`
-	AvgPnLPct                   float64  `json:"avg_pnl_pct"`
-	LiftAvgPnLPct               float64  `json:"lift_avg_pnl_pct"`
-	Expectancy                  float64  `json:"expectancy"`
-	AvgMFEPct                   float64  `json:"avg_mfe_pct"`
-	AvgMAEPct                   float64  `json:"avg_mae_pct"`
-	GiveBackRate                float64  `json:"give_back_rate"`
-	AvgGiveBackPct              float64  `json:"avg_give_back_pct"`
-	ConfidenceScore             float64  `json:"confidence_score"`
-	StabilityScore              float64  `json:"stability_score"`
-	DriftScore                  float64  `json:"drift_score"`
-	CompositeScore              float64  `json:"composite_score"`
-	FalsePositiveScore          float64  `json:"false_positive_score"`
-	ReverseRiskScore            float64  `json:"reverse_risk_score"`
-	TrainingSampleCount         int      `json:"training_sample_count"`
-	ValidationSampleCount       int      `json:"validation_sample_count"`
-	ValidationSupportCount      int      `json:"validation_support_count"`
-	ValidationSupportScore      float64  `json:"validation_support_score"`
-	RecentSampleCount           int      `json:"recent_sample_count"`
-	RecentSupportCount          int      `json:"recent_support_count"`
-	RecentSupportScore          float64  `json:"recent_support_score"`
-	CurrentWindowMatchType      string   `json:"current_window_match_type"`
-	ClosedCaseMatchCount        int      `json:"closed_case_match_count"`
-	RecentExecutionMatchCount   int      `json:"recent_execution_match_count"`
-	OpportunitySymbolMatchCount int      `json:"opportunity_symbol_match_count"`
-	CurrentWindowNetPnL         float64  `json:"current_window_net_pnl"`
-	ImplicationType             string   `json:"implication_type"`
-	ImplicationSummary          string   `json:"implication_summary"`
-	EvidenceCaseIDs             []string `json:"evidence_case_ids,omitempty"`
-	Summary                     string   `json:"summary,omitempty"`
-	ValidationAlert             string   `json:"validation_alert,omitempty"`
+	PatternID                                       string   `json:"pattern_id"`
+	ScopeType                                       string   `json:"scope_type"`
+	Symbol                                          string   `json:"symbol,omitempty"`
+	Side                                            string   `json:"side"`
+	PatternClass                                    string   `json:"pattern_class"`
+	Status                                          string   `json:"status,omitempty"`
+	ValidationLabel                                 string   `json:"validation_label,omitempty"`
+	RecommendedUse                                  string   `json:"recommended_use,omitempty"`
+	PatternSignature                                string   `json:"pattern_signature,omitempty"`
+	RegimeSignature                                 string   `json:"regime_signature,omitempty"`
+	PatternOrder                                    int      `json:"pattern_order,omitempty"`
+	FeatureCount                                    int      `json:"feature_count,omitempty"`
+	FeatureSet                                      []string `json:"feature_set,omitempty"`
+	SampleCount                                     int      `json:"sample_count"`
+	SupportCount                                    int      `json:"support_count"`
+	ContradictCount                                 int      `json:"contradict_count"`
+	WinRate                                         float64  `json:"win_rate"`
+	LossRate                                        float64  `json:"loss_rate"`
+	AvgPnLPct                                       float64  `json:"avg_pnl_pct"`
+	LiftAvgPnLPct                                   float64  `json:"lift_avg_pnl_pct"`
+	Expectancy                                      float64  `json:"expectancy"`
+	AvgMFEPct                                       float64  `json:"avg_mfe_pct"`
+	AvgMAEPct                                       float64  `json:"avg_mae_pct"`
+	GiveBackRate                                    float64  `json:"give_back_rate"`
+	AvgGiveBackPct                                  float64  `json:"avg_give_back_pct"`
+	ConfidenceScore                                 float64  `json:"confidence_score"`
+	StabilityScore                                  float64  `json:"stability_score"`
+	DriftScore                                      float64  `json:"drift_score"`
+	CompositeScore                                  float64  `json:"composite_score"`
+	FalsePositiveScore                              float64  `json:"false_positive_score"`
+	ReverseRiskScore                                float64  `json:"reverse_risk_score"`
+	TrainingSampleCount                             int      `json:"training_sample_count"`
+	ValidationSampleCount                           int      `json:"validation_sample_count"`
+	ValidationSupportCount                          int      `json:"validation_support_count"`
+	ValidationSupportScore                          float64  `json:"validation_support_score"`
+	RecentSampleCount                               int      `json:"recent_sample_count"`
+	RecentSupportCount                              int      `json:"recent_support_count"`
+	RecentSupportScore                              float64  `json:"recent_support_score"`
+	CurrentWindowMatchType                          string   `json:"current_window_match_type"`
+	ClosedCaseMatchCount                            int      `json:"closed_case_match_count"`
+	RecentExecutionMatchCount                       int      `json:"recent_execution_match_count"`
+	OpportunitySymbolMatchCount                     int      `json:"opportunity_symbol_match_count"`
+	CurrentWindowNetPnL                             float64  `json:"current_window_net_pnl"`
+	ImplicationType                                 string   `json:"implication_type"`
+	ImplicationSummary                              string   `json:"implication_summary"`
+	LifecycleStatus                                 string   `json:"lifecycle_status,omitempty"`
+	LifecycleSummary                                string   `json:"lifecycle_summary,omitempty"`
+	LifecycleExpiryScore                            float64  `json:"lifecycle_expiry_score,omitempty"`
+	LifecycleRollbackScore                          float64  `json:"lifecycle_rollback_score,omitempty"`
+	LifecycleRecentGuardEventCount                  int      `json:"lifecycle_recent_guard_event_count,omitempty"`
+	LifecycleRecentQualifiedGuardCount              int      `json:"lifecycle_recent_qualified_guard_count,omitempty"`
+	LifecycleRecentHardBlockedCount                 int      `json:"lifecycle_recent_hard_blocked_count,omitempty"`
+	LifecycleRecentMonitorOnlyCount                 int      `json:"lifecycle_recent_monitor_only_count,omitempty"`
+	LifecycleRecentMatchedUnqualifiedCount          int      `json:"lifecycle_recent_matched_unqualified_count,omitempty"`
+	LifecycleLastGuardEventAt                       string   `json:"lifecycle_last_guard_event_at,omitempty"`
+	LifecycleTrendSnapshotCount                     int      `json:"lifecycle_trend_snapshot_count,omitempty"`
+	LifecycleTrendStatusChangeCount                 int      `json:"lifecycle_trend_status_change_count,omitempty"`
+	LifecycleTrendSpanHours                         float64  `json:"lifecycle_trend_span_hours,omitempty"`
+	LifecycleTrendLatestStatusDurationHours         float64  `json:"lifecycle_trend_latest_status_duration_hours,omitempty"`
+	LifecycleTrendActiveHours                       float64  `json:"lifecycle_trend_active_hours,omitempty"`
+	LifecycleTrendDegradingHours                    float64  `json:"lifecycle_trend_degrading_hours,omitempty"`
+	LifecycleTrendRollbackWatchHours                float64  `json:"lifecycle_trend_rollback_watch_hours,omitempty"`
+	LifecycleTrendExpiredHours                      float64  `json:"lifecycle_trend_expired_hours,omitempty"`
+	LifecycleTrendActiveShare                       float64  `json:"lifecycle_trend_active_share,omitempty"`
+	LifecycleTrendDegradingShare                    float64  `json:"lifecycle_trend_degrading_share,omitempty"`
+	LifecycleTrendRollbackWatchShare                float64  `json:"lifecycle_trend_rollback_watch_share,omitempty"`
+	LifecycleTrendExpiredShare                      float64  `json:"lifecycle_trend_expired_share,omitempty"`
+	LifecycleTrendStaleGuardSnapshotCount           int      `json:"lifecycle_trend_stale_guard_snapshot_count,omitempty"`
+	LifecycleTrendStaleGuardSnapshotShare           float64  `json:"lifecycle_trend_stale_guard_snapshot_share,omitempty"`
+	LifecycleTrendAvgObservedToGuardLagHours        float64  `json:"lifecycle_trend_avg_observed_to_guard_lag_hours,omitempty"`
+	LifecycleTrendMaxObservedToGuardLagHours        float64  `json:"lifecycle_trend_max_observed_to_guard_lag_hours,omitempty"`
+	LifecycleTrendLastStatusChangeAt                string   `json:"lifecycle_trend_last_status_change_at,omitempty"`
+	LifecycleTrendFragile                           bool     `json:"lifecycle_trend_fragile,omitempty"`
+	LifecycleTrendSummary                           string   `json:"lifecycle_trend_summary,omitempty"`
+	LiveGuardAttributionEventCount                  int      `json:"live_guard_attribution_event_count,omitempty"`
+	LiveGuardAttributionQualifiedEventCount         int      `json:"live_guard_attribution_qualified_event_count,omitempty"`
+	LiveGuardAttributionResolvedEventCount          int      `json:"live_guard_attribution_resolved_event_count,omitempty"`
+	LiveGuardAttributionProtectiveEvidenceCount     int      `json:"live_guard_attribution_protective_evidence_count,omitempty"`
+	LiveGuardAttributionOverblockingEvidenceCount   int      `json:"live_guard_attribution_overblocking_evidence_count,omitempty"`
+	LiveGuardAttributionCorrectlyBlockedCount       int      `json:"live_guard_attribution_correctly_blocked_count,omitempty"`
+	LiveGuardAttributionOverblockedCount            int      `json:"live_guard_attribution_overblocked_count,omitempty"`
+	LiveGuardAttributionWarningConfirmedCount       int      `json:"live_guard_attribution_warning_confirmed_count,omitempty"`
+	LiveGuardAttributionWarningNotConfirmedCount    int      `json:"live_guard_attribution_warning_not_confirmed_count,omitempty"`
+	LiveGuardAttributionThresholdMissedLossCount    int      `json:"live_guard_attribution_threshold_missed_loss_count,omitempty"`
+	LiveGuardAttributionThresholdMissedProfitCount  int      `json:"live_guard_attribution_threshold_missed_profit_count,omitempty"`
+	LiveGuardAttributionPendingCount                int      `json:"live_guard_attribution_pending_count,omitempty"`
+	LiveGuardAttributionFollowupOpenCount           int      `json:"live_guard_attribution_followup_open_count,omitempty"`
+	LiveGuardAttributionProtectiveRate              float64  `json:"live_guard_attribution_protective_rate,omitempty"`
+	LiveGuardAttributionOverblockingRate            float64  `json:"live_guard_attribution_overblocking_rate,omitempty"`
+	LiveGuardAttributionConfidenceScore             float64  `json:"live_guard_attribution_confidence_score,omitempty"`
+	LiveGuardAttributionLabel                       string   `json:"live_guard_attribution_label,omitempty"`
+	LiveGuardAttributionSummary                     string   `json:"live_guard_attribution_summary,omitempty"`
+	LiveGuardAttributionDeltaRecentEventCount       int      `json:"live_guard_attribution_delta_recent_event_count,omitempty"`
+	LiveGuardAttributionDeltaPriorEventCount        int      `json:"live_guard_attribution_delta_prior_event_count,omitempty"`
+	LiveGuardAttributionDeltaRecentResolvedCount    int      `json:"live_guard_attribution_delta_recent_resolved_count,omitempty"`
+	LiveGuardAttributionDeltaPriorResolvedCount     int      `json:"live_guard_attribution_delta_prior_resolved_count,omitempty"`
+	LiveGuardAttributionDeltaRecentProtectiveRate   float64  `json:"live_guard_attribution_delta_recent_protective_rate,omitempty"`
+	LiveGuardAttributionDeltaPriorProtectiveRate    float64  `json:"live_guard_attribution_delta_prior_protective_rate,omitempty"`
+	LiveGuardAttributionDeltaRecentOverblockingRate float64  `json:"live_guard_attribution_delta_recent_overblocking_rate,omitempty"`
+	LiveGuardAttributionDeltaPriorOverblockingRate  float64  `json:"live_guard_attribution_delta_prior_overblocking_rate,omitempty"`
+	LiveGuardAttributionDeltaProtectiveRateDelta    float64  `json:"live_guard_attribution_delta_protective_rate_delta,omitempty"`
+	LiveGuardAttributionDeltaOverblockingRateDelta  float64  `json:"live_guard_attribution_delta_overblocking_rate_delta,omitempty"`
+	LiveGuardAttributionDeltaTrendLabel             string   `json:"live_guard_attribution_delta_trend_label,omitempty"`
+	LiveGuardAttributionDeltaConfidenceScore        float64  `json:"live_guard_attribution_delta_confidence_score,omitempty"`
+	LiveGuardAttributionDeltaSummary                string   `json:"live_guard_attribution_delta_summary,omitempty"`
+	ActionHintRecommendedAction                     string   `json:"action_hint_recommended_action,omitempty"`
+	ActionHintPriorityLabel                         string   `json:"action_hint_priority_label,omitempty"`
+	ActionHintReasonCode                            string   `json:"action_hint_reason_code,omitempty"`
+	ActionHintConfidenceScore                       float64  `json:"action_hint_confidence_score,omitempty"`
+	ActionHintSummary                               string   `json:"action_hint_summary,omitempty"`
+	ActionHintAutoNote                              string   `json:"action_hint_auto_note,omitempty"`
+	LiveActionCandidateKind                         string   `json:"live_action_candidate_kind,omitempty"`
+	LiveActionCandidateRecommendedAction            string   `json:"live_action_candidate_recommended_action,omitempty"`
+	LiveActionCandidatePriorityLabel                string   `json:"live_action_candidate_priority_label,omitempty"`
+	LiveActionCandidateConfidenceScore              float64  `json:"live_action_candidate_confidence_score,omitempty"`
+	LiveActionCandidateSummary                      string   `json:"live_action_candidate_summary,omitempty"`
+	LiveActionCandidateOpen                         bool     `json:"live_action_candidate_open,omitempty"`
+	InterventionOpenStrongCandidateCount            int      `json:"intervention_open_strong_candidate_count,omitempty"`
+	InterventionOpenSuggestionCount                 int      `json:"intervention_open_suggestion_count,omitempty"`
+	InterventionAcceptedCount                       int      `json:"intervention_accepted_count,omitempty"`
+	InterventionOverriddenCount                     int      `json:"intervention_overridden_count,omitempty"`
+	InterventionManualActionCount                   int      `json:"intervention_manual_action_count,omitempty"`
+	InterventionLatestEventType                     string   `json:"intervention_latest_event_type,omitempty"`
+	InterventionLatestStatus                        string   `json:"intervention_latest_status,omitempty"`
+	InterventionLatestSuggestedAction               string   `json:"intervention_latest_suggested_action,omitempty"`
+	InterventionLatestAppliedAction                 string   `json:"intervention_latest_applied_action,omitempty"`
+	InterventionLatestSeenAt                        string   `json:"intervention_latest_seen_at,omitempty"`
+	InterventionLatestSummary                       string   `json:"intervention_latest_summary,omitempty"`
+	InterventionLatestNote                          string   `json:"intervention_latest_note,omitempty"`
+	EvidenceCaseIDs                                 []string `json:"evidence_case_ids,omitempty"`
+	Summary                                         string   `json:"summary,omitempty"`
+	ValidationAlert                                 string   `json:"validation_alert,omitempty"`
 }
 
 type autonomousOptimizerLearnedPatternPayload struct {
-	AvailableCount       int                                         `json:"available_count"`
-	RelevantCount        int                                         `json:"relevant_count"`
-	PositiveCount        int                                         `json:"positive_count"`
-	NegativeCount        int                                         `json:"negative_count"`
-	ConfirmedCount       int                                         `json:"confirmed_count"`
-	CandidateCount       int                                         `json:"candidate_count"`
-	FalsePositiveCount   int                                         `json:"false_positive_count"`
-	ReverseRiskCount     int                                         `json:"reverse_risk_count"`
-	DriftingCount        int                                         `json:"drifting_count"`
-	ExpiredCount         int                                         `json:"expired_count"`
-	ConfigCandidateCount int                                         `json:"config_candidate_count"`
-	PromptOnlyCount      int                                         `json:"prompt_only_count"`
-	ReviewHintCount      int                                         `json:"review_hint_count"`
-	MonitorOnlyCount     int                                         `json:"monitor_only_count"`
-	DoNotUseCount        int                                         `json:"do_not_use_count"`
-	Items                []autonomousOptimizerLearnedPatternEvidence `json:"items,omitempty"`
-	TopPositivePatterns  []autonomousOptimizerLearnedPatternEvidence `json:"top_positive_patterns,omitempty"`
-	TopNegativePatterns  []autonomousOptimizerLearnedPatternEvidence `json:"top_negative_patterns,omitempty"`
-	TopSymbolOverrides   []autonomousOptimizerLearnedPatternEvidence `json:"top_symbol_overrides,omitempty"`
-	Notes                []string                                    `json:"notes,omitempty"`
+	AvailableCount                  int                                         `json:"available_count"`
+	RelevantCount                   int                                         `json:"relevant_count"`
+	PositiveCount                   int                                         `json:"positive_count"`
+	NegativeCount                   int                                         `json:"negative_count"`
+	ConfirmedCount                  int                                         `json:"confirmed_count"`
+	CandidateCount                  int                                         `json:"candidate_count"`
+	FalsePositiveCount              int                                         `json:"false_positive_count"`
+	ReverseRiskCount                int                                         `json:"reverse_risk_count"`
+	DriftingCount                   int                                         `json:"drifting_count"`
+	ExpiredCount                    int                                         `json:"expired_count"`
+	ConfigCandidateCount            int                                         `json:"config_candidate_count"`
+	PromptOnlyCount                 int                                         `json:"prompt_only_count"`
+	MonitoringRuleCount             int                                         `json:"monitoring_rule_count"`
+	ReviewHintCount                 int                                         `json:"review_hint_count"`
+	MonitorOnlyCount                int                                         `json:"monitor_only_count"`
+	DoNotUseCount                   int                                         `json:"do_not_use_count"`
+	LifecycleActiveCount            int                                         `json:"lifecycle_active_count"`
+	LifecycleDegradingCount         int                                         `json:"lifecycle_degrading_count"`
+	LifecycleRollbackWatchCount     int                                         `json:"lifecycle_rollback_watch_count"`
+	LifecycleExpiredCount           int                                         `json:"lifecycle_expired_count"`
+	LifecycleFragileCount           int                                         `json:"lifecycle_fragile_count"`
+	LifecycleLaggingGuardCount      int                                         `json:"lifecycle_lagging_guard_count"`
+	LiveGuardProtectiveCount        int                                         `json:"live_guard_protective_count"`
+	LiveGuardOverblockingCount      int                                         `json:"live_guard_overblocking_count"`
+	LiveGuardImprovingCount         int                                         `json:"live_guard_improving_count"`
+	LiveGuardDegradingCount         int                                         `json:"live_guard_degrading_count"`
+	LiveGuardNewlyOverblockingCount int                                         `json:"live_guard_newly_overblocking_count"`
+	Items                           []autonomousOptimizerLearnedPatternEvidence `json:"items,omitempty"`
+	TopPositivePatterns             []autonomousOptimizerLearnedPatternEvidence `json:"top_positive_patterns,omitempty"`
+	TopNegativePatterns             []autonomousOptimizerLearnedPatternEvidence `json:"top_negative_patterns,omitempty"`
+	TopSymbolOverrides              []autonomousOptimizerLearnedPatternEvidence `json:"top_symbol_overrides,omitempty"`
+	TopExpiringMonitoringRules      []autonomousOptimizerLearnedPatternEvidence `json:"top_expiring_monitoring_rules,omitempty"`
+	TopRollbackWatchPatterns        []autonomousOptimizerLearnedPatternEvidence `json:"top_rollback_watch_patterns,omitempty"`
+	TopFragileMonitoringRules       []autonomousOptimizerLearnedPatternEvidence `json:"top_fragile_monitoring_rules,omitempty"`
+	TopOverblockingMonitoringRules  []autonomousOptimizerLearnedPatternEvidence `json:"top_overblocking_monitoring_rules,omitempty"`
+	TopImprovingMonitoringRules     []autonomousOptimizerLearnedPatternEvidence `json:"top_improving_monitoring_rules,omitempty"`
+	TopDegradingMonitoringRules     []autonomousOptimizerLearnedPatternEvidence `json:"top_degrading_monitoring_rules,omitempty"`
+	Notes                           []string                                    `json:"notes,omitempty"`
 }
 
 type autonomousOptimizerPromptPatch struct {
@@ -462,7 +564,7 @@ func (s *Server) attachAutonomousOptimizerTelemetry(cfg *store.AutonomousOptimiz
 		firstTrailingUpdates = updates
 	}
 
-	bundle.Metadata.TrailingStopTelemetry = buildAutonomousOptimizerTrailingStopTelemetry(bundle.Cases, firstTrailingUpdates)
+	bundle.Metadata.TrailingStopTelemetry = buildAutonomousOptimizerTrailingStopTelemetry(strategyCfg, bundle.Cases, firstTrailingUpdates)
 	bundle.Metadata.AdaptiveCooldownTelemetry = buildAutonomousOptimizerAdaptiveCooldownTelemetry(strategyCfg, bundle.Cases)
 	return nil
 }
@@ -472,7 +574,7 @@ func autonomousOptimizerTrailingTelemetryPositionIDs(cases []store.DealReviewCas
 	ids := make([]int64, 0, len(cases))
 	for _, detail := range cases {
 		caseRec := detail.Case
-		if normalizeAutonomousOptimizerCloseReason(caseRec.CloseReason) != "trailing_stop" {
+		if !strings.EqualFold(caseRec.Status, store.DealReviewCaseStatusClosed) {
 			continue
 		}
 		if caseRec.PositionID <= 0 {
@@ -487,8 +589,17 @@ func autonomousOptimizerTrailingTelemetryPositionIDs(cases []store.DealReviewCas
 	return ids
 }
 
-func buildAutonomousOptimizerTrailingStopTelemetry(cases []store.DealReviewCaseDetail, firstTrailingUpdates map[int64]store.DealReviewTrailingUpdateRecord) *autonomousOptimizerTrailingStopTelemetry {
+func buildAutonomousOptimizerTrailingStopTelemetry(strategyCfg *store.StrategyConfig, cases []store.DealReviewCaseDetail, firstTrailingUpdates map[int64]store.DealReviewTrailingUpdateRecord) *autonomousOptimizerTrailingStopTelemetry {
 	telemetry := &autonomousOptimizerTrailingStopTelemetry{}
+	trailingCfg := store.DefaultTrailingStopConfig()
+	if strategyCfg != nil {
+		trailingCfg = strategyCfg.RiskControl.EffectiveTrailingStop()
+	}
+	if trailingCfg.CheckIntervalSec <= 0 {
+		trailingCfg.CheckIntervalSec = store.DefaultTrailingStopCheckIntervalSec
+	}
+	telemetry.OneCycleExitThresholdSec = trailingCfg.CheckIntervalSec
+
 	var trailingPnLSum float64
 	var stopLossPnLSum float64
 	var minutesToFirstSum float64
@@ -496,42 +607,187 @@ func buildAutonomousOptimizerTrailingStopTelemetry(cases []store.DealReviewCaseD
 	var timedTrailingSamples int
 	auditItems := make([]autonomousOptimizerTrailingStopUpdateAuditItem, 0)
 
+	type tierAccumulator struct {
+		autonomousOptimizerTrailingStopTierBreakdown
+		preUpdatePnLSum float64
+	}
+	type profitBandAccumulator struct {
+		autonomousOptimizerTrailingStopProfitBandBreakdown
+		minutesToFirstSum float64
+		timedCount        int
+	}
+
+	tierBreakdown := make(map[string]*tierAccumulator)
+	profitBandBreakdown := make(map[string]*profitBandAccumulator)
+	entryProtectionBreakdown := make(map[string]*autonomousOptimizerTrailingStopEntryProtectionBreakdown)
+
 	for _, detail := range cases {
 		caseRec := detail.Case
 		if !strings.EqualFold(caseRec.Status, store.DealReviewCaseStatusClosed) {
 			continue
 		}
-		if record, ok := firstTrailingUpdates[caseRec.PositionID]; ok && record.TimestampMs > 0 {
+
+		closeReason := normalizeAutonomousOptimizerCloseReason(caseRec.CloseReason)
+		audit, hasAudit := autonomousOptimizerTrailingStopAuditContextForCase(&caseRec, firstTrailingUpdates)
+		if hasAudit {
+			minutesToFirstUpdate := 0.0
+			minutesFromUpdateToExit := 0.0
+			hasMinutesToFirstUpdate := false
+			hasMinutesFromUpdateToExit := false
+			if audit.UpdateTimeMs > caseRec.EntryTimeMs && caseRec.EntryTimeMs > 0 {
+				minutesToFirstUpdate = float64(audit.UpdateTimeMs-caseRec.EntryTimeMs) / 60000
+				hasMinutesToFirstUpdate = true
+			}
+			if caseRec.ExitTimeMs > audit.UpdateTimeMs && audit.UpdateTimeMs > 0 {
+				minutesFromUpdateToExit = float64(caseRec.ExitTimeMs-audit.UpdateTimeMs) / 60000
+				hasMinutesFromUpdateToExit = true
+			}
+
+			entryProtectionState := autonomousOptimizerTrailingStopEntryProtectionState(caseRec.Side, audit.EntryPrice, audit.NewStopPrice, audit.ProtectsBreakeven)
+			profitBand := autonomousOptimizerTrailingStopProfitBand(audit.PreUpdateUnrealizedPnLPct)
+			exitWithinOneCycle := autonomousOptimizerTrailingStopExitWithinOneCycle(caseRec.ExitTimeMs, audit.UpdateTimeMs, trailingCfg.CheckIntervalSec)
+			earlyTightening := hasMinutesToFirstUpdate && minutesToFirstUpdate <= autonomousOptimizerEarlyTighteningMinutes
+
 			item := autonomousOptimizerTrailingStopUpdateAuditItem{
 				PositionID:                caseRec.PositionID,
 				Symbol:                    strings.TrimSpace(caseRec.Symbol),
 				Side:                      strings.TrimSpace(caseRec.Side),
-				CloseReason:               normalizeAutonomousOptimizerCloseReason(caseRec.CloseReason),
-				TrailingMode:              strings.TrimSpace(record.TrailingMode),
-				UpdateTimeMs:              record.TimestampMs,
-				PreUpdateUnrealizedPnL:    roundAutonomousOptimizerFloat(record.UnrealizedPnL, 4),
-				PreUpdateUnrealizedPnLPct: roundAutonomousOptimizerFloat(record.UnrealizedPnLPct, 2),
-				StopProfitPct:             roundAutonomousOptimizerFloat(record.StopProfitPct, 2),
-				ProtectsBreakeven:         record.ProtectsBreakeven,
+				CloseReason:               closeReason,
+				UpdateSource:              audit.UpdateSource,
+				TrailingMode:              strings.TrimSpace(audit.TrailingMode),
+				UpdateTimeMs:              audit.UpdateTimeMs,
+				PreUpdateUnrealizedPnL:    roundAutonomousOptimizerFloat(audit.PreUpdateUnrealizedPnL, 4),
+				PreUpdateUnrealizedPnLPct: roundAutonomousOptimizerFloat(audit.PreUpdateUnrealizedPnLPct, 2),
+				PreUpdateProfitBand:       profitBand,
+				StopProfitPct:             roundAutonomousOptimizerFloat(audit.StopProfitPct, 2),
+				ProtectsBreakeven:         audit.ProtectsBreakeven,
+				EntryProtectionState:      entryProtectionState,
+				ExitWithinOneCycle:        exitWithinOneCycle,
 				RealizedPnLPct:            roundAutonomousOptimizerFloat(caseRec.RealizedPnLPct, 2),
-				PreviousStopPrice:         roundAutonomousOptimizerFloat(record.PreviousStopPrice, 8),
-				NewStopPrice:              roundAutonomousOptimizerFloat(record.NewStopPrice, 8),
-				TierTriggerProfitPct:      roundAutonomousOptimizerFloat(record.TierTriggerProfitPct, 2),
+				PreviousStopPrice:         roundAutonomousOptimizerFloat(audit.PreviousStopPrice, 8),
+				NewStopPrice:              roundAutonomousOptimizerFloat(audit.NewStopPrice, 8),
+				TierTriggerProfitPct:      roundAutonomousOptimizerFloat(audit.TierTriggerProfitPct, 2),
 			}
-			if record.TimestampMs > caseRec.EntryTimeMs && caseRec.EntryTimeMs > 0 {
-				item.MinutesToFirstUpdate = roundAutonomousOptimizerFloat(float64(record.TimestampMs-caseRec.EntryTimeMs)/60000, 1)
+			if hasMinutesToFirstUpdate {
+				item.MinutesToFirstUpdate = roundAutonomousOptimizerFloat(minutesToFirstUpdate, 1)
 			}
-			if caseRec.ExitTimeMs > record.TimestampMs && record.TimestampMs > 0 {
-				item.MinutesFromUpdateToExit = roundAutonomousOptimizerFloat(float64(caseRec.ExitTimeMs-record.TimestampMs)/60000, 1)
+			if hasMinutesFromUpdateToExit {
+				item.MinutesFromUpdateToExit = roundAutonomousOptimizerFloat(minutesFromUpdateToExit, 1)
 			}
+
 			telemetry.FirstUpdateAuditCount++
-			if record.ProtectsBreakeven {
+			if audit.ProtectsBreakeven {
 				telemetry.BreakevenProtectedCount++
 			}
+			if exitWithinOneCycle {
+				telemetry.OneCycleExitCount++
+			}
+			if earlyTightening {
+				telemetry.EarlyTighteningCount++
+				if caseRec.RealizedPnLPct < 0 {
+					telemetry.EarlyTighteningLossCount++
+				}
+				if entryProtectionState == "below_entry" {
+					telemetry.EarlyTighteningBelowEntryCount++
+				} else {
+					telemetry.EarlyTighteningProtectedCount++
+				}
+				if exitWithinOneCycle {
+					telemetry.EarlyTighteningOneCycleExitCount++
+				}
+			}
 			auditItems = append(auditItems, item)
+
+			tierKey := fmt.Sprintf("%.4f|%s", roundAutonomousOptimizerFloat(audit.TierTriggerProfitPct, 4), strings.TrimSpace(audit.TrailingMode))
+			tierEntry, ok := tierBreakdown[tierKey]
+			if !ok {
+				tierEntry = &tierAccumulator{
+					autonomousOptimizerTrailingStopTierBreakdown: autonomousOptimizerTrailingStopTierBreakdown{
+						TierTriggerProfitPct: roundAutonomousOptimizerFloat(audit.TierTriggerProfitPct, 2),
+						TrailingMode:         strings.TrimSpace(audit.TrailingMode),
+					},
+				}
+				tierBreakdown[tierKey] = tierEntry
+			}
+			tierEntry.AuditCount++
+			tierEntry.preUpdatePnLSum += audit.PreUpdateUnrealizedPnLPct
+			switch {
+			case caseRec.RealizedPnLPct < 0:
+				tierEntry.LossExitCount++
+			case caseRec.RealizedPnLPct > 0:
+				tierEntry.ProfitExitCount++
+			}
+			if entryProtectionState == "below_entry" {
+				tierEntry.BelowEntryCount++
+			} else {
+				tierEntry.BreakevenOrBetterCount++
+			}
+			if exitWithinOneCycle {
+				tierEntry.OneCycleExitCount++
+			}
+			if earlyTightening {
+				tierEntry.EarlyTighteningCount++
+				if caseRec.RealizedPnLPct < 0 {
+					tierEntry.EarlyTighteningLossCount++
+				}
+			}
+
+			profitBandEntry, ok := profitBandBreakdown[profitBand]
+			if !ok {
+				profitBandEntry = &profitBandAccumulator{
+					autonomousOptimizerTrailingStopProfitBandBreakdown: autonomousOptimizerTrailingStopProfitBandBreakdown{
+						ProfitBand: profitBand,
+					},
+				}
+				profitBandBreakdown[profitBand] = profitBandEntry
+			}
+			profitBandEntry.AuditCount++
+			if hasMinutesToFirstUpdate {
+				profitBandEntry.minutesToFirstSum += minutesToFirstUpdate
+				profitBandEntry.timedCount++
+			}
+			switch {
+			case caseRec.RealizedPnLPct < 0:
+				profitBandEntry.LossExitCount++
+			case caseRec.RealizedPnLPct > 0:
+				profitBandEntry.ProfitExitCount++
+			}
+			if exitWithinOneCycle {
+				profitBandEntry.OneCycleExitCount++
+			}
+			if earlyTightening {
+				profitBandEntry.EarlyTighteningCount++
+				if caseRec.RealizedPnLPct < 0 {
+					profitBandEntry.EarlyTighteningLossCount++
+				}
+			}
+
+			entryProtectionEntry, ok := entryProtectionBreakdown[entryProtectionState]
+			if !ok {
+				entryProtectionEntry = &autonomousOptimizerTrailingStopEntryProtectionBreakdown{
+					EntryProtectionState: entryProtectionState,
+				}
+				entryProtectionBreakdown[entryProtectionState] = entryProtectionEntry
+			}
+			entryProtectionEntry.AuditCount++
+			switch {
+			case caseRec.RealizedPnLPct < 0:
+				entryProtectionEntry.LossExitCount++
+			case caseRec.RealizedPnLPct > 0:
+				entryProtectionEntry.ProfitExitCount++
+			}
+			if exitWithinOneCycle {
+				entryProtectionEntry.OneCycleExitCount++
+			}
+			if earlyTightening {
+				entryProtectionEntry.EarlyTighteningCount++
+				if caseRec.RealizedPnLPct < 0 {
+					entryProtectionEntry.EarlyTighteningLossCount++
+				}
+			}
 		}
 
-		switch normalizeAutonomousOptimizerCloseReason(caseRec.CloseReason) {
+		switch closeReason {
 		case "trailing_stop":
 			telemetry.TrailingExitCount++
 			trailingPnLSum += caseRec.RealizedPnLPct
@@ -541,25 +797,10 @@ func buildAutonomousOptimizerTrailingStopTelemetry(cases []store.DealReviewCaseD
 			case caseRec.RealizedPnLPct < 0:
 				telemetry.TrailingLossExitCount++
 			}
-
-			updateMs := int64(0)
-			if record, ok := firstTrailingUpdates[caseRec.PositionID]; ok && record.TimestampMs > 0 {
-				updateMs = record.TimestampMs
-			} else if caseRec.ExitEvidence != nil && caseRec.ExitEvidence.TrailingUpdatedAtMs > 0 {
-				updateMs = caseRec.ExitEvidence.TrailingUpdatedAtMs
-			}
-			if updateMs > caseRec.EntryTimeMs && caseRec.ExitTimeMs > updateMs {
-				minutesToFirst := float64(updateMs-caseRec.EntryTimeMs) / 60000
-				minutesFromFirstToExit := float64(caseRec.ExitTimeMs-updateMs) / 60000
-				minutesToFirstSum += minutesToFirst
-				minutesFromFirstToExitSum += minutesFromFirstToExit
+			if hasAudit && audit.UpdateTimeMs > caseRec.EntryTimeMs && caseRec.ExitTimeMs > audit.UpdateTimeMs {
+				minutesToFirstSum += float64(audit.UpdateTimeMs-caseRec.EntryTimeMs) / 60000
+				minutesFromFirstToExitSum += float64(caseRec.ExitTimeMs-audit.UpdateTimeMs) / 60000
 				timedTrailingSamples++
-				if minutesToFirst <= autonomousOptimizerEarlyTighteningMinutes {
-					telemetry.EarlyTighteningCount++
-					if caseRec.RealizedPnLPct < 0 {
-						telemetry.EarlyTighteningLossCount++
-					}
-				}
 			}
 		case "stop_loss":
 			telemetry.InitialStopLossCount++
@@ -580,6 +821,45 @@ func buildAutonomousOptimizerTrailingStopTelemetry(cases []store.DealReviewCaseD
 		telemetry.AvgMinutesToFirstUpdate = roundAutonomousOptimizerFloat(minutesToFirstSum/float64(timedTrailingSamples), 1)
 		telemetry.AvgMinutesFromFirstUpdateToExit = roundAutonomousOptimizerFloat(minutesFromFirstToExitSum/float64(timedTrailingSamples), 1)
 	}
+	if len(tierBreakdown) > 0 {
+		items := make([]autonomousOptimizerTrailingStopTierBreakdown, 0, len(tierBreakdown))
+		for _, entry := range tierBreakdown {
+			if entry.AuditCount > 0 {
+				entry.AvgPreUpdateUnrealizedPnLPct = roundAutonomousOptimizerFloat(entry.preUpdatePnLSum/float64(entry.AuditCount), 2)
+			}
+			items = append(items, entry.autonomousOptimizerTrailingStopTierBreakdown)
+		}
+		sort.Slice(items, func(i, j int) bool {
+			if items[i].TierTriggerProfitPct == items[j].TierTriggerProfitPct {
+				return items[i].TrailingMode < items[j].TrailingMode
+			}
+			return items[i].TierTriggerProfitPct < items[j].TierTriggerProfitPct
+		})
+		telemetry.TierBreakdown = items
+	}
+	if len(profitBandBreakdown) > 0 {
+		items := make([]autonomousOptimizerTrailingStopProfitBandBreakdown, 0, len(profitBandBreakdown))
+		for _, entry := range profitBandBreakdown {
+			if entry.timedCount > 0 {
+				entry.AvgMinutesToFirstUpdate = roundAutonomousOptimizerFloat(entry.minutesToFirstSum/float64(entry.timedCount), 1)
+			}
+			items = append(items, entry.autonomousOptimizerTrailingStopProfitBandBreakdown)
+		}
+		sort.Slice(items, func(i, j int) bool {
+			return autonomousOptimizerTrailingStopProfitBandRank(items[i].ProfitBand) < autonomousOptimizerTrailingStopProfitBandRank(items[j].ProfitBand)
+		})
+		telemetry.ProfitBandBreakdown = items
+	}
+	if len(entryProtectionBreakdown) > 0 {
+		items := make([]autonomousOptimizerTrailingStopEntryProtectionBreakdown, 0, len(entryProtectionBreakdown))
+		for _, entry := range entryProtectionBreakdown {
+			items = append(items, *entry)
+		}
+		sort.Slice(items, func(i, j int) bool {
+			return items[i].EntryProtectionState < items[j].EntryProtectionState
+		})
+		telemetry.EntryProtectionBreakdown = items
+	}
 	if len(auditItems) > 0 {
 		sort.Slice(auditItems, func(i, j int) bool {
 			if auditItems[i].RealizedPnLPct == auditItems[j].RealizedPnLPct {
@@ -596,6 +876,123 @@ func buildAutonomousOptimizerTrailingStopTelemetry(cases []store.DealReviewCaseD
 		telemetry.SampleUpdates = auditItems
 	}
 	return telemetry
+}
+
+type autonomousOptimizerTrailingStopAuditContext struct {
+	UpdateSource              string
+	UpdateTimeMs              int64
+	PreUpdateUnrealizedPnL    float64
+	PreUpdateUnrealizedPnLPct float64
+	StopProfitPct             float64
+	ProtectsBreakeven         bool
+	PreviousStopPrice         float64
+	NewStopPrice              float64
+	TierTriggerProfitPct      float64
+	TrailingMode              string
+	EntryPrice                float64
+	MarkPrice                 float64
+}
+
+func autonomousOptimizerTrailingStopAuditContextForCase(caseRec *store.DealReviewCase, firstTrailingUpdates map[int64]store.DealReviewTrailingUpdateRecord) (autonomousOptimizerTrailingStopAuditContext, bool) {
+	if caseRec == nil {
+		return autonomousOptimizerTrailingStopAuditContext{}, false
+	}
+	if record, ok := firstTrailingUpdates[caseRec.PositionID]; ok && record.TimestampMs > 0 {
+		return autonomousOptimizerTrailingStopAuditContext{
+			UpdateSource:              "trailing_update_record",
+			UpdateTimeMs:              record.TimestampMs,
+			PreUpdateUnrealizedPnL:    record.UnrealizedPnL,
+			PreUpdateUnrealizedPnLPct: record.UnrealizedPnLPct,
+			StopProfitPct:             record.StopProfitPct,
+			ProtectsBreakeven:         record.ProtectsBreakeven,
+			PreviousStopPrice:         record.PreviousStopPrice,
+			NewStopPrice:              record.NewStopPrice,
+			TierTriggerProfitPct:      record.TierTriggerProfitPct,
+			TrailingMode:              strings.TrimSpace(record.TrailingMode),
+			EntryPrice:                record.EntryPrice,
+			MarkPrice:                 record.MarkPrice,
+		}, true
+	}
+	if caseRec.ExitEvidence != nil && caseRec.ExitEvidence.TrailingUpdatedAtMs > 0 {
+		return autonomousOptimizerTrailingStopAuditContext{
+			UpdateSource:              "exit_evidence",
+			UpdateTimeMs:              caseRec.ExitEvidence.TrailingUpdatedAtMs,
+			PreUpdateUnrealizedPnL:    caseRec.ExitEvidence.TrailingUnrealizedPnL,
+			PreUpdateUnrealizedPnLPct: caseRec.ExitEvidence.TrailingUnrealizedPnLPct,
+			StopProfitPct:             caseRec.ExitEvidence.TrailingStopProfitPct,
+			ProtectsBreakeven:         caseRec.ExitEvidence.TrailingProtectsBreakeven,
+			PreviousStopPrice:         caseRec.ExitEvidence.PreviousStopPrice,
+			NewStopPrice:              caseRec.ExitEvidence.NewStopPrice,
+			TierTriggerProfitPct:      caseRec.ExitEvidence.TrailingTriggerProfitPct,
+			TrailingMode:              strings.TrimSpace(caseRec.ExitEvidence.TrailingMode),
+			EntryPrice:                caseRec.EntryPrice,
+		}, true
+	}
+	return autonomousOptimizerTrailingStopAuditContext{}, false
+}
+
+func autonomousOptimizerTrailingStopEntryProtectionState(side string, entryPrice, newStopPrice float64, protectsBreakeven bool) string {
+	if entryPrice > 0 && newStopPrice > 0 {
+		switch strings.ToLower(strings.TrimSpace(side)) {
+		case "short":
+			if newStopPrice <= entryPrice {
+				return "breakeven_or_better"
+			}
+			return "below_entry"
+		default:
+			if newStopPrice >= entryPrice {
+				return "breakeven_or_better"
+			}
+			return "below_entry"
+		}
+	}
+	if protectsBreakeven {
+		return "breakeven_or_better"
+	}
+	return "below_entry"
+}
+
+func autonomousOptimizerTrailingStopProfitBand(unrealizedPnLPct float64) string {
+	switch {
+	case unrealizedPnLPct < 0:
+		return "<0%"
+	case unrealizedPnLPct < 0.25:
+		return "0-0.25%"
+	case unrealizedPnLPct < 0.5:
+		return "0.25-0.5%"
+	case unrealizedPnLPct < 1:
+		return "0.5-1.0%"
+	case unrealizedPnLPct < 2:
+		return "1.0-2.0%"
+	default:
+		return ">=2.0%"
+	}
+}
+
+func autonomousOptimizerTrailingStopProfitBandRank(band string) int {
+	switch band {
+	case "<0%":
+		return 0
+	case "0-0.25%":
+		return 1
+	case "0.25-0.5%":
+		return 2
+	case "0.5-1.0%":
+		return 3
+	case "1.0-2.0%":
+		return 4
+	case ">=2.0%":
+		return 5
+	default:
+		return 99
+	}
+}
+
+func autonomousOptimizerTrailingStopExitWithinOneCycle(exitTimeMs, updateTimeMs int64, thresholdSec int) bool {
+	if thresholdSec <= 0 || updateTimeMs <= 0 || exitTimeMs <= updateTimeMs {
+		return false
+	}
+	return exitTimeMs-updateTimeMs <= int64(thresholdSec)*1000
 }
 
 func buildAutonomousOptimizerAdaptiveCooldownTelemetry(strategyCfg *store.StrategyConfig, cases []store.DealReviewCaseDetail) *autonomousOptimizerAdaptiveCooldownTelemetry {
@@ -1391,6 +1788,11 @@ func buildAutonomousOptimizerLearnedPatternPayload(patterns []store.DealReviewLe
 		payload.ReverseRiskCount = reportingSummary.ReverseRiskCount
 		payload.DriftingCount = reportingSummary.DriftingCount
 		payload.ExpiredCount = reportingSummary.ExpiredCount
+		payload.LiveGuardProtectiveCount = reportingSummary.LiveGuardProtectiveCount
+		payload.LiveGuardOverblockingCount = reportingSummary.LiveGuardOverblockingCount
+		payload.LiveGuardImprovingCount = reportingSummary.LiveGuardImprovingCount
+		payload.LiveGuardDegradingCount = reportingSummary.LiveGuardDegradingCount
+		payload.LiveGuardNewlyOverblockingCount = reportingSummary.LiveGuardNewlyOverblockingCount
 		payload.Notes = append(payload.Notes, reportingSummary.Notes...)
 	}
 
@@ -1451,12 +1853,34 @@ func buildAutonomousOptimizerLearnedPatternPayload(patterns []store.DealReviewLe
 			payload.ConfigCandidateCount++
 		case store.DealReviewLearnedPatternRecommendedUsePromptHint:
 			payload.PromptOnlyCount++
+		case store.DealReviewLearnedPatternRecommendedUseMonitoringRule:
+			payload.MonitoringRuleCount++
 		case store.DealReviewLearnedPatternRecommendedUseReviewHint:
 			payload.ReviewHintCount++
 		case store.DealReviewLearnedPatternRecommendedUseMonitorOnly:
 			payload.MonitorOnlyCount++
 		case store.DealReviewLearnedPatternRecommendedUseExpiredIgnore:
 			payload.DoNotUseCount++
+		}
+		if pattern.Lifecycle != nil {
+			switch strings.TrimSpace(pattern.Lifecycle.Status) {
+			case store.DealReviewLearnedPatternLifecycleStatusActive:
+				payload.LifecycleActiveCount++
+			case store.DealReviewLearnedPatternLifecycleStatusDegrading:
+				payload.LifecycleDegradingCount++
+			case store.DealReviewLearnedPatternLifecycleStatusRollbackWatch:
+				payload.LifecycleRollbackWatchCount++
+			case store.DealReviewLearnedPatternLifecycleStatusExpired:
+				payload.LifecycleExpiredCount++
+			}
+		}
+		if pattern.LifecycleTrend != nil {
+			if pattern.LifecycleTrend.Fragile {
+				payload.LifecycleFragileCount++
+			}
+			if pattern.LifecycleTrend.StaleGuardSnapshotCount > 0 {
+				payload.LifecycleLaggingGuardCount++
+			}
 		}
 
 		closedMatches := closedCaseMatchCounts[pattern.ID]
@@ -1536,6 +1960,12 @@ func buildAutonomousOptimizerLearnedPatternPayload(patterns []store.DealReviewLe
 		payload.TopPositivePatterns = buildAutonomousOptimizerLearnedPatternEvidenceList(reportingSummary.TopPositivePatterns, lookup, 4)
 		payload.TopNegativePatterns = buildAutonomousOptimizerLearnedPatternEvidenceList(reportingSummary.TopNegativePatterns, lookup, 4)
 		payload.TopSymbolOverrides = buildAutonomousOptimizerLearnedPatternEvidenceList(reportingSummary.TopSymbolOverrides, lookup, 4)
+		payload.TopExpiringMonitoringRules = buildAutonomousOptimizerLearnedPatternEvidenceList(reportingSummary.TopExpiringMonitoringRules, lookup, 4)
+		payload.TopRollbackWatchPatterns = buildAutonomousOptimizerLearnedPatternEvidenceList(reportingSummary.TopRollbackWatchPatterns, lookup, 4)
+		payload.TopFragileMonitoringRules = buildAutonomousOptimizerLearnedPatternEvidenceList(reportingSummary.TopFragileMonitoringRules, lookup, 4)
+		payload.TopOverblockingMonitoringRules = buildAutonomousOptimizerLearnedPatternEvidenceList(reportingSummary.TopOverblockingMonitoringRules, lookup, 4)
+		payload.TopImprovingMonitoringRules = buildAutonomousOptimizerLearnedPatternEvidenceList(reportingSummary.TopImprovingMonitoringRules, lookup, 4)
+		payload.TopDegradingMonitoringRules = buildAutonomousOptimizerLearnedPatternEvidenceList(reportingSummary.TopDegradingMonitoringRules, lookup, 4)
 	}
 	payload.Notes = buildAutonomousOptimizerLearnedPatternNotes(payload)
 	return payload
@@ -1558,55 +1988,354 @@ func buildAutonomousOptimizerLearnedPatternExecutionCase(item store.TraderOpenEx
 }
 
 func buildAutonomousOptimizerLearnedPatternEvidence(pattern store.DealReviewLearnedPattern, matchType string, closedMatches, recentMatches, opportunityMatches int, currentWindowNetPnL float64, implicationType, implicationSummary string) autonomousOptimizerLearnedPatternEvidence {
+	lifecycleStatus := ""
+	lifecycleSummary := ""
+	lifecycleExpiryScore := 0.0
+	lifecycleRollbackScore := 0.0
+	lifecycleRecentGuardEventCount := 0
+	lifecycleRecentQualifiedGuardCount := 0
+	lifecycleRecentHardBlockedCount := 0
+	lifecycleRecentMonitorOnlyCount := 0
+	lifecycleRecentMatchedUnqualifiedCount := 0
+	lifecycleLastGuardEventAt := ""
+	lifecycleTrendSnapshotCount := 0
+	lifecycleTrendStatusChangeCount := 0
+	lifecycleTrendSpanHours := 0.0
+	lifecycleTrendLatestStatusDurationHours := 0.0
+	lifecycleTrendActiveHours := 0.0
+	lifecycleTrendDegradingHours := 0.0
+	lifecycleTrendRollbackWatchHours := 0.0
+	lifecycleTrendExpiredHours := 0.0
+	lifecycleTrendActiveShare := 0.0
+	lifecycleTrendDegradingShare := 0.0
+	lifecycleTrendRollbackWatchShare := 0.0
+	lifecycleTrendExpiredShare := 0.0
+	lifecycleTrendStaleGuardSnapshotCount := 0
+	lifecycleTrendStaleGuardSnapshotShare := 0.0
+	lifecycleTrendAvgObservedToGuardLagHours := 0.0
+	lifecycleTrendMaxObservedToGuardLagHours := 0.0
+	lifecycleTrendLastStatusChangeAt := ""
+	lifecycleTrendFragile := false
+	lifecycleTrendSummary := ""
+	liveGuardAttributionEventCount := 0
+	liveGuardAttributionQualifiedEventCount := 0
+	liveGuardAttributionResolvedEventCount := 0
+	liveGuardAttributionProtectiveEvidenceCount := 0
+	liveGuardAttributionOverblockingEvidenceCount := 0
+	liveGuardAttributionCorrectlyBlockedCount := 0
+	liveGuardAttributionOverblockedCount := 0
+	liveGuardAttributionWarningConfirmedCount := 0
+	liveGuardAttributionWarningNotConfirmedCount := 0
+	liveGuardAttributionThresholdMissedLossCount := 0
+	liveGuardAttributionThresholdMissedProfitCount := 0
+	liveGuardAttributionPendingCount := 0
+	liveGuardAttributionFollowupOpenCount := 0
+	liveGuardAttributionProtectiveRate := 0.0
+	liveGuardAttributionOverblockingRate := 0.0
+	liveGuardAttributionConfidenceScore := 0.0
+	liveGuardAttributionLabel := ""
+	liveGuardAttributionSummary := ""
+	liveGuardAttributionDeltaRecentEventCount := 0
+	liveGuardAttributionDeltaPriorEventCount := 0
+	liveGuardAttributionDeltaRecentResolvedCount := 0
+	liveGuardAttributionDeltaPriorResolvedCount := 0
+	liveGuardAttributionDeltaRecentProtectiveRate := 0.0
+	liveGuardAttributionDeltaPriorProtectiveRate := 0.0
+	liveGuardAttributionDeltaRecentOverblockingRate := 0.0
+	liveGuardAttributionDeltaPriorOverblockingRate := 0.0
+	liveGuardAttributionDeltaProtectiveRateDelta := 0.0
+	liveGuardAttributionDeltaOverblockingRateDelta := 0.0
+	liveGuardAttributionDeltaTrendLabel := ""
+	liveGuardAttributionDeltaConfidenceScore := 0.0
+	liveGuardAttributionDeltaSummary := ""
+	actionHintRecommendedAction := ""
+	actionHintPriorityLabel := ""
+	actionHintReasonCode := ""
+	actionHintConfidenceScore := 0.0
+	actionHintSummary := ""
+	actionHintAutoNote := ""
+	liveActionCandidateKind := ""
+	liveActionCandidateRecommendedAction := ""
+	liveActionCandidatePriorityLabel := ""
+	liveActionCandidateConfidenceScore := 0.0
+	liveActionCandidateSummary := ""
+	liveActionCandidateOpen := false
+	interventionOpenStrongCandidateCount := 0
+	interventionOpenSuggestionCount := 0
+	interventionAcceptedCount := 0
+	interventionOverriddenCount := 0
+	interventionManualActionCount := 0
+	interventionLatestEventType := ""
+	interventionLatestStatus := ""
+	interventionLatestSuggestedAction := ""
+	interventionLatestAppliedAction := ""
+	interventionLatestSeenAt := ""
+	interventionLatestSummary := ""
+	interventionLatestNote := ""
+	if pattern.Lifecycle != nil {
+		lifecycleStatus = pattern.Lifecycle.Status
+		lifecycleSummary = pattern.Lifecycle.Summary
+		lifecycleExpiryScore = pattern.Lifecycle.ExpiryScore
+		lifecycleRollbackScore = pattern.Lifecycle.RollbackScore
+		lifecycleRecentGuardEventCount = pattern.Lifecycle.RecentGuardEventCount
+		lifecycleRecentQualifiedGuardCount = pattern.Lifecycle.RecentQualifiedGuardCount
+		lifecycleRecentHardBlockedCount = pattern.Lifecycle.RecentHardBlockedCount
+		lifecycleRecentMonitorOnlyCount = pattern.Lifecycle.RecentMonitorOnlyCount
+		lifecycleRecentMatchedUnqualifiedCount = pattern.Lifecycle.RecentMatchedUnqualifiedCount
+		if !pattern.Lifecycle.LastGuardEventAt.IsZero() {
+			lifecycleLastGuardEventAt = pattern.Lifecycle.LastGuardEventAt.UTC().Format(time.RFC3339)
+		}
+	}
+	if pattern.LifecycleTrend != nil {
+		lifecycleTrendSnapshotCount = pattern.LifecycleTrend.SnapshotCount
+		lifecycleTrendStatusChangeCount = pattern.LifecycleTrend.StatusChangeCount
+		lifecycleTrendSpanHours = pattern.LifecycleTrend.SpanHours
+		lifecycleTrendLatestStatusDurationHours = pattern.LifecycleTrend.LatestStatusDurationHours
+		lifecycleTrendActiveHours = pattern.LifecycleTrend.ActiveHours
+		lifecycleTrendDegradingHours = pattern.LifecycleTrend.DegradingHours
+		lifecycleTrendRollbackWatchHours = pattern.LifecycleTrend.RollbackWatchHours
+		lifecycleTrendExpiredHours = pattern.LifecycleTrend.ExpiredHours
+		lifecycleTrendActiveShare = pattern.LifecycleTrend.ActiveShare
+		lifecycleTrendDegradingShare = pattern.LifecycleTrend.DegradingShare
+		lifecycleTrendRollbackWatchShare = pattern.LifecycleTrend.RollbackWatchShare
+		lifecycleTrendExpiredShare = pattern.LifecycleTrend.ExpiredShare
+		lifecycleTrendStaleGuardSnapshotCount = pattern.LifecycleTrend.StaleGuardSnapshotCount
+		lifecycleTrendStaleGuardSnapshotShare = pattern.LifecycleTrend.StaleGuardSnapshotShare
+		lifecycleTrendAvgObservedToGuardLagHours = pattern.LifecycleTrend.AvgObservedToGuardLagHours
+		lifecycleTrendMaxObservedToGuardLagHours = pattern.LifecycleTrend.MaxObservedToGuardLagHours
+		lifecycleTrendFragile = pattern.LifecycleTrend.Fragile
+		lifecycleTrendSummary = clipDealReviewAIScanText(pattern.LifecycleTrend.Summary, 240)
+		if !pattern.LifecycleTrend.LastStatusChangeAt.IsZero() {
+			lifecycleTrendLastStatusChangeAt = pattern.LifecycleTrend.LastStatusChangeAt.UTC().Format(time.RFC3339)
+		}
+	}
+	if pattern.LiveGuardAttribution != nil {
+		liveGuardAttributionEventCount = pattern.LiveGuardAttribution.EventCount
+		liveGuardAttributionQualifiedEventCount = pattern.LiveGuardAttribution.QualifiedEventCount
+		liveGuardAttributionResolvedEventCount = pattern.LiveGuardAttribution.ResolvedEventCount
+		liveGuardAttributionProtectiveEvidenceCount = pattern.LiveGuardAttribution.ProtectiveEvidenceCount
+		liveGuardAttributionOverblockingEvidenceCount = pattern.LiveGuardAttribution.OverblockingEvidenceCount
+		liveGuardAttributionCorrectlyBlockedCount = pattern.LiveGuardAttribution.CorrectlyBlockedCount
+		liveGuardAttributionOverblockedCount = pattern.LiveGuardAttribution.OverblockedCount
+		liveGuardAttributionWarningConfirmedCount = pattern.LiveGuardAttribution.WarningConfirmedCount
+		liveGuardAttributionWarningNotConfirmedCount = pattern.LiveGuardAttribution.WarningNotConfirmedCount
+		liveGuardAttributionThresholdMissedLossCount = pattern.LiveGuardAttribution.ThresholdMissedLossCount
+		liveGuardAttributionThresholdMissedProfitCount = pattern.LiveGuardAttribution.ThresholdMissedProfitCount
+		liveGuardAttributionPendingCount = pattern.LiveGuardAttribution.PendingCount
+		liveGuardAttributionFollowupOpenCount = pattern.LiveGuardAttribution.FollowupOpenCount
+		liveGuardAttributionProtectiveRate = pattern.LiveGuardAttribution.ProtectiveRate
+		liveGuardAttributionOverblockingRate = pattern.LiveGuardAttribution.OverblockingRate
+		liveGuardAttributionConfidenceScore = pattern.LiveGuardAttribution.ConfidenceScore
+		liveGuardAttributionLabel = pattern.LiveGuardAttribution.AttributionLabel
+		liveGuardAttributionSummary = clipDealReviewAIScanText(pattern.LiveGuardAttribution.Summary, 240)
+	}
+	if pattern.LiveGuardAttributionDelta != nil {
+		liveGuardAttributionDeltaRecentEventCount = pattern.LiveGuardAttributionDelta.RecentEventCount
+		liveGuardAttributionDeltaPriorEventCount = pattern.LiveGuardAttributionDelta.PriorEventCount
+		liveGuardAttributionDeltaRecentResolvedCount = pattern.LiveGuardAttributionDelta.RecentResolvedEventCount
+		liveGuardAttributionDeltaPriorResolvedCount = pattern.LiveGuardAttributionDelta.PriorResolvedEventCount
+		liveGuardAttributionDeltaRecentProtectiveRate = pattern.LiveGuardAttributionDelta.RecentProtectiveRate
+		liveGuardAttributionDeltaPriorProtectiveRate = pattern.LiveGuardAttributionDelta.PriorProtectiveRate
+		liveGuardAttributionDeltaRecentOverblockingRate = pattern.LiveGuardAttributionDelta.RecentOverblockingRate
+		liveGuardAttributionDeltaPriorOverblockingRate = pattern.LiveGuardAttributionDelta.PriorOverblockingRate
+		liveGuardAttributionDeltaProtectiveRateDelta = pattern.LiveGuardAttributionDelta.ProtectiveRateDelta
+		liveGuardAttributionDeltaOverblockingRateDelta = pattern.LiveGuardAttributionDelta.OverblockingRateDelta
+		liveGuardAttributionDeltaTrendLabel = pattern.LiveGuardAttributionDelta.TrendLabel
+		liveGuardAttributionDeltaConfidenceScore = pattern.LiveGuardAttributionDelta.ConfidenceScore
+		liveGuardAttributionDeltaSummary = clipDealReviewAIScanText(pattern.LiveGuardAttributionDelta.Summary, 240)
+	}
+	if pattern.ActionHint != nil {
+		actionHintRecommendedAction = pattern.ActionHint.RecommendedAction
+		actionHintPriorityLabel = pattern.ActionHint.PriorityLabel
+		actionHintReasonCode = pattern.ActionHint.ReasonCode
+		actionHintConfidenceScore = pattern.ActionHint.ConfidenceScore
+		actionHintSummary = clipDealReviewAIScanText(pattern.ActionHint.Summary, 240)
+		actionHintAutoNote = clipDealReviewAIScanText(pattern.ActionHint.AutoNote, 240)
+	}
+	if pattern.LiveActionHint != nil {
+		liveActionCandidateKind = pattern.LiveActionHint.CandidateKind
+		liveActionCandidateRecommendedAction = pattern.LiveActionHint.RecommendedAction
+		liveActionCandidatePriorityLabel = pattern.LiveActionHint.PriorityLabel
+		liveActionCandidateConfidenceScore = pattern.LiveActionHint.ConfidenceScore
+		liveActionCandidateSummary = clipDealReviewAIScanText(pattern.LiveActionHint.Summary, 240)
+	}
+	for idx, intervention := range pattern.InterventionHistory {
+		switch strings.TrimSpace(intervention.EventStatus) {
+		case store.DealReviewLearnedPatternInterventionStatusOpen:
+			interventionOpenSuggestionCount++
+			if intervention.DirectLiveActionCandidate {
+				interventionOpenStrongCandidateCount++
+				if !liveActionCandidateOpen {
+					liveActionCandidateKind = strings.TrimSpace(intervention.DirectLiveActionKind)
+					liveActionCandidateRecommendedAction = strings.TrimSpace(intervention.SuggestedAction)
+					liveActionCandidatePriorityLabel = strings.TrimSpace(intervention.TriggerPriorityLabel)
+					liveActionCandidateConfidenceScore = intervention.DirectLiveActionConfidence
+					liveActionCandidateSummary = clipDealReviewAIScanText(
+						blankAutonomousOptimizerText(intervention.DirectLiveActionSummary, intervention.Summary),
+						240,
+					)
+					liveActionCandidateOpen = true
+				}
+			}
+		case store.DealReviewLearnedPatternInterventionStatusAccepted:
+			interventionAcceptedCount++
+		case store.DealReviewLearnedPatternInterventionStatusOverridden:
+			interventionOverriddenCount++
+		}
+		if strings.TrimSpace(intervention.EventType) == store.DealReviewLearnedPatternInterventionEventTypeManualAction {
+			interventionManualActionCount++
+		}
+		if idx != 0 {
+			continue
+		}
+		interventionLatestEventType = strings.TrimSpace(intervention.EventType)
+		interventionLatestStatus = strings.TrimSpace(intervention.EventStatus)
+		interventionLatestSuggestedAction = strings.TrimSpace(intervention.SuggestedAction)
+		interventionLatestAppliedAction = strings.TrimSpace(intervention.AppliedAction)
+		switch {
+		case !intervention.ResolvedAt.IsZero():
+			interventionLatestSeenAt = intervention.ResolvedAt.UTC().Format(time.RFC3339)
+		case !intervention.LastSeenAt.IsZero():
+			interventionLatestSeenAt = intervention.LastSeenAt.UTC().Format(time.RFC3339)
+		case !intervention.FirstSeenAt.IsZero():
+			interventionLatestSeenAt = intervention.FirstSeenAt.UTC().Format(time.RFC3339)
+		}
+		interventionLatestSummary = clipDealReviewAIScanText(intervention.Summary, 240)
+		interventionLatestNote = clipDealReviewAIScanText(intervention.Note, 240)
+	}
 	return autonomousOptimizerLearnedPatternEvidence{
-		PatternID:                   pattern.ID,
-		ScopeType:                   pattern.ScopeType,
-		Symbol:                      pattern.Symbol,
-		Side:                        pattern.Side,
-		PatternClass:                pattern.PatternClass,
-		Status:                      pattern.Status,
-		ValidationLabel:             pattern.ValidationLabel,
-		RecommendedUse:              pattern.RecommendedUse,
-		PatternSignature:            pattern.PatternSignature,
-		RegimeSignature:             pattern.RegimeSignature,
-		PatternOrder:                pattern.PatternOrder,
-		FeatureCount:                pattern.FeatureCount,
-		FeatureSet:                  limitAutonomousOptimizerStringSlice(pattern.FeatureSet, 8),
-		SampleCount:                 pattern.SampleCount,
-		SupportCount:                pattern.SupportCount,
-		ContradictCount:             pattern.ContradictCount,
-		WinRate:                     pattern.WinRate,
-		LossRate:                    pattern.LossRate,
-		AvgPnLPct:                   pattern.AvgPnLPct,
-		LiftAvgPnLPct:               pattern.LiftAvgPnLPct,
-		Expectancy:                  pattern.Expectancy,
-		AvgMFEPct:                   pattern.AvgMFEPct,
-		AvgMAEPct:                   pattern.AvgMAEPct,
-		GiveBackRate:                pattern.GiveBackRate,
-		AvgGiveBackPct:              pattern.AvgGiveBackPct,
-		ConfidenceScore:             pattern.ConfidenceScore,
-		StabilityScore:              pattern.StabilityScore,
-		DriftScore:                  pattern.DriftScore,
-		CompositeScore:              pattern.CompositeScore,
-		FalsePositiveScore:          pattern.FalsePositiveScore,
-		ReverseRiskScore:            pattern.ReverseRiskScore,
-		TrainingSampleCount:         pattern.TrainingSampleCount,
-		ValidationSampleCount:       pattern.ValidationSampleCount,
-		ValidationSupportCount:      pattern.ValidationSupportCount,
-		ValidationSupportScore:      pattern.ValidationSupportScore,
-		RecentSampleCount:           pattern.RecentSampleCount,
-		RecentSupportCount:          pattern.RecentSupportCount,
-		RecentSupportScore:          pattern.RecentSupportScore,
-		CurrentWindowMatchType:      matchType,
-		ClosedCaseMatchCount:        closedMatches,
-		RecentExecutionMatchCount:   recentMatches,
-		OpportunitySymbolMatchCount: opportunityMatches,
-		CurrentWindowNetPnL:         currentWindowNetPnL,
-		ImplicationType:             implicationType,
-		ImplicationSummary:          implicationSummary,
-		EvidenceCaseIDs:             buildAutonomousOptimizerLearnedPatternEvidenceCaseIDs(pattern, 4),
-		Summary:                     clipDealReviewAIScanText(pattern.Summary, 320),
-		ValidationAlert:             clipDealReviewAIScanText(pattern.ValidationAlert, 240),
+		PatternID:                                       pattern.ID,
+		ScopeType:                                       pattern.ScopeType,
+		Symbol:                                          pattern.Symbol,
+		Side:                                            pattern.Side,
+		PatternClass:                                    pattern.PatternClass,
+		Status:                                          pattern.Status,
+		ValidationLabel:                                 pattern.ValidationLabel,
+		RecommendedUse:                                  pattern.RecommendedUse,
+		PatternSignature:                                pattern.PatternSignature,
+		RegimeSignature:                                 pattern.RegimeSignature,
+		PatternOrder:                                    pattern.PatternOrder,
+		FeatureCount:                                    pattern.FeatureCount,
+		FeatureSet:                                      limitAutonomousOptimizerStringSlice(pattern.FeatureSet, 8),
+		SampleCount:                                     pattern.SampleCount,
+		SupportCount:                                    pattern.SupportCount,
+		ContradictCount:                                 pattern.ContradictCount,
+		WinRate:                                         pattern.WinRate,
+		LossRate:                                        pattern.LossRate,
+		AvgPnLPct:                                       pattern.AvgPnLPct,
+		LiftAvgPnLPct:                                   pattern.LiftAvgPnLPct,
+		Expectancy:                                      pattern.Expectancy,
+		AvgMFEPct:                                       pattern.AvgMFEPct,
+		AvgMAEPct:                                       pattern.AvgMAEPct,
+		GiveBackRate:                                    pattern.GiveBackRate,
+		AvgGiveBackPct:                                  pattern.AvgGiveBackPct,
+		ConfidenceScore:                                 pattern.ConfidenceScore,
+		StabilityScore:                                  pattern.StabilityScore,
+		DriftScore:                                      pattern.DriftScore,
+		CompositeScore:                                  pattern.CompositeScore,
+		FalsePositiveScore:                              pattern.FalsePositiveScore,
+		ReverseRiskScore:                                pattern.ReverseRiskScore,
+		TrainingSampleCount:                             pattern.TrainingSampleCount,
+		ValidationSampleCount:                           pattern.ValidationSampleCount,
+		ValidationSupportCount:                          pattern.ValidationSupportCount,
+		ValidationSupportScore:                          pattern.ValidationSupportScore,
+		RecentSampleCount:                               pattern.RecentSampleCount,
+		RecentSupportCount:                              pattern.RecentSupportCount,
+		RecentSupportScore:                              pattern.RecentSupportScore,
+		CurrentWindowMatchType:                          matchType,
+		ClosedCaseMatchCount:                            closedMatches,
+		RecentExecutionMatchCount:                       recentMatches,
+		OpportunitySymbolMatchCount:                     opportunityMatches,
+		CurrentWindowNetPnL:                             currentWindowNetPnL,
+		ImplicationType:                                 implicationType,
+		ImplicationSummary:                              implicationSummary,
+		LifecycleStatus:                                 lifecycleStatus,
+		LifecycleSummary:                                clipDealReviewAIScanText(lifecycleSummary, 240),
+		LifecycleExpiryScore:                            lifecycleExpiryScore,
+		LifecycleRollbackScore:                          lifecycleRollbackScore,
+		LifecycleRecentGuardEventCount:                  lifecycleRecentGuardEventCount,
+		LifecycleRecentQualifiedGuardCount:              lifecycleRecentQualifiedGuardCount,
+		LifecycleRecentHardBlockedCount:                 lifecycleRecentHardBlockedCount,
+		LifecycleRecentMonitorOnlyCount:                 lifecycleRecentMonitorOnlyCount,
+		LifecycleRecentMatchedUnqualifiedCount:          lifecycleRecentMatchedUnqualifiedCount,
+		LifecycleLastGuardEventAt:                       lifecycleLastGuardEventAt,
+		LifecycleTrendSnapshotCount:                     lifecycleTrendSnapshotCount,
+		LifecycleTrendStatusChangeCount:                 lifecycleTrendStatusChangeCount,
+		LifecycleTrendSpanHours:                         lifecycleTrendSpanHours,
+		LifecycleTrendLatestStatusDurationHours:         lifecycleTrendLatestStatusDurationHours,
+		LifecycleTrendActiveHours:                       lifecycleTrendActiveHours,
+		LifecycleTrendDegradingHours:                    lifecycleTrendDegradingHours,
+		LifecycleTrendRollbackWatchHours:                lifecycleTrendRollbackWatchHours,
+		LifecycleTrendExpiredHours:                      lifecycleTrendExpiredHours,
+		LifecycleTrendActiveShare:                       lifecycleTrendActiveShare,
+		LifecycleTrendDegradingShare:                    lifecycleTrendDegradingShare,
+		LifecycleTrendRollbackWatchShare:                lifecycleTrendRollbackWatchShare,
+		LifecycleTrendExpiredShare:                      lifecycleTrendExpiredShare,
+		LifecycleTrendStaleGuardSnapshotCount:           lifecycleTrendStaleGuardSnapshotCount,
+		LifecycleTrendStaleGuardSnapshotShare:           lifecycleTrendStaleGuardSnapshotShare,
+		LifecycleTrendAvgObservedToGuardLagHours:        lifecycleTrendAvgObservedToGuardLagHours,
+		LifecycleTrendMaxObservedToGuardLagHours:        lifecycleTrendMaxObservedToGuardLagHours,
+		LifecycleTrendLastStatusChangeAt:                lifecycleTrendLastStatusChangeAt,
+		LifecycleTrendFragile:                           lifecycleTrendFragile,
+		LifecycleTrendSummary:                           lifecycleTrendSummary,
+		LiveGuardAttributionEventCount:                  liveGuardAttributionEventCount,
+		LiveGuardAttributionQualifiedEventCount:         liveGuardAttributionQualifiedEventCount,
+		LiveGuardAttributionResolvedEventCount:          liveGuardAttributionResolvedEventCount,
+		LiveGuardAttributionProtectiveEvidenceCount:     liveGuardAttributionProtectiveEvidenceCount,
+		LiveGuardAttributionOverblockingEvidenceCount:   liveGuardAttributionOverblockingEvidenceCount,
+		LiveGuardAttributionCorrectlyBlockedCount:       liveGuardAttributionCorrectlyBlockedCount,
+		LiveGuardAttributionOverblockedCount:            liveGuardAttributionOverblockedCount,
+		LiveGuardAttributionWarningConfirmedCount:       liveGuardAttributionWarningConfirmedCount,
+		LiveGuardAttributionWarningNotConfirmedCount:    liveGuardAttributionWarningNotConfirmedCount,
+		LiveGuardAttributionThresholdMissedLossCount:    liveGuardAttributionThresholdMissedLossCount,
+		LiveGuardAttributionThresholdMissedProfitCount:  liveGuardAttributionThresholdMissedProfitCount,
+		LiveGuardAttributionPendingCount:                liveGuardAttributionPendingCount,
+		LiveGuardAttributionFollowupOpenCount:           liveGuardAttributionFollowupOpenCount,
+		LiveGuardAttributionProtectiveRate:              liveGuardAttributionProtectiveRate,
+		LiveGuardAttributionOverblockingRate:            liveGuardAttributionOverblockingRate,
+		LiveGuardAttributionConfidenceScore:             liveGuardAttributionConfidenceScore,
+		LiveGuardAttributionLabel:                       liveGuardAttributionLabel,
+		LiveGuardAttributionSummary:                     liveGuardAttributionSummary,
+		LiveGuardAttributionDeltaRecentEventCount:       liveGuardAttributionDeltaRecentEventCount,
+		LiveGuardAttributionDeltaPriorEventCount:        liveGuardAttributionDeltaPriorEventCount,
+		LiveGuardAttributionDeltaRecentResolvedCount:    liveGuardAttributionDeltaRecentResolvedCount,
+		LiveGuardAttributionDeltaPriorResolvedCount:     liveGuardAttributionDeltaPriorResolvedCount,
+		LiveGuardAttributionDeltaRecentProtectiveRate:   liveGuardAttributionDeltaRecentProtectiveRate,
+		LiveGuardAttributionDeltaPriorProtectiveRate:    liveGuardAttributionDeltaPriorProtectiveRate,
+		LiveGuardAttributionDeltaRecentOverblockingRate: liveGuardAttributionDeltaRecentOverblockingRate,
+		LiveGuardAttributionDeltaPriorOverblockingRate:  liveGuardAttributionDeltaPriorOverblockingRate,
+		LiveGuardAttributionDeltaProtectiveRateDelta:    liveGuardAttributionDeltaProtectiveRateDelta,
+		LiveGuardAttributionDeltaOverblockingRateDelta:  liveGuardAttributionDeltaOverblockingRateDelta,
+		LiveGuardAttributionDeltaTrendLabel:             liveGuardAttributionDeltaTrendLabel,
+		LiveGuardAttributionDeltaConfidenceScore:        liveGuardAttributionDeltaConfidenceScore,
+		LiveGuardAttributionDeltaSummary:                liveGuardAttributionDeltaSummary,
+		ActionHintRecommendedAction:                     actionHintRecommendedAction,
+		ActionHintPriorityLabel:                         actionHintPriorityLabel,
+		ActionHintReasonCode:                            actionHintReasonCode,
+		ActionHintConfidenceScore:                       actionHintConfidenceScore,
+		ActionHintSummary:                               actionHintSummary,
+		ActionHintAutoNote:                              actionHintAutoNote,
+		LiveActionCandidateKind:                         liveActionCandidateKind,
+		LiveActionCandidateRecommendedAction:            liveActionCandidateRecommendedAction,
+		LiveActionCandidatePriorityLabel:                liveActionCandidatePriorityLabel,
+		LiveActionCandidateConfidenceScore:              liveActionCandidateConfidenceScore,
+		LiveActionCandidateSummary:                      liveActionCandidateSummary,
+		LiveActionCandidateOpen:                         liveActionCandidateOpen,
+		InterventionOpenStrongCandidateCount:            interventionOpenStrongCandidateCount,
+		InterventionOpenSuggestionCount:                 interventionOpenSuggestionCount,
+		InterventionAcceptedCount:                       interventionAcceptedCount,
+		InterventionOverriddenCount:                     interventionOverriddenCount,
+		InterventionManualActionCount:                   interventionManualActionCount,
+		InterventionLatestEventType:                     interventionLatestEventType,
+		InterventionLatestStatus:                        interventionLatestStatus,
+		InterventionLatestSuggestedAction:               interventionLatestSuggestedAction,
+		InterventionLatestAppliedAction:                 interventionLatestAppliedAction,
+		InterventionLatestSeenAt:                        interventionLatestSeenAt,
+		InterventionLatestSummary:                       interventionLatestSummary,
+		InterventionLatestNote:                          interventionLatestNote,
+		EvidenceCaseIDs:                                 buildAutonomousOptimizerLearnedPatternEvidenceCaseIDs(pattern, 4),
+		Summary:                                         clipDealReviewAIScanText(pattern.Summary, 320),
+		ValidationAlert:                                 clipDealReviewAIScanText(pattern.ValidationAlert, 240),
 	}
 }
 
@@ -1659,12 +2388,53 @@ func buildAutonomousOptimizerLearnedPatternNotes(payload *autonomousOptimizerLea
 	if payload == nil {
 		return nil
 	}
-	notes := make([]string, 0, 6)
+	notes := make([]string, 0, 8)
 	if payload.ConfigCandidateCount > 0 {
 		notes = append(notes, fmt.Sprintf("%d learned pattern(s) are strong enough for narrow config-level consideration.", payload.ConfigCandidateCount))
 	}
 	if payload.PromptOnlyCount > 0 {
 		notes = append(notes, fmt.Sprintf("%d learned pattern(s) should bias prompt behavior before hard config changes.", payload.PromptOnlyCount))
+	}
+	if payload.MonitoringRuleCount > 0 {
+		notes = append(notes, fmt.Sprintf("%d learned pattern(s) are strong enough for explicit live monitoring or hard-block review when the strategy opts in.", payload.MonitoringRuleCount))
+	}
+	if payload.LifecycleDegradingCount > 0 || payload.LifecycleExpiredCount > 0 {
+		notes = append(notes, fmt.Sprintf("%d monitoring rule(s) are degrading and %d are already expired for live use.", payload.LifecycleDegradingCount, payload.LifecycleExpiredCount))
+	}
+	if payload.LifecycleRollbackWatchCount > 0 {
+		notes = append(notes, fmt.Sprintf("%d monitoring rule(s) now carry rollback pressure because live-guard activity is outrunning fresh evidence.", payload.LifecycleRollbackWatchCount))
+	}
+	if payload.LifecycleFragileCount > 0 {
+		notes = append(notes, fmt.Sprintf("%d monitoring rule(s) look structurally fragile across the persisted lifecycle trail.", payload.LifecycleFragileCount))
+	}
+	if payload.LifecycleLaggingGuardCount > 0 {
+		notes = append(notes, fmt.Sprintf("%d learned pattern(s) showed live-guard hits after the last supporting evidence had already gone stale.", payload.LifecycleLaggingGuardCount))
+	}
+	if payload.LiveGuardProtectiveCount > 0 {
+		notes = append(notes, fmt.Sprintf("%d learned pattern(s) now have recent live-guard attribution that is mostly protective.", payload.LiveGuardProtectiveCount))
+	}
+	if payload.LiveGuardOverblockingCount > 0 {
+		notes = append(notes, fmt.Sprintf("%d learned pattern(s) now look overblocking based on recent live-guard follow-up attribution.", payload.LiveGuardOverblockingCount))
+	}
+	if payload.LiveGuardImprovingCount > 0 {
+		notes = append(notes, fmt.Sprintf("%d monitoring rule(s) improved versus their prior live-guard comparison window.", payload.LiveGuardImprovingCount))
+	}
+	if payload.LiveGuardDegradingCount > 0 || payload.LiveGuardNewlyOverblockingCount > 0 {
+		notes = append(notes, fmt.Sprintf("%d monitoring rule(s) are degrading and %d now look newly overblocking versus the prior comparison window.", payload.LiveGuardDegradingCount, payload.LiveGuardNewlyOverblockingCount))
+	}
+	openStrongCandidates := 0
+	openRollbackCandidates := 0
+	for _, item := range payload.Items {
+		if !item.LiveActionCandidateOpen {
+			continue
+		}
+		openStrongCandidates++
+		if item.LiveActionCandidateKind == store.DealReviewLearnedPatternLiveActionKindRollback {
+			openRollbackCandidates++
+		}
+	}
+	if openStrongCandidates > 0 {
+		notes = append(notes, fmt.Sprintf("%d monitoring rule(s) already carry direct live-action candidates, including %d rollback-grade candidates that should be reviewed before the next patch window.", openStrongCandidates, openRollbackCandidates))
 	}
 	if payload.MonitorOnlyCount > 0 {
 		notes = append(notes, fmt.Sprintf("%d learned pattern(s) are better treated as monitoring or caution signals for now.", payload.MonitorOnlyCount))
@@ -1690,6 +2460,8 @@ func buildAutonomousOptimizerLearnedPatternBacklogProposals(payload *autonomousO
 	antiEvidenceCount := 0
 	driftCount := 0
 	coverageCount := 0
+	lifecycleCount := 0
+	deltaCount := 0
 
 	appendProposal := func(item autonomousOptimizerBacklogProposal) {
 		item = sanitizeAutonomousOptimizerBacklogProposal(item)
@@ -1721,6 +2493,18 @@ func buildAutonomousOptimizerLearnedPatternBacklogProposals(payload *autonomousO
 			if proposal, ok := buildAutonomousOptimizerLearnedPatternCoverageBacklogProposal(item); ok {
 				appendProposal(proposal)
 				coverageCount++
+			}
+		}
+		if lifecycleCount < 1 {
+			if proposal, ok := buildAutonomousOptimizerLearnedPatternLifecycleBacklogProposal(item); ok {
+				appendProposal(proposal)
+				lifecycleCount++
+			}
+		}
+		if deltaCount < 1 {
+			if proposal, ok := buildAutonomousOptimizerLearnedPatternDeltaBacklogProposal(item); ok {
+				appendProposal(proposal)
+				deltaCount++
 			}
 		}
 		if len(proposals) >= 4 {
@@ -1886,26 +2670,184 @@ func buildAutonomousOptimizerLearnedPatternCoverageBacklogProposal(item autonomo
 	}, true
 }
 
+func buildAutonomousOptimizerLearnedPatternLifecycleBacklogProposal(item autonomousOptimizerLearnedPatternEvidence) (autonomousOptimizerBacklogProposal, bool) {
+	if item.RecommendedUse != store.DealReviewLearnedPatternRecommendedUseMonitoringRule {
+		return autonomousOptimizerBacklogProposal{}, false
+	}
+	status := strings.TrimSpace(item.LifecycleStatus)
+	if status != store.DealReviewLearnedPatternLifecycleStatusDegrading &&
+		status != store.DealReviewLearnedPatternLifecycleStatusRollbackWatch &&
+		status != store.DealReviewLearnedPatternLifecycleStatusExpired {
+		return autonomousOptimizerBacklogProposal{}, false
+	}
+	if item.LifecycleExpiryScore < 0.55 && item.LifecycleRollbackScore < 0.60 {
+		return autonomousOptimizerBacklogProposal{}, false
+	}
+
+	scopeLabel := buildAutonomousOptimizerLearnedPatternScopeLabel(item)
+	description := fmt.Sprintf(
+		"%s still carries monitoring_rule weight, but its lifecycle is now %s (expiry %.0f%%, rollback %.0f%%, %d recent live-guard hits). Summary: %s",
+		scopeLabel,
+		status,
+		item.LifecycleExpiryScore*100,
+		item.LifecycleRollbackScore*100,
+		item.LifecycleRecentGuardEventCount,
+		blankAutonomousOptimizerText(item.LifecycleSummary, item.ValidationAlert, item.Summary),
+	)
+	return autonomousOptimizerBacklogProposal{
+		Title:              fmt.Sprintf("Revalidate or retire %s live learned rule", scopeLabel),
+		Category:           "missing_review_metric",
+		Description:        clipDealReviewAIScanText(description, 900),
+		ExpectedImpact:     "Reduce stale or overblocking live guard behavior by surfacing lifecycle decay before the next automatic strategy change.",
+		Confidence:         clampAutonomousOptimizerScore(maxFloat(item.LifecycleExpiryScore, item.LifecycleRollbackScore)),
+		ImplementationCost: 0.22,
+		Urgency:            clampAutonomousOptimizerScore(maxFloat(item.LifecycleExpiryScore, item.LifecycleRollbackScore, autonomousOptimizerLearnedPatternWindowUrgency(item))),
+		RecurrenceCount:    maxInt(1, item.LifecycleRecentGuardEventCount),
+		Evidence:           []map[string]any{buildAutonomousOptimizerLearnedPatternEvidenceMap(item)},
+		Metadata: map[string]any{
+			"source_kind":                   "learned_pattern_synthesis",
+			"derived_goal":                  "monitoring_rule_lifecycle",
+			"pattern_id":                    item.PatternID,
+			"lifecycle_status":              item.LifecycleStatus,
+			"lifecycle_expiry_score":        item.LifecycleExpiryScore,
+			"lifecycle_rollback_score":      item.LifecycleRollbackScore,
+			"lifecycle_recent_guard_events": item.LifecycleRecentGuardEventCount,
+			"lifecycle_recent_hard_blocked": item.LifecycleRecentHardBlockedCount,
+			"lifecycle_recent_monitor_only": item.LifecycleRecentMonitorOnlyCount,
+			"validation_label":              item.ValidationLabel,
+			"recommended_use":               item.RecommendedUse,
+			"scope_type":                    item.ScopeType,
+			"symbol":                        item.Symbol,
+			"side":                          item.Side,
+		},
+	}, true
+}
+
+func buildAutonomousOptimizerLearnedPatternDeltaBacklogProposal(item autonomousOptimizerLearnedPatternEvidence) (autonomousOptimizerBacklogProposal, bool) {
+	if item.RecommendedUse != store.DealReviewLearnedPatternRecommendedUseMonitoringRule {
+		return autonomousOptimizerBacklogProposal{}, false
+	}
+	trend := strings.TrimSpace(item.LiveGuardAttributionDeltaTrendLabel)
+	if trend != store.DealReviewLearnedPatternLiveGuardAttributionTrendDegrading &&
+		trend != store.DealReviewLearnedPatternLiveGuardAttributionTrendNewlyOverblocking {
+		return autonomousOptimizerBacklogProposal{}, false
+	}
+	if item.LiveGuardAttributionDeltaRecentResolvedCount < 2 {
+		return autonomousOptimizerBacklogProposal{}, false
+	}
+
+	scopeLabel := buildAutonomousOptimizerLearnedPatternScopeLabel(item)
+	category := "missing_review_metric"
+	title := fmt.Sprintf("Revalidate %s monitoring rule against live follow-up drift", scopeLabel)
+	expectedImpact := "Escalate rollback or suppression review when a live monitoring rule worsens versus its prior comparison window."
+	implementationCost := 0.24
+	if trend == store.DealReviewLearnedPatternLiveGuardAttributionTrendNewlyOverblocking {
+		category = "missing_risk_control"
+		title = fmt.Sprintf("Add auto-rollback trigger for %s monitoring rule", scopeLabel)
+		expectedImpact = "Stop newly overblocking live rules from staying active after their recent follow-up flips against the prior window."
+		implementationCost = 0.36
+	}
+
+	description := fmt.Sprintf(
+		"%s monitoring rule now shows %s live-guard follow-up versus the prior comparison window (recent overblocking %.0f%% vs prior %.0f%%, recent protective %.0f%% vs prior %.0f%%, recent resolved=%d, prior resolved=%d). Summary: %s",
+		scopeLabel,
+		trend,
+		item.LiveGuardAttributionDeltaRecentOverblockingRate*100,
+		item.LiveGuardAttributionDeltaPriorOverblockingRate*100,
+		item.LiveGuardAttributionDeltaRecentProtectiveRate*100,
+		item.LiveGuardAttributionDeltaPriorProtectiveRate*100,
+		item.LiveGuardAttributionDeltaRecentResolvedCount,
+		item.LiveGuardAttributionDeltaPriorResolvedCount,
+		blankAutonomousOptimizerText(item.LiveGuardAttributionDeltaSummary, item.LiveGuardAttributionSummary, item.Summary),
+	)
+	confidence := clampAutonomousOptimizerScore(maxFloat(
+		item.LiveGuardAttributionDeltaConfidenceScore,
+		math.Abs(item.LiveGuardAttributionDeltaOverblockingRateDelta),
+	))
+	urgency := clampAutonomousOptimizerScore(maxFloat(
+		confidence,
+		maxFloat(item.LifecycleRollbackScore, autonomousOptimizerLearnedPatternWindowUrgency(item)),
+	))
+	return autonomousOptimizerBacklogProposal{
+		Title:              title,
+		Category:           category,
+		Description:        clipDealReviewAIScanText(description, 900),
+		ExpectedImpact:     expectedImpact,
+		Confidence:         confidence,
+		ImplementationCost: implementationCost,
+		Urgency:            urgency,
+		RecurrenceCount:    maxInt(1, item.LiveGuardAttributionDeltaRecentResolvedCount),
+		Evidence:           []map[string]any{buildAutonomousOptimizerLearnedPatternEvidenceMap(item)},
+		Metadata: map[string]any{
+			"source_kind":      "learned_pattern_synthesis",
+			"derived_goal":     "live_guard_delta_revalidation",
+			"pattern_id":       item.PatternID,
+			"validation_label": item.ValidationLabel,
+			"recommended_use":  item.RecommendedUse,
+			"live_guard_attribution_delta_trend_label":              item.LiveGuardAttributionDeltaTrendLabel,
+			"live_guard_attribution_delta_confidence":               item.LiveGuardAttributionDeltaConfidenceScore,
+			"live_guard_attribution_delta_recent_resolved":          item.LiveGuardAttributionDeltaRecentResolvedCount,
+			"live_guard_attribution_delta_prior_resolved":           item.LiveGuardAttributionDeltaPriorResolvedCount,
+			"live_guard_attribution_delta_recent_overblocking_rate": item.LiveGuardAttributionDeltaRecentOverblockingRate,
+			"live_guard_attribution_delta_prior_overblocking_rate":  item.LiveGuardAttributionDeltaPriorOverblockingRate,
+			"live_guard_attribution_delta_summary":                  item.LiveGuardAttributionDeltaSummary,
+			"scope_type":                                            item.ScopeType,
+			"symbol":                                                item.Symbol,
+			"side":                                                  item.Side,
+			"pattern_signature":                                     item.PatternSignature,
+		},
+	}, true
+}
+
 func buildAutonomousOptimizerLearnedPatternEvidenceMap(item autonomousOptimizerLearnedPatternEvidence) map[string]any {
 	return map[string]any{
-		"source":                         "learned_pattern",
-		"pattern_id":                     item.PatternID,
-		"scope_type":                     item.ScopeType,
-		"symbol":                         item.Symbol,
-		"side":                           item.Side,
-		"pattern_class":                  item.PatternClass,
-		"validation_label":               item.ValidationLabel,
-		"recommended_use":                item.RecommendedUse,
-		"implication_type":               item.ImplicationType,
-		"current_window_match_type":      item.CurrentWindowMatchType,
-		"closed_case_match_count":        item.ClosedCaseMatchCount,
-		"recent_execution_match_count":   item.RecentExecutionMatchCount,
-		"opportunity_symbol_match_count": item.OpportunitySymbolMatchCount,
-		"current_window_net_pnl":         item.CurrentWindowNetPnL,
-		"feature_set":                    item.FeatureSet,
-		"evidence_case_ids":              item.EvidenceCaseIDs,
-		"summary":                        item.Summary,
-		"validation_alert":               item.ValidationAlert,
+		"source":                                   "learned_pattern",
+		"pattern_id":                               item.PatternID,
+		"scope_type":                               item.ScopeType,
+		"symbol":                                   item.Symbol,
+		"side":                                     item.Side,
+		"pattern_class":                            item.PatternClass,
+		"validation_label":                         item.ValidationLabel,
+		"recommended_use":                          item.RecommendedUse,
+		"implication_type":                         item.ImplicationType,
+		"current_window_match_type":                item.CurrentWindowMatchType,
+		"closed_case_match_count":                  item.ClosedCaseMatchCount,
+		"recent_execution_match_count":             item.RecentExecutionMatchCount,
+		"opportunity_symbol_match_count":           item.OpportunitySymbolMatchCount,
+		"current_window_net_pnl":                   item.CurrentWindowNetPnL,
+		"feature_set":                              item.FeatureSet,
+		"evidence_case_ids":                        item.EvidenceCaseIDs,
+		"lifecycle_status":                         item.LifecycleStatus,
+		"lifecycle_expiry_score":                   item.LifecycleExpiryScore,
+		"lifecycle_rollback_score":                 item.LifecycleRollbackScore,
+		"lifecycle_recent_guard_events":            item.LifecycleRecentGuardEventCount,
+		"action_hint_recommended_action":           item.ActionHintRecommendedAction,
+		"action_hint_priority_label":               item.ActionHintPriorityLabel,
+		"action_hint_reason_code":                  item.ActionHintReasonCode,
+		"action_hint_confidence_score":             item.ActionHintConfidenceScore,
+		"action_hint_summary":                      item.ActionHintSummary,
+		"action_hint_auto_note":                    item.ActionHintAutoNote,
+		"live_action_candidate_kind":               item.LiveActionCandidateKind,
+		"live_action_candidate_recommended_action": item.LiveActionCandidateRecommendedAction,
+		"live_action_candidate_priority_label":     item.LiveActionCandidatePriorityLabel,
+		"live_action_candidate_confidence_score":   item.LiveActionCandidateConfidenceScore,
+		"live_action_candidate_summary":            item.LiveActionCandidateSummary,
+		"live_action_candidate_open":               item.LiveActionCandidateOpen,
+		"intervention_open_strong_candidate_count": item.InterventionOpenStrongCandidateCount,
+		"intervention_open_suggestion_count":       item.InterventionOpenSuggestionCount,
+		"intervention_accepted_count":              item.InterventionAcceptedCount,
+		"intervention_overridden_count":            item.InterventionOverriddenCount,
+		"intervention_manual_action_count":         item.InterventionManualActionCount,
+		"intervention_latest_event_type":           item.InterventionLatestEventType,
+		"intervention_latest_status":               item.InterventionLatestStatus,
+		"intervention_latest_suggested_action":     item.InterventionLatestSuggestedAction,
+		"intervention_latest_applied_action":       item.InterventionLatestAppliedAction,
+		"intervention_latest_seen_at":              item.InterventionLatestSeenAt,
+		"intervention_latest_summary":              item.InterventionLatestSummary,
+		"intervention_latest_note":                 item.InterventionLatestNote,
+		"summary":                                  item.Summary,
+		"validation_alert":                         item.ValidationAlert,
+		"lifecycle_summary":                        item.LifecycleSummary,
 	}
 }
 
@@ -1935,6 +2877,13 @@ func autonomousOptimizerLearnedPatternWindowUrgency(item autonomousOptimizerLear
 func isAutonomousOptimizerLearnedPatternHealthAlert(pattern *store.DealReviewLearnedPattern) bool {
 	if pattern == nil {
 		return false
+	}
+	if pattern.LiveGuardAttributionDelta != nil {
+		switch strings.TrimSpace(pattern.LiveGuardAttributionDelta.TrendLabel) {
+		case store.DealReviewLearnedPatternLiveGuardAttributionTrendDegrading,
+			store.DealReviewLearnedPatternLiveGuardAttributionTrendNewlyOverblocking:
+			return true
+		}
 	}
 	switch strings.TrimSpace(pattern.ValidationLabel) {
 	case store.DealReviewLearnedPatternValidationLabelFalsePositive,
@@ -1993,6 +2942,11 @@ func autonomousOptimizerLearnedPatternDefaultImplication(pattern *store.DealRevi
 	switch strings.TrimSpace(pattern.RecommendedUse) {
 	case store.DealReviewLearnedPatternRecommendedUseConfigCand:
 		return "config_candidate"
+	case store.DealReviewLearnedPatternRecommendedUseMonitoringRule:
+		if pattern.PatternClass == store.DealReviewLearnedPatternClassNegativeEdge {
+			return "anti_evidence"
+		}
+		return "monitor_only"
 	case store.DealReviewLearnedPatternRecommendedUsePromptHint:
 		if pattern.PatternClass == store.DealReviewLearnedPatternClassNegativeEdge {
 			return "anti_evidence"
@@ -2014,6 +2968,14 @@ func classifyAutonomousOptimizerLearnedPatternImplication(pattern *store.DealRev
 	if pattern == nil {
 		return "review_hint", "Learned pattern is unavailable."
 	}
+	if pattern.LiveGuardAttributionDelta != nil {
+		switch strings.TrimSpace(pattern.LiveGuardAttributionDelta.TrendLabel) {
+		case store.DealReviewLearnedPatternLiveGuardAttributionTrendNewlyOverblocking:
+			return "monitor_only", "This live monitoring rule recently turned newly overblocking versus the prior comparison window. Bias toward rollback or revalidation before relying on it again."
+		case store.DealReviewLearnedPatternLiveGuardAttributionTrendDegrading:
+			return "monitor_only", "This live monitoring rule is degrading versus the prior comparison window. Keep it visible, but avoid expanding reliance until it is revalidated."
+		}
+	}
 	switch strings.TrimSpace(pattern.ValidationLabel) {
 	case store.DealReviewLearnedPatternValidationLabelFalsePositive:
 		return "anti_evidence", "This learned pattern now behaves like a false positive. Use it as anti-evidence and avoid repeating the old assumption."
@@ -2032,6 +2994,11 @@ func classifyAutonomousOptimizerLearnedPatternImplication(pattern *store.DealRev
 			return "config_candidate", "Confirmed learned edge with direct window relevance; a narrow config patch can be justified."
 		}
 		return "review_hint", "Strong learned edge exists, but the current window did not hit it directly. Treat it as bounded review context first."
+	case store.DealReviewLearnedPatternRecommendedUseMonitoringRule:
+		if pattern.PatternClass == store.DealReviewLearnedPatternClassNegativeEdge {
+			return "anti_evidence", "Confirmed negative learned pattern is strong enough for monitored live-guard use, but only when the strategy explicitly opts into that guard."
+		}
+		return "monitor_only", "Pattern should stay bounded to explicit monitoring workflows, not broad config mutation."
 	case store.DealReviewLearnedPatternRecommendedUsePromptHint:
 		if pattern.PatternClass == store.DealReviewLearnedPatternClassNegativeEdge {
 			return "anti_evidence", "Confirmed negative learned pattern should tighten prompt behavior or block repeating the same setup."
@@ -2178,6 +3145,8 @@ Rules:
   - config_candidate: a narrow config_patch may be justified, especially when current_window_match_type is closed_case or recent_open_execution.
   - prompt_only or review_hint: bias prompt behavior or narrow the review narrative before hard config changes.
   - monitor_only or do_not_use: do not turn these into live config patches.
+- Treat learned_patterns.items[].recommended_use=monitoring_rule as explicit live-guard evidence only. It can justify monitoring or hard-block workflows only when the strategy already opted into the learned-pattern live guard; by itself it is not support for broad config mutation.
+- Treat learned_patterns.items[].lifecycle_status=degrading, rollback_watch, or expired as decay signals. Prefer rollback, retirement, or backlog work over new mutations when a monitoring_rule is losing support.
 - Treat learned_patterns.items[].validation_label=false_positive, reverse_risk, or drifting as caution or anti-evidence, not as support for aggressive config changes.
 - Treat learned_patterns.top_symbol_overrides as stronger evidence for symbol-specific exceptions than generic global intuition.
 - Treat current_window_match_type=opportunity_symbol or global_background as weaker evidence than direct closed_case matches.
@@ -2233,6 +3202,8 @@ Rules:
 - Use learned_patterns explicitly when present. If the proposal relies on them, cite pattern_id values in learned_pattern_references.
 - Treat learned_patterns.items[].implication_type=anti_evidence as a blocker against broad config relaxation or repeated exposure to the same setup.
 - Treat learned_patterns.items[].implication_type=config_candidate with direct closed_case or recent_open_execution matches as stronger than background-only pattern matches.
+- Treat learned_patterns.items[].recommended_use=monitoring_rule as live-guard scoped evidence, not as standalone support for broad config changes.
+- Treat learned_patterns.items[].lifecycle_status=degrading, rollback_watch, or expired as a reason to downgrade or block proposals that still rely on that monitoring_rule as strong evidence.
 - Treat learned_patterns.items[].validation_label=false_positive, reverse_risk, drifting, or expired as caution, anti-evidence, or do-not-use context rather than support for live mutation.
 - Never output markdown or code fences.`
 	if cfg != nil {

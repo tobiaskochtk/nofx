@@ -1,6 +1,7 @@
 import { DeepVoidBackground } from '../components/common/DeepVoidBackground'
 import { AutonomousOptimizerPanel } from '../components/trader/AutonomousOptimizerPanel'
 import { NofxSelect } from '../components/ui/select'
+import { useLanguage } from '../contexts/LanguageContext'
 import type { TraderInfo } from '../types'
 
 interface AutonomousOptimizerPageProps {
@@ -16,6 +17,9 @@ export function AutonomousOptimizerPage({
   selectedTraderId,
   onTraderSelect,
 }: AutonomousOptimizerPageProps) {
+  const { language } = useLanguage()
+  const pickText = (values: { en: string; de: string }) =>
+    language === 'de' ? values.de : values.en
   const selectedTrader = traders?.find(
     (item) => item.trader_id === selectedTraderId
   )
@@ -35,7 +39,11 @@ export function AutonomousOptimizerPage({
   if (tradersError) {
     return (
       <div className="p-8 text-red-400">
-        Failed to load traders: {tradersError.message}
+        {pickText({
+          en: 'Failed to load traders',
+          de: 'Trader konnten nicht geladen werden',
+        })}
+        : {tradersError.message}
       </div>
     )
   }
@@ -47,20 +55,27 @@ export function AutonomousOptimizerPage({
           <div className="flex flex-col lg:flex-row lg:items-end gap-4">
             <div className="flex-1">
               <div className="text-xs uppercase tracking-[0.24em] text-nofx-gold/80 mb-2">
-                Autonomous Optimizer
+                {pickText({
+                  en: 'Autonomous Optimizer',
+                  de: 'Autonomer Optimierer',
+                })}
               </div>
               <h1 className="text-3xl font-semibold text-nofx-text-main">
-                Self-improving trader loop
+                {pickText({
+                  en: 'Self-improving trader loop',
+                  de: 'Sich selbst verbessernde Trader-Schleife',
+                })}
               </h1>
               <p className="text-sm text-nofx-text-muted mt-2">
-                Inspect the optimizer separately from deal review: runs, gate
-                results, scored improvement backlog, model pair, and direct
-                jumps into the linked review cohort or strategy version.
+                {pickText({
+                  en: 'Inspect the optimizer separately from deal review: runs, gate results, scored improvement backlog, model pair, and direct jumps into the linked review cohort or strategy version.',
+                  de: 'Pruefe den Optimierer getrennt vom Deal-Review: Laeufe, Gate-Ergebnisse, bewerteten Verbesserungs-Backlog, Modellpaar und direkte Spruenge in die verknuepfte Review-Kohorte oder Strategieversion.',
+                })}
               </p>
             </div>
             <div className="w-full lg:w-80">
               <label className="text-xs text-nofx-text-muted block mb-2">
-                Trader
+                {pickText({ en: 'Trader', de: 'Trader' })}
               </label>
               <div className="h-11 rounded-lg border border-white/10 px-3 flex items-center nofx-glass">
                 <NofxSelect

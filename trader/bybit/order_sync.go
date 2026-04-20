@@ -17,6 +17,15 @@ import (
 	"time"
 )
 
+type bybitListAPIResult struct {
+	RetCode int    `json:"retCode"`
+	RetMsg  string `json:"retMsg"`
+	Result  struct {
+		List           []map[string]interface{} `json:"list"`
+		NextPageCursor string                   `json:"nextPageCursor"`
+	} `json:"result"`
+}
+
 // BybitTrade represents a trade record from Bybit execution list
 type BybitTrade struct {
 	Symbol      string
@@ -67,69 +76,36 @@ func (t *BybitTrader) GetTriggerOrderHistory(startTime time.Time, limit int) ([]
 
 // getTradesViaHTTP makes direct HTTP call to Bybit API for execution list
 func (t *BybitTrader) getTradesViaHTTP(startTime time.Time, limit int) ([]BybitTrade, error) {
-	// Build query string
-	queryParams := fmt.Sprintf("category=linear&startTime=%d&limit=%d", startTime.UnixMilli(), limit)
-	url := "https://api.bybit.com/v5/execution/list?" + queryParams
+	pageLimit := clampBybitHistoryPageLimit(limit)
+	var (
+		allTrades []BybitTrade
+		cursor    string
+	)
 
-	// Generate timestamp
-	timestamp := fmt.Sprintf("%d", time.Now().UnixMilli())
-	recvWindow := "10000"
+	for page := 0; page < 100; page++ {
+		result, err := t.callBybitListEndpoint("/v5/execution/list", fmt.Sprintf("category=linear&startTime=%d&limit=%d", startTime.UnixMilli(), pageLimit), cursor)
+		if err != nil {
+			return nil, err
+		}
 
-	// Build signature payload: timestamp + api_key + recv_window + queryString
-	signPayload := timestamp + t.apiKey + recvWindow + queryParams
+		trades, err := t.parseTradesResult(result.Result.List)
+		if err != nil {
+			return nil, err
+		}
+		allTrades = append(allTrades, trades...)
 
-	// Generate HMAC-SHA256 signature
-	h := hmac.New(sha256.New, []byte(t.secretKey))
-	h.Write([]byte(signPayload))
-	signature := hex.EncodeToString(h.Sum(nil))
+		if result.Result.NextPageCursor == "" || len(result.Result.List) < pageLimit {
+			break
+		}
+		cursor = result.Result.NextPageCursor
 
-	// Create request
-	req, err := http.NewRequest("GET", url, nil)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create request: %w", err)
+		if limit > 0 && len(allTrades) >= limit {
+			allTrades = allTrades[:limit]
+			break
+		}
 	}
 
-	// Add Bybit V5 API headers
-	req.Header.Set("X-BAPI-API-KEY", t.apiKey)
-	req.Header.Set("X-BAPI-SIGN", signature)
-	req.Header.Set("X-BAPI-SIGN-TYPE", "2")
-	req.Header.Set("X-BAPI-TIMESTAMP", timestamp)
-	req.Header.Set("X-BAPI-RECV-WINDOW", recvWindow)
-	req.Header.Set("Content-Type", "application/json")
-
-	// Reuse trader HTTP client so transport-level timestamp correction is applied.
-	httpClient := http.DefaultClient
-	if t.client != nil && t.client.HTTPClient != nil {
-		httpClient = t.client.HTTPClient
-	}
-	resp, err := httpClient.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("failed to call Bybit API: %w", err)
-	}
-	defer resp.Body.Close()
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read response: %w", err)
-	}
-
-	var result struct {
-		RetCode int    `json:"retCode"`
-		RetMsg  string `json:"retMsg"`
-		Result  struct {
-			List []map[string]interface{} `json:"list"`
-		} `json:"result"`
-	}
-
-	if err := json.Unmarshal(body, &result); err != nil {
-		return nil, fmt.Errorf("failed to parse response: %w", err)
-	}
-
-	if result.RetCode != 0 {
-		return nil, fmt.Errorf("Bybit API error: %s", result.RetMsg)
-	}
-
-	return t.parseTradesResult(result.Result.List)
+	return allTrades, nil
 }
 
 // parseTradesResult parses the execution list result from Bybit API
@@ -202,8 +178,51 @@ func (t *BybitTrader) parseTradesResult(list []map[string]interface{}) ([]BybitT
 }
 
 func (t *BybitTrader) getTriggerOrderHistoryViaHTTP(startTime time.Time, limit int) ([]BybitTriggerOrder, error) {
-	queryParams := fmt.Sprintf("category=linear&orderFilter=StopOrder&startTime=%d&limit=%d", startTime.UnixMilli(), limit)
-	url := "https://api.bybit.com/v5/order/history?" + queryParams
+	pageLimit := clampBybitHistoryPageLimit(limit)
+	var (
+		allOrders []BybitTriggerOrder
+		cursor    string
+	)
+
+	for page := 0; page < 100; page++ {
+		result, err := t.callBybitListEndpoint("/v5/order/history", fmt.Sprintf("category=linear&orderFilter=StopOrder&startTime=%d&limit=%d", startTime.UnixMilli(), pageLimit), cursor)
+		if err != nil {
+			return nil, err
+		}
+
+		orders, err := parseBybitTriggerOrdersResult(result.Result.List)
+		if err != nil {
+			return nil, err
+		}
+		allOrders = append(allOrders, orders...)
+
+		if result.Result.NextPageCursor == "" || len(result.Result.List) < pageLimit {
+			break
+		}
+		cursor = result.Result.NextPageCursor
+
+		if limit > 0 && len(allOrders) >= limit {
+			allOrders = allOrders[:limit]
+			break
+		}
+	}
+
+	return allOrders, nil
+}
+
+func clampBybitHistoryPageLimit(limit int) int {
+	if limit <= 0 || limit > 50 {
+		return 50
+	}
+	return limit
+}
+
+func (t *BybitTrader) callBybitListEndpoint(path, baseQuery, cursor string) (*bybitListAPIResult, error) {
+	queryParams := baseQuery
+	if strings.TrimSpace(cursor) != "" {
+		queryParams += "&cursor=" + cursor
+	}
+	url := "https://api.bybit.com" + path + "?" + queryParams
 
 	timestamp := fmt.Sprintf("%d", time.Now().UnixMilli())
 	recvWindow := "10000"
@@ -240,23 +259,14 @@ func (t *BybitTrader) getTriggerOrderHistoryViaHTTP(startTime time.Time, limit i
 		return nil, fmt.Errorf("failed to read response: %w", err)
 	}
 
-	var result struct {
-		RetCode int    `json:"retCode"`
-		RetMsg  string `json:"retMsg"`
-		Result  struct {
-			List []map[string]interface{} `json:"list"`
-		} `json:"result"`
-	}
-
+	var result bybitListAPIResult
 	if err := json.Unmarshal(body, &result); err != nil {
 		return nil, fmt.Errorf("failed to parse response: %w", err)
 	}
-
 	if result.RetCode != 0 {
 		return nil, fmt.Errorf("Bybit API error: %s", result.RetMsg)
 	}
-
-	return parseBybitTriggerOrdersResult(result.Result.List)
+	return &result, nil
 }
 
 func parseBybitTriggerOrdersResult(list []map[string]interface{}) ([]BybitTriggerOrder, error) {
@@ -506,13 +516,13 @@ func (t *BybitTrader) SyncOrdersFromBybit(traderID string, exchangeID string, ex
 	// Get recent trades (last 24 hours)
 	startTime := time.Now().Add(-24 * time.Hour)
 
-	logger.Infof("🔄 Syncing Bybit trades from: %s", startTime.Format(time.RFC3339))
+	logger.Infof("🔄 [%s] Syncing Bybit trades from: %s", traderID, startTime.Format(time.RFC3339))
 
 	triggerSyncedCount, err := t.syncTriggerOrdersFromBybit(traderID, exchangeID, exchangeType, st, startTime)
 	if err != nil {
-		logger.Infof("⚠️  Bybit trigger-order sync failed: %v", err)
+		logger.Infof("⚠️  [%s] Bybit trigger-order sync failed: %v", traderID, err)
 	} else if triggerSyncedCount > 0 {
-		logger.Infof("📥 Synced %d Bybit trigger orders", triggerSyncedCount)
+		logger.Infof("📥 [%s] Synced %d Bybit trigger orders", traderID, triggerSyncedCount)
 	}
 
 	// Use GetTrades method to fetch trade records
@@ -521,7 +531,7 @@ func (t *BybitTrader) SyncOrdersFromBybit(traderID string, exchangeID string, ex
 		return fmt.Errorf("failed to get trades: %w", err)
 	}
 
-	logger.Infof("📥 Received %d trades from Bybit", len(trades))
+	logger.Infof("📥 [%s] Received %d trades from Bybit", traderID, len(trades))
 
 	// Sort trades by time ASC (oldest first) for proper position building
 	sort.Slice(trades, func(i, j int) bool {
@@ -623,7 +633,7 @@ func (t *BybitTrader) SyncOrdersFromBybit(traderID string, exchangeID string, ex
 			trade.ExecID, symbol, side, trade.ExecQty, trade.ExecPrice, trade.ClosedPnL, trade.ExecFee, trade.OrderAction)
 	}
 
-	logger.Infof("✅ Bybit order sync completed: %d new trades synced", syncedCount)
+	logger.Infof("✅ [%s] Bybit order sync completed: %d new trades synced", traderID, syncedCount)
 	return nil
 }
 

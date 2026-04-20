@@ -3,6 +3,7 @@ package kernel
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -14,6 +15,7 @@ import (
 	"nofx/store"
 	"os"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -368,8 +370,10 @@ type OIDeltaData struct {
 
 // StrategyEngine strategy execution engine
 type StrategyEngine struct {
-	config       *store.StrategyConfig
-	nofxosClient *nofxos.Client
+	config                  *store.StrategyConfig
+	nofxosClient            *nofxos.Client
+	unsupportedQuantSymbols map[string]time.Time
+	unsupportedQuantMu      sync.RWMutex
 }
 
 // NewStrategyEngine creates strategy execution engine.
@@ -412,8 +416,9 @@ func NewStrategyEngine(config *store.StrategyConfig, claw402WalletKey ...string)
 	}
 
 	return &StrategyEngine{
-		config:       config,
-		nofxosClient: client,
+		config:                  config,
+		nofxosClient:            client,
+		unsupportedQuantSymbols: make(map[string]time.Time),
 	}
 }
 
@@ -1003,8 +1008,16 @@ func (e *StrategyEngine) FetchQuantDataBatch(symbols []string) map[string]*Quant
 	}
 
 	for _, symbol := range symbols {
+		if e.shouldSkipQuantDataSymbol(symbol) {
+			continue
+		}
 		data, err := e.FetchQuantData(symbol)
 		if err != nil {
+			if isQuantDataSymbolNotFoundError(err) {
+				e.markQuantDataSymbolUnsupported(symbol)
+				logger.Infof("ℹ️  Quantitative data unavailable for %s; suppressing retries for 6h", symbol)
+				continue
+			}
 			logger.Infof("⚠️  Failed to fetch quantitative data for %s: %v", symbol, err)
 			continue
 		}
@@ -1014,6 +1027,52 @@ func (e *StrategyEngine) FetchQuantDataBatch(symbols []string) map[string]*Quant
 	}
 
 	return result
+}
+
+func (e *StrategyEngine) shouldSkipQuantDataSymbol(symbol string) bool {
+	normalized := strings.ToUpper(strings.TrimSpace(symbol))
+	if normalized == "" {
+		return false
+	}
+
+	e.unsupportedQuantMu.RLock()
+	until, ok := e.unsupportedQuantSymbols[normalized]
+	e.unsupportedQuantMu.RUnlock()
+	if !ok {
+		return false
+	}
+	if time.Now().Before(until) {
+		return true
+	}
+
+	e.unsupportedQuantMu.Lock()
+	delete(e.unsupportedQuantSymbols, normalized)
+	e.unsupportedQuantMu.Unlock()
+	return false
+}
+
+func (e *StrategyEngine) markQuantDataSymbolUnsupported(symbol string) {
+	normalized := strings.ToUpper(strings.TrimSpace(symbol))
+	if normalized == "" {
+		return
+	}
+
+	e.unsupportedQuantMu.Lock()
+	e.unsupportedQuantSymbols[normalized] = time.Now().Add(6 * time.Hour)
+	e.unsupportedQuantMu.Unlock()
+}
+
+func isQuantDataSymbolNotFoundError(err error) bool {
+	if err == nil {
+		return false
+	}
+
+	var apiErr *nofxos.APIError
+	if errors.As(err, &apiErr) && apiErr.StatusCode == http.StatusNotFound {
+		return true
+	}
+
+	return strings.Contains(strings.ToLower(err.Error()), "symbol not found")
 }
 
 // FetchOIRankingData fetches market-wide OI ranking data

@@ -30,7 +30,9 @@ function getSignalProviderSummary(strategy?: Strategy, language?: string): strin
   if (providerType === 'selfhosted_ai500') {
     return 'Selfhosted AI500'
   }
-  return language === 'zh' ? 'NOFXOS 官方' : 'NOFXOS'
+  if (language === 'zh') return 'NOFXOS 官方'
+  if (language === 'de') return 'NOFXOS Offiziell'
+  return 'NOFXOS'
 }
 
 // 表单内部状态类型
@@ -66,6 +68,11 @@ export function TraderConfigModal({
   onSave,
 }: TraderConfigModalProps) {
   const { language } = useLanguage()
+  const pickText = (copy: { zh: string; de: string; en: string }) => {
+    if (language === 'zh') return copy.zh
+    if (language === 'de') return copy.de
+    return copy.en
+  }
   const [formData, setFormData] = useState<FormState>({
     trader_name: '',
     ai_model: '',
@@ -222,6 +229,20 @@ export function TraderConfigModal({
   }
 
   const selectedStrategy = strategies.find(s => s.id === formData.strategy_id)
+  const getCoinSourceLabel = (sourceType?: string) => {
+    switch (sourceType) {
+      case 'static':
+        return pickText({ zh: '固定币种', de: 'Feste Coins', en: 'Static Coins' })
+      case 'ai500':
+        return 'AI500'
+      case 'oi_top':
+        return 'OI Top'
+      case 'oi_low':
+        return pickText({ zh: 'OI Bottom', de: 'OI Bottom', en: 'OI Bottom' })
+      default:
+        return pickText({ zh: '混合', de: 'Gemischt', en: 'Mixed' })
+    }
+  }
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50 backdrop-blur-sm p-4 overflow-y-auto">
@@ -389,19 +410,25 @@ export function TraderConfigModal({
                     )}
                   </div>
                   <p className="text-sm text-[#848E9C] mb-2">
-                    {selectedStrategy.description || (language === 'zh' ? '无描述' : 'No description')}
+                    {selectedStrategy.description || pickText({
+                      zh: '无描述',
+                      de: 'Keine Beschreibung',
+                      en: 'No description',
+                    })}
                   </p>
                   <div className="grid grid-cols-2 gap-2 text-xs text-[#848E9C]">
                     <div>
-                      {t('coinSource', language)}: {selectedStrategy.config.coin_source.source_type === 'static' ? '固定币种' :
-                        selectedStrategy.config.coin_source.source_type === 'ai500' ? 'AI500' :
-                        selectedStrategy.config.coin_source.source_type === 'oi_top' ? 'OI Top' : '混合'}
+                      {t('coinSource', language)}: {getCoinSourceLabel(selectedStrategy.config.coin_source.source_type)}
                     </div>
                     <div>
                       {t('marginLimit', language)}: {((selectedStrategy.config.risk_control?.max_margin_usage || 0.9) * 100).toFixed(0)}%
                     </div>
                     <div>
-                      {language === 'zh' ? '信号提供方' : 'Signal Provider'}: {getSignalProviderSummary(selectedStrategy, language)}
+                      {pickText({
+                        zh: '信号提供方',
+                        de: 'Signalanbieter',
+                        en: 'Signal Provider',
+                      })}: {getSignalProviderSummary(selectedStrategy, language)}
                     </div>
                   </div>
                 </div>

@@ -87,7 +87,13 @@ export function CoinSourceEditor({
 
     const currentCoins = config.static_coins || []
     if (currentCoins.length >= MAX_STATIC_COINS) {
-      showToast(language === 'zh' ? `最多添加 ${MAX_STATIC_COINS} 个币种` : `Maximum ${MAX_STATIC_COINS} coins allowed`)
+      showToast(
+        language === 'zh'
+          ? `最多添加 ${MAX_STATIC_COINS} 个币种`
+          : language === 'de'
+            ? `Maximal ${MAX_STATIC_COINS} Coins erlaubt`
+            : `Maximum ${MAX_STATIC_COINS} coins allowed`
+      )
       return
     }
 

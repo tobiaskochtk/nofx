@@ -986,7 +986,7 @@ func NewDealReviewStore(db *gorm.DB) *DealReviewStore {
 }
 
 func (s *DealReviewStore) initTables() error {
-	if err := s.db.AutoMigrate(&DealReviewCase{}, &DealReviewEvent{}, &DealReviewAIScan{}, &DealReviewStrategyVersion{}, &DealReviewChallengerCompare{}, &DealReviewCyclePointRecord{}, &DealReviewMarketPointRecord{}, &DealReviewTrailingUpdateRecord{}, &DealReviewExitIntentRecord{}, &DealReviewClassifierFeedback{}, &DealReviewFilterPreset{}, &DealReviewSymbolBehaviorPrior{}, &DealReviewSymbolBehaviorLiveGuardEvent{}, &DealReviewPatternFeatureRecord{}, &DealReviewLearnedPattern{}, &DealReviewLearnedPatternLiveGuardEvent{}); err != nil {
+	if err := s.db.AutoMigrate(&DealReviewCase{}, &DealReviewEvent{}, &DealReviewAIScan{}, &DealReviewStrategyVersion{}, &DealReviewChallengerCompare{}, &DealReviewCyclePointRecord{}, &DealReviewMarketPointRecord{}, &DealReviewTrailingUpdateRecord{}, &DealReviewExitIntentRecord{}, &DealReviewClassifierFeedback{}, &DealReviewFilterPreset{}, &DealReviewSymbolBehaviorPrior{}, &DealReviewSymbolBehaviorLiveGuardEvent{}, &DealReviewPatternFeatureRecord{}, &DealReviewLearnedPattern{}, &DealReviewPatternEvidenceRecord{}, &DealReviewPatternValidationRun{}, &DealReviewPatternBacklogCandidate{}, &DealReviewLearnedPatternLiveGuardEvent{}, &DealReviewLearnedPatternLiveGuardRollupCache{}, &DealReviewLearnedPatternLifecycleSnapshot{}, &DealReviewLearnedPatternManualControl{}, &DealReviewLearnedPatternManualControlEvent{}, &DealReviewLearnedPatternIntervention{}); err != nil {
 		return fmt.Errorf("failed to migrate deal review tables: %w", err)
 	}
 	if !s.db.Migrator().HasTable(&DealReviewExitIntentRecord{}) {

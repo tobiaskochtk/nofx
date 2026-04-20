@@ -12,7 +12,8 @@ import {
 } from 'lightweight-charts'
 import { useLanguage } from '../../contexts/LanguageContext'
 import { httpClient } from '../../lib/httpClient'
-import { t } from '../../i18n/translations'
+import { t, type Language } from '../../i18n/translations'
+import { toDateTimeLocale } from '../../i18n/locale'
 import {
   calculateSMA,
   calculateEMA,
@@ -75,16 +76,20 @@ const getQuoteUnit = (exchange: string): string => {
 }
 
 // Get base volume unit
-const getBaseUnit = (exchange: string, symbol: string, language: string): string => {
+const getBaseUnit = (
+  exchange: string,
+  symbol: string,
+  language: Language
+): string => {
   if (['alpaca'].includes(exchange)) {
-    return t('advancedChart.shares', language as 'en' | 'zh' | 'id')
+    return t('advancedChart.shares', language)
   }
   if (['forex', 'metals'].includes(exchange)) {
     return ''
   }
   // Crypto: extract base asset from symbol
   const base = symbol.replace(/USDT$|USD$|BUSD$/, '')
-  return base || t('advancedChart.units', language as 'en' | 'zh' | 'id')
+  return base || t('advancedChart.units', language)
 }
 
 // Format large numbers
@@ -418,7 +423,7 @@ export function AdvancedChart({
       localization: {
         timeFormatter: (time: number) => {
           const date = new Date(time * 1000)
-          return date.toLocaleString('zh-CN', {
+          return date.toLocaleString(toDateTimeLocale(language), {
             month: '2-digit',
             day: '2-digit',
             hour: '2-digit',
@@ -1112,7 +1117,7 @@ export function AdvancedChart({
             }}
           >
             <div style={{ marginBottom: '6px', color: '#F0B90B', fontWeight: 'bold', fontSize: '11px' }}>
-              {new Date((tooltipData.time as number) * 1000).toLocaleString(language === 'zh' ? 'zh-CN' : 'en-US', {
+              {new Date((tooltipData.time as number) * 1000).toLocaleString(toDateTimeLocale(language), {
                 month: 'short',
                 day: 'numeric',
                 hour: '2-digit',

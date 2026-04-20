@@ -70,7 +70,7 @@ func (s *Server) handleRegister(c *gin.Context) {
 	}
 
 	lang := req.Lang
-	if lang != "zh" && lang != "id" {
+	if lang != "zh" && lang != "de" && lang != "id" {
 		lang = "en"
 	}
 
@@ -250,6 +250,11 @@ func (s *Server) createDefaultStrategies(userID string, lang string) error {
 			conservative: strategyI18n{"Conservative Strategy", "System default strategy. Low-leverage conservative trading, capital preservation first. 3x leverage, focused on major assets."},
 			aggressive:   strategyI18n{"Aggressive Strategy", "System default strategy. High-leverage active trading, wider asset selection, for experienced traders. 10x leverage, up to 5 positions."},
 		},
+		"de": {
+			balanced:     strategyI18n{"Ausgewogene Strategie", "Standardstrategie des Systems. Ausgewogenes Risiko-Ertrags-Profil, geeignet fuer die meisten Marktphasen. 5x Hebel, bis zu 3 Positionen."},
+			conservative: strategyI18n{"Konservative Strategie", "Standardstrategie des Systems. Konservativer Handel mit niedrigem Hebel, Kapitalschutz zuerst. 3x Hebel, Fokus auf grosse Assets."},
+			aggressive:   strategyI18n{"Aggressive Strategie", "Standardstrategie des Systems. Aktiver Handel mit hoeherem Hebel und breiterer Asset-Auswahl fuer erfahrene Trader. 10x Hebel, bis zu 5 Positionen."},
+		},
 		"id": {
 			balanced:     strategyI18n{"Strategi Seimbang", "Strategi default sistem. Risiko-reward seimbang, cocok untuk sebagian besar kondisi pasar. Leverage 5x, hingga 3 posisi."},
 			conservative: strategyI18n{"Strategi Konservatif", "Strategi default sistem. Trading konservatif leverage rendah, utamakan perlindungan modal. Leverage 3x, fokus aset utama."},
@@ -311,9 +316,9 @@ func (s *Server) createDefaultStrategies(userID string, lang string) error {
 		},
 	}
 
-	// GetDefaultStrategyConfig only supports zh/en; map id -> en
+	// GetDefaultStrategyConfig only needs zh/en prompt locales; map UI-only locales to en.
 	configLang := lang
-	if lang == "id" {
+	if lang == "id" || lang == "de" {
 		configLang = "en"
 	}
 

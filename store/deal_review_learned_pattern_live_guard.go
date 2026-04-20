@@ -1,11 +1,13 @@
 package store
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 	"time"
 
 	"github.com/google/uuid"
+	"gorm.io/gorm"
 )
 
 const (
@@ -58,47 +60,57 @@ type DealReviewLearnedPatternLiveGuardEventFilter struct {
 }
 
 type DealReviewLearnedPatternLiveGuardEventSummary struct {
-	TotalVisible            int       `json:"total_visible"`
-	HardBlockedCount        int       `json:"hard_blocked_count"`
-	MonitorOnlyCount        int       `json:"monitor_only_count"`
-	MatchedUnqualifiedCount int       `json:"matched_unqualified_count"`
-	NoMatchCount            int       `json:"no_match_count"`
-	LatestDecisionTimestamp time.Time `json:"latest_decision_timestamp,omitempty"`
+	TotalVisible               int       `json:"total_visible"`
+	HardBlockedCount           int       `json:"hard_blocked_count"`
+	MonitorOnlyCount           int       `json:"monitor_only_count"`
+	MatchedUnqualifiedCount    int       `json:"matched_unqualified_count"`
+	NoMatchCount               int       `json:"no_match_count"`
+	CorrectlyBlockedCount      int       `json:"correctly_blocked_count"`
+	OverblockedCount           int       `json:"overblocked_count"`
+	WarningConfirmedCount      int       `json:"warning_confirmed_count"`
+	WarningNotConfirmedCount   int       `json:"warning_not_confirmed_count"`
+	ThresholdMissedLossCount   int       `json:"threshold_missed_loss_count"`
+	ThresholdMissedProfitCount int       `json:"threshold_missed_profit_count"`
+	AttributionPendingCount    int       `json:"attribution_pending_count"`
+	FollowupOpenCount          int       `json:"followup_open_count"`
+	LatestDecisionTimestamp    time.Time `json:"latest_decision_timestamp,omitempty"`
 }
 
 type DealReviewLearnedPatternLiveGuardEvent struct {
-	ID                                   string    `gorm:"primaryKey" json:"id"`
-	UserID                               string    `gorm:"column:user_id;not null;index:idx_pattern_live_guard_user_trader" json:"user_id"`
-	TraderID                             string    `gorm:"column:trader_id;not null;index:idx_pattern_live_guard_user_trader;index:idx_pattern_live_guard_lookup" json:"trader_id"`
-	CycleNumber                          int       `gorm:"column:cycle_number;default:0;index:idx_pattern_live_guard_lookup" json:"cycle_number"`
-	DecisionTimestamp                    time.Time `gorm:"column:decision_timestamp;index:idx_pattern_live_guard_lookup" json:"decision_timestamp"`
-	Action                               string    `gorm:"column:action;default:''" json:"action"`
-	Symbol                               string    `gorm:"column:symbol;not null;index:idx_pattern_live_guard_lookup" json:"symbol"`
-	Side                                 string    `gorm:"column:side;not null;index:idx_pattern_live_guard_lookup" json:"side"`
-	SelectionBucket                      string    `gorm:"column:selection_bucket;default:''" json:"selection_bucket"`
-	TrendRegime                          string    `gorm:"column:trend_regime;default:''" json:"trend_regime"`
-	VolatilityRegime                     string    `gorm:"column:volatility_regime;default:''" json:"volatility_regime"`
-	OIRegime                             string    `gorm:"column:oi_regime;default:''" json:"oi_regime"`
-	PolicyMode                           string    `gorm:"column:policy_mode;default:''" json:"policy_mode"`
-	Effect                               string    `gorm:"column:effect;default:'';index:idx_pattern_live_guard_effect" json:"effect"`
-	DecisionConfidence                   int       `gorm:"column:decision_confidence;default:0" json:"decision_confidence"`
-	MatchScore                           float64   `gorm:"column:match_score;default:0" json:"match_score"`
-	MatchedPatternID                     string    `gorm:"column:matched_pattern_id;default:'';index:idx_pattern_live_guard_pattern" json:"matched_pattern_id"`
-	MatchedPatternScopeType              string    `gorm:"column:matched_pattern_scope_type;default:''" json:"matched_pattern_scope_type"`
-	MatchedPatternClass                  string    `gorm:"column:matched_pattern_class;default:''" json:"matched_pattern_class"`
-	MatchedPatternSignature              string    `gorm:"column:matched_pattern_signature;type:text;default:''" json:"matched_pattern_signature"`
-	MatchedPatternValidationLabel        string    `gorm:"column:matched_pattern_validation_label;default:''" json:"matched_pattern_validation_label"`
-	MatchedPatternRecommendedUse         string    `gorm:"column:matched_pattern_recommended_use;default:''" json:"matched_pattern_recommended_use"`
-	MatchedPatternSampleCount            int       `gorm:"column:matched_pattern_sample_count;default:0" json:"matched_pattern_sample_count"`
-	MatchedPatternCompositeScore         float64   `gorm:"column:matched_pattern_composite_score;default:0" json:"matched_pattern_composite_score"`
-	MatchedPatternConfidenceScore        float64   `gorm:"column:matched_pattern_confidence_score;default:0" json:"matched_pattern_confidence_score"`
-	MatchedPatternValidationSupportScore float64   `gorm:"column:matched_pattern_validation_support_score;default:0" json:"matched_pattern_validation_support_score"`
-	MatchedPatternFalsePositiveScore     float64   `gorm:"column:matched_pattern_false_positive_score;default:0" json:"matched_pattern_false_positive_score"`
-	MatchedPatternDriftScore             float64   `gorm:"column:matched_pattern_drift_score;default:0" json:"matched_pattern_drift_score"`
-	Summary                              string    `gorm:"column:summary;type:text;default:''" json:"summary"`
-	BlockReason                          string    `gorm:"column:block_reason;type:text;default:''" json:"block_reason"`
-	CreatedAt                            time.Time `json:"created_at"`
-	UpdatedAt                            time.Time `json:"updated_at"`
+	ID                                   string                                             `gorm:"primaryKey" json:"id"`
+	UserID                               string                                             `gorm:"column:user_id;not null;index:idx_pattern_live_guard_user_trader" json:"user_id"`
+	TraderID                             string                                             `gorm:"column:trader_id;not null;index:idx_pattern_live_guard_user_trader;index:idx_pattern_live_guard_lookup" json:"trader_id"`
+	CycleNumber                          int                                                `gorm:"column:cycle_number;default:0;index:idx_pattern_live_guard_lookup" json:"cycle_number"`
+	DecisionTimestamp                    time.Time                                          `gorm:"column:decision_timestamp;index:idx_pattern_live_guard_lookup" json:"decision_timestamp"`
+	Action                               string                                             `gorm:"column:action;default:''" json:"action"`
+	Symbol                               string                                             `gorm:"column:symbol;not null;index:idx_pattern_live_guard_lookup" json:"symbol"`
+	Side                                 string                                             `gorm:"column:side;not null;index:idx_pattern_live_guard_lookup" json:"side"`
+	SelectionBucket                      string                                             `gorm:"column:selection_bucket;default:''" json:"selection_bucket"`
+	TrendRegime                          string                                             `gorm:"column:trend_regime;default:''" json:"trend_regime"`
+	VolatilityRegime                     string                                             `gorm:"column:volatility_regime;default:''" json:"volatility_regime"`
+	OIRegime                             string                                             `gorm:"column:oi_regime;default:''" json:"oi_regime"`
+	PolicyMode                           string                                             `gorm:"column:policy_mode;default:''" json:"policy_mode"`
+	Effect                               string                                             `gorm:"column:effect;default:'';index:idx_pattern_live_guard_effect" json:"effect"`
+	DecisionConfidence                   int                                                `gorm:"column:decision_confidence;default:0" json:"decision_confidence"`
+	MatchScore                           float64                                            `gorm:"column:match_score;default:0" json:"match_score"`
+	MatchedPatternID                     string                                             `gorm:"column:matched_pattern_id;default:'';index:idx_pattern_live_guard_pattern" json:"matched_pattern_id"`
+	MatchedPatternStableKey              string                                             `gorm:"column:matched_pattern_stable_key;default:'';index:idx_pattern_live_guard_pattern_stable" json:"matched_pattern_stable_key,omitempty"`
+	MatchedPatternScopeType              string                                             `gorm:"column:matched_pattern_scope_type;default:''" json:"matched_pattern_scope_type"`
+	MatchedPatternClass                  string                                             `gorm:"column:matched_pattern_class;default:''" json:"matched_pattern_class"`
+	MatchedPatternSignature              string                                             `gorm:"column:matched_pattern_signature;type:text;default:''" json:"matched_pattern_signature"`
+	MatchedPatternValidationLabel        string                                             `gorm:"column:matched_pattern_validation_label;default:''" json:"matched_pattern_validation_label"`
+	MatchedPatternRecommendedUse         string                                             `gorm:"column:matched_pattern_recommended_use;default:''" json:"matched_pattern_recommended_use"`
+	MatchedPatternSampleCount            int                                                `gorm:"column:matched_pattern_sample_count;default:0" json:"matched_pattern_sample_count"`
+	MatchedPatternCompositeScore         float64                                            `gorm:"column:matched_pattern_composite_score;default:0" json:"matched_pattern_composite_score"`
+	MatchedPatternConfidenceScore        float64                                            `gorm:"column:matched_pattern_confidence_score;default:0" json:"matched_pattern_confidence_score"`
+	MatchedPatternValidationSupportScore float64                                            `gorm:"column:matched_pattern_validation_support_score;default:0" json:"matched_pattern_validation_support_score"`
+	MatchedPatternFalsePositiveScore     float64                                            `gorm:"column:matched_pattern_false_positive_score;default:0" json:"matched_pattern_false_positive_score"`
+	MatchedPatternDriftScore             float64                                            `gorm:"column:matched_pattern_drift_score;default:0" json:"matched_pattern_drift_score"`
+	Summary                              string                                             `gorm:"column:summary;type:text;default:''" json:"summary"`
+	BlockReason                          string                                             `gorm:"column:block_reason;type:text;default:''" json:"block_reason"`
+	Attribution                          *DealReviewLearnedPatternLiveGuardEventAttribution `gorm:"-" json:"attribution,omitempty"`
+	CreatedAt                            time.Time                                          `json:"created_at"`
+	UpdatedAt                            time.Time                                          `json:"updated_at"`
 }
 
 func (DealReviewLearnedPatternLiveGuardEvent) TableName() string {
@@ -298,7 +310,11 @@ func (s *DealReviewStore) RecordLearnedPatternLiveGuardEvent(
 		BlockReason:        strings.TrimSpace(assessment.BlockReason),
 	}
 	if pattern := assessment.MatchedPattern; pattern != nil {
+		if strings.TrimSpace(pattern.StableKey) == "" {
+			pattern.StableKey = dealReviewLearnedPatternStableKey(pattern)
+		}
 		event.MatchedPatternID = strings.TrimSpace(pattern.ID)
+		event.MatchedPatternStableKey = strings.TrimSpace(pattern.StableKey)
 		event.MatchedPatternScopeType = strings.TrimSpace(pattern.ScopeType)
 		event.MatchedPatternClass = strings.TrimSpace(pattern.PatternClass)
 		event.MatchedPatternSignature = strings.TrimSpace(pattern.PatternSignature)
@@ -311,7 +327,86 @@ func (s *DealReviewStore) RecordLearnedPatternLiveGuardEvent(
 		event.MatchedPatternFalsePositiveScore = pattern.FalsePositiveScore
 		event.MatchedPatternDriftScore = pattern.DriftScore
 	}
-	return s.db.Create(event).Error
+	return s.db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Create(event).Error; err != nil {
+			return err
+		}
+		if strings.TrimSpace(event.MatchedPatternID) == "" {
+			return nil
+		}
+
+		var pattern DealReviewLearnedPattern
+		if err := tx.Where(
+			"user_id = ? AND trader_id = ? AND id = ?",
+			event.UserID,
+			event.TraderID,
+			event.MatchedPatternID,
+		).First(&pattern).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				cacheRefs := dedupeDealReviewLearnedPatternRefs([]string{
+					strings.TrimSpace(event.MatchedPatternStableKey),
+					strings.TrimSpace(event.MatchedPatternID),
+				})
+				return s.deleteLearnedPatternLiveGuardRollupCachesTx(
+					tx,
+					event.UserID,
+					event.TraderID,
+					cacheRefs,
+					0,
+				)
+			}
+			return err
+		}
+		hydrateDealReviewLearnedPattern(&pattern)
+		if strings.TrimSpace(pattern.StableKey) != "" && strings.TrimSpace(event.MatchedPatternStableKey) == "" {
+			if err := tx.Model(&DealReviewLearnedPatternLiveGuardEvent{}).
+				Where("id = ?", event.ID).
+				Update("matched_pattern_stable_key", pattern.StableKey).Error; err != nil {
+				return err
+			}
+			event.MatchedPatternStableKey = pattern.StableKey
+		}
+		if strings.TrimSpace(pattern.StableKey) != "" {
+			if err := tx.Model(&DealReviewLearnedPattern{}).
+				Where("id = ? AND (stable_key = '' OR stable_key IS NULL)", pattern.ID).
+				Update("stable_key", pattern.StableKey).Error; err != nil {
+				return err
+			}
+		}
+		capturedAt := event.DecisionTimestamp
+		if capturedAt.IsZero() {
+			capturedAt = time.Now().UTC()
+		}
+		if err := s.persistLearnedPatternLifecycleSnapshotsTx(
+			tx,
+			event.UserID,
+			event.TraderID,
+			[]DealReviewLearnedPattern{pattern},
+			capturedAt,
+			dealReviewLearnedPatternLifecycleSnapshotSourceLiveGuardEvent,
+			event.ID,
+		); err != nil {
+			return err
+		}
+
+		cacheRefs := make([]string, 0, 3)
+		if ref := dealReviewLearnedPatternLiveGuardCanonicalRef(&pattern); ref != "" {
+			cacheRefs = append(cacheRefs, ref)
+		}
+		if stable := strings.TrimSpace(event.MatchedPatternStableKey); stable != "" {
+			cacheRefs = append(cacheRefs, stable)
+		}
+		if id := strings.TrimSpace(event.MatchedPatternID); id != "" {
+			cacheRefs = append(cacheRefs, id)
+		}
+		return s.deleteLearnedPatternLiveGuardRollupCachesTx(
+			tx,
+			event.UserID,
+			event.TraderID,
+			dedupeDealReviewLearnedPatternRefs(cacheRefs),
+			0,
+		)
+	})
 }
 
 func (s *DealReviewStore) ListLearnedPatternLiveGuardEvents(
@@ -337,6 +432,13 @@ func (s *DealReviewStore) ListLearnedPatternLiveGuardEvents(
 	if err := query.Order("decision_timestamp DESC, created_at DESC").Limit(filter.Limit).Find(&items).Error; err != nil {
 		return nil, err
 	}
+	if err := s.enrichLearnedPatternLiveGuardEventAttribution(
+		strings.TrimSpace(userID),
+		strings.TrimSpace(traderID),
+		items,
+	); err != nil {
+		return nil, err
+	}
 	return items, nil
 }
 
@@ -354,6 +456,26 @@ func BuildDealReviewLearnedPatternLiveGuardEventSummary(items []DealReviewLearne
 			summary.MatchedUnqualifiedCount++
 		case DealReviewLearnedPatternLiveGuardEffectNoMatch:
 			summary.NoMatchCount++
+		}
+		if item.Attribution != nil {
+			switch item.Attribution.Status {
+			case DealReviewLearnedPatternLiveGuardAttributionStatusCorrectlyBlocked:
+				summary.CorrectlyBlockedCount++
+			case DealReviewLearnedPatternLiveGuardAttributionStatusOverblocked:
+				summary.OverblockedCount++
+			case DealReviewLearnedPatternLiveGuardAttributionStatusWarningConfirmed:
+				summary.WarningConfirmedCount++
+			case DealReviewLearnedPatternLiveGuardAttributionStatusWarningNotConfirmed:
+				summary.WarningNotConfirmedCount++
+			case DealReviewLearnedPatternLiveGuardAttributionStatusThresholdMissedLoss:
+				summary.ThresholdMissedLossCount++
+			case DealReviewLearnedPatternLiveGuardAttributionStatusThresholdMissedProfit:
+				summary.ThresholdMissedProfitCount++
+			case DealReviewLearnedPatternLiveGuardAttributionStatusFollowupOpen:
+				summary.FollowupOpenCount++
+			case DealReviewLearnedPatternLiveGuardAttributionStatusPending:
+				summary.AttributionPendingCount++
+			}
 		}
 		if item.DecisionTimestamp.After(summary.LatestDecisionTimestamp) {
 			summary.LatestDecisionTimestamp = item.DecisionTimestamp
@@ -410,6 +532,15 @@ func dealReviewLearnedPatternLiveDisqualificationReasons(
 		}
 		reasons = append(reasons, value)
 	}
+	recommendedUse := effectiveDealReviewLearnedPatternRecommendedUse(pattern)
+	switch normalizeDealReviewLearnedPatternManualControlState(
+		dealReviewLearnedPatternManualControlState(pattern.ManualControl),
+	) {
+	case DealReviewLearnedPatternManualControlStateSuppressed:
+		appendReason("analyst_control=suppressed")
+	case DealReviewLearnedPatternManualControlStateRetired:
+		appendReason("analyst_control=retired")
+	}
 
 	if normalizeDealReviewLearnedPatternClass(pattern.PatternClass) != DealReviewLearnedPatternClassNegativeEdge {
 		appendReason("pattern_not_negative")
@@ -417,8 +548,11 @@ func dealReviewLearnedPatternLiveDisqualificationReasons(
 	if normalizeDealReviewLearnedPatternValidationLabel(pattern.ValidationLabel) == DealReviewLearnedPatternValidationLabelExpired {
 		appendReason("pattern_expired")
 	}
-	if strings.EqualFold(strings.TrimSpace(pattern.RecommendedUse), DealReviewLearnedPatternRecommendedUseExpiredIgnore) {
+	if recommendedUse == DealReviewLearnedPatternRecommendedUseExpiredIgnore {
 		appendReason("recommended_use=expired_do_not_use")
+	}
+	if recommendedUse != DealReviewLearnedPatternRecommendedUseMonitoringRule {
+		appendReason("recommended_use!=monitoring_rule")
 	}
 	if cfg.RequireConfirmedLabel || cfg.Mode == LearnedPatternLiveGuardModeHardBlock {
 		if !strings.EqualFold(strings.TrimSpace(pattern.ValidationLabel), DealReviewLearnedPatternValidationLabelConfirmed) {
@@ -454,7 +588,7 @@ func buildDealReviewLearnedPatternLiveQualifiedSummary(pattern *DealReviewLearne
 		return ""
 	}
 	return fmt.Sprintf(
-		"Matched confirmed negative learned pattern %s for %s %s (match %.2f, composite %.2f, confidence %.2f, validation support %.2f, samples %d, false-positive %.2f, drift %.2f).",
+		"Matched confirmed negative learned pattern %s for %s %s under monitoring_rule (match %.2f, composite %.2f, confidence %.2f, validation support %.2f, samples %d, false-positive %.2f, drift %.2f).",
 		dealReviewLearnedPatternRuntimeKey(pattern),
 		strings.ToUpper(strings.TrimSpace(pattern.Symbol)),
 		normalizeDealReviewSide(pattern.Side),
@@ -499,6 +633,15 @@ func dealReviewLearnedPatternRuntimeKey(pattern *DealReviewLearnedPattern) strin
 	}
 	if strings.TrimSpace(pattern.Symbol) != "" {
 		return fmt.Sprintf("%s:%s:%s:%s", scope, strings.ToUpper(strings.TrimSpace(pattern.Symbol)), normalizeDealReviewSide(pattern.Side), signature)
+	}
+	if scope == DealReviewLearnedPatternScopeRegimeLocal {
+		scopeKey := strings.TrimSpace(pattern.ScopeKey)
+		if scopeKey == "" {
+			scopeKey = strings.TrimSpace(pattern.RegimeSignature)
+		}
+		if scopeKey != "" {
+			return fmt.Sprintf("%s:%s:%s:%s", scope, scopeKey, normalizeDealReviewSide(pattern.Side), signature)
+		}
 	}
 	return fmt.Sprintf("%s:%s:%s", scope, normalizeDealReviewSide(pattern.Side), signature)
 }

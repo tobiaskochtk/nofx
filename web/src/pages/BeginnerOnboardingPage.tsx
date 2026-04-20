@@ -22,6 +22,8 @@ export function BeginnerOnboardingPage() {
   const [refreshingBalance, setRefreshingBalance] = useState(false)
   const hasRequestedRef = useRef(false)
   const isZh = language === 'zh'
+  const pickText = (values: Record<string, string>) =>
+    values[language] ?? values.en
 
   const loadOnboarding = async (showLoading: boolean) => {
     if (showLoading) {
@@ -39,9 +41,11 @@ export function BeginnerOnboardingPage() {
       setError(
         err instanceof Error
           ? err.message
-          : isZh
-            ? '新手钱包准备失败'
-            : 'Failed to prepare beginner wallet'
+          : pickText({
+              zh: '新手钱包准备失败',
+              en: 'Failed to prepare beginner wallet',
+              de: 'Beginner-Wallet konnte nicht vorbereitet werden',
+            })
       )
     } finally {
       if (showLoading) {
@@ -62,18 +66,32 @@ export function BeginnerOnboardingPage() {
 
   const noticeText = useMemo(
     () =>
-      isZh
-        ? '此钱包仅用于大模型调用费用，不会自动充到交易所。私钥丢失后无法恢复，只充 Base 链 USDC。'
-        : 'This wallet only pays for model calls. It does not fund your exchange automatically. The private key cannot be recovered, and you should only deposit Base USDC.',
-    [isZh]
+      pickText({
+        zh: '此钱包仅用于大模型调用费用，不会自动充到交易所。私钥丢失后无法恢复，只充 Base 链 USDC。',
+        en: 'This wallet only pays for model calls. It does not fund your exchange automatically. The private key cannot be recovered, and you should only deposit Base USDC.',
+        de: 'Dieses Wallet bezahlt nur Modellaufrufe. Es fuellt dein Boersenkonto nicht automatisch auf. Der Private Key kann nicht wiederhergestellt werden, und du solltest nur Base-USDC einzahlen.',
+      }),
+    [language]
   )
 
   const copyText = async (value: string, label: string) => {
     try {
       await navigator.clipboard.writeText(value)
-      toast.success(isZh ? `${label}已复制` : `${label} copied`)
+      toast.success(
+        pickText({
+          zh: `${label}已复制`,
+          en: `${label} copied`,
+          de: `${label} kopiert`,
+        })
+      )
     } catch {
-      toast.error(isZh ? '复制失败' : 'Copy failed')
+      toast.error(
+        pickText({
+          zh: '复制失败',
+          en: 'Copy failed',
+          de: 'Kopieren fehlgeschlagen',
+        })
+      )
     }
   }
 
@@ -91,7 +109,7 @@ export function BeginnerOnboardingPage() {
           type="button"
           onClick={handleContinue}
           className="absolute right-6 top-6 z-10 inline-flex h-10 w-10 items-center justify-center rounded-full border border-white/10 bg-white/5 text-zinc-400 transition hover:border-white/20 hover:bg-white/10 hover:text-white"
-          aria-label={isZh ? '跳过' : 'Skip'}
+          aria-label={pickText({ zh: '跳过', en: 'Skip', de: 'Ueberspringen' })}
         >
           <X className="h-5 w-5" />
         </button>
@@ -107,7 +125,11 @@ export function BeginnerOnboardingPage() {
                     isZh ? 'text-[11px] tracking-[0.34em]' : 'text-[10px] tracking-[0.2em]'
                   }`}
                 >
-                  {isZh ? '新手保护' : 'Beginner Guard'}
+                  {pickText({
+                    zh: '新手保护',
+                    en: 'Beginner Guard',
+                    de: 'Beginner Guard',
+                  })}
                 </div>
                 <h1
                   className={`mt-2 font-bold leading-[1.04] text-white ${
@@ -116,7 +138,11 @@ export function BeginnerOnboardingPage() {
                       : 'max-w-[720px] text-[27px] tracking-[-0.03em] sm:text-[35px] xl:text-[42px]'
                   }`}
                 >
-                  {isZh ? '钱包已经帮你准备好了' : 'Your wallet is ready'}
+                  {pickText({
+                    zh: '钱包已经帮你准备好了',
+                    en: 'Your wallet is ready',
+                    de: 'Dein Wallet ist bereit',
+                  })}
                 </h1>
               </div>
             </div>
@@ -129,14 +155,22 @@ export function BeginnerOnboardingPage() {
               }`}
             >
               Claw402 + DeepSeek <span className="mx-2 text-zinc-700">·</span>
-              {isZh ? '按次付费' : 'Pay per call'}
+              {pickText({
+                zh: '按次付费',
+                en: 'Pay per call',
+                de: 'Bezahlung pro Aufruf',
+              })}
             </div>
           </div>
 
           <div className="overflow-hidden rounded-[32px] border border-white/10 bg-[linear-gradient(180deg,rgba(8,11,16,0.94),rgba(5,7,10,0.88))] shadow-[0_24px_120px_rgba(0,0,0,0.58)] backdrop-blur-2xl">
             {loading ? (
               <div className="flex min-h-[390px] items-center justify-center px-6 text-sm text-zinc-400">
-                {isZh ? '正在准备你的 Base 钱包...' : 'Preparing your Base wallet...'}
+                {pickText({
+                  zh: '正在准备你的 Base 钱包...',
+                  en: 'Preparing your Base wallet...',
+                  de: 'Dein Base-Wallet wird vorbereitet...',
+                })}
               </div>
             ) : data ? (
               <div className="grid lg:grid-cols-[0.82fr_1.18fr]">
@@ -147,7 +181,11 @@ export function BeginnerOnboardingPage() {
                     </div>
 
                     <div className="mt-4 text-[15px] font-medium text-zinc-300">
-                      {isZh ? '充值地址（Base USDC）' : 'Deposit address (Base USDC)'}
+                      {pickText({
+                        zh: '充值地址（Base USDC）',
+                        en: 'Deposit address (Base USDC)',
+                        de: 'Einzahlungsadresse (Base USDC)',
+                      })}
                     </div>
 
                     <div className="mt-4 flex items-center justify-between gap-3 rounded-[24px] border border-emerald-400/20 bg-emerald-500/7 px-5 py-3.5 shadow-[0_0_0_1px_rgba(16,185,129,0.08)]">
@@ -162,14 +200,22 @@ export function BeginnerOnboardingPage() {
                         onClick={() => void loadOnboarding(false)}
                         disabled={refreshingBalance}
                         className="inline-flex h-12 w-12 items-center justify-center rounded-2xl border border-emerald-300/20 bg-black/20 text-emerald-300 transition hover:bg-emerald-500/10 disabled:cursor-not-allowed disabled:opacity-60"
-                        aria-label={isZh ? '刷新余额' : 'Refresh balance'}
+                        aria-label={pickText({
+                          zh: '刷新余额',
+                          en: 'Refresh balance',
+                          de: 'Guthaben aktualisieren',
+                        })}
                       >
                         <RefreshCw className={`h-4 w-4 ${refreshingBalance ? 'animate-spin' : ''}`} />
                       </button>
                     </div>
 
                     <div className="mt-4 text-sm text-zinc-500">
-                      {isZh ? '$5-$10 可以用很久' : '$5-$10 usually lasts a long time'}
+                      {pickText({
+                        zh: '$5-$10 可以用很久',
+                        en: '$5-$10 usually lasts a long time',
+                        de: '$5-$10 reichen in der Regel lange',
+                      })}
                     </div>
                   </div>
                 </section>
@@ -179,7 +225,7 @@ export function BeginnerOnboardingPage() {
                     <div>
                       <div className="mb-3 flex items-center gap-2 text-sm font-medium text-nofx-gold">
                         <Wallet className="h-4 w-4" />
-                        <span>{isZh ? '钱包地址' : 'Wallet address'}</span>
+                        <span>{pickText({ zh: '钱包地址', en: 'Wallet address', de: 'Wallet-Adresse' })}</span>
                       </div>
                       <div className="flex items-stretch gap-3">
                         <div className="min-w-0 flex-1 rounded-2xl border border-white/10 bg-black/30 px-5 py-3 font-mono text-[14px] text-zinc-200 shadow-[inset_0_1px_0_rgba(255,255,255,0.03)]">
@@ -187,9 +233,18 @@ export function BeginnerOnboardingPage() {
                         </div>
                         <button
                           type="button"
-                          onClick={() => copyText(data.address, isZh ? '地址' : 'Address')}
+                          onClick={() =>
+                            copyText(
+                              data.address,
+                              pickText({ zh: '地址', en: 'Address', de: 'Adresse' })
+                            )
+                          }
                           className="inline-flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl border border-white/10 bg-white/5 text-zinc-300 transition hover:border-white/20 hover:bg-white/10 hover:text-white"
-                          aria-label={isZh ? '复制地址' : 'Copy address'}
+                          aria-label={pickText({
+                            zh: '复制地址',
+                            en: 'Copy address',
+                            de: 'Adresse kopieren',
+                          })}
                         >
                           <Copy className="h-5 w-5" />
                         </button>
@@ -199,7 +254,13 @@ export function BeginnerOnboardingPage() {
                     <div className="pt-1">
                       <div className="mb-3 flex items-center gap-2 text-sm font-medium text-nofx-gold">
                         <Shield className="h-4 w-4" />
-                        <span>{isZh ? '私钥，请立即备份' : 'Private key, back it up now'}</span>
+                        <span>
+                          {pickText({
+                            zh: '私钥，请立即备份',
+                            en: 'Private key, back it up now',
+                            de: 'Private Key, bitte jetzt sichern',
+                          })}
+                        </span>
                       </div>
                       <div className="flex items-stretch gap-3">
                         <div className="min-w-0 flex-1 rounded-[24px] border border-nofx-gold/20 bg-[linear-gradient(180deg,rgba(32,25,7,0.44),rgba(14,10,3,0.28))] px-5 py-3 font-mono text-[13px] leading-6 text-amber-100 shadow-[0_0_0_1px_rgba(240,185,11,0.05)]">
@@ -208,9 +269,22 @@ export function BeginnerOnboardingPage() {
                         <div className="flex shrink-0 flex-col justify-end">
                           <button
                             type="button"
-                            onClick={() => copyText(data.private_key, isZh ? '私钥' : 'Private key')}
+                            onClick={() =>
+                              copyText(
+                                data.private_key,
+                                pickText({
+                                  zh: '私钥',
+                                  en: 'Private key',
+                                  de: 'Private Key',
+                                })
+                              )
+                            }
                             className="inline-flex h-14 w-14 items-center justify-center rounded-2xl border border-nofx-gold/20 bg-nofx-gold/10 text-nofx-gold transition hover:bg-nofx-gold/15"
-                            aria-label={isZh ? '复制私钥' : 'Copy private key'}
+                            aria-label={pickText({
+                              zh: '复制私钥',
+                              en: 'Copy private key',
+                              de: 'Private Key kopieren',
+                            })}
                           >
                             <Copy className="h-5 w-5" />
                           </button>
@@ -246,15 +320,23 @@ export function BeginnerOnboardingPage() {
                         isZh ? 'text-[20px]' : 'text-[16px] sm:text-[18px]'
                       }`}
                     >
-                      <span>{isZh ? '我已保存，进入下一步' : 'I saved it, continue'}</span>
+                      <span>
+                        {pickText({
+                          zh: '我已保存，进入下一步',
+                          en: 'I saved it, continue',
+                          de: 'Gespeichert, weiter',
+                        })}
+                      </span>
                       <ArrowRight className="h-5 w-5" />
                     </button>
 
                     {data.env_saved ? (
                       <div className="pt-1 text-xs text-zinc-600">
-                        {isZh
-                          ? `钱包信息已同步保存到 ${data.env_path || '.env'}`
-                          : `Wallet details were also saved to ${data.env_path || '.env'}`}
+                        {pickText({
+                          zh: `钱包信息已同步保存到 ${data.env_path || '.env'}`,
+                          en: `Wallet details were also saved to ${data.env_path || '.env'}`,
+                          de: `Wallet-Daten wurden auch in ${data.env_path || '.env'} gespeichert`,
+                        })}
                       </div>
                     ) : null}
                   </div>

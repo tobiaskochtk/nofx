@@ -75,6 +75,10 @@ services:
     volumes:
       - ./.env:/app/.env
       - ./data:/app/data
+      - type: bind
+        source: ${USERPROFILE}/.codex
+        target: /root/.codex
+        read_only: true
       - /etc/localtime:/etc/localtime:ro
     env_file:
       - .env

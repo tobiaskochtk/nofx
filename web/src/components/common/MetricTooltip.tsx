@@ -3,15 +3,17 @@ import { createPortal } from 'react-dom'
 import { HelpCircle } from 'lucide-react'
 import katex from 'katex'
 import 'katex/dist/katex.min.css'
-import { t } from '../../i18n/translations'
+import { t, type Language } from '../../i18n/translations'
 
 export interface MetricDefinition {
   key: string
   nameEn: string
   nameZh: string
+  nameDe: string
   formula: string // LaTeX formula
   descriptionEn: string
   descriptionZh: string
+  descriptionDe: string
 }
 
 // Metric definitions with formulas
@@ -20,121 +22,151 @@ export const METRIC_DEFINITIONS: Record<string, MetricDefinition> = {
     key: 'total_return',
     nameEn: 'Total Return',
     nameZh: '总收益率',
+    nameDe: 'Gesamtrendite',
     formula: 'R_{total} = \\frac{V_{end} - V_{start}}{V_{start}} \\times 100\\%',
     descriptionEn: 'Measures overall portfolio performance from start to end',
     descriptionZh: '衡量投资组合从开始到结束的整体收益表现',
+    descriptionDe: 'Misst die Gesamtentwicklung des Portfolios vom Start bis zum Ende',
   },
   annualized_return: {
     key: 'annualized_return',
     nameEn: 'Annualized Return',
     nameZh: '年化收益率',
+    nameDe: 'Annualisierte Rendite',
     formula: 'R_{ann} = \\left(1 + R_{total}\\right)^{\\frac{252}{n}} - 1',
     descriptionEn: 'Standardized yearly return rate (252 trading days)',
     descriptionZh: '标准化年度收益率（按252个交易日计算）',
+    descriptionDe: 'Standardisierte Jahresrendite (auf Basis von 252 Handelstagen)',
   },
   max_drawdown: {
     key: 'max_drawdown',
     nameEn: 'Maximum Drawdown',
     nameZh: '最大回撤',
+    nameDe: 'Maximaler Drawdown',
     formula: 'MDD = \\max_{t} \\left( \\frac{Peak_t - Trough_t}{Peak_t} \\right)',
     descriptionEn: 'Largest peak-to-trough decline during the period',
     descriptionZh: '期间内从峰值到谷底的最大跌幅',
+    descriptionDe: 'Größter Rückgang vom Hoch zum Tief innerhalb des betrachteten Zeitraums',
   },
   sharpe_ratio: {
     key: 'sharpe_ratio',
     nameEn: 'Sharpe Ratio',
     nameZh: '夏普比率',
+    nameDe: 'Sharpe Ratio',
     formula: 'SR = \\frac{\\bar{r} - r_f}{\\sigma}',
     descriptionEn: 'Risk-adjusted return per unit of volatility (r̄=avg return, rf=risk-free rate, σ=std dev)',
     descriptionZh: '单位波动风险下的超额收益（r̄=平均收益，rf=无风险利率，σ=标准差）',
+    descriptionDe: 'Risikobereinigte Rendite pro Volatilitätseinheit (r̄=Durchschnittsrendite, rf=risikofreier Zins, σ=Standardabweichung)',
   },
   sortino_ratio: {
     key: 'sortino_ratio',
     nameEn: 'Sortino Ratio',
     nameZh: '索提诺比率',
+    nameDe: 'Sortino Ratio',
     formula: 'Sortino = \\frac{\\bar{r} - r_f}{\\sigma_d}',
     descriptionEn: 'Return per unit of downside risk (σd=downside deviation)',
     descriptionZh: '单位下行风险的收益（σd=下行标准差）',
+    descriptionDe: 'Rendite pro Einheit des Abwärtsrisikos (σd=Abwärtsabweichung)',
   },
   calmar_ratio: {
     key: 'calmar_ratio',
     nameEn: 'Calmar Ratio',
     nameZh: '卡玛比率',
+    nameDe: 'Calmar Ratio',
     formula: 'Calmar = \\frac{R_{ann}}{|MDD|}',
     descriptionEn: 'Annualized return divided by maximum drawdown',
     descriptionZh: '年化收益率与最大回撤的比值',
+    descriptionDe: 'Annualisierte Rendite geteilt durch den maximalen Drawdown',
   },
   win_rate: {
     key: 'win_rate',
     nameEn: 'Win Rate',
     nameZh: '胜率',
+    nameDe: 'Trefferquote',
     formula: 'WinRate = \\frac{N_{win}}{N_{total}} \\times 100\\%',
     descriptionEn: 'Percentage of profitable trades',
     descriptionZh: '盈利交易占总交易数的百分比',
+    descriptionDe: 'Anteil profitabler Trades an allen Trades',
   },
   profit_factor: {
     key: 'profit_factor',
     nameEn: 'Profit Factor',
     nameZh: '盈亏比',
+    nameDe: 'Profit Factor',
     formula: 'PF = \\frac{\\sum Profits}{|\\sum Losses|}',
     descriptionEn: 'Ratio of gross profit to gross loss',
     descriptionZh: '总盈利与总亏损的比值',
+    descriptionDe: 'Verhältnis von Bruttogewinn zu Bruttoverlust',
   },
   volatility: {
     key: 'volatility',
     nameEn: 'Volatility',
     nameZh: '波动率',
+    nameDe: 'Volatilität',
     formula: '\\sigma = \\sqrt{\\frac{1}{n}\\sum_{i=1}^{n}(r_i - \\bar{r})^2}',
     descriptionEn: 'Standard deviation of returns',
     descriptionZh: '收益率的标准差',
+    descriptionDe: 'Standardabweichung der Renditen',
   },
   var_95: {
     key: 'var_95',
     nameEn: 'VaR (95%)',
     nameZh: '风险价值',
+    nameDe: 'VaR (95 %)',
     formula: 'P(R < VaR_{95\\%}) = 5\\%',
     descriptionEn: '95% confidence level maximum expected loss',
     descriptionZh: '95%置信水平下的最大预期损失',
+    descriptionDe: 'Maximal erwarteter Verlust bei 95 % Konfidenzniveau',
   },
   alpha: {
     key: 'alpha',
     nameEn: 'Alpha',
     nameZh: '超额收益',
+    nameDe: 'Alpha',
     formula: '\\alpha = R_{portfolio} - R_{benchmark}',
     descriptionEn: 'Excess return over benchmark',
     descriptionZh: '相对于基准的超额收益',
+    descriptionDe: 'Überschussrendite gegenüber der Benchmark',
   },
   beta: {
     key: 'beta',
     nameEn: 'Beta',
     nameZh: '贝塔系数',
+    nameDe: 'Beta',
     formula: '\\beta = \\frac{Cov(R_p, R_m)}{Var(R_m)}',
     descriptionEn: 'Portfolio sensitivity to market movements',
     descriptionZh: '投资组合对市场波动的敏感度',
+    descriptionDe: 'Empfindlichkeit des Portfolios gegenüber Marktbewegungen',
   },
   information_ratio: {
     key: 'information_ratio',
     nameEn: 'Information Ratio',
     nameZh: '信息比率',
+    nameDe: 'Information Ratio',
     formula: 'IR = \\frac{\\alpha}{\\sigma_{tracking}}',
     descriptionEn: 'Alpha per unit of tracking error',
     descriptionZh: '单位跟踪误差的超额收益',
+    descriptionDe: 'Alpha pro Einheit Tracking Error',
   },
   avg_trade_pnl: {
     key: 'avg_trade_pnl',
     nameEn: 'Avg Trade PnL',
     nameZh: '平均盈亏',
+    nameDe: 'Durchschnittlicher Trade-PnL',
     formula: '\\bar{PnL} = \\frac{\\sum PnL_i}{N}',
     descriptionEn: 'Average profit/loss per trade',
     descriptionZh: '每笔交易的平均盈亏',
+    descriptionDe: 'Durchschnittlicher Gewinn oder Verlust pro Trade',
   },
   expectancy: {
     key: 'expectancy',
     nameEn: 'Expectancy',
     nameZh: '期望收益',
+    nameDe: 'Erwartungswert',
     formula: 'E = (WinRate \\times \\bar{W}) - (LossRate \\times \\bar{L})',
     descriptionEn: 'Expected return per trade',
     descriptionZh: '每笔交易的期望收益',
+    descriptionDe: 'Erwartete Rendite pro Trade',
   },
 }
 
@@ -172,7 +204,7 @@ interface TooltipPosition {
 
 interface MetricTooltipProps {
   metricKey: string
-  language?: string
+  language?: Language
   size?: number
   className?: string
 }
@@ -240,9 +272,25 @@ export function MetricTooltip({
     return null
   }
 
-  const name = language === 'zh' ? metric.nameZh : metric.nameEn
-  const description = language === 'zh' ? metric.descriptionZh : metric.descriptionEn
-  const formulaLabel = t('metricTooltip.formula', language as 'en' | 'zh' | 'id')
+  const name =
+    language === 'zh'
+      ? metric.nameZh
+      : language === 'de'
+        ? metric.nameDe
+        : metric.nameEn
+  const description =
+    language === 'zh'
+      ? metric.descriptionZh
+      : language === 'de'
+        ? metric.descriptionDe
+        : metric.descriptionEn
+  const formulaLabel = t('metricTooltip.formula', language)
+  const ariaLabel =
+    language === 'zh'
+      ? `${name} 信息`
+      : language === 'de'
+        ? `Informationen zu ${name}`
+        : `Info about ${name}`
 
   const tooltipContent = (
     <div
@@ -335,7 +383,7 @@ export function MetricTooltip({
         }}
         className={`p-0.5 rounded-full transition-colors hover:bg-white/10 ${className}`}
         style={{ color: '#848E9C' }}
-        aria-label={`Info about ${name}`}
+        aria-label={ariaLabel}
       >
         <HelpCircle size={size} />
       </button>
@@ -349,13 +397,20 @@ export function MetricTooltip({
 interface MetricLabelProps {
   metricKey: string
   label?: string
-  language?: string
+  language?: Language
   className?: string
 }
 
 export function MetricLabel({ metricKey, label, language = 'en', className = '' }: MetricLabelProps) {
   const metric = METRIC_DEFINITIONS[metricKey]
-  const displayLabel = label || (language === 'zh' ? metric?.nameZh : metric?.nameEn) || metricKey
+  const displayLabel =
+    label ||
+    (language === 'zh'
+      ? metric?.nameZh
+      : language === 'de'
+        ? metric?.nameDe
+        : metric?.nameEn) ||
+    metricKey
 
   return (
     <span className={`inline-flex items-center gap-1 ${className}`}>

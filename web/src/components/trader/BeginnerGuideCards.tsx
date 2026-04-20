@@ -32,104 +32,162 @@ export function BeginnerGuideCards({
   onOpenStrategy,
   onCreateTrader,
 }: BeginnerGuideCardsProps) {
-  const isZh = language === 'zh'
+  const pickText = (copy: { zh: string; de: string; en: string }) => {
+    if (language === 'zh') return copy.zh
+    if (language === 'de') return copy.de
+    return copy.en
+  }
 
   const cards = [
     {
       key: 'model',
       icon: Brain,
-      title: isZh ? '1. 极速模型' : '1. Fast AI',
-      desc: isZh
-        ? '默认就是 Claw402 + DeepSeek。第一次不用挑模型，先跑起来。'
-        : 'Start with Claw402 + DeepSeek. No model picking needed for the first run.',
+      title: pickText({
+        zh: '1. 极速模型',
+        de: '1. Schnellstart-KI',
+        en: '1. Fast AI',
+      }),
+      desc: pickText({
+        zh: '默认就是 Claw402 + DeepSeek。第一次不用挑模型，先跑起来。',
+        de: 'Starte direkt mit Claw402 + DeepSeek. Für den ersten Lauf musst du kein Modell auswählen.',
+        en: 'Start with Claw402 + DeepSeek. No model picking needed for the first run.',
+      }),
       meta: walletAddress
-        ? isZh
-          ? `钱包 ${truncateAddress(walletAddress)}`
-          : `Wallet ${truncateAddress(walletAddress)}`
-        : isZh
-          ? 'Base 链 USDC 按次付费'
-          : 'Pay per call with Base USDC',
+        ? pickText({
+          zh: `钱包 ${truncateAddress(walletAddress)}`,
+          de: `Wallet ${truncateAddress(walletAddress)}`,
+          en: `Wallet ${truncateAddress(walletAddress)}`,
+        })
+        : pickText({
+          zh: 'Base 链 USDC 按次付费',
+          de: 'Bezahlung pro Aufruf mit USDC auf Base',
+          en: 'Pay per call with Base USDC',
+        }),
       ready: claw402Ready,
       actionLabel: claw402Ready
-        ? isZh
-          ? '已配置'
-          : 'Configured'
-        : isZh
-          ? '一键配置'
-          : 'One-click setup',
+        ? pickText({
+          zh: '已配置',
+          de: 'Konfiguriert',
+          en: 'Configured',
+        })
+        : pickText({
+          zh: '一键配置',
+          de: 'Ein-Klick-Setup',
+          en: 'One-click setup',
+        }),
       onAction: onQuickSetupClaw402,
       disabled: claw402Ready,
     },
     {
       key: 'exchange',
       icon: Landmark,
-      title: isZh ? '2. 连接交易所' : '2. Add Exchange',
-      desc: isZh
-        ? '交易所接好以后，AI 才能真正下单。'
-        : 'Connect an exchange so the AI can actually place trades.',
+      title: pickText({
+        zh: '2. 连接交易所',
+        de: '2. Börse verbinden',
+        en: '2. Add Exchange',
+      }),
+      desc: pickText({
+        zh: '交易所接好以后，AI 才能真正下单。',
+        de: 'Erst mit einer verbundenen Börse kann die KI tatsächlich Orders platzieren.',
+        en: 'Connect an exchange so the AI can actually place trades.',
+      }),
       meta: exchangeReady
-        ? isZh
-          ? '已准备好'
-          : 'Ready'
-        : isZh
-          ? 'Binance / OKX / Bybit / Hyperliquid'
-          : 'Binance / OKX / Bybit / Hyperliquid',
+        ? pickText({
+          zh: '已准备好',
+          de: 'Bereit',
+          en: 'Ready',
+        })
+        : 'Binance / OKX / Bybit / Hyperliquid',
       ready: exchangeReady,
       actionLabel: exchangeReady
-        ? isZh
-          ? '继续管理'
-          : 'Manage'
-        : isZh
-          ? '去配置'
-          : 'Configure',
+        ? pickText({
+          zh: '继续管理',
+          de: 'Verwalten',
+          en: 'Manage',
+        })
+        : pickText({
+          zh: '去配置',
+          de: 'Konfigurieren',
+          en: 'Configure',
+        }),
       onAction: onOpenExchange,
       disabled: false,
     },
     {
       key: 'strategy',
       icon: Sparkles,
-      title: isZh ? '3. 选择策略' : '3. Pick Strategy',
-      desc: isZh
-        ? '先用默认策略也可以，后面再慢慢细调。'
-        : 'You can start with a default strategy and fine-tune later.',
+      title: pickText({
+        zh: '3. 选择策略',
+        de: '3. Strategie wählen',
+        en: '3. Pick Strategy',
+      }),
+      desc: pickText({
+        zh: '先用默认策略也可以，后面再慢慢细调。',
+        de: 'Du kannst mit der Standardstrategie starten und später im Detail nachschärfen.',
+        en: 'You can start with a default strategy and fine-tune later.',
+      }),
       meta: strategyReady
-        ? isZh
-          ? '已有策略可用'
-          : 'Strategy ready'
-        : isZh
-          ? '可选，但建议提前看一眼'
-          : 'Optional, but worth a quick look',
+        ? pickText({
+          zh: '已有策略可用',
+          de: 'Strategie bereit',
+          en: 'Strategy ready',
+        })
+        : pickText({
+          zh: '可选，但建议提前看一眼',
+          de: 'Optional, aber ein kurzer Blick lohnt sich',
+          en: 'Optional, but worth a quick look',
+        }),
       ready: strategyReady,
-      actionLabel: isZh ? '打开策略页' : 'Open strategy',
+      actionLabel: pickText({
+        zh: '打开策略页',
+        de: 'Strategie öffnen',
+        en: 'Open strategy',
+      }),
       onAction: onOpenStrategy,
       disabled: false,
     },
     {
       key: 'trader',
       icon: Rocket,
-      title: isZh ? '4. 创建 Trader' : '4. Create Trader',
-      desc: isZh
-        ? '最后一步，把模型和交易所绑在一起，就能开始运行。'
-        : 'Last step: bind your model and exchange, then start running.',
+      title: pickText({
+        zh: '4. 创建 Trader',
+        de: '4. Trader erstellen',
+        en: '4. Create Trader',
+      }),
+      desc: pickText({
+        zh: '最后一步，把模型和交易所绑在一起，就能开始运行。',
+        de: 'Letzter Schritt: Modell und Börse verbinden, dann kann der Trader starten.',
+        en: 'Last step: bind your model and exchange, then start running.',
+      }),
       meta: traderReady
-        ? isZh
-          ? '已创建 Trader，可继续添加'
-          : 'Trader created, you can add more'
+        ? pickText({
+          zh: '已创建 Trader，可继续添加',
+          de: 'Trader erstellt, du kannst weitere hinzufügen',
+          en: 'Trader created, you can add more',
+        })
         : canCreateTrader
-          ? isZh
-            ? '已经可以创建'
-            : 'Ready to create'
-        : isZh
-          ? '先完成前三步'
-          : 'Finish the first three steps first',
+          ? pickText({
+            zh: '已经可以创建',
+            de: 'Bereit zum Erstellen',
+            en: 'Ready to create',
+          })
+        : pickText({
+          zh: '先完成前三步',
+          de: 'Bitte zuerst die ersten drei Schritte abschließen',
+          en: 'Finish the first three steps first',
+        }),
       ready: traderReady,
       actionLabel: traderReady
-        ? isZh
-          ? '继续创建'
-          : 'Create another'
-        : isZh
-          ? '立即创建'
-          : 'Create now',
+        ? pickText({
+          zh: '继续创建',
+          de: 'Weiteren erstellen',
+          en: 'Create another',
+        })
+        : pickText({
+          zh: '立即创建',
+          de: 'Jetzt erstellen',
+          en: 'Create now',
+        }),
       onAction: onCreateTrader,
       disabled: !canCreateTrader,
     },
@@ -140,12 +198,18 @@ export function BeginnerGuideCards({
       <div className="flex items-center justify-between gap-4">
         <div>
           <div className="text-xs font-semibold uppercase tracking-[0.3em] text-nofx-gold/80">
-            {isZh ? '新手引导' : 'Quickstart'}
+            {pickText({
+              zh: '新手引导',
+              de: 'Schnellstart',
+              en: 'Quickstart',
+            })}
           </div>
           <h2 className="mt-1 text-xl font-bold text-white">
-            {isZh
-              ? '先按这 4 步走，最快上手'
-              : 'Follow these 4 steps to get started fast'}
+            {pickText({
+              zh: '先按这 4 步走，最快上手',
+              de: 'Mit diesen 4 Schritten bist du am schnellsten startklar',
+              en: 'Follow these 4 steps to get started fast',
+            })}
           </h2>
         </div>
         {/* <div className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs text-zinc-400">
@@ -173,12 +237,16 @@ export function BeginnerGuideCards({
                   }`}
                 >
                   {card.ready
-                    ? isZh
-                      ? '已就绪'
-                      : 'Ready'
-                    : isZh
-                      ? '待完成'
-                      : 'Pending'}
+                    ? pickText({
+                      zh: '已就绪',
+                      de: 'Bereit',
+                      en: 'Ready',
+                    })
+                    : pickText({
+                      zh: '待完成',
+                      de: 'Offen',
+                      en: 'Pending',
+                    })}
                 </span>
               </div>
 

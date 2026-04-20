@@ -7,21 +7,48 @@ interface AboutSectionProps {
 }
 
 export default function AboutSection({ language }: AboutSectionProps) {
+  const pickText = (values: Record<Language, string>) => values[language]
+
   const features = [
     {
       icon: Shield,
-      title: language === 'zh' ? '完全自主控制' : 'Full Control',
-      desc: language === 'zh' ? '自托管，数据安全' : 'Self-hosted, data secure',
+      title: pickText({
+        zh: '完全自主控制',
+        en: 'Full Control',
+        de: 'Volle Kontrolle',
+        id: 'Full Control',
+      }),
+      desc: pickText({
+        zh: '自托管，数据安全',
+        en: 'Self-hosted, data secure',
+        de: 'Self-hosted, Daten bleiben bei dir',
+        id: 'Self-hosted, data secure',
+      }),
     },
     {
       icon: Cpu,
-      title: language === 'zh' ? '多 AI 支持' : 'Multi-AI Support',
-      desc: language === 'zh' ? 'DeepSeek, GPT, Claude...' : 'DeepSeek, GPT, Claude...',
+      title: pickText({
+        zh: '多 AI 支持',
+        en: 'Multi-AI Support',
+        de: 'Multi-AI-Support',
+        id: 'Multi-AI Support',
+      }),
+      desc: 'DeepSeek, GPT, Claude...',
     },
     {
       icon: BarChart3,
-      title: language === 'zh' ? '实时监控' : 'Real-time Monitor',
-      desc: language === 'zh' ? '可视化交易看板' : 'Visual trading dashboard',
+      title: pickText({
+        zh: '实时监控',
+        en: 'Real-time Monitor',
+        de: 'Echtzeit-Monitoring',
+        id: 'Real-time Monitor',
+      }),
+      desc: pickText({
+        zh: '可视化交易看板',
+        en: 'Visual trading dashboard',
+        de: 'Visuelles Trading-Dashboard',
+        id: 'Visual trading dashboard',
+      }),
     },
   ]
 

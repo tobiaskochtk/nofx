@@ -169,6 +169,7 @@ function App() {
       const hash = window.location.hash.slice(1)
       const params = new URLSearchParams(window.location.search)
       const traderParam = params.get('trader')
+      setSelectedTraderSlug(traderParam || undefined)
 
       if (path === '/welcome') {
         setCurrentPage('traders')
@@ -194,8 +195,6 @@ function App() {
         hash === 'details'
       ) {
         setCurrentPage('trader')
-        // 如果 URL 中有 trader 参数（slug 格式），更新选中的 trader
-        setSelectedTraderSlug(traderParam || undefined)
       } else if (
         path === '/competition' ||
         hash === 'competition' ||
@@ -579,10 +578,16 @@ function App() {
                 onTraderSelect={(traderId) => {
                   setSelectedTraderId(traderId)
                   const trader = traders?.find((t) => t.trader_id === traderId)
+                  const url = new URL(window.location.href)
                   if (trader) {
                     const slug = getTraderSlug(trader)
                     setSelectedTraderSlug(slug)
+                    url.searchParams.set('trader', slug)
+                  } else {
+                    url.searchParams.delete('trader')
+                    setSelectedTraderSlug(undefined)
                   }
+                  window.history.replaceState({}, '', url.toString())
                 }}
               />
             ) : currentPage === 'pattern-lab' ? (
@@ -593,10 +598,16 @@ function App() {
                 onTraderSelect={(traderId) => {
                   setSelectedTraderId(traderId)
                   const trader = traders?.find((t) => t.trader_id === traderId)
+                  const url = new URL(window.location.href)
                   if (trader) {
                     const slug = getTraderSlug(trader)
                     setSelectedTraderSlug(slug)
+                    url.searchParams.set('trader', slug)
+                  } else {
+                    url.searchParams.delete('trader')
+                    setSelectedTraderSlug(undefined)
                   }
+                  window.history.replaceState({}, '', url.toString())
                 }}
               />
             ) : currentPage === 'optimizer' ? (
@@ -607,10 +618,16 @@ function App() {
                 onTraderSelect={(traderId) => {
                   setSelectedTraderId(traderId)
                   const trader = traders?.find((t) => t.trader_id === traderId)
+                  const url = new URL(window.location.href)
                   if (trader) {
                     const slug = getTraderSlug(trader)
                     setSelectedTraderSlug(slug)
+                    url.searchParams.set('trader', slug)
+                  } else {
+                    url.searchParams.delete('trader')
+                    setSelectedTraderSlug(undefined)
                   }
+                  window.history.replaceState({}, '', url.toString())
                 }}
               />
             ) : currentPage === 'memory' ? (
@@ -621,10 +638,16 @@ function App() {
                 onTraderSelect={(traderId) => {
                   setSelectedTraderId(traderId)
                   const trader = traders?.find((t) => t.trader_id === traderId)
+                  const url = new URL(window.location.href)
                   if (trader) {
                     const slug = getTraderSlug(trader)
                     setSelectedTraderSlug(slug)
+                    url.searchParams.set('trader', slug)
+                  } else {
+                    url.searchParams.delete('trader')
+                    setSelectedTraderSlug(undefined)
                   }
+                  window.history.replaceState({}, '', url.toString())
                 }}
               />
             ) : currentPage === 'traders' ? (

@@ -1,7 +1,10 @@
 import { useEffect, useMemo, useState } from 'react'
+import { useLanguage } from '../../contexts/LanguageContext'
+import { toDateTimeLocale } from '../../i18n/locale'
 import { api } from '../../lib/api'
 import { notify } from '../../lib/notify'
 import { NofxSelect } from '../ui/select'
+import type { Language } from '../../i18n/translations'
 import type {
   AIModel,
   AutonomousOptimizerBacklogItem,
@@ -25,52 +28,351 @@ interface AutonomousOptimizerPanelProps {
   onApplyRunWindowFilter?: (fromTime: number, toTime: number) => void
 }
 
-const optimizerStatusOptions = [
-  { value: '', label: 'All run statuses' },
-  { value: 'scheduled', label: 'Scheduled' },
-  { value: 'running', label: 'Running' },
-  { value: 'insufficient_evidence', label: 'Insufficient evidence' },
-  { value: 'no_change', label: 'No change' },
-  { value: 'backlog_only', label: 'Backlog only' },
-  { value: 'blocked_by_gate', label: 'Blocked by gate' },
-  { value: 'deferred_for_next_window', label: 'Deferred for next window' },
-  { value: 'auto_applied', label: 'Auto applied' },
-  { value: 'monitoring', label: 'Monitoring' },
-  { value: 'rollback_pending', label: 'Rollback pending' },
-  { value: 'rolled_back', label: 'Rolled back' },
-  { value: 'kept', label: 'Kept' },
-  { value: 'paused', label: 'Paused' },
-  { value: 'failed', label: 'Failed' },
-]
-
-const configStatusOptions = [
-  { value: 'scheduled', label: 'Scheduled' },
-  { value: 'paused', label: 'Paused' },
-]
-
-const backlogStatusOptions = [
-  { value: '', label: 'All backlog statuses' },
-  { value: 'new', label: 'New' },
-  { value: 'confirmed', label: 'Confirmed' },
-  { value: 'planned', label: 'Planned' },
-  { value: 'in_progress', label: 'In progress' },
-  { value: 'done', label: 'Done' },
-  { value: 'rejected', label: 'Rejected' },
-]
-
-const backlogCategoryOptions = [
-  { value: 'missing_indicator', label: 'Missing indicator' },
-  { value: 'missing_market_data', label: 'Missing market data' },
-  {
-    value: 'missing_execution_telemetry',
-    label: 'Missing execution telemetry',
+const optimizerTextTranslations: Record<
+  string,
+  Partial<Record<Language, string>>
+> = {
+  'Autonomous Optimizer': { de: 'Autonomer Optimierer' },
+  'Self-improving trader loop': {
+    de: 'Sich selbst verbessernde Trader-Schleife',
   },
-  { value: 'missing_regime_metadata', label: 'Missing regime metadata' },
-  { value: 'missing_risk_control', label: 'Missing risk control' },
-  { value: 'missing_prompt_instruction', label: 'Missing prompt instruction' },
-  { value: 'missing_review_metric', label: 'Missing review metric' },
-  { value: 'other_capability_gap', label: 'Other capability gap' },
-]
+  'Visible here are the AI improvement steps, the current live optimizer status, and the recent automatic review outcomes.':
+    {
+      de: 'Hier siehst du die KI-Verbesserungsschritte, den aktuellen Live-Status des Optimierers und die juengsten automatischen Review-Ergebnisse.',
+    },
+  'Running…': { de: 'Laeuft…' },
+  'Run now': { de: 'Jetzt ausfuehren' },
+  'Refreshing…': { de: 'Aktualisiere…' },
+  'Refresh optimizer': { de: 'Optimierer aktualisieren' },
+  'Current state': { de: 'Aktueller Status' },
+  Enabled: { de: 'Aktiviert' },
+  Yes: { de: 'Ja' },
+  No: { de: 'Nein' },
+  'Next review window': { de: 'Naechstes Review-Fenster' },
+  'Last run': { de: 'Letzter Lauf' },
+  'Open improvement steps': { de: 'Offene Verbesserungsschritte' },
+  'Highest score': { de: 'Hoechster Score' },
+  'Last applied change': { de: 'Zuletzt uebernommene Aenderung' },
+  'No applied autonomous change yet': {
+    de: 'Noch keine autonome Aenderung uebernommen',
+  },
+  Config: { de: 'Konfiguration' },
+  'Choose the active optimizer account and model pair here. This is where `GPT-5.4` is currently wired by default.':
+    {
+      de: 'Waehle hier das aktive Optimizer-Konto und Modellpaar. Standardmaessig ist hier aktuell `GPT-5.4` verdrahtet.',
+    },
+  Status: { de: 'Status' },
+  'Review interval hours': { de: 'Review-Intervall (Stunden)' },
+  'Cooldown hours': { de: 'Cooldown (Stunden)' },
+  'Max consecutive applies': {
+    de: 'Max. aufeinanderfolgende Uebernahmen',
+  },
+  'Auto-apply config patches': {
+    de: 'Config-Patches automatisch uebernehmen',
+  },
+  'Auto-apply prompt patches': {
+    de: 'Prompt-Patches automatisch uebernehmen',
+  },
+  'Auto rollback': { de: 'Auto-Rollback' },
+  'Self-pause': { de: 'Selbstpause' },
+  'Proposer account': { de: 'Proposer-Konto' },
+  'Current model name': { de: 'Aktueller Modellname' },
+  'e.g. gpt-5.4': { de: 'z. B. gpt-5.4' },
+  'Critic account': { de: 'Critic-Konto' },
+  'Proposal instructions overlay': {
+    de: 'Proposal-Anweisungs-Overlay',
+  },
+  'Optional extra instructions merged into the optimizer proposer prompt.':
+    {
+      de: 'Optionale Zusatzanweisungen, die in den Proposer-Prompt des Optimierers eingefuegt werden.',
+    },
+  'Critic instructions overlay': {
+    de: 'Critic-Anweisungs-Overlay',
+  },
+  'Optional extra instructions merged into the optimizer critic prompt.': {
+    de: 'Optionale Zusatzanweisungen, die in den Critic-Prompt des Optimierers eingefuegt werden.',
+  },
+  'Seed source trader': { de: 'Seed-Quell-Trader' },
+  'Current seed strategy': { de: 'Aktuelle Seed-Strategie' },
+  'Last applied version': { de: 'Zuletzt uebernommene Version' },
+  Cooldown: { de: 'Cooldown' },
+  'Max apply streak': { de: 'Max. Uebernahme-Serie' },
+  'Saving…': { de: 'Speichere…' },
+  'Save optimizer config': { de: 'Optimizer-Konfiguration speichern' },
+  'Improvement Backlog': { de: 'Verbesserungs-Backlog' },
+  'These are the AI-detected next improvement steps. If the AI says indicators, telemetry, or prompt changes are missing, they land here with a score.':
+    {
+      de: 'Das sind die von der KI erkannten naechsten Verbesserungsschritte. Wenn laut KI Indikatoren, Telemetrie oder Prompt-Aenderungen fehlen, landen sie hier mit einem Score.',
+    },
+  'No visible improvement steps yet for this filter. Once the optimizer proposes missing capabilities or next build items, they will appear here.':
+    {
+      de: 'Fuer diesen Filter sind noch keine Verbesserungsschritte sichtbar. Sobald der Optimierer fehlende Faehigkeiten oder naechste Build-Items vorschlaegt, erscheinen sie hier.',
+    },
+  AI: { de: 'KI' },
+  'User edited': { de: 'Vom Nutzer bearbeitet' },
+  'Expected impact:': { de: 'Erwarteter Effekt:' },
+  Score: { de: 'Score' },
+  Confidence: { de: 'Konfidenz' },
+  Urgency: { de: 'Dringlichkeit' },
+  Cost: { de: 'Kosten' },
+  Recurrent: { de: 'Wiederkehrend' },
+  Merged: { de: 'Zusammengefuehrt' },
+  'Source run': { de: 'Quelllauf' },
+  'Edit fields': { de: 'Felder bearbeiten' },
+  'Save edit': { de: 'Bearbeitung speichern' },
+  Cancel: { de: 'Abbrechen' },
+  Updated: { de: 'Aktualisiert' },
+  Title: { de: 'Titel' },
+  Category: { de: 'Kategorie' },
+  Description: { de: 'Beschreibung' },
+  'Expected impact': { de: 'Erwarteter Effekt' },
+  'Implementation cost': { de: 'Implementierungskosten' },
+  'Recurrence count': { de: 'Wiederholungsanzahl' },
+  'Model Outcomes': { de: 'Modell-Ergebnisse' },
+  'This ranks proposer/critic pairs by actual optimizer outcomes: apply rate, rollback rate, kept-win rate, and backlog usefulness.':
+    {
+      de: 'Dies bewertet Proposer-/Critic-Paare nach realen Optimizer-Ergebnissen: Uebernahmerate, Rollback-Rate, Beibehalten-Gewinnrate und Nutzen des Backlogs.',
+    },
+  'No per-model optimizer outcome data is available yet.': {
+    de: 'Noch keine optimizerbezogenen Ergebnisdaten pro Modell verfuegbar.',
+  },
+  'Active pair': { de: 'Aktives Paar' },
+  'Last used': { de: 'Zuletzt verwendet' },
+  'Outcome score': { de: 'Ergebnis-Score' },
+  'Apply rate': { de: 'Uebernahmerate' },
+  'Rollback rate': { de: 'Rollback-Rate' },
+  'Kept-win rate': { de: 'Behalten-Gewinnrate' },
+  'Backlog usefulness': { de: 'Backlog-Nutzen' },
+  'Operational health': { de: 'Betriebszustand' },
+  'Monitoring applies:': { de: 'Monitoring-Uebernahmen:' },
+  'Failed runs:': { de: 'Fehlgeschlagene Laeufe:' },
+  'Evidence-gap overlaps:': { de: 'Belegluecken-Ueberschneidungen:' },
+  'Done backlog items:': { de: 'Erledigte Backlog-Eintraege:' },
+  'Rejected backlog items:': { de: 'Abgelehnte Backlog-Eintraege:' },
+  'Blocked runs:': { de: 'Blockierte Laeufe:' },
+  'Run History': { de: 'Laufhistorie' },
+  'This shows what the optimizer actually did every window: applied, blocked, backlog-only, monitoring, rollback, or no change.':
+    {
+      de: 'Das zeigt, was der Optimierer pro Fenster tatsaechlich getan hat: uebernommen, blockiert, nur Backlog, Monitoring, Rollback oder keine Aenderung.',
+    },
+  'No optimizer runs visible for this filter yet.': {
+    de: 'Fuer diesen Filter sind noch keine Optimizer-Laeufe sichtbar.',
+  },
+  'No summary stored': { de: 'Keine Zusammenfassung gespeichert' },
+  Started: { de: 'Gestartet' },
+  Finished: { de: 'Beendet' },
+  'Strategy version': { de: 'Strategieversion' },
+  'Run ID': { de: 'Lauf-ID' },
+  'Run Detail': { de: 'Laufdetails' },
+  'Loading run detail…': { de: 'Laufdetails werden geladen…' },
+  'Open strategy version': { de: 'Strategieversion oeffnen' },
+  'Open review cohort': { de: 'Review-Kohorte oeffnen' },
+  'Select model account': { de: 'Modellkonto waehlen' },
+  'Failed to load autonomous optimizer panel': {
+    de: 'Panel des autonomen Optimierers konnte nicht geladen werden',
+  },
+  'Failed to load autonomous optimizer run detail': {
+    de: 'Laufdetails des autonomen Optimierers konnten nicht geladen werden',
+  },
+  'Autonomous optimizer run completed': {
+    de: 'Lauf des autonomen Optimierers abgeschlossen',
+  },
+  'Failed to execute autonomous optimizer run': {
+    de: 'Lauf des autonomen Optimierers konnte nicht ausgefuehrt werden',
+  },
+  'Failed to fetch similar autonomous optimizer runs': {
+    de: 'Aehnliche Laeufe des autonomen Optimierers konnten nicht geladen werden',
+  },
+  'Failed to update autonomous optimizer backlog item': {
+    de: 'Backlog-Eintrag des autonomen Optimierers konnte nicht aktualisiert werden',
+  },
+  'Backlog item updated': { de: 'Backlog-Eintrag aktualisiert' },
+  'Failed to save autonomous optimizer backlog item': {
+    de: 'Backlog-Eintrag des autonomen Optimierers konnte nicht gespeichert werden',
+  },
+  'Autonomous optimizer config saved': {
+    de: 'Konfiguration des autonomen Optimierers gespeichert',
+  },
+  'Failed to save autonomous optimizer config': {
+    de: 'Konfiguration des autonomen Optimierers konnte nicht gespeichert werden',
+  },
+  'No linked strategy version is stored for this run': {
+    de: 'Fuer diesen Lauf ist keine verknuepfte Strategieversion gespeichert',
+  },
+  'No stored review window is available for this run': {
+    de: 'Fuer diesen Lauf ist kein gespeichertes Review-Fenster verfuegbar',
+  },
+  'All run statuses': { de: 'Alle Laufstatus' },
+  'All backlog statuses': { de: 'Alle Backlog-Status' },
+}
+
+const optimizerValueTranslations: Record<
+  string,
+  Partial<Record<Language, string>>
+> = {
+  scheduled: { de: 'Geplant' },
+  running: { de: 'Laeuft' },
+  insufficient_evidence: { de: 'Zu wenig Belege' },
+  no_change: { de: 'Keine Aenderung' },
+  backlog_only: { de: 'Nur Backlog' },
+  blocked_by_gate: { de: 'Durch Gate blockiert' },
+  deferred_for_next_window: { de: 'Auf naechstes Fenster verschoben' },
+  auto_applied: { de: 'Automatisch uebernommen' },
+  monitoring: { de: 'Monitoring' },
+  rollback_pending: { de: 'Rollback ausstehend' },
+  rolled_back: { de: 'Zurueckgerollt' },
+  kept: { de: 'Beibehalten' },
+  paused: { de: 'Pausiert' },
+  failed: { de: 'Fehlgeschlagen' },
+  none: { de: 'Keiner' },
+  new: { de: 'Neu' },
+  confirmed: { de: 'Bestaetigt' },
+  planned: { de: 'Geplant' },
+  in_progress: { de: 'In Arbeit' },
+  done: { de: 'Erledigt' },
+  rejected: { de: 'Abgelehnt' },
+  missing_indicator: { de: 'Fehlender Indikator' },
+  missing_market_data: { de: 'Fehlende Marktdaten' },
+  missing_execution_telemetry: { de: 'Fehlende Ausfuehrungs-Telemetrie' },
+  missing_regime_metadata: { de: 'Fehlende Regime-Metadaten' },
+  missing_risk_control: { de: 'Fehlende Risikosteuerung' },
+  missing_prompt_instruction: { de: 'Fehlende Prompt-Anweisung' },
+  missing_review_metric: { de: 'Fehlende Review-Metrik' },
+  other_capability_gap: { de: 'Sonstige Faehigkeitsluecke' },
+  submitted: { de: 'Eingereicht' },
+  blocked_by_risk_control: { de: 'Durch Risikosteuerung blockiert' },
+  blocked_by_position_state: { de: 'Durch Positionsstatus blockiert' },
+  failed_exchange_validation: { de: 'Boersenvalidierung fehlgeschlagen' },
+  rejected_or_canceled: { de: 'Abgelehnt oder abgebrochen' },
+  submit_failed: { de: 'Einreichen fehlgeschlagen' },
+  never_handed_to_execution: { de: 'Nie an Ausfuehrung uebergeben' },
+  review: { de: 'Review' },
+  unknown: { de: 'Unbekannt' },
+  conversation: { de: 'Konversation' },
+  review_hint: { de: 'Review-Hinweis' },
+  prompt_hint: { de: 'Prompt-Hinweis' },
+  config_candidate: { de: 'Konfig-Kandidat' },
+  monitoring_rule: { de: 'Monitoring-Regel' },
+  monitor_only: { de: 'Nur beobachten' },
+  open: { de: 'Offen' },
+  accepted: { de: 'Akzeptiert' },
+  overridden: { de: 'Ueberschrieben' },
+  manual_action: { de: 'Manuelle Aktion' },
+  suggested: { de: 'Vorgeschlagen' },
+}
+
+function optimizerText(language: Language, value: string): string {
+  return optimizerTextTranslations[value]?.[language] || value
+}
+
+function optimizerValueText(language: Language, value: string): string {
+  return (
+    optimizerValueTranslations[value]?.[language] ||
+    value
+      .replace(/_/g, ' ')
+      .replace(/\b\w/g, (match) => match.toUpperCase())
+  )
+}
+
+function createOptimizerStatusOptions(language: Language) {
+  return [
+    { value: '', label: optimizerText(language, 'All run statuses') },
+    { value: 'scheduled', label: optimizerValueText(language, 'scheduled') },
+    { value: 'running', label: optimizerValueText(language, 'running') },
+    {
+      value: 'insufficient_evidence',
+      label: optimizerValueText(language, 'insufficient_evidence'),
+    },
+    { value: 'no_change', label: optimizerValueText(language, 'no_change') },
+    {
+      value: 'backlog_only',
+      label: optimizerValueText(language, 'backlog_only'),
+    },
+    {
+      value: 'blocked_by_gate',
+      label: optimizerValueText(language, 'blocked_by_gate'),
+    },
+    {
+      value: 'deferred_for_next_window',
+      label: optimizerValueText(language, 'deferred_for_next_window'),
+    },
+    {
+      value: 'auto_applied',
+      label: optimizerValueText(language, 'auto_applied'),
+    },
+    { value: 'monitoring', label: optimizerValueText(language, 'monitoring') },
+    {
+      value: 'rollback_pending',
+      label: optimizerValueText(language, 'rollback_pending'),
+    },
+    {
+      value: 'rolled_back',
+      label: optimizerValueText(language, 'rolled_back'),
+    },
+    { value: 'kept', label: optimizerValueText(language, 'kept') },
+    { value: 'paused', label: optimizerValueText(language, 'paused') },
+    { value: 'failed', label: optimizerValueText(language, 'failed') },
+  ]
+}
+
+function createConfigStatusOptions(language: Language) {
+  return [
+    { value: 'scheduled', label: optimizerValueText(language, 'scheduled') },
+    { value: 'paused', label: optimizerValueText(language, 'paused') },
+  ]
+}
+
+function createBacklogStatusOptions(language: Language) {
+  return [
+    { value: '', label: optimizerText(language, 'All backlog statuses') },
+    { value: 'new', label: optimizerValueText(language, 'new') },
+    { value: 'confirmed', label: optimizerValueText(language, 'confirmed') },
+    { value: 'planned', label: optimizerValueText(language, 'planned') },
+    {
+      value: 'in_progress',
+      label: optimizerValueText(language, 'in_progress'),
+    },
+    { value: 'done', label: optimizerValueText(language, 'done') },
+    { value: 'rejected', label: optimizerValueText(language, 'rejected') },
+  ]
+}
+
+function createBacklogCategoryOptions(language: Language) {
+  return [
+    {
+      value: 'missing_indicator',
+      label: optimizerValueText(language, 'missing_indicator'),
+    },
+    {
+      value: 'missing_market_data',
+      label: optimizerValueText(language, 'missing_market_data'),
+    },
+    {
+      value: 'missing_execution_telemetry',
+      label: optimizerValueText(language, 'missing_execution_telemetry'),
+    },
+    {
+      value: 'missing_regime_metadata',
+      label: optimizerValueText(language, 'missing_regime_metadata'),
+    },
+    {
+      value: 'missing_risk_control',
+      label: optimizerValueText(language, 'missing_risk_control'),
+    },
+    {
+      value: 'missing_prompt_instruction',
+      label: optimizerValueText(language, 'missing_prompt_instruction'),
+    },
+    {
+      value: 'missing_review_metric',
+      label: optimizerValueText(language, 'missing_review_metric'),
+    },
+    {
+      value: 'other_capability_gap',
+      label: optimizerValueText(language, 'other_capability_gap'),
+    },
+  ]
+}
 
 interface BacklogEditDraft {
   title: string
@@ -84,42 +386,9 @@ interface BacklogEditDraft {
   status: string
 }
 
-function normalizeTime(value?: string): string {
-  if (!value || value.startsWith('0001-01-01')) return '-'
-  return new Date(value).toLocaleString()
-}
-
-function formatRelativeTime(value?: string): string {
-  if (!value || value.startsWith('0001-01-01')) return '-'
-  const deltaMs = new Date(value).getTime() - Date.now()
-  if (!Number.isFinite(deltaMs)) return '-'
-  const mins = Math.round(deltaMs / 60000)
-  if (Math.abs(mins) < 60) {
-    return mins >= 0 ? `in ${mins}m` : `${Math.abs(mins)}m ago`
-  }
-  const hours = Math.round(mins / 60)
-  if (Math.abs(hours) < 48) {
-    return hours >= 0 ? `in ${hours}h` : `${Math.abs(hours)}h ago`
-  }
-  const days = Math.round(hours / 24)
-  return days >= 0 ? `in ${days}d` : `${Math.abs(days)}d ago`
-}
-
-function formatLabel(value?: string): string {
-  if (!value) return '-'
-  return value
-    .replace(/_/g, ' ')
-    .replace(/\b\w/g, (match) => match.toUpperCase())
-}
-
 function formatScore(value?: number): string {
   const safe = typeof value === 'number' && Number.isFinite(value) ? value : 0
   return `${Math.round(safe)}/100`
-}
-
-function formatSemanticSimilarityScore(value?: number): string {
-  if (typeof value !== 'number' || Number.isNaN(value)) return '-'
-  return `${Math.round(Math.max(0, Math.min(1, value)) * 100)}% match`
 }
 
 function statusToneClasses(status?: string): string {
@@ -153,8 +422,24 @@ function statusToneClasses(status?: string): string {
   }
 }
 
-function modelLabel(model?: AIModel): string {
-  if (!model) return 'Select model account'
+function actionHintToneClasses(action?: string, priority?: string): string {
+  if (priority === 'critical' || action === 'retire') {
+    return 'border-rose-400/25 bg-rose-500/15 text-rose-300'
+  }
+  if (priority === 'warning' || action === 'suppress') {
+    return 'border-amber-400/25 bg-amber-500/15 text-amber-200'
+  }
+  if (action === 'rearm' || action === 'acknowledge_live') {
+    return 'border-sky-400/25 bg-sky-500/15 text-sky-200'
+  }
+  return 'border-white/10 bg-white/5 text-nofx-text-muted'
+}
+
+function modelLabel(
+  model: AIModel | undefined,
+  language: Language = 'en'
+): string {
+  if (!model) return optimizerText(language, 'Select model account')
   return model.customModelName?.trim() || model.name || model.provider
 }
 
@@ -290,25 +575,16 @@ function readNestedStringArray(
   return readStringArray(current)
 }
 
-function formatCooldownOutcomeSummary(
-  summary: Record<string, unknown> | undefined
-): string {
-  const trades = readNestedNumber(summary, 'trade_count')
-  const wins = readNestedNumber(summary, 'win_count')
-  const losses = readNestedNumber(summary, 'loss_count')
-  const avgPnL = readNestedNumber(summary, 'avg_pnl_pct')
-  const netPnL = readNestedNumber(summary, 'net_pnl_pct')
-  if (typeof trades !== 'number') {
-    return 'No outcomes'
-  }
-  return `${Math.round(trades)} trades • ${Math.round(wins || 0)}/${Math.round(losses || 0)} W/L • avg ${formatNumber(avgPnL)}% • net ${formatNumber(netPnL)}%`
-}
-
-function renderDiffList(diffs?: DealReviewJSONDiffEntry[]) {
+function renderDiffList(
+  diffs: DealReviewJSONDiffEntry[] | undefined,
+  language: Language = 'en'
+) {
   if (!diffs || diffs.length === 0) {
     return (
       <div className="text-sm text-nofx-text-muted">
-        No before/after diff is available for this run.
+        {language === 'de'
+          ? 'Fuer diesen Lauf ist kein Vorher/Nachher-Diff verfuegbar.'
+          : 'No before/after diff is available for this run.'}
       </div>
     )
   }
@@ -324,13 +600,17 @@ function renderDiffList(diffs?: DealReviewJSONDiffEntry[]) {
           </div>
           <div className="grid grid-cols-1 xl:grid-cols-2 gap-3 mt-2 text-xs">
             <div>
-              <div className="text-nofx-text-muted mb-1">Before</div>
+              <div className="text-nofx-text-muted mb-1">
+                {language === 'de' ? 'Vorher' : 'Before'}
+              </div>
               <pre className="whitespace-pre-wrap break-words text-rose-200">
                 {entry.left}
               </pre>
             </div>
             <div>
-              <div className="text-nofx-text-muted mb-1">After</div>
+              <div className="text-nofx-text-muted mb-1">
+                {language === 'de' ? 'Nachher' : 'After'}
+              </div>
               <pre className="whitespace-pre-wrap break-words text-emerald-200">
                 {entry.right}
               </pre>
@@ -348,6 +628,97 @@ export function AutonomousOptimizerPanel({
   onOpenStrategyVersion,
   onApplyRunWindowFilter,
 }: AutonomousOptimizerPanelProps) {
+  const { language } = useLanguage()
+  const ot = (value: string) => optimizerText(language, value)
+  const pickText = (en: string, de: string) => (language === 'de' ? de : en)
+  const formatLabel = (value: string | undefined, lang: Language = language) => {
+    if (!value) return '-'
+    return optimizerValueText(lang, value)
+  }
+  const normalizeTime = (
+    value: string | undefined,
+    lang: Language = language
+  ) => {
+    if (!value || value.startsWith('0001-01-01')) return '-'
+    return new Date(value).toLocaleString(toDateTimeLocale(lang))
+  }
+  const formatRelativeTime = (
+    value: string | undefined,
+    lang: Language = language
+  ) => {
+    if (!value || value.startsWith('0001-01-01')) return '-'
+    const deltaMs = new Date(value).getTime() - Date.now()
+    if (!Number.isFinite(deltaMs)) return '-'
+    const mins = Math.round(deltaMs / 60000)
+    if (Math.abs(mins) < 60) {
+      return mins >= 0
+        ? lang === 'de'
+          ? `in ${mins} Min.`
+          : `in ${mins}m`
+        : lang === 'de'
+          ? `vor ${Math.abs(mins)} Min.`
+          : `${Math.abs(mins)}m ago`
+    }
+    const hours = Math.round(mins / 60)
+    if (Math.abs(hours) < 48) {
+      return hours >= 0
+        ? lang === 'de'
+          ? `in ${hours} Std.`
+          : `in ${hours}h`
+        : lang === 'de'
+          ? `vor ${Math.abs(hours)} Std.`
+          : `${Math.abs(hours)}h ago`
+    }
+    const days = Math.round(hours / 24)
+    return days >= 0
+      ? lang === 'de'
+        ? `in ${days} Tg.`
+        : `in ${days}d`
+      : lang === 'de'
+        ? `vor ${Math.abs(days)} Tg.`
+        : `${Math.abs(days)}d ago`
+  }
+  const formatSemanticSimilarityScore = (
+    value: number | undefined,
+    lang: Language = language
+  ) =>
+    typeof value !== 'number' || Number.isNaN(value)
+      ? '-'
+      : lang === 'de'
+        ? `${Math.round(Math.max(0, Math.min(1, value)) * 100)}% Treffer`
+        : `${Math.round(Math.max(0, Math.min(1, value)) * 100)}% match`
+  const formatCooldownOutcomeSummary = (
+    summary: Record<string, unknown> | undefined,
+    lang: Language = language
+  ) => {
+    const trades = readNestedNumber(summary, 'trade_count')
+    const wins = readNestedNumber(summary, 'win_count')
+    const losses = readNestedNumber(summary, 'loss_count')
+    const avgPnL = readNestedNumber(summary, 'avg_pnl_pct')
+    const netPnL = readNestedNumber(summary, 'net_pnl_pct')
+    if (typeof trades !== 'number') {
+      return lang === 'de' ? 'Keine Ergebnisse' : 'No outcomes'
+    }
+    return lang === 'de'
+      ? `${Math.round(trades)} Trades • ${Math.round(wins || 0)}/${Math.round(losses || 0)} S/N • Ø ${formatNumber(avgPnL)}% • netto ${formatNumber(netPnL)}%`
+      : `${Math.round(trades)} trades • ${Math.round(wins || 0)}/${Math.round(losses || 0)} W/L • avg ${formatNumber(avgPnL)}% • net ${formatNumber(netPnL)}%`
+  }
+  const optimizerStatusOptions = useMemo(
+    () => createOptimizerStatusOptions(language),
+    [language]
+  )
+  const configStatusOptions = useMemo(
+    () => createConfigStatusOptions(language),
+    [language]
+  )
+  const backlogStatusOptions = useMemo(
+    () => createBacklogStatusOptions(language),
+    [language]
+  )
+  const backlogCategoryOptions = useMemo(
+    () => createBacklogCategoryOptions(language),
+    [language]
+  )
   const [config, setConfig] = useState<AutonomousOptimizerConfig | null>(null)
   const [runs, setRuns] = useState<AutonomousOptimizerRun[]>([])
   const [backlog, setBacklog] = useState<AutonomousOptimizerBacklogItem[]>([])
@@ -427,7 +798,7 @@ export function AutonomousOptimizerPanel({
       const message =
         err instanceof Error
           ? err.message
-          : 'Failed to load autonomous optimizer panel'
+          : ot('Failed to load autonomous optimizer panel')
       setError(message)
     } finally {
       setLoading(false)
@@ -448,7 +819,7 @@ export function AutonomousOptimizerPanel({
       notify.error(
         err instanceof Error
           ? err.message
-          : 'Failed to load autonomous optimizer run detail'
+          : ot('Failed to load autonomous optimizer run detail')
       )
     } finally {
       setRunDetailLoading(false)
@@ -463,12 +834,12 @@ export function AutonomousOptimizerPanel({
       setSelectedRunId(detail.run.id)
       setSelectedRunDetail(detail)
       await loadPanel()
-      notify.success('Autonomous optimizer run completed')
+      notify.success(ot('Autonomous optimizer run completed'))
     } catch (err) {
       notify.error(
         err instanceof Error
           ? err.message
-          : 'Failed to execute autonomous optimizer run'
+          : ot('Failed to execute autonomous optimizer run')
       )
     } finally {
       setManualRunLoading(false)
@@ -513,7 +884,7 @@ export function AutonomousOptimizerPanel({
         setSimilarRunsError(
           err instanceof Error
             ? err.message
-            : 'Failed to fetch similar autonomous optimizer runs'
+            : ot('Failed to fetch similar autonomous optimizer runs')
         )
       } finally {
         if (!active) return
@@ -737,6 +1108,18 @@ export function AutonomousOptimizerPanel({
     trailingStopTelemetry,
     'sample_updates'
   )
+  const trailingStopTierBreakdown = readNestedObjectArray(
+    trailingStopTelemetry,
+    'tier_breakdown'
+  )
+  const trailingStopProfitBandBreakdown = readNestedObjectArray(
+    trailingStopTelemetry,
+    'profit_band_breakdown'
+  )
+  const trailingStopEntryProtectionBreakdown = readNestedObjectArray(
+    trailingStopTelemetry,
+    'entry_protection_breakdown'
+  )
   const adaptiveCooldownTelemetry = readNestedObject(
     selectedMetadata,
     'adaptive_cooldown_telemetry'
@@ -911,13 +1294,11 @@ export function AutonomousOptimizerPanel({
         }
       )
       setConfig(nextConfig)
-      notify.success('Autonomous optimizer config saved')
+      notify.success(ot('Autonomous optimizer config saved'))
       await loadPanel()
     } catch (err) {
       notify.error(
-        err instanceof Error
-          ? err.message
-          : 'Failed to save autonomous optimizer config'
+        err instanceof Error ? err.message : ot('Failed to save autonomous optimizer config')
       )
     } finally {
       setSavingConfig(false)
@@ -949,12 +1330,14 @@ export function AutonomousOptimizerPanel({
           current.map((entry) => (entry.id === saved.id ? saved : entry))
         )
       )
-      notify.success(`Backlog item marked as ${formatLabel(nextStatus)}`)
+      notify.success(
+        `${ot('Status')}: ${formatLabel(nextStatus, language)}`
+      )
     } catch (err) {
       notify.error(
         err instanceof Error
           ? err.message
-          : 'Failed to update autonomous optimizer backlog item'
+          : ot('Failed to update autonomous optimizer backlog item')
       )
     } finally {
       setSavingBacklogId(null)
@@ -1006,12 +1389,12 @@ export function AutonomousOptimizerPanel({
       )
       setEditingBacklogId(null)
       setBacklogDraft(null)
-      notify.success('Backlog item updated')
+      notify.success(ot('Backlog item updated'))
     } catch (err) {
       notify.error(
         err instanceof Error
           ? err.message
-          : 'Failed to save autonomous optimizer backlog item'
+          : ot('Failed to save autonomous optimizer backlog item')
       )
     } finally {
       setSavingBacklogId(null)
@@ -1027,7 +1410,7 @@ export function AutonomousOptimizerPanel({
       selectedRunDetail?.run.applied_strategy_version_id ||
       ''
     if (!versionId) {
-      notify.info('No linked strategy version is stored for this run')
+      notify.info(ot('No linked strategy version is stored for this run'))
       return
     }
     onOpenStrategyVersion?.(versionId, version || null)
@@ -1037,17 +1420,17 @@ export function AutonomousOptimizerPanel({
     const fromTime = selectedRunDetail?.review_window_start_ms || 0
     const toTime = selectedRunDetail?.review_window_end_ms || 0
     if (!fromTime || !toTime) {
-      notify.info('No stored review window is available for this run')
+      notify.info(ot('No stored review window is available for this run'))
       return
     }
     onApplyRunWindowFilter?.(fromTime, toTime)
   }
 
   const modelOptions = [
-    { value: '', label: 'Select model account' },
+    { value: '', label: ot('Select model account') },
     ...models.map((item) => ({
       value: item.id,
-      label: modelLabel(item),
+      label: modelLabel(item, language),
     })),
   ]
 
@@ -1056,14 +1439,19 @@ export function AutonomousOptimizerPanel({
       <div className="flex flex-col xl:flex-row xl:items-start xl:justify-between gap-4">
         <div>
           <div className="text-xs uppercase tracking-[0.24em] text-nofx-gold/80">
-            Autonomous Optimizer
+            {ot('Autonomous Optimizer')}
           </div>
           <h2 className="text-xl font-semibold text-nofx-text-main mt-1">
-            Self-improving loop for {traderName || 'selected trader'}
+            {language === 'de'
+              ? `Sich selbst verbessernde Schleife fuer ${
+                  traderName || 'ausgewaehlten Trader'
+                }`
+              : `Self-improving loop for ${traderName || 'selected trader'}`}
           </h2>
           <p className="text-sm text-nofx-text-muted mt-2">
-            Visible here are the AI improvement steps, the current live
-            optimizer status, and the recent automatic review outcomes.
+            {ot(
+              'Visible here are the AI improvement steps, the current live optimizer status, and the recent automatic review outcomes.'
+            )}
           </p>
         </div>
         <div className="flex flex-col sm:flex-row gap-2">
@@ -1072,14 +1460,14 @@ export function AutonomousOptimizerPanel({
             disabled={!traderId || manualRunLoading || loading}
             className="h-10 px-4 rounded-lg bg-nofx-gold text-black text-sm font-semibold disabled:opacity-50"
           >
-            {manualRunLoading ? 'Running…' : 'Run now'}
+            {manualRunLoading ? ot('Running…') : ot('Run now')}
           </button>
           <button
             onClick={() => void loadPanel()}
             disabled={!traderId || loading || manualRunLoading}
             className="h-10 px-4 rounded-lg border border-white/10 bg-black/20 text-sm font-semibold disabled:opacity-50"
           >
-            {loading ? 'Refreshing…' : 'Refresh optimizer'}
+            {loading ? ot('Refreshing…') : ot('Refresh optimizer')}
           </button>
         </div>
       </div>
@@ -1092,50 +1480,50 @@ export function AutonomousOptimizerPanel({
 
       <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-5 gap-3">
         <div className="rounded-xl border border-white/10 bg-black/20 p-4">
-          <div className="text-xs text-nofx-text-muted">Current state</div>
+          <div className="text-xs text-nofx-text-muted">{ot('Current state')}</div>
           <div className="mt-2">
             <span
               className={`inline-flex px-2.5 py-1 rounded-full border text-xs font-semibold ${statusToneClasses(config?.status)}`}
             >
-              {formatLabel(config?.status || 'paused')}
+              {formatLabel(config?.status || 'paused', language)}
             </span>
           </div>
           <div className="text-xs text-nofx-text-muted mt-3">
-            Enabled {config?.enabled ? 'Yes' : 'No'}
+            {ot('Enabled')} {config?.enabled ? ot('Yes') : ot('No')}
           </div>
         </div>
 
         <div className="rounded-xl border border-white/10 bg-black/20 p-4">
-          <div className="text-xs text-nofx-text-muted">Next review window</div>
+          <div className="text-xs text-nofx-text-muted">{ot('Next review window')}</div>
           <div className="text-lg font-semibold mt-2">
-            {formatRelativeTime(config?.next_run_at)}
+            {formatRelativeTime(config?.next_run_at, language)}
           </div>
           <div className="text-xs text-nofx-text-muted mt-2">
-            {normalizeTime(config?.next_run_at)}
+            {normalizeTime(config?.next_run_at, language)}
           </div>
         </div>
 
         <div className="rounded-xl border border-white/10 bg-black/20 p-4">
-          <div className="text-xs text-nofx-text-muted">Last run</div>
+          <div className="text-xs text-nofx-text-muted">{ot('Last run')}</div>
           <div className="text-lg font-semibold mt-2">
-            {formatLabel(lastRun?.status || 'none')}
+            {formatLabel(lastRun?.status || 'none', language)}
           </div>
           <div className="text-xs text-nofx-text-muted mt-2">
             {lastRun
-              ? normalizeTime(lastRun.completed_at || lastRun.started_at)
+              ? normalizeTime(lastRun.completed_at || lastRun.started_at, language)
               : '-'}
           </div>
         </div>
 
         <div className="rounded-xl border border-white/10 bg-black/20 p-4">
           <div className="text-xs text-nofx-text-muted">
-            Open improvement steps
+            {ot('Open improvement steps')}
           </div>
           <div className="text-lg font-semibold mt-2">
             {activeBacklog.length}
           </div>
           <div className="text-xs text-nofx-text-muted mt-2">
-            Highest score{' '}
+            {ot('Highest score')}{' '}
             {activeBacklog[0]
               ? formatScore(activeBacklog[0].composite_score)
               : '-'}
@@ -1144,13 +1532,13 @@ export function AutonomousOptimizerPanel({
 
         <div className="rounded-xl border border-white/10 bg-black/20 p-4">
           <div className="text-xs text-nofx-text-muted">
-            Last applied change
+            {ot('Last applied change')}
           </div>
           <div className="text-sm font-semibold mt-2 line-clamp-2">
-            {lastAppliedRun?.summary || 'No applied autonomous change yet'}
+            {lastAppliedRun?.summary || ot('No applied autonomous change yet')}
           </div>
           <div className="text-xs text-nofx-text-muted mt-2">
-            {lastAppliedRun ? normalizeTime(lastAppliedRun.updated_at) : '-'}
+            {lastAppliedRun ? normalizeTime(lastAppliedRun.updated_at, language) : '-'}
           </div>
         </div>
       </div>
@@ -1159,17 +1547,18 @@ export function AutonomousOptimizerPanel({
         <div className="rounded-xl border border-white/10 bg-black/20 p-4 space-y-4">
           <div>
             <div className="text-xs uppercase tracking-[0.2em] text-nofx-text-muted">
-              Config
+              {ot('Config')}
             </div>
             <div className="text-sm text-nofx-text-muted mt-2">
-              Choose the active optimizer account and model pair here. This is
-              where `GPT-5.4` is currently wired by default.
+              {ot(
+                'Choose the active optimizer account and model pair here. This is where `GPT-5.4` is currently wired by default.'
+              )}
             </div>
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
             <label className="rounded-lg border border-white/10 bg-black/20 p-3 text-sm">
-              <div className="text-xs text-nofx-text-muted mb-2">Enabled</div>
+              <div className="text-xs text-nofx-text-muted mb-2">{ot('Enabled')}</div>
               <input
                 type="checkbox"
                 checked={enabled}
@@ -1177,7 +1566,7 @@ export function AutonomousOptimizerPanel({
               />
             </label>
             <div className="rounded-lg border border-white/10 bg-black/20 p-3">
-              <div className="text-xs text-nofx-text-muted mb-2">Status</div>
+              <div className="text-xs text-nofx-text-muted mb-2">{ot('Status')}</div>
               <div className="h-10 rounded-lg border border-white/10 px-3 flex items-center">
                 <NofxSelect
                   value={configStatus}
@@ -1188,7 +1577,7 @@ export function AutonomousOptimizerPanel({
             </div>
             <label className="rounded-lg border border-white/10 bg-black/20 p-3 text-sm">
               <div className="text-xs text-nofx-text-muted mb-2">
-                Review interval hours
+                {ot('Review interval hours')}
               </div>
               <input
                 value={reviewIntervalHours}
@@ -1198,7 +1587,7 @@ export function AutonomousOptimizerPanel({
             </label>
             <label className="rounded-lg border border-white/10 bg-black/20 p-3 text-sm">
               <div className="text-xs text-nofx-text-muted mb-2">
-                Cooldown hours
+                {ot('Cooldown hours')}
               </div>
               <input
                 value={autoApplyCooldownHours}
@@ -1210,7 +1599,7 @@ export function AutonomousOptimizerPanel({
             </label>
             <label className="rounded-lg border border-white/10 bg-black/20 p-3 text-sm">
               <div className="text-xs text-nofx-text-muted mb-2">
-                Max consecutive applies
+                {ot('Max consecutive applies')}
               </div>
               <input
                 value={maxConsecutiveAutoApplies}
@@ -1222,7 +1611,7 @@ export function AutonomousOptimizerPanel({
             </label>
             <label className="rounded-lg border border-white/10 bg-black/20 p-3 text-sm">
               <div className="text-xs text-nofx-text-muted mb-2">
-                Auto-apply config patches
+                {ot('Auto-apply config patches')}
               </div>
               <input
                 type="checkbox"
@@ -1234,7 +1623,7 @@ export function AutonomousOptimizerPanel({
             </label>
             <label className="rounded-lg border border-white/10 bg-black/20 p-3 text-sm">
               <div className="text-xs text-nofx-text-muted mb-2">
-                Auto-apply prompt patches
+                {ot('Auto-apply prompt patches')}
               </div>
               <input
                 type="checkbox"
@@ -1246,7 +1635,7 @@ export function AutonomousOptimizerPanel({
             </label>
             <label className="rounded-lg border border-white/10 bg-black/20 p-3 text-sm">
               <div className="text-xs text-nofx-text-muted mb-2">
-                Auto rollback
+                {ot('Auto rollback')}
               </div>
               <input
                 type="checkbox"
@@ -1258,7 +1647,7 @@ export function AutonomousOptimizerPanel({
             </label>
             <label className="rounded-lg border border-white/10 bg-black/20 p-3 text-sm">
               <div className="text-xs text-nofx-text-muted mb-2">
-                Self-pause
+                {ot('Self-pause')}
               </div>
               <input
                 type="checkbox"
@@ -1271,7 +1660,7 @@ export function AutonomousOptimizerPanel({
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
             <div className="rounded-lg border border-white/10 bg-black/20 p-3">
               <div className="text-xs text-nofx-text-muted mb-2">
-                Proposer account
+                {ot('Proposer account')}
               </div>
               <div className="h-10 rounded-lg border border-white/10 px-3 flex items-center">
                 <NofxSelect
@@ -1287,7 +1676,7 @@ export function AutonomousOptimizerPanel({
                   options={[
                     {
                       value: primaryModelName || '',
-                      label: 'Current model name',
+                      label: ot('Current model name'),
                     },
                     ...primaryRemoteModels
                       .filter((item) => item.available)
@@ -1301,14 +1690,14 @@ export function AutonomousOptimizerPanel({
               <input
                 value={primaryModelName}
                 onChange={(event) => setPrimaryModelName(event.target.value)}
-                placeholder="e.g. gpt-5.4"
+                placeholder={ot('e.g. gpt-5.4')}
                 className="h-10 w-full rounded-lg border border-white/10 bg-black/20 px-3 text-sm mt-3"
               />
             </div>
 
             <div className="rounded-lg border border-white/10 bg-black/20 p-3">
               <div className="text-xs text-nofx-text-muted mb-2">
-                Critic account
+                {ot('Critic account')}
               </div>
               <div className="h-10 rounded-lg border border-white/10 px-3 flex items-center">
                 <NofxSelect
@@ -1324,7 +1713,7 @@ export function AutonomousOptimizerPanel({
                   options={[
                     {
                       value: criticModelName || '',
-                      label: 'Current model name',
+                      label: ot('Current model name'),
                     },
                     ...criticRemoteModels
                       .filter((item) => item.available)
@@ -1338,7 +1727,7 @@ export function AutonomousOptimizerPanel({
               <input
                 value={criticModelName}
                 onChange={(event) => setCriticModelName(event.target.value)}
-                placeholder="e.g. gpt-5.4"
+                placeholder={ot('e.g. gpt-5.4')}
                 className="h-10 w-full rounded-lg border border-white/10 bg-black/20 px-3 text-sm mt-3"
               />
             </div>
@@ -1347,27 +1736,31 @@ export function AutonomousOptimizerPanel({
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
             <label className="rounded-lg border border-white/10 bg-black/20 p-3 text-sm">
               <div className="text-xs text-nofx-text-muted mb-2">
-                Proposal instructions overlay
+                {ot('Proposal instructions overlay')}
               </div>
               <textarea
                 value={proposalPromptInstructions}
                 onChange={(event) =>
                   setProposalPromptInstructions(event.target.value)
                 }
-                placeholder="Optional extra instructions merged into the optimizer proposer prompt."
+                placeholder={ot(
+                  'Optional extra instructions merged into the optimizer proposer prompt.'
+                )}
                 className="min-h-[140px] w-full rounded-lg border border-white/10 bg-black/20 px-3 py-2 text-sm"
               />
             </label>
             <label className="rounded-lg border border-white/10 bg-black/20 p-3 text-sm">
               <div className="text-xs text-nofx-text-muted mb-2">
-                Critic instructions overlay
+                {ot('Critic instructions overlay')}
               </div>
               <textarea
                 value={criticPromptInstructions}
                 onChange={(event) =>
                   setCriticPromptInstructions(event.target.value)
                 }
-                placeholder="Optional extra instructions merged into the optimizer critic prompt."
+                placeholder={ot(
+                  'Optional extra instructions merged into the optimizer critic prompt.'
+                )}
                 className="min-h-[140px] w-full rounded-lg border border-white/10 bg-black/20 px-3 py-2 text-sm"
               />
             </label>
@@ -1375,31 +1768,31 @@ export function AutonomousOptimizerPanel({
 
           <div className="grid grid-cols-1 md:grid-cols-5 gap-3 text-xs">
             <div className="rounded-lg border border-white/10 bg-black/20 p-3">
-              <div className="text-nofx-text-muted">Seed source trader</div>
+              <div className="text-nofx-text-muted">{ot('Seed source trader')}</div>
               <div className="mt-1 break-all">
                 {config?.seed_source_trader_id || '-'}
               </div>
             </div>
             <div className="rounded-lg border border-white/10 bg-black/20 p-3">
-              <div className="text-nofx-text-muted">Current seed strategy</div>
+              <div className="text-nofx-text-muted">{ot('Current seed strategy')}</div>
               <div className="mt-1 break-all">
                 {config?.current_seed_strategy_id || '-'}
               </div>
             </div>
             <div className="rounded-lg border border-white/10 bg-black/20 p-3">
-              <div className="text-nofx-text-muted">Last applied version</div>
+              <div className="text-nofx-text-muted">{ot('Last applied version')}</div>
               <div className="mt-1 break-all">
                 {lastAppliedRun?.applied_strategy_version_id || '-'}
               </div>
             </div>
             <div className="rounded-lg border border-white/10 bg-black/20 p-3">
-              <div className="text-nofx-text-muted">Cooldown</div>
+              <div className="text-nofx-text-muted">{ot('Cooldown')}</div>
               <div className="mt-1 break-all">
                 {config?.auto_apply_cooldown_hours || 12}h
               </div>
             </div>
             <div className="rounded-lg border border-white/10 bg-black/20 p-3">
-              <div className="text-nofx-text-muted">Max apply streak</div>
+              <div className="text-nofx-text-muted">{ot('Max apply streak')}</div>
               <div className="mt-1 break-all">
                 {config?.max_consecutive_auto_applies || 2}
               </div>
@@ -1411,7 +1804,7 @@ export function AutonomousOptimizerPanel({
             disabled={!traderId || savingConfig}
             className="h-11 px-4 rounded-lg bg-nofx-gold text-black font-semibold disabled:opacity-50"
           >
-            {savingConfig ? 'Saving…' : 'Save optimizer config'}
+            {savingConfig ? ot('Saving…') : ot('Save optimizer config')}
           </button>
         </div>
 
@@ -1419,12 +1812,12 @@ export function AutonomousOptimizerPanel({
           <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
             <div>
               <div className="text-xs uppercase tracking-[0.2em] text-nofx-text-muted">
-                Improvement Backlog
+                {ot('Improvement Backlog')}
               </div>
               <div className="text-sm text-nofx-text-muted mt-2">
-                These are the AI-detected next improvement steps. If the AI says
-                indicators, telemetry, or prompt changes are missing, they land
-                here with a score.
+                {ot(
+                  'These are the AI-detected next improvement steps. If the AI says indicators, telemetry, or prompt changes are missing, they land here with a score.'
+                )}
               </div>
             </div>
             <div className="w-full md:w-56 h-10 rounded-lg border border-white/10 px-3 flex items-center">
@@ -1439,9 +1832,9 @@ export function AutonomousOptimizerPanel({
           <div className="space-y-3 max-h-[32rem] overflow-y-auto pr-1">
             {filteredBacklog.length === 0 ? (
               <div className="rounded-lg border border-dashed border-white/10 bg-black/10 p-4 text-sm text-nofx-text-muted">
-                No visible improvement steps yet for this filter. Once the
-                optimizer proposes missing capabilities or next build items,
-                they will appear here.
+                {ot(
+                  'No visible improvement steps yet for this filter. Once the optimizer proposes missing capabilities or next build items, they will appear here.'
+                )}
               </div>
             ) : (
               filteredBacklog.map((item) => (
@@ -1456,19 +1849,19 @@ export function AutonomousOptimizerPanel({
                         <span
                           className={`inline-flex px-2 py-1 rounded-full border text-[11px] ${statusToneClasses(item.status)}`}
                         >
-                          {formatLabel(item.status)}
+                          {formatLabel(item.status, language)}
                         </span>
                         <span className="inline-flex px-2 py-1 rounded-full border border-white/10 bg-white/5 text-[11px] text-nofx-text-muted">
-                          {formatLabel(item.category)}
+                          {formatLabel(item.category, language)}
                         </span>
                         {item.ai_generated && (
                           <span className="inline-flex px-2 py-1 rounded-full border border-sky-400/20 bg-sky-500/10 text-[11px] text-sky-300">
-                            AI
+                            {ot('AI')}
                           </span>
                         )}
                         {item.user_edited && (
                           <span className="inline-flex px-2 py-1 rounded-full border border-nofx-gold/20 bg-nofx-gold/10 text-[11px] text-nofx-gold">
-                            User edited
+                            {ot('User edited')}
                           </span>
                         )}
                       </div>
@@ -1479,20 +1872,20 @@ export function AutonomousOptimizerPanel({
                       )}
                       {item.expected_impact && (
                         <div className="text-sm text-emerald-300 mt-2">
-                          Expected impact: {item.expected_impact}
+                          {ot('Expected impact:')} {item.expected_impact}
                         </div>
                       )}
                       <div className="flex flex-wrap gap-4 text-xs text-nofx-text-muted mt-3">
-                        <span>Score {formatScore(item.composite_score)}</span>
-                        <span>Confidence {formatScore(item.confidence)}</span>
-                        <span>Urgency {formatScore(item.urgency)}</span>
+                        <span>{ot('Score')} {formatScore(item.composite_score)}</span>
+                        <span>{ot('Confidence')} {formatScore(item.confidence)}</span>
+                        <span>{ot('Urgency')} {formatScore(item.urgency)}</span>
                         <span>
-                          Cost {formatScore(item.implementation_cost)}
+                          {ot('Cost')} {formatScore(item.implementation_cost)}
                         </span>
-                        <span>Recurrent {item.recurrence_count}x</span>
-                        <span>Merged {item.merged_finding_count}x</span>
+                        <span>{ot('Recurrent')} {item.recurrence_count}x</span>
+                        <span>{ot('Merged')} {item.merged_finding_count}x</span>
                         <span>
-                          Source run{' '}
+                          {ot('Source run')}{' '}
                           {item.run_id ? item.run_id.slice(0, 8) : '-'}
                         </span>
                       </div>
@@ -1502,7 +1895,7 @@ export function AutonomousOptimizerPanel({
                           disabled={savingBacklogId === item.id}
                           className="h-9 px-3 rounded-lg border border-white/10 bg-white/5 text-xs font-semibold disabled:opacity-50"
                         >
-                          Edit fields
+                          {ot('Edit fields')}
                         </button>
                         {editingBacklogId === item.id && (
                           <>
@@ -1514,15 +1907,15 @@ export function AutonomousOptimizerPanel({
                               className="h-9 px-3 rounded-lg bg-nofx-gold text-black text-xs font-semibold disabled:opacity-50"
                             >
                               {savingBacklogId === item.id
-                                ? 'Saving…'
-                                : 'Save edit'}
+                                ? ot('Saving…')
+                                : ot('Save edit')}
                             </button>
                             <button
                               onClick={cancelBacklogEdit}
                               disabled={savingBacklogId === item.id}
                               className="h-9 px-3 rounded-lg border border-white/10 bg-black/20 text-xs font-semibold disabled:opacity-50"
                             >
-                              Cancel
+                              {ot('Cancel')}
                             </button>
                           </>
                         )}
@@ -1543,7 +1936,7 @@ export function AutonomousOptimizerPanel({
                         />
                       </div>
                       <div className="text-xs text-nofx-text-muted mt-2">
-                        Updated {normalizeTime(item.updated_at)}
+                        {ot('Updated')} {normalizeTime(item.updated_at, language)}
                       </div>
                     </div>
                   </div>
@@ -1552,7 +1945,7 @@ export function AutonomousOptimizerPanel({
                     <div className="mt-4 grid grid-cols-1 xl:grid-cols-2 gap-3">
                       <label className="rounded-lg border border-white/10 bg-black/20 p-3 text-sm">
                         <div className="text-xs text-nofx-text-muted mb-2">
-                          Title
+                          {ot('Title')}
                         </div>
                         <input
                           value={backlogDraft.title}
@@ -1568,7 +1961,7 @@ export function AutonomousOptimizerPanel({
                       </label>
                       <div className="rounded-lg border border-white/10 bg-black/20 p-3">
                         <div className="text-xs text-nofx-text-muted mb-2">
-                          Category
+                          {ot('Category')}
                         </div>
                         <div className="h-10 rounded-lg border border-white/10 px-3 flex items-center">
                           <NofxSelect
@@ -1586,7 +1979,7 @@ export function AutonomousOptimizerPanel({
                       </div>
                       <label className="rounded-lg border border-white/10 bg-black/20 p-3 text-sm xl:col-span-2">
                         <div className="text-xs text-nofx-text-muted mb-2">
-                          Description
+                          {ot('Description')}
                         </div>
                         <textarea
                           value={backlogDraft.description}
@@ -1606,7 +1999,7 @@ export function AutonomousOptimizerPanel({
                       </label>
                       <label className="rounded-lg border border-white/10 bg-black/20 p-3 text-sm xl:col-span-2">
                         <div className="text-xs text-nofx-text-muted mb-2">
-                          Expected impact
+                          {ot('Expected impact')}
                         </div>
                         <textarea
                           value={backlogDraft.expectedImpact}
@@ -1626,7 +2019,7 @@ export function AutonomousOptimizerPanel({
                       </label>
                       <label className="rounded-lg border border-white/10 bg-black/20 p-3 text-sm">
                         <div className="text-xs text-nofx-text-muted mb-2">
-                          Confidence
+                          {ot('Confidence')}
                         </div>
                         <input
                           value={backlogDraft.confidence}
@@ -1642,7 +2035,7 @@ export function AutonomousOptimizerPanel({
                       </label>
                       <label className="rounded-lg border border-white/10 bg-black/20 p-3 text-sm">
                         <div className="text-xs text-nofx-text-muted mb-2">
-                          Implementation cost
+                          {ot('Implementation cost')}
                         </div>
                         <input
                           value={backlogDraft.implementationCost}
@@ -1661,7 +2054,7 @@ export function AutonomousOptimizerPanel({
                       </label>
                       <label className="rounded-lg border border-white/10 bg-black/20 p-3 text-sm">
                         <div className="text-xs text-nofx-text-muted mb-2">
-                          Urgency
+                          {ot('Urgency')}
                         </div>
                         <input
                           value={backlogDraft.urgency}
@@ -1677,7 +2070,7 @@ export function AutonomousOptimizerPanel({
                       </label>
                       <label className="rounded-lg border border-white/10 bg-black/20 p-3 text-sm">
                         <div className="text-xs text-nofx-text-muted mb-2">
-                          Recurrence count
+                          {ot('Recurrence count')}
                         </div>
                         <input
                           value={backlogDraft.recurrenceCount}
@@ -1696,7 +2089,7 @@ export function AutonomousOptimizerPanel({
                       </label>
                       <div className="rounded-lg border border-white/10 bg-black/20 p-3">
                         <div className="text-xs text-nofx-text-muted mb-2">
-                          Status
+                          {ot('Status')}
                         </div>
                         <div className="h-10 rounded-lg border border-white/10 px-3 flex items-center">
                           <NofxSelect
@@ -1727,17 +2120,18 @@ export function AutonomousOptimizerPanel({
         <div className="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-3">
           <div>
             <div className="text-xs uppercase tracking-[0.2em] text-nofx-text-muted">
-              Model Outcomes
+              {ot('Model Outcomes')}
             </div>
             <div className="text-sm text-nofx-text-muted mt-2">
-              This ranks proposer/critic pairs by actual optimizer outcomes:
-              apply rate, rollback rate, kept-win rate, and backlog usefulness.
+              {ot(
+                'This ranks proposer/critic pairs by actual optimizer outcomes: apply rate, rollback rate, kept-win rate, and backlog usefulness.'
+              )}
             </div>
           </div>
         </div>
         {modelOutcomes.length === 0 ? (
           <div className="rounded-lg border border-dashed border-white/10 bg-black/10 p-4 text-sm text-nofx-text-muted">
-            No per-model optimizer outcome data is available yet.
+            {ot('No per-model optimizer outcome data is available yet.')}
           </div>
         ) : (
           <div className="grid grid-cols-1 xl:grid-cols-2 gap-3">
@@ -1759,17 +2153,17 @@ export function AutonomousOptimizerPanel({
                         <div className="font-semibold">{item.model_label}</div>
                         {isActive && (
                           <span className="inline-flex px-2.5 py-1 rounded-full border border-nofx-gold/30 bg-nofx-gold/10 text-[11px] text-nofx-gold">
-                            Active pair
+                            {ot('Active pair')}
                           </span>
                         )}
                       </div>
                       <div className="text-xs text-nofx-text-muted mt-2">
-                        Last used {normalizeTime(item.last_used_at)}
+                        {ot('Last used')} {normalizeTime(item.last_used_at, language)}
                       </div>
                     </div>
                     <div className="text-right">
                       <div className="text-xs text-nofx-text-muted">
-                        Outcome score
+                        {ot('Outcome score')}
                       </div>
                       <div className="text-lg font-semibold mt-1">
                         {formatScore(item.outcome_score)}
@@ -1780,7 +2174,7 @@ export function AutonomousOptimizerPanel({
                   <div className="grid grid-cols-2 xl:grid-cols-5 gap-3 mt-4">
                     <div className="rounded-lg border border-white/10 bg-black/20 p-3">
                       <div className="text-xs text-nofx-text-muted">
-                        Apply rate
+                        {ot('Apply rate')}
                       </div>
                       <div className="text-base font-semibold mt-1">
                         {formatPct(item.apply_rate)}
@@ -1791,7 +2185,7 @@ export function AutonomousOptimizerPanel({
                     </div>
                     <div className="rounded-lg border border-white/10 bg-black/20 p-3">
                       <div className="text-xs text-nofx-text-muted">
-                        Rollback rate
+                        {ot('Rollback rate')}
                       </div>
                       <div className="text-base font-semibold mt-1">
                         {formatPct(item.rollback_rate)}
@@ -1803,7 +2197,7 @@ export function AutonomousOptimizerPanel({
                     </div>
                     <div className="rounded-lg border border-white/10 bg-black/20 p-3">
                       <div className="text-xs text-nofx-text-muted">
-                        Kept-win rate
+                        {ot('Kept-win rate')}
                       </div>
                       <div className="text-base font-semibold mt-1">
                         {formatPct(item.kept_win_rate)}
@@ -1815,7 +2209,7 @@ export function AutonomousOptimizerPanel({
                     </div>
                     <div className="rounded-lg border border-white/10 bg-black/20 p-3">
                       <div className="text-xs text-nofx-text-muted">
-                        Backlog usefulness
+                        {ot('Backlog usefulness')}
                       </div>
                       <div className="text-base font-semibold mt-1">
                         {formatPct(item.backlog_usefulness)}
@@ -1827,7 +2221,7 @@ export function AutonomousOptimizerPanel({
                     </div>
                     <div className="rounded-lg border border-white/10 bg-black/20 p-3">
                       <div className="text-xs text-nofx-text-muted">
-                        Operational health
+                        {ot('Operational health')}
                       </div>
                       <div className="text-base font-semibold mt-1">
                         {formatPct(item.operational_health_score)}
@@ -1841,23 +2235,23 @@ export function AutonomousOptimizerPanel({
 
                   <div className="grid grid-cols-2 xl:grid-cols-3 gap-3 mt-3 text-xs text-nofx-text-muted">
                     <div className="rounded-lg border border-white/10 bg-black/20 p-3">
-                      Monitoring applies: {item.monitoring_count}
+                      {ot('Monitoring applies:')} {item.monitoring_count}
                     </div>
                     <div className="rounded-lg border border-white/10 bg-black/20 p-3">
-                      Failed runs: {item.failed_count}
+                      {ot('Failed runs:')} {item.failed_count}
                     </div>
                     <div className="rounded-lg border border-white/10 bg-black/20 p-3">
-                      Evidence-gap overlaps:{' '}
+                      {ot('Evidence-gap overlaps:')}{' '}
                       {item.failure_overlap_insufficient_evidence_count}
                     </div>
                     <div className="rounded-lg border border-white/10 bg-black/20 p-3">
-                      Done backlog items: {item.done_backlog_count}
+                      {ot('Done backlog items:')} {item.done_backlog_count}
                     </div>
                     <div className="rounded-lg border border-white/10 bg-black/20 p-3">
-                      Rejected backlog items: {item.rejected_backlog_count}
+                      {ot('Rejected backlog items:')} {item.rejected_backlog_count}
                     </div>
                     <div className="rounded-lg border border-white/10 bg-black/20 p-3">
-                      Blocked runs: {item.status_counts?.blocked_by_gate || 0}
+                      {ot('Blocked runs:')} {item.status_counts?.blocked_by_gate || 0}
                     </div>
                   </div>
                 </div>
@@ -1871,11 +2265,12 @@ export function AutonomousOptimizerPanel({
         <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
           <div>
             <div className="text-xs uppercase tracking-[0.2em] text-nofx-text-muted">
-              Run History
+              {ot('Run History')}
             </div>
             <div className="text-sm text-nofx-text-muted mt-2">
-              This shows what the optimizer actually did every window: applied,
-              blocked, backlog-only, monitoring, rollback, or no change.
+              {ot(
+                'This shows what the optimizer actually did every window: applied, blocked, backlog-only, monitoring, rollback, or no change.'
+              )}
             </div>
           </div>
           <div className="w-full md:w-56 h-10 rounded-lg border border-white/10 px-3 flex items-center">
@@ -1890,7 +2285,7 @@ export function AutonomousOptimizerPanel({
         <div className="space-y-3">
           {filteredRuns.length === 0 ? (
             <div className="rounded-lg border border-dashed border-white/10 bg-black/10 p-4 text-sm text-nofx-text-muted">
-              No optimizer runs visible for this filter yet.
+              {ot('No optimizer runs visible for this filter yet.')}
             </div>
           ) : (
             filteredRuns.map((run) => (
@@ -1909,10 +2304,10 @@ export function AutonomousOptimizerPanel({
                       <span
                         className={`inline-flex px-2.5 py-1 rounded-full border text-xs font-semibold ${statusToneClasses(run.status)}`}
                       >
-                        {formatLabel(run.status)}
+                        {formatLabel(run.status, language)}
                       </span>
                       <span className="inline-flex px-2.5 py-1 rounded-full border border-white/10 bg-white/5 text-xs text-nofx-text-muted">
-                        {formatLabel(run.trigger)}
+                        {formatLabel(run.trigger, language)}
                       </span>
                       <span className="inline-flex px-2.5 py-1 rounded-full border border-white/10 bg-white/5 text-xs text-nofx-text-muted">
                         {run.primary_model_name || '-'} /{' '}
@@ -1920,22 +2315,22 @@ export function AutonomousOptimizerPanel({
                       </span>
                     </div>
                     <div className="font-semibold mt-3">
-                      {run.summary || 'No summary stored'}
+                      {run.summary || ot('No summary stored')}
                     </div>
                     <div className="flex flex-wrap gap-4 text-xs text-nofx-text-muted mt-3">
-                      <span>Started {normalizeTime(run.started_at)}</span>
-                      <span>Finished {normalizeTime(run.completed_at)}</span>
-                      <span>Updated {normalizeTime(run.updated_at)}</span>
+                      <span>{ot('Started')} {normalizeTime(run.started_at, language)}</span>
+                      <span>{ot('Finished')} {normalizeTime(run.completed_at, language)}</span>
+                      <span>{ot('Updated')} {normalizeTime(run.updated_at, language)}</span>
                       {run.applied_strategy_version_id && (
                         <span>
-                          Strategy version{' '}
+                          {ot('Strategy version')}{' '}
                           {run.applied_strategy_version_id.slice(0, 8)}
                         </span>
                       )}
                     </div>
                   </div>
                   <div className="text-xs text-nofx-text-muted">
-                    Run ID {run.id.slice(0, 8)}
+                    {ot('Run ID')} {run.id.slice(0, 8)}
                   </div>
                 </div>
               </div>
@@ -1948,26 +2343,26 @@ export function AutonomousOptimizerPanel({
             <div className="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-3">
               <div>
                 <div className="text-xs uppercase tracking-[0.2em] text-nofx-text-muted">
-                  Run Detail
+                  {ot('Run Detail')}
                 </div>
                 <div className="text-lg font-semibold mt-2">
                   {runDetailLoading
-                    ? 'Loading run detail…'
-                    : selectedRunDetail?.run.summary || 'No summary stored'}
+                    ? ot('Loading run detail…')
+                    : selectedRunDetail?.run.summary || ot('No summary stored')}
                 </div>
                 {!runDetailLoading && (
                   <div className="flex flex-wrap gap-2 mt-3">
                     <span
                       className={`inline-flex px-2.5 py-1 rounded-full border text-xs font-semibold ${statusToneClasses(selectedRunDetail?.run.status)}`}
                     >
-                      {formatLabel(selectedRunDetail?.run.status)}
+                      {formatLabel(selectedRunDetail?.run.status, language)}
                     </span>
                     <span className="inline-flex px-2.5 py-1 rounded-full border border-white/10 bg-white/5 text-xs text-nofx-text-muted">
-                      {formatLabel(selectedRunDetail?.run.trigger)}
+                      {formatLabel(selectedRunDetail?.run.trigger, language)}
                     </span>
                     {proposalType && (
                       <span className="inline-flex px-2.5 py-1 rounded-full border border-sky-400/20 bg-sky-500/10 text-xs text-sky-300">
-                        {formatLabel(proposalType)}
+                        {formatLabel(proposalType, language)}
                       </span>
                     )}
                   </div>
@@ -1983,7 +2378,7 @@ export function AutonomousOptimizerPanel({
                     }
                     className="h-10 px-3 rounded-lg border border-nofx-gold/30 text-nofx-gold disabled:opacity-50"
                   >
-                    Open strategy version
+                    {ot('Open strategy version')}
                   </button>
                   <button
                     onClick={applyRunWindowFilter}
@@ -1993,7 +2388,7 @@ export function AutonomousOptimizerPanel({
                     }
                     className="h-10 px-3 rounded-lg border border-sky-400/30 text-sky-300 disabled:opacity-50"
                   >
-                    Open review cohort
+                    {ot('Open review cohort')}
                   </button>
                 </div>
               )}
@@ -2003,36 +2398,42 @@ export function AutonomousOptimizerPanel({
               <>
                 <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-5 gap-3 text-sm">
                   <div className="rounded-lg border border-white/10 bg-black/20 p-3">
-                    <div className="text-xs text-nofx-text-muted">Started</div>
+                    <div className="text-xs text-nofx-text-muted">
+                      {ot('Started')}
+                    </div>
                     <div className="mt-1">
                       {normalizeTime(selectedRunDetail.run.started_at)}
                     </div>
                   </div>
                   <div className="rounded-lg border border-white/10 bg-black/20 p-3">
-                    <div className="text-xs text-nofx-text-muted">Finished</div>
+                    <div className="text-xs text-nofx-text-muted">
+                      {ot('Finished')}
+                    </div>
                     <div className="mt-1">
                       {normalizeTime(selectedRunDetail.run.completed_at)}
                     </div>
                   </div>
                   <div className="rounded-lg border border-white/10 bg-black/20 p-3">
                     <div className="text-xs text-nofx-text-muted">
-                      Window stats
+                      {pickText('Window stats', 'Fenster-Statistik')}
                     </div>
                     <div className="mt-1">
-                      {reviewWindowClosedDeals ?? '-'} deals |{' '}
-                      {reviewWindowCycles ?? '-'} cycles |{' '}
-                      {reviewWindowCandidates ?? '-'} candidates
+                      {reviewWindowClosedDeals ?? '-'}{' '}
+                      {pickText('deals', 'Deals')} | {reviewWindowCycles ?? '-'}{' '}
+                      {pickText('cycles', 'Zyklen')} |{' '}
+                      {reviewWindowCandidates ?? '-'}{' '}
+                      {pickText('candidates', 'Kandidaten')}
                     </div>
                   </div>
                   <div className="rounded-lg border border-white/10 bg-black/20 p-3">
                     <div className="text-xs text-nofx-text-muted">
-                      Window PnL
+                      {pickText('Window PnL', 'Fenster-PnL')}
                     </div>
                     <div className="mt-1">{formatNumber(reviewWindowPnL)}</div>
                   </div>
                   <div className="rounded-lg border border-white/10 bg-black/20 p-3">
                     <div className="text-xs text-nofx-text-muted">
-                      Next eligible apply
+                      {pickText('Next eligible apply', 'Naechste moegliche Uebernahme')}
                     </div>
                     <div className="mt-1">
                       {typeof nextEligibleRunMs === 'number'
@@ -2043,22 +2444,28 @@ export function AutonomousOptimizerPanel({
                     </div>
                     <div className="text-xs text-nofx-text-muted mt-1">
                       {typeof cooldownUntilMs === 'number'
-                        ? `Cooldown until ${normalizeTime(
+                        ? `${pickText('Cooldown until', 'Cooldown bis')} ${normalizeTime(
                             new Date(cooldownUntilMs).toISOString()
                           )}`
-                        : 'No cooldown hold stored'}
+                        : pickText(
+                            'No cooldown hold stored',
+                            'Kein gespeicherter Cooldown-Hold'
+                          )}
                     </div>
                   </div>
                 </div>
 
                 <div className="rounded-lg border border-white/10 bg-black/20 p-4">
                   <div className="text-xs uppercase tracking-[0.2em] text-nofx-text-muted mb-3">
-                    Monitoring / Rollback Analysis
+                    {pickText(
+                      'Monitoring / Rollback Analysis',
+                      'Monitoring- / Rollback-Analyse'
+                    )}
                   </div>
                   <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3 text-sm">
                     <div>
                       <div className="text-xs text-nofx-text-muted">
-                        Root apply run
+                        {pickText('Root apply run', 'Ausgangs-Uebernahmelauf')}
                       </div>
                       <div className="mt-1 break-all">
                         {monitoringRootRunId || '-'}
@@ -2066,7 +2473,7 @@ export function AutonomousOptimizerPanel({
                     </div>
                     <div>
                       <div className="text-xs text-nofx-text-muted">
-                        Observed windows
+                        {pickText('Observed windows', 'Beobachtete Fenster')}
                       </div>
                       <div className="mt-1 font-semibold">
                         {typeof monitoringWindowsObserved === 'number'
@@ -2076,7 +2483,10 @@ export function AutonomousOptimizerPanel({
                     </div>
                     <div>
                       <div className="text-xs text-nofx-text-muted">
-                        Cumulative monitored deals / PnL
+                        {pickText(
+                          'Cumulative monitored deals / PnL',
+                          'Kumulierte ueberwachte Deals / PnL'
+                        )}
                       </div>
                       <div className="mt-1 font-semibold">
                         {typeof monitoringObservedClosedDeals === 'number'
@@ -2090,7 +2500,7 @@ export function AutonomousOptimizerPanel({
                     </div>
                     <div>
                       <div className="text-xs text-nofx-text-muted">
-                        Negative windows
+                        {pickText('Negative windows', 'Negative Fenster')}
                       </div>
                       <div className="mt-1 font-semibold">
                         {typeof monitoringObservedNegativeWindows === 'number'
@@ -2102,7 +2512,7 @@ export function AutonomousOptimizerPanel({
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-sm mt-4">
                     <div className="rounded-lg border border-white/10 bg-black/20 p-3">
                       <div className="text-xs text-nofx-text-muted">
-                        Baseline net PnL
+                        {pickText('Baseline net PnL', 'Baseline Netto-PnL')}
                       </div>
                       <div className="mt-1 font-semibold">
                         {typeof sourceBaselineNetPnL === 'number'
@@ -2112,7 +2522,7 @@ export function AutonomousOptimizerPanel({
                     </div>
                     <div className="rounded-lg border border-white/10 bg-black/20 p-3">
                       <div className="text-xs text-nofx-text-muted">
-                        Baseline win rate
+                        {pickText('Baseline win rate', 'Baseline Gewinnrate')}
                       </div>
                       <div className="mt-1 font-semibold">
                         {typeof sourceBaselineWinRate === 'number'
@@ -2122,7 +2532,10 @@ export function AutonomousOptimizerPanel({
                     </div>
                     <div className="rounded-lg border border-white/10 bg-black/20 p-3">
                       <div className="text-xs text-nofx-text-muted">
-                        Baseline exit efficiency
+                        {pickText(
+                          'Baseline exit efficiency',
+                          'Baseline Exit-Effizienz'
+                        )}
                       </div>
                       <div className="mt-1 font-semibold">
                         {typeof sourceBaselineExitEfficiency === 'number'
@@ -2156,7 +2569,10 @@ export function AutonomousOptimizerPanel({
                     </div>
                   ) : (
                     <div className="text-sm text-nofx-text-muted mt-4">
-                      No rollback trigger fired for this run.
+                      {pickText(
+                        'No rollback trigger fired for this run.',
+                        'Fuer diesen Lauf wurde kein Rollback-Trigger ausgeloest.'
+                      )}
                     </div>
                   )}
                 </div>
@@ -2164,12 +2580,12 @@ export function AutonomousOptimizerPanel({
                 <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
                   <div className="rounded-lg border border-white/10 bg-black/20 p-4">
                     <div className="text-xs uppercase tracking-[0.2em] text-nofx-text-muted mb-3">
-                      Low-Trade Telemetry
+                      {pickText('Low-Trade Telemetry', 'Low-Trade-Telemetrie')}
                     </div>
                     <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
                       <div>
                         <div className="text-xs text-nofx-text-muted">
-                          Open decisions
+                          {pickText('Open decisions', 'Open-Entscheidungen')}
                         </div>
                         <div className="mt-1 font-semibold">
                           {typeof openDecisionCount === 'number'
@@ -2179,7 +2595,7 @@ export function AutonomousOptimizerPanel({
                       </div>
                       <div>
                         <div className="text-xs text-nofx-text-muted">
-                          Hold decisions
+                          {pickText('Hold decisions', 'Hold-Entscheidungen')}
                         </div>
                         <div className="mt-1 font-semibold">
                           {typeof holdDecisionCount === 'number'
@@ -2189,7 +2605,7 @@ export function AutonomousOptimizerPanel({
                       </div>
                       <div>
                         <div className="text-xs text-nofx-text-muted">
-                          Wait decisions
+                          {pickText('Wait decisions', 'Wait-Entscheidungen')}
                         </div>
                         <div className="mt-1 font-semibold">
                           {typeof waitDecisionCount === 'number'
@@ -2199,7 +2615,7 @@ export function AutonomousOptimizerPanel({
                       </div>
                       <div>
                         <div className="text-xs text-nofx-text-muted">
-                          Conversion
+                          {pickText('Conversion', 'Konversion')}
                         </div>
                         <div className="mt-1 font-semibold">
                           {typeof decisionConversionRate === 'number'
@@ -2209,7 +2625,7 @@ export function AutonomousOptimizerPanel({
                       </div>
                     </div>
                     <div className="text-xs text-nofx-text-muted mt-3">
-                      Avg decision confidence:{' '}
+                      {pickText('Avg decision confidence:', 'Ø Entscheidungs-Konfidenz:')}{' '}
                       {typeof avgDecisionConfidence === 'number'
                         ? formatNumber(avgDecisionConfidence)
                         : '-'}
@@ -2218,11 +2634,14 @@ export function AutonomousOptimizerPanel({
 
                   <div className="rounded-lg border border-white/10 bg-black/20 p-4">
                     <div className="text-xs uppercase tracking-[0.2em] text-nofx-text-muted mb-3">
-                      Recent Optimizer Context
+                      {pickText('Recent Optimizer Context', 'Juengster Optimizer-Kontext')}
                     </div>
                     {recentOptimizerContext.length === 0 ? (
                       <div className="text-sm text-nofx-text-muted">
-                        No previous optimizer runs were attached to this run.
+                        {pickText(
+                          'No previous optimizer runs were attached to this run.',
+                          'Diesem Lauf wurden keine frueheren Optimizer-Laeufe zugeordnet.'
+                        )}
                       </div>
                     ) : (
                       <div className="space-y-2">
@@ -2260,7 +2679,7 @@ export function AutonomousOptimizerPanel({
                               <div className="text-sm mt-2">
                                 {typeof item.summary === 'string'
                                   ? item.summary
-                                  : 'No summary stored'}
+                                  : ot('No summary stored')}
                               </div>
                             </div>
                           ))}
@@ -2271,11 +2690,14 @@ export function AutonomousOptimizerPanel({
 
                 <div className="rounded-lg border border-white/10 bg-black/20 p-4">
                   <div className="text-xs uppercase tracking-[0.2em] text-nofx-text-muted mb-3">
-                    Similar Prior Runs
+                    {pickText('Similar Prior Runs', 'Aehnliche fruehere Laeufe')}
                   </div>
                   {similarRunsLoading ? (
                     <div className="text-sm text-nofx-text-muted">
-                      Loading similar prior runs…
+                      {pickText(
+                        'Loading similar prior runs…',
+                        'Aehnliche fruehere Laeufe werden geladen…'
+                      )}
                     </div>
                   ) : similarRunsError ? (
                     <div className="text-sm text-amber-200">
@@ -2283,7 +2705,10 @@ export function AutonomousOptimizerPanel({
                     </div>
                   ) : similarRuns.length === 0 ? (
                     <div className="text-sm text-nofx-text-muted">
-                      No similar prior optimizer runs were found yet.
+                      {pickText(
+                        'No similar prior optimizer runs were found yet.',
+                        'Es wurden noch keine aehnlichen frueheren Optimizer-Laeufe gefunden.'
+                      )}
                     </div>
                   ) : (
                     <div className="space-y-3">
@@ -2298,7 +2723,8 @@ export function AutonomousOptimizerPanel({
                                 {hit.document.title || hit.document.source_id}
                               </div>
                               <div className="text-xs text-nofx-text-muted mt-1">
-                                {formatSemanticSimilarityScore(hit.similarity_score)} · updated{' '}
+                                {formatSemanticSimilarityScore(hit.similarity_score)} ·{' '}
+                                {pickText('updated', 'aktualisiert')}{' '}
                                 {hit.document.source_updated_at
                                   ? normalizeTime(hit.document.source_updated_at)
                                   : '-'}
@@ -2308,11 +2734,11 @@ export function AutonomousOptimizerPanel({
                               onClick={() => void loadRunDetail(hit.document.source_id)}
                               className="h-9 px-3 rounded-lg border border-white/10 bg-black/20 text-sm"
                             >
-                              Focus run
+                              {pickText('Focus run', 'Lauf fokussieren')}
                             </button>
                           </div>
                           <div className="text-sm text-nofx-text-muted mt-3">
-                            {hit.document.summary || 'No summary stored'}
+                            {hit.document.summary || ot('No summary stored')}
                           </div>
                         </div>
                       ))}
@@ -2322,19 +2748,21 @@ export function AutonomousOptimizerPanel({
 
                 <div className="rounded-lg border border-white/10 bg-black/20 p-4">
                   <div className="text-xs uppercase tracking-[0.2em] text-nofx-text-muted mb-3">
-                    Learned Pattern Evidence
+                    {pickText('Learned Pattern Evidence', 'Belege gelernter Muster')}
                   </div>
                   {!learnedPatternPayload ? (
                     <div className="text-sm text-nofx-text-muted">
-                      No learned-pattern evidence was attached to this optimizer
-                      run.
+                      {pickText(
+                        'No learned-pattern evidence was attached to this optimizer run.',
+                        'Diesem Optimizer-Lauf wurden keine Belege gelernter Muster zugeordnet.'
+                      )}
                     </div>
                   ) : (
                     <div className="space-y-4">
                       <div className="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-8 gap-3 text-sm">
                         <div className="rounded-lg border border-white/10 bg-black/20 p-3">
                           <div className="text-xs text-nofx-text-muted">
-                            Available
+                            {pickText('Available', 'Verfuegbar')}
                           </div>
                           <div className="mt-1 font-semibold">
                             {typeof readNestedNumber(
@@ -2352,7 +2780,7 @@ export function AutonomousOptimizerPanel({
                         </div>
                         <div className="rounded-lg border border-white/10 bg-black/20 p-3">
                           <div className="text-xs text-nofx-text-muted">
-                            Relevant
+                            {pickText('Relevant', 'Relevant')}
                           </div>
                           <div className="mt-1 font-semibold">
                             {typeof readNestedNumber(
@@ -2370,7 +2798,7 @@ export function AutonomousOptimizerPanel({
                         </div>
                         <div className="rounded-lg border border-white/10 bg-black/20 p-3">
                           <div className="text-xs text-nofx-text-muted">
-                            Positive / Negative
+                            {pickText('Positive / Negative', 'Positiv / Negativ')}
                           </div>
                           <div className="mt-1 font-semibold">
                             {typeof readNestedNumber(
@@ -2400,7 +2828,7 @@ export function AutonomousOptimizerPanel({
                         </div>
                         <div className="rounded-lg border border-white/10 bg-black/20 p-3">
                           <div className="text-xs text-nofx-text-muted">
-                            Confirmed
+                            {formatLabel('confirmed')}
                           </div>
                           <div className="mt-1 font-semibold">
                             {typeof readNestedNumber(
@@ -2418,7 +2846,7 @@ export function AutonomousOptimizerPanel({
                         </div>
                         <div className="rounded-lg border border-white/10 bg-black/20 p-3">
                           <div className="text-xs text-nofx-text-muted">
-                            Config candidates
+                            {pickText('Config candidates', 'Konfig-Kandidaten')}
                           </div>
                           <div className="mt-1 font-semibold">
                             {typeof readNestedNumber(
@@ -2436,7 +2864,7 @@ export function AutonomousOptimizerPanel({
                         </div>
                         <div className="rounded-lg border border-white/10 bg-black/20 p-3">
                           <div className="text-xs text-nofx-text-muted">
-                            Prompt only
+                            {pickText('Prompt only', 'Nur Prompt')}
                           </div>
                           <div className="mt-1 font-semibold">
                             {typeof readNestedNumber(
@@ -2454,7 +2882,25 @@ export function AutonomousOptimizerPanel({
                         </div>
                         <div className="rounded-lg border border-white/10 bg-black/20 p-3">
                           <div className="text-xs text-nofx-text-muted">
-                            False pos / reverse
+                            {pickText('Monitoring rules', 'Monitoring-Regeln')}
+                          </div>
+                          <div className="mt-1 font-semibold">
+                            {typeof readNestedNumber(
+                              learnedPatternPayload,
+                              'monitoring_rule_count'
+                            ) === 'number'
+                              ? Math.round(
+                                  readNestedNumber(
+                                    learnedPatternPayload,
+                                    'monitoring_rule_count'
+                                  ) || 0
+                                )
+                              : '-'}
+                          </div>
+                        </div>
+                        <div className="rounded-lg border border-white/10 bg-black/20 p-3">
+                          <div className="text-xs text-nofx-text-muted">
+                            {pickText('False pos / reverse', 'Falsch pos. / Umkehr')}
                           </div>
                           <div className="mt-1 font-semibold">
                             {typeof readNestedNumber(
@@ -2484,7 +2930,43 @@ export function AutonomousOptimizerPanel({
                         </div>
                         <div className="rounded-lg border border-white/10 bg-black/20 p-3">
                           <div className="text-xs text-nofx-text-muted">
-                            Drifting
+                            {pickText('Degrading rules', 'Schlechter werdende Regeln')}
+                          </div>
+                          <div className="mt-1 font-semibold">
+                            {typeof readNestedNumber(
+                              learnedPatternPayload,
+                              'lifecycle_degrading_count'
+                            ) === 'number'
+                              ? Math.round(
+                                  readNestedNumber(
+                                    learnedPatternPayload,
+                                    'lifecycle_degrading_count'
+                                  ) || 0
+                                )
+                              : '-'}
+                          </div>
+                        </div>
+                        <div className="rounded-lg border border-white/10 bg-black/20 p-3">
+                          <div className="text-xs text-nofx-text-muted">
+                            {pickText('Rollback watch', 'Rollback-Watch')}
+                          </div>
+                          <div className="mt-1 font-semibold">
+                            {typeof readNestedNumber(
+                              learnedPatternPayload,
+                              'lifecycle_rollback_watch_count'
+                            ) === 'number'
+                              ? Math.round(
+                                  readNestedNumber(
+                                    learnedPatternPayload,
+                                    'lifecycle_rollback_watch_count'
+                                  ) || 0
+                                )
+                              : '-'}
+                          </div>
+                        </div>
+                        <div className="rounded-lg border border-white/10 bg-black/20 p-3">
+                          <div className="text-xs text-nofx-text-muted">
+                            {formatLabel('drifting')}
                           </div>
                           <div className="mt-1 font-semibold">
                             {typeof readNestedNumber(
@@ -2507,12 +2989,14 @@ export function AutonomousOptimizerPanel({
                         <div className="grid grid-cols-1 xl:grid-cols-2 gap-3">
                           <div className="rounded-lg border border-white/10 bg-black/20 p-3">
                             <div className="text-xs text-nofx-text-muted mb-2">
-                              Proposal references
+                              {pickText('Proposal references', 'Proposal-Referenzen')}
                             </div>
                             {proposalLearnedPatternRefs.length === 0 ? (
                               <div className="text-sm text-nofx-text-muted">
-                                No learned pattern was explicitly cited by the
-                                proposer.
+                                {pickText(
+                                  'No learned pattern was explicitly cited by the proposer.',
+                                  'Es wurde kein gelerntes Muster explizit vom Proposer referenziert.'
+                                )}
                               </div>
                             ) : (
                               <div className="flex flex-wrap gap-2">
@@ -2529,12 +3013,14 @@ export function AutonomousOptimizerPanel({
                           </div>
                           <div className="rounded-lg border border-white/10 bg-black/20 p-3">
                             <div className="text-xs text-nofx-text-muted mb-2">
-                              Critic references
+                              {pickText('Critic references', 'Critic-Referenzen')}
                             </div>
                             {criticLearnedPatternRefs.length === 0 ? (
                               <div className="text-sm text-nofx-text-muted">
-                                No learned pattern was explicitly cited by the
-                                critic.
+                                {pickText(
+                                  'No learned pattern was explicitly cited by the critic.',
+                                  'Es wurde kein gelerntes Muster explizit vom Critic referenziert.'
+                                )}
                               </div>
                             ) : (
                               <div className="flex flex-wrap gap-2">
@@ -2568,15 +3054,15 @@ export function AutonomousOptimizerPanel({
                       <div className="grid grid-cols-1 xl:grid-cols-3 gap-3">
                         {[
                           {
-                            title: 'Top positive',
+                            title: pickText('Top positive', 'Top positiv'),
                             items: learnedPatternTopPositive,
                           },
                           {
-                            title: 'Top anti-patterns',
+                            title: pickText('Top anti-patterns', 'Top Anti-Muster'),
                             items: learnedPatternTopNegative,
                           },
                           {
-                            title: 'Symbol overrides',
+                            title: pickText('Symbol overrides', 'Symbol-Overrides'),
                             items: learnedPatternTopOverrides,
                           },
                         ].map((group) => (
@@ -2589,7 +3075,7 @@ export function AutonomousOptimizerPanel({
                             </div>
                             {group.items.length === 0 ? (
                               <div className="text-sm text-nofx-text-muted">
-                                No items stored.
+                                {pickText('No items stored.', 'Keine Eintraege gespeichert.')}
                               </div>
                             ) : (
                               <div className="space-y-2">
@@ -2605,7 +3091,7 @@ export function AutonomousOptimizerPanel({
                                         {typeof item.symbol === 'string' &&
                                         item.symbol
                                           ? item.symbol
-                                          : 'Trader-wide'}
+                                          : pickText('Trader-wide', 'Trader-weit')}
                                       </span>
                                       <span className="text-nofx-text-muted">
                                         {formatLabel(
@@ -2631,13 +3117,13 @@ export function AutonomousOptimizerPanel({
                                       </span>
                                     </div>
                                     <div className="text-xs text-nofx-text-muted mt-2">
-                                      {typeof item.summary === 'string' &&
+                                        {typeof item.summary === 'string' &&
                                       item.summary
                                         ? item.summary
                                         : typeof item.pattern_signature ===
                                             'string' && item.pattern_signature
                                           ? item.pattern_signature
-                                          : 'No summary stored'}
+                                          : ot('No summary stored')}
                                     </div>
                                   </div>
                                 ))}
@@ -2649,8 +3135,10 @@ export function AutonomousOptimizerPanel({
 
                       {learnedPatternItems.length === 0 ? (
                         <div className="text-sm text-nofx-text-muted">
-                          No current-window learned-pattern matches were stored
-                          for this run.
+                          {pickText(
+                            'No current-window learned-pattern matches were stored for this run.',
+                            'Fuer diesen Lauf wurden keine Learned-Pattern-Treffer des aktuellen Fensters gespeichert.'
+                          )}
                         </div>
                       ) : (
                         <div className="space-y-3">
@@ -2658,6 +3146,60 @@ export function AutonomousOptimizerPanel({
                             const patternId =
                               typeof item.pattern_id === 'string'
                                 ? item.pattern_id
+                                : ''
+                            const actionHintAction =
+                              typeof item.action_hint_recommended_action ===
+                              'string'
+                                ? item.action_hint_recommended_action
+                                : ''
+                            const actionHintPriority =
+                              typeof item.action_hint_priority_label === 'string'
+                                ? item.action_hint_priority_label
+                                : ''
+                            const actionHintSummary =
+                              typeof item.action_hint_summary === 'string'
+                                ? item.action_hint_summary
+                                : ''
+                            const actionHintAutoNote =
+                              typeof item.action_hint_auto_note === 'string'
+                                ? item.action_hint_auto_note
+                                : ''
+                            const interventionOpenCount =
+                              typeof item.intervention_open_suggestion_count ===
+                              'number'
+                                ? item.intervention_open_suggestion_count
+                                : 0
+                            const interventionAcceptedCount =
+                              typeof item.intervention_accepted_count === 'number'
+                                ? item.intervention_accepted_count
+                                : 0
+                            const interventionOverriddenCount =
+                              typeof item.intervention_overridden_count ===
+                              'number'
+                                ? item.intervention_overridden_count
+                                : 0
+                            const interventionManualCount =
+                              typeof item.intervention_manual_action_count ===
+                              'number'
+                                ? item.intervention_manual_action_count
+                                : 0
+                            const interventionLatestStatus =
+                              typeof item.intervention_latest_status === 'string'
+                                ? item.intervention_latest_status
+                                : ''
+                            const interventionLatestEventType =
+                              typeof item.intervention_latest_event_type ===
+                              'string'
+                                ? item.intervention_latest_event_type
+                                : ''
+                            const interventionLatestSummary =
+                              typeof item.intervention_latest_summary ===
+                              'string'
+                                ? item.intervention_latest_summary
+                                : ''
+                            const interventionLatestNote =
+                              typeof item.intervention_latest_note === 'string'
+                                ? item.intervention_latest_note
                                 : ''
                             return (
                               <div
@@ -2671,7 +3213,7 @@ export function AutonomousOptimizerPanel({
                                         {typeof item.symbol === 'string' &&
                                         item.symbol
                                           ? item.symbol
-                                          : 'Trader-wide'}
+                                          : pickText('Trader-wide', 'Trader-weit')}
                                       </span>
                                       <span className="text-nofx-text-muted">
                                         {formatLabel(
@@ -2703,12 +3245,28 @@ export function AutonomousOptimizerPanel({
                                             : 'review_hint'
                                         )}
                                       </span>
+                                      {typeof item.recommended_use === 'string' &&
+                                        item.recommended_use && (
+                                          <span className="inline-flex px-2 py-1 rounded-full border border-amber-400/20 bg-amber-500/10 text-[11px] text-amber-200">
+                                            {formatLabel(item.recommended_use)}
+                                          </span>
+                                        )}
+                                      {actionHintAction && (
+                                        <span
+                                          className={`inline-flex px-2 py-1 rounded-full border text-[11px] ${actionHintToneClasses(
+                                            actionHintAction,
+                                            actionHintPriority
+                                          )}`}
+                                        >
+                                          {formatLabel(actionHintAction)}
+                                        </span>
+                                      )}
                                       {patternId &&
                                         learnedPatternRefLookup.has(
                                           patternId
                                         ) && (
                                           <span className="inline-flex px-2 py-1 rounded-full border border-nofx-gold/30 bg-nofx-gold/10 text-[11px] text-nofx-gold">
-                                            Cited
+                                            {pickText('Cited', 'Zitiert')}
                                           </span>
                                         )}
                                     </div>
@@ -2719,7 +3277,7 @@ export function AutonomousOptimizerPanel({
                                         : typeof item.pattern_signature ===
                                             'string' && item.pattern_signature
                                           ? item.pattern_signature
-                                          : 'No summary stored'}
+                                          : ot('No summary stored')}
                                     </div>
                                     {typeof item.implication_summary ===
                                       'string' &&
@@ -2735,6 +3293,86 @@ export function AutonomousOptimizerPanel({
                                           {item.validation_alert}
                                         </div>
                                       )}
+                                    {typeof item.lifecycle_summary ===
+                                      'string' &&
+                                      item.lifecycle_summary && (
+                                        <div className="text-sm text-rose-200 mt-2">
+                                          {item.lifecycle_summary}
+                                        </div>
+                                      )}
+                                    {actionHintSummary && (
+                                      <div className="mt-3 rounded-lg border border-white/10 bg-white/[0.03] p-3">
+                                        <div className="flex flex-wrap items-center gap-2">
+                                          <span className="text-xs uppercase tracking-[0.18em] text-nofx-text-muted">
+                                            {pickText('Suggested action', 'Vorgeschlagene Aktion')}
+                                          </span>
+                                          <span
+                                            className={`inline-flex px-2 py-1 rounded-full border text-[11px] ${actionHintToneClasses(
+                                              actionHintAction,
+                                              actionHintPriority
+                                            )}`}
+                                          >
+                                            {formatLabel(actionHintAction || 'review')}
+                                          </span>
+                                          {actionHintPriority && (
+                                            <span className="inline-flex px-2 py-1 rounded-full border border-white/10 bg-white/5 text-[11px] text-nofx-text-muted">
+                                              {formatLabel(actionHintPriority)}
+                                            </span>
+                                          )}
+                                        </div>
+                                        <div className="text-sm mt-2 text-nofx-text-main">
+                                          {actionHintSummary}
+                                        </div>
+                                        {actionHintAutoNote && (
+                                          <div className="text-xs text-nofx-text-muted mt-2">
+                                            {actionHintAutoNote}
+                                          </div>
+                                        )}
+                                      </div>
+                                    )}
+                                    {(interventionOpenCount > 0 ||
+                                      interventionAcceptedCount > 0 ||
+                                      interventionOverriddenCount > 0 ||
+                                      interventionManualCount > 0 ||
+                                      interventionLatestSummary) && (
+                                      <div className="mt-3 rounded-lg border border-white/10 bg-black/20 p-3">
+                                        <div className="flex flex-wrap items-center gap-2">
+                                          <span className="text-xs uppercase tracking-[0.18em] text-nofx-text-muted">
+                                            {pickText('Intervention history', 'Interventionsverlauf')}
+                                          </span>
+                                          {interventionLatestEventType && (
+                                            <span className="inline-flex px-2 py-1 rounded-full border border-white/10 bg-white/5 text-[11px] text-nofx-text-muted">
+                                              {formatLabel(interventionLatestEventType)}
+                                            </span>
+                                          )}
+                                          {interventionLatestStatus && (
+                                            <span
+                                              className={`inline-flex px-2 py-1 rounded-full border text-[11px] ${statusToneClasses(
+                                                interventionLatestStatus
+                                              )}`}
+                                            >
+                                              {formatLabel(interventionLatestStatus)}
+                                            </span>
+                                          )}
+                                        </div>
+                                        <div className="text-xs text-nofx-text-muted mt-2">
+                                          {pickText('Open', 'Offen')} {interventionOpenCount} • {pickText('Accepted', 'Akzeptiert')}{' '}
+                                          {interventionAcceptedCount} • {pickText('Overridden', 'Ueberschrieben')}{' '}
+                                          {interventionOverriddenCount} • {pickText('Manual', 'Manuell')}{' '}
+                                          {interventionManualCount}
+                                        </div>
+                                        {interventionLatestSummary && (
+                                          <div className="text-sm text-nofx-text-main mt-2">
+                                            {interventionLatestSummary}
+                                          </div>
+                                        )}
+                                        {interventionLatestNote && (
+                                          <div className="text-xs text-nofx-text-muted mt-2">
+                                            {interventionLatestNote}
+                                          </div>
+                                        )}
+                                      </div>
+                                    )}
                                   </div>
                                   <div className="text-xs text-nofx-text-muted">
                                     {patternId ? `ID ${patternId.slice(0, 12)}` : '-'}
@@ -2743,7 +3381,7 @@ export function AutonomousOptimizerPanel({
 
                                 <div className="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-6 gap-3 mt-4 text-xs">
                                   <div className="rounded-lg border border-white/10 bg-white/[0.03] p-3">
-                                    Match type
+                                    {pickText('Match type', 'Treffertyp')}
                                     <div className="mt-1 font-semibold text-nofx-text-main">
                                       {formatLabel(
                                         typeof item.current_window_match_type ===
@@ -2754,7 +3392,7 @@ export function AutonomousOptimizerPanel({
                                     </div>
                                   </div>
                                   <div className="rounded-lg border border-white/10 bg-white/[0.03] p-3">
-                                    Closed / recent
+                                    {pickText('Closed / recent', 'Geschlossen / aktuell')}
                                     <div className="mt-1 font-semibold text-nofx-text-main">
                                       {typeof item.closed_case_match_count ===
                                       'number'
@@ -2772,7 +3410,7 @@ export function AutonomousOptimizerPanel({
                                     </div>
                                   </div>
                                   <div className="rounded-lg border border-white/10 bg-white/[0.03] p-3">
-                                    Samples
+                                    {pickText('Samples', 'Samples')}
                                     <div className="mt-1 font-semibold text-nofx-text-main">
                                       {typeof item.sample_count === 'number'
                                         ? Math.round(item.sample_count)
@@ -2780,21 +3418,21 @@ export function AutonomousOptimizerPanel({
                                     </div>
                                   </div>
                                   <div className="rounded-lg border border-white/10 bg-white/[0.03] p-3">
-                                    Avg PnL / lift
+                                    {pickText('Avg PnL / lift', 'Ø PnL / Lift')}
                                     <div className="mt-1 font-semibold text-nofx-text-main">
                                       {formatNumber(item.avg_pnl_pct)}% /{' '}
                                       {formatNumber(item.lift_avg_pnl_pct)}%
                                     </div>
                                   </div>
                                   <div className="rounded-lg border border-white/10 bg-white/[0.03] p-3">
-                                    Composite / confidence
+                                    {pickText('Composite / confidence', 'Composite / Konfidenz')}
                                     <div className="mt-1 font-semibold text-nofx-text-main">
                                       {formatNumber(item.composite_score)} /{' '}
                                       {formatNumber(item.confidence_score)}
                                     </div>
                                   </div>
                                   <div className="rounded-lg border border-white/10 bg-white/[0.03] p-3">
-                                    Window net PnL
+                                    {pickText('Window net PnL', 'Fenster Netto-PnL')}
                                     <div className="mt-1 font-semibold text-nofx-text-main">
                                       {formatNumber(item.current_window_net_pnl)}
                                     </div>
@@ -2825,12 +3463,14 @@ export function AutonomousOptimizerPanel({
                 <div className="grid grid-cols-1 xl:grid-cols-3 gap-4">
                   <div className="rounded-lg border border-white/10 bg-black/20 p-4">
                     <div className="text-xs uppercase tracking-[0.2em] text-nofx-text-muted mb-3">
-                      Reject Reasons
+                      {pickText('Reject Reasons', 'Ablehnungsgruende')}
                     </div>
                     {rejectReasons.length === 0 ? (
                       <div className="text-sm text-nofx-text-muted">
-                        No structured skipped-candidate reject reasons were
-                        stored in this window.
+                        {pickText(
+                          'No structured skipped-candidate reject reasons were stored in this window.',
+                          'In diesem Fenster wurden keine strukturierten Ablehnungsgruende fuer uebersprungene Kandidaten gespeichert.'
+                        )}
                       </div>
                     ) : (
                       <div className="space-y-2">
@@ -2850,7 +3490,7 @@ export function AutonomousOptimizerPanel({
                               {typeof item.count === 'number'
                                 ? Math.round(item.count)
                                 : '-'}{' '}
-                              times
+                              {pickText('times', 'mal')}
                               {typeof item.share_pct === 'number'
                                 ? ` • ${formatNumber(item.share_pct)}%`
                                 : ''}
@@ -2863,11 +3503,14 @@ export function AutonomousOptimizerPanel({
 
                   <div className="rounded-lg border border-white/10 bg-black/20 p-4">
                     <div className="text-xs uppercase tracking-[0.2em] text-nofx-text-muted mb-3">
-                      Opportunity Sessions
+                      {pickText('Opportunity Sessions', 'Chancen-Sessions')}
                     </div>
                     {opportunitySessions.length === 0 ? (
                       <div className="text-sm text-nofx-text-muted">
-                        No session density was stored for this window.
+                        {pickText(
+                          'No session density was stored for this window.',
+                          'Fuer dieses Fenster wurde keine Session-Dichte gespeichert.'
+                        )}
                       </div>
                     ) : (
                       <div className="space-y-2">
@@ -2887,19 +3530,19 @@ export function AutonomousOptimizerPanel({
                               {typeof item.candidate_count === 'number'
                                 ? Math.round(item.candidate_count)
                                 : '-'}{' '}
-                              candidates •{' '}
+                              {pickText('candidates', 'Kandidaten')} •{' '}
                               {typeof item.open_decision_count === 'number'
                                 ? Math.round(item.open_decision_count)
                                 : '-'}{' '}
-                              opens •{' '}
+                              {pickText('opens', 'Opens')} •{' '}
                               {typeof item.hold_decision_count === 'number'
                                 ? Math.round(item.hold_decision_count)
                                 : '-'}{' '}
-                              holds •{' '}
+                              {pickText('holds', 'Holds')} •{' '}
                               {typeof item.wait_decision_count === 'number'
                                 ? Math.round(item.wait_decision_count)
                                 : '-'}{' '}
-                              waits
+                              {pickText('waits', 'Waits')}
                             </div>
                           </div>
                         ))}
@@ -2909,11 +3552,14 @@ export function AutonomousOptimizerPanel({
 
                   <div className="rounded-lg border border-white/10 bg-black/20 p-4">
                     <div className="text-xs uppercase tracking-[0.2em] text-nofx-text-muted mb-3">
-                      Confidence Bands
+                      {pickText('Confidence Bands', 'Konfidenz-Baender')}
                     </div>
                     {confidenceBands.length === 0 ? (
                       <div className="text-sm text-nofx-text-muted">
-                        No confidence-band telemetry was stored for this window.
+                        {pickText(
+                          'No confidence-band telemetry was stored for this window.',
+                          'Fuer dieses Fenster wurde keine Konfidenzband-Telemetrie gespeichert.'
+                        )}
                       </div>
                     ) : (
                       <div className="space-y-2">
@@ -2931,7 +3577,7 @@ export function AutonomousOptimizerPanel({
                               {typeof item.decision_count === 'number'
                                 ? Math.round(item.decision_count)
                                 : '-'}{' '}
-                              decisions • avg{' '}
+                              {pickText('decisions', 'Entscheidungen')} • {pickText('avg', 'Ø')}{' '}
                               {typeof item.avg_confidence === 'number'
                                 ? formatNumber(item.avg_confidence)
                                 : '-'}
@@ -2945,12 +3591,14 @@ export function AutonomousOptimizerPanel({
 
                 <div className="rounded-lg border border-white/10 bg-black/20 p-4">
                   <div className="text-xs uppercase tracking-[0.2em] text-nofx-text-muted mb-3">
-                    Opportunity Symbols
+                      {pickText('Opportunity Symbols', 'Chancen-Symbole')}
                   </div>
                   {opportunitySymbols.length === 0 ? (
                     <div className="text-sm text-nofx-text-muted">
-                      No symbol-level opportunity density was stored for this
-                      run.
+                      {pickText(
+                        'No symbol-level opportunity density was stored for this run.',
+                        'Fuer diesen Lauf wurde keine symbolbasierte Opportunity-Dichte gespeichert.'
+                      )}
                     </div>
                   ) : (
                     <div className="space-y-2">
@@ -2964,25 +3612,25 @@ export function AutonomousOptimizerPanel({
                               <div className="font-semibold">
                                 {typeof item.symbol === 'string'
                                   ? item.symbol
-                                  : 'UNKNOWN'}
+                                  : pickText('UNKNOWN', 'UNBEKANNT')}
                               </div>
                               <div className="text-xs text-nofx-text-muted mt-1">
                                 {typeof item.candidate_count === 'number'
                                   ? Math.round(item.candidate_count)
                                   : '-'}{' '}
-                                candidates •{' '}
+                                {pickText('candidates', 'Kandidaten')} •{' '}
                                 {typeof item.open_decision_count === 'number'
                                   ? Math.round(item.open_decision_count)
                                   : '-'}{' '}
-                                opens •{' '}
+                                {pickText('opens', 'Opens')} •{' '}
                                 {typeof item.hold_decision_count === 'number'
                                   ? Math.round(item.hold_decision_count)
                                   : '-'}{' '}
-                                holds •{' '}
+                                {pickText('holds', 'Holds')} •{' '}
                                 {typeof item.wait_decision_count === 'number'
                                   ? Math.round(item.wait_decision_count)
                                   : '-'}{' '}
-                                waits
+                                {pickText('waits', 'Waits')}
                               </div>
                             </div>
                             <div className="text-xs text-nofx-text-muted">
@@ -3021,21 +3669,26 @@ export function AutonomousOptimizerPanel({
                 <div className="grid grid-cols-1 xl:grid-cols-3 gap-4">
                   <div className="rounded-lg border border-white/10 bg-black/20 p-4">
                     <div className="text-xs uppercase tracking-[0.2em] text-nofx-text-muted mb-3">
-                      Execution Statuses
+                      {pickText('Execution Statuses', 'Ausfuehrungsstatus')}
                     </div>
                     <div className="text-xs text-nofx-text-muted mb-3">
                       {typeof openDecisionCount === 'number'
                         ? Math.round(openDecisionCount)
                         : '-'}{' '}
-                      open decisions
+                      {pickText('open decisions', 'Open-Entscheidungen')}
                       {typeof rejectedCandidateCount === 'number'
-                        ? ` • ${Math.round(rejectedCandidateCount)} rejected candidates`
+                        ? ` • ${Math.round(rejectedCandidateCount)} ${pickText(
+                            'rejected candidates',
+                            'abgelehnte Kandidaten'
+                          )}`
                         : ''}
                     </div>
                     {executionStatuses.length === 0 ? (
                       <div className="text-sm text-nofx-text-muted">
-                        No open-decision execution telemetry was stored in this
-                        window.
+                        {pickText(
+                          'No open-decision execution telemetry was stored in this window.',
+                          'In diesem Fenster wurde keine Open-Decision-Ausfuehrungstelemetrie gespeichert.'
+                        )}
                       </div>
                     ) : (
                       <div className="space-y-2">
@@ -3055,7 +3708,7 @@ export function AutonomousOptimizerPanel({
                               {typeof item.count === 'number'
                                 ? Math.round(item.count)
                                 : '-'}{' '}
-                              times
+                              {pickText('times', 'mal')}
                               {typeof item.share_pct === 'number'
                                 ? ` • ${formatNumber(item.share_pct)}%`
                                 : ''}
@@ -3068,11 +3721,14 @@ export function AutonomousOptimizerPanel({
 
                   <div className="rounded-lg border border-white/10 bg-black/20 p-4">
                     <div className="text-xs uppercase tracking-[0.2em] text-nofx-text-muted mb-3">
-                      Recent Open Executions
+                      {pickText('Recent Open Executions', 'Juengste Open-Ausfuehrungen')}
                     </div>
                     {recentOpenExecutions.length === 0 ? (
                       <div className="text-sm text-nofx-text-muted">
-                        No recent open-decision execution samples were stored.
+                        {pickText(
+                          'No recent open-decision execution samples were stored.',
+                          'Es wurden keine aktuellen Open-Decision-Ausfuehrungsbeispiele gespeichert.'
+                        )}
                       </div>
                     ) : (
                       <div className="space-y-2">
@@ -3085,7 +3741,7 @@ export function AutonomousOptimizerPanel({
                               <div className="font-semibold">
                                 {typeof item.symbol === 'string'
                                   ? item.symbol
-                                  : 'UNKNOWN'}
+                                  : pickText('UNKNOWN', 'UNBEKANNT')}
                               </div>
                               <span
                                 className={`inline-flex px-2 py-1 rounded-full border text-[11px] ${statusToneClasses(
@@ -3105,7 +3761,7 @@ export function AutonomousOptimizerPanel({
                               {typeof item.side === 'string'
                                 ? formatLabel(item.side)
                                 : '-'}{' '}
-                              • conf{' '}
+                              • {pickText('conf', 'Konf.')}{' '}
                               {typeof item.confidence === 'number'
                                 ? Math.round(item.confidence)
                                 : '-'}{' '}
@@ -3123,8 +3779,14 @@ export function AutonomousOptimizerPanel({
                                 : ''}
                               {typeof item.liquidity_tier === 'string' &&
                               item.liquidity_tier
-                                ? `${formatLabel(item.liquidity_tier)} liquidity`
-                                : 'No liquidity tier stored'}
+                                ? `${formatLabel(item.liquidity_tier)} ${pickText(
+                                    'liquidity',
+                                    'Liquiditaet'
+                                  )}`
+                                : pickText(
+                                    'No liquidity tier stored',
+                                    'Keine Liquiditaetsstufe gespeichert'
+                                  )}
                             </div>
                           </div>
                         ))}
@@ -3134,12 +3796,14 @@ export function AutonomousOptimizerPanel({
 
                   <div className="rounded-lg border border-white/10 bg-black/20 p-4">
                     <div className="text-xs uppercase tracking-[0.2em] text-nofx-text-muted mb-3">
-                      Regime Snapshots
+                      {pickText('Regime Snapshots', 'Regime-Snapshots')}
                     </div>
                     {regimeSummaries.length === 0 ? (
                       <div className="text-sm text-nofx-text-muted">
-                        No persisted regime summary was stored for this run
-                        window.
+                        {pickText(
+                          'No persisted regime summary was stored for this run window.',
+                          'Fuer dieses Lauf-Fenster wurde keine persistierte Regime-Zusammenfassung gespeichert.'
+                        )}
                       </div>
                     ) : (
                       <div className="space-y-2">
@@ -3167,11 +3831,11 @@ export function AutonomousOptimizerPanel({
                               {typeof item.candidate_count === 'number'
                                 ? Math.round(item.candidate_count)
                                 : '-'}{' '}
-                              candidates •{' '}
+                              {pickText('candidates', 'Kandidaten')} •{' '}
                               {typeof item.open_decision_count === 'number'
                                 ? Math.round(item.open_decision_count)
                                 : '-'}{' '}
-                              opens
+                              {pickText('opens', 'Opens')}
                             </div>
                             <div className="flex flex-wrap gap-2 mt-2">
                               {[
@@ -3208,19 +3872,21 @@ export function AutonomousOptimizerPanel({
                 <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
                   <div className="rounded-lg border border-white/10 bg-black/20 p-4">
                     <div className="text-xs uppercase tracking-[0.2em] text-nofx-text-muted mb-3">
-                      Trailing Stop Telemetry
+                      {pickText('Trailing Stop Telemetry', 'Trailing-Stop-Telemetrie')}
                     </div>
                     {!trailingStopTelemetry ? (
                       <div className="text-sm text-nofx-text-muted">
-                        No trailing-stop versus initial stop-loss telemetry was
-                        stored for this run window.
+                        {pickText(
+                          'No trailing-stop versus initial stop-loss telemetry was stored for this run window.',
+                          'Fuer dieses Lauf-Fenster wurde keine Telemetrie fuer Trailing-Stop versus initialen Stop-Loss gespeichert.'
+                        )}
                       </div>
                     ) : (
                       <div className="space-y-3">
-                        <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
+                        <div className="grid grid-cols-2 md:grid-cols-5 gap-3 text-sm">
                           <div className="rounded-lg border border-white/10 bg-black/20 p-3">
                             <div className="text-xs text-nofx-text-muted">
-                              Trailing exits
+                              {pickText('Trailing exits', 'Trailing-Exits')}
                             </div>
                             <div className="mt-1 font-semibold">
                               {typeof trailingStopTelemetry.trailing_exit_count ===
@@ -3233,7 +3899,7 @@ export function AutonomousOptimizerPanel({
                           </div>
                           <div className="rounded-lg border border-white/10 bg-black/20 p-3">
                             <div className="text-xs text-nofx-text-muted">
-                              Profit / loss
+                              {pickText('Profit / loss', 'Gewinn / Verlust')}
                             </div>
                             <div className="mt-1 font-semibold">
                               {typeof trailingStopTelemetry.trailing_profit_exit_count ===
@@ -3253,7 +3919,7 @@ export function AutonomousOptimizerPanel({
                           </div>
                           <div className="rounded-lg border border-white/10 bg-black/20 p-3">
                             <div className="text-xs text-nofx-text-muted">
-                              Initial stop losses
+                              {pickText('Initial stop losses', 'Initiale Stop-Losses')}
                             </div>
                             <div className="mt-1 font-semibold">
                               {typeof trailingStopTelemetry.initial_stop_loss_count ===
@@ -3266,7 +3932,7 @@ export function AutonomousOptimizerPanel({
                           </div>
                           <div className="rounded-lg border border-white/10 bg-black/20 p-3">
                             <div className="text-xs text-nofx-text-muted">
-                              Early tightening
+                              {pickText('Early tightening', 'Fruehes Nachziehen')}
                             </div>
                             <div className="mt-1 font-semibold">
                               {typeof trailingStopTelemetry.early_tightening_count ===
@@ -3282,14 +3948,48 @@ export function AutonomousOptimizerPanel({
                                     trailingStopTelemetry.early_tightening_loss_count
                                   )
                                 : '-'}{' '}
-                              red
+                              {pickText('red', 'negativ')}
+                            </div>
+                          </div>
+                          <div className="rounded-lg border border-white/10 bg-black/20 p-3">
+                            <div className="text-xs text-nofx-text-muted">
+                              {pickText('One-cycle exits', 'Ein-Zyklus-Exits')}
+                            </div>
+                            <div className="mt-1 font-semibold">
+                              {typeof trailingStopTelemetry.one_cycle_exit_count ===
+                              'number'
+                                ? Math.round(
+                                    trailingStopTelemetry.one_cycle_exit_count
+                                  )
+                                : '-'}{' '}
+                              /{' '}
+                              {typeof trailingStopTelemetry.early_tightening_one_cycle_exit_count ===
+                              'number'
+                                ? Math.round(
+                                    trailingStopTelemetry.early_tightening_one_cycle_exit_count
+                                  )
+                                : '-'}{' '}
+                              {pickText('early', 'frueh')}
+                            </div>
+                            <div className="mt-1 text-[11px] text-nofx-text-muted">
+                              {pickText('Threshold', 'Schwelle')}{' '}
+                              {typeof trailingStopTelemetry.one_cycle_exit_threshold_sec ===
+                              'number'
+                                ? Math.round(
+                                    trailingStopTelemetry.one_cycle_exit_threshold_sec
+                                  )
+                                : '-'}
+                              s
                             </div>
                           </div>
                         </div>
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-sm">
                           <div className="rounded-lg border border-white/10 bg-black/20 p-3">
                             <div className="text-xs text-nofx-text-muted">
-                              Avg trailing exit PnL / initial SL PnL
+                              {pickText(
+                                'Avg trailing exit PnL / initial SL PnL',
+                                'Ø Trailing-Exit-PnL / initiales SL-PnL'
+                              )}
                             </div>
                             <div className="mt-1 font-semibold">
                               {formatNumber(
@@ -3304,7 +4004,10 @@ export function AutonomousOptimizerPanel({
                           </div>
                           <div className="rounded-lg border border-white/10 bg-black/20 p-3">
                             <div className="text-xs text-nofx-text-muted">
-                              Avg first update / update-to-exit
+                              {pickText(
+                                'Avg first update / update-to-exit',
+                                'Ø erstes Update / Update-bis-Exit'
+                              )}
                             </div>
                             <div className="mt-1 font-semibold">
                               {formatNumber(
@@ -3317,11 +4020,9 @@ export function AutonomousOptimizerPanel({
                               m
                             </div>
                           </div>
-                        </div>
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
                           <div className="rounded-lg border border-white/10 bg-black/20 p-3">
                             <div className="text-xs text-nofx-text-muted">
-                              Audited first updates
+                              {pickText('Audited first updates', 'Gepruefte erste Updates')}
                             </div>
                             <div className="mt-1 font-semibold">
                               {typeof trailingStopTelemetry.first_update_audit_count ===
@@ -3340,11 +4041,280 @@ export function AutonomousOptimizerPanel({
                               breakeven
                             </div>
                           </div>
+                          <div className="rounded-lg border border-white/10 bg-black/20 p-3">
+                            <div className="text-xs text-nofx-text-muted">
+                              {pickText(
+                                'Early below entry / protected',
+                                'Frueh unter Einstieg / geschuetzt'
+                              )}
+                            </div>
+                            <div className="mt-1 font-semibold">
+                              {typeof trailingStopTelemetry.early_tightening_below_entry_count ===
+                              'number'
+                                ? Math.round(
+                                    trailingStopTelemetry.early_tightening_below_entry_count
+                                  )
+                                : '-'}{' '}
+                              /{' '}
+                              {typeof trailingStopTelemetry.early_tightening_protected_count ===
+                              'number'
+                                ? Math.round(
+                                    trailingStopTelemetry.early_tightening_protected_count
+                                  )
+                                : '-'}
+                            </div>
+                          </div>
                         </div>
+                        {(trailingStopTierBreakdown.length > 0 ||
+                          trailingStopProfitBandBreakdown.length > 0 ||
+                          trailingStopEntryProtectionBreakdown.length > 0) && (
+                          <div className="grid grid-cols-1 xl:grid-cols-3 gap-3 text-sm">
+                            {trailingStopTierBreakdown.length > 0 && (
+                              <div className="rounded-lg border border-white/10 bg-black/20 p-3">
+                                <div className="text-xs text-nofx-text-muted mb-2">
+                                  {pickText('By Tier Trigger', 'Nach Tier-Trigger')}
+                                </div>
+                                <div className="space-y-2">
+                                  {trailingStopTierBreakdown.map((item, index) => (
+                                    <div
+                                      key={`${String(readNestedNumber(item, 'tier_trigger_profit_pct') ?? index)}-${String(readNestedString(item, 'trailing_mode') || index)}`}
+                                      className="rounded-lg border border-white/10 bg-white/[0.03] p-3"
+                                    >
+                                      <div className="flex flex-wrap items-center justify-between gap-2">
+                                        <div className="font-semibold">
+                                          {formatNumber(
+                                            readNestedNumber(
+                                              item,
+                                              'tier_trigger_profit_pct'
+                                            )
+                                          )}
+                                          % {pickText('trigger', 'Trigger')}
+                                        </div>
+                                        <span className="inline-flex px-2 py-1 rounded-full border border-white/10 bg-white/5 text-[11px] text-nofx-text-muted">
+                                          {formatLabel(
+                                            String(
+                                              readNestedString(
+                                                item,
+                                                'trailing_mode'
+                                              ) || 'unknown'
+                                            )
+                                          )}
+                                        </span>
+                                      </div>
+                                      <div className="mt-2 text-xs text-nofx-text-muted">
+                                        {Math.round(
+                                          readNestedNumber(item, 'audit_count') || 0
+                                        )}{' '}
+                                        {pickText('audits', 'Audits')} •{' '}
+                                        {Math.round(
+                                          readNestedNumber(
+                                            item,
+                                            'early_tightening_count'
+                                          ) || 0
+                                        )}{' '}
+                                        {pickText('early', 'frueh')} •{' '}
+                                        {Math.round(
+                                          readNestedNumber(
+                                            item,
+                                            'early_tightening_loss_count'
+                                          ) || 0
+                                        )}{' '}
+                                        {pickText('harmful', 'schaedlich')}
+                                      </div>
+                                      <div className="mt-2 text-xs text-nofx-text-muted">
+                                        {pickText('Below entry', 'Unter Einstieg')}{' '}
+                                        {Math.round(
+                                          readNestedNumber(
+                                            item,
+                                            'below_entry_count'
+                                          ) || 0
+                                        )}{' '}
+                                        • {pickText('protected', 'geschuetzt')}{' '}
+                                        {Math.round(
+                                          readNestedNumber(
+                                            item,
+                                            'breakeven_or_better_count'
+                                          ) || 0
+                                        )}{' '}
+                                        • {pickText('one-cycle', 'ein Zyklus')}{' '}
+                                        {Math.round(
+                                          readNestedNumber(
+                                            item,
+                                            'one_cycle_exit_count'
+                                          ) || 0
+                                        )}
+                                      </div>
+                                      <div className="mt-2 text-xs text-nofx-text-muted">
+                                        {pickText('Avg pre-update uPnL', 'Ø uPnL vor Update')}{' '}
+                                        {formatNumber(
+                                          readNestedNumber(
+                                            item,
+                                            'avg_pre_update_unrealized_pnl_pct'
+                                          )
+                                        )}
+                                        %
+                                      </div>
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+                            )}
+                            {trailingStopProfitBandBreakdown.length > 0 && (
+                              <div className="rounded-lg border border-white/10 bg-black/20 p-3">
+                                <div className="text-xs text-nofx-text-muted mb-2">
+                                  {pickText('By Profit Band', 'Nach Profit-Band')}
+                                </div>
+                                <div className="space-y-2">
+                                  {trailingStopProfitBandBreakdown.map(
+                                    (item, index) => (
+                                      <div
+                                        key={`${String(readNestedString(item, 'profit_band') || index)}`}
+                                        className="rounded-lg border border-white/10 bg-white/[0.03] p-3"
+                                      >
+                                        <div className="font-semibold">
+                                          {String(
+                                            readNestedString(
+                                              item,
+                                              'profit_band'
+                                            ) || '-'
+                                          )}
+                                        </div>
+                                        <div className="mt-2 text-xs text-nofx-text-muted">
+                                          {Math.round(
+                                            readNestedNumber(item, 'audit_count') || 0
+                                          )}{' '}
+                                          {pickText('audits', 'Audits')} •{' '}
+                                          {Math.round(
+                                            readNestedNumber(
+                                              item,
+                                              'early_tightening_count'
+                                            ) || 0
+                                          )}{' '}
+                                          {pickText('early', 'frueh')} •{' '}
+                                          {Math.round(
+                                            readNestedNumber(
+                                              item,
+                                              'early_tightening_loss_count'
+                                            ) || 0
+                                          )}{' '}
+                                          {pickText('harmful', 'schaedlich')}
+                                        </div>
+                                        <div className="mt-2 text-xs text-nofx-text-muted">
+                                          {pickText('Loss / profit', 'Verlust / Gewinn')}{' '}
+                                          {Math.round(
+                                            readNestedNumber(
+                                              item,
+                                              'loss_exit_count'
+                                            ) || 0
+                                          )}{' '}
+                                          /{' '}
+                                          {Math.round(
+                                            readNestedNumber(
+                                              item,
+                                              'profit_exit_count'
+                                            ) || 0
+                                          )}{' '}
+                                          • {pickText('one-cycle', 'ein Zyklus')}{' '}
+                                          {Math.round(
+                                            readNestedNumber(
+                                              item,
+                                              'one_cycle_exit_count'
+                                            ) || 0
+                                          )}
+                                        </div>
+                                        <div className="mt-2 text-xs text-nofx-text-muted">
+                                          {pickText('Avg first update', 'Ø erstes Update')}{' '}
+                                          {formatNumber(
+                                            readNestedNumber(
+                                              item,
+                                              'avg_minutes_to_first_update'
+                                            )
+                                          )}
+                                          m
+                                        </div>
+                                      </div>
+                                    )
+                                  )}
+                                </div>
+                              </div>
+                            )}
+                            {trailingStopEntryProtectionBreakdown.length > 0 && (
+                              <div className="rounded-lg border border-white/10 bg-black/20 p-3">
+                                <div className="text-xs text-nofx-text-muted mb-2">
+                                  {pickText('By Entry Protection', 'Nach Einstiegsschutz')}
+                                </div>
+                                <div className="space-y-2">
+                                  {trailingStopEntryProtectionBreakdown.map(
+                                    (item, index) => (
+                                      <div
+                                        key={`${String(readNestedString(item, 'entry_protection_state') || index)}`}
+                                        className="rounded-lg border border-white/10 bg-white/[0.03] p-3"
+                                      >
+                                        <div className="font-semibold">
+                                          {formatLabel(
+                                            String(
+                                              readNestedString(
+                                                item,
+                                                'entry_protection_state'
+                                              ) || 'unknown'
+                                            )
+                                          )}
+                                        </div>
+                                        <div className="mt-2 text-xs text-nofx-text-muted">
+                                          {Math.round(
+                                            readNestedNumber(item, 'audit_count') || 0
+                                          )}{' '}
+                                          {pickText('audits', 'Audits')} •{' '}
+                                          {Math.round(
+                                            readNestedNumber(
+                                              item,
+                                              'early_tightening_count'
+                                            ) || 0
+                                          )}{' '}
+                                          {pickText('early', 'frueh')} •{' '}
+                                          {Math.round(
+                                            readNestedNumber(
+                                              item,
+                                              'early_tightening_loss_count'
+                                            ) || 0
+                                          )}{' '}
+                                          {pickText('harmful', 'schaedlich')}
+                                        </div>
+                                        <div className="mt-2 text-xs text-nofx-text-muted">
+                                          {pickText('Loss / profit', 'Verlust / Gewinn')}{' '}
+                                          {Math.round(
+                                            readNestedNumber(
+                                              item,
+                                              'loss_exit_count'
+                                            ) || 0
+                                          )}{' '}
+                                          /{' '}
+                                          {Math.round(
+                                            readNestedNumber(
+                                              item,
+                                              'profit_exit_count'
+                                            ) || 0
+                                          )}{' '}
+                                          • {pickText('one-cycle', 'ein Zyklus')}{' '}
+                                          {Math.round(
+                                            readNestedNumber(
+                                              item,
+                                              'one_cycle_exit_count'
+                                            ) || 0
+                                          )}
+                                        </div>
+                                      </div>
+                                    )
+                                  )}
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        )}
                         {trailingStopSamples.length > 0 && (
                           <div className="rounded-lg border border-white/10 bg-black/20 p-3">
                             <div className="text-xs text-nofx-text-muted mb-2">
-                              First Update Audit
+                              {pickText('First Update Audit', 'Audit des ersten Updates')}
                             </div>
                             <div className="space-y-2">
                               {trailingStopSamples.map((item, index) => (
@@ -3369,15 +4339,50 @@ export function AutonomousOptimizerPanel({
                                         )
                                       )}
                                     </span>
+                                    <span className="inline-flex px-2 py-1 rounded-full border border-sky-400/20 bg-sky-500/10 text-[11px] text-sky-300">
+                                      {formatNumber(
+                                        readNestedNumber(
+                                          item,
+                                          'tier_trigger_profit_pct'
+                                        )
+                                      )}
+                                      % {pickText('tier', 'Tier')}
+                                    </span>
+                                    <span className="inline-flex px-2 py-1 rounded-full border border-white/10 bg-white/5 text-[11px] text-nofx-text-muted">
+                                      {String(
+                                        readNestedString(
+                                          item,
+                                          'pre_update_profit_band'
+                                        ) || '-'
+                                      )}
+                                    </span>
+                                    <span className="inline-flex px-2 py-1 rounded-full border border-white/10 bg-white/5 text-[11px] text-nofx-text-muted">
+                                      {formatLabel(
+                                        String(
+                                          readNestedString(
+                                            item,
+                                            'update_source'
+                                          ) || 'unknown'
+                                        )
+                                      )}
+                                    </span>
                                     {readNestedBoolean(item, 'protects_breakeven') && (
                                       <span className="inline-flex px-2 py-1 rounded-full border border-emerald-400/25 bg-emerald-500/15 text-[11px] text-emerald-300">
-                                        Breakeven protected
+                                        {pickText('Breakeven protected', 'Breakeven geschuetzt')}
+                                      </span>
+                                    )}
+                                    {readNestedBoolean(
+                                      item,
+                                      'exit_within_one_cycle'
+                                    ) && (
+                                      <span className="inline-flex px-2 py-1 rounded-full border border-amber-400/25 bg-amber-500/15 text-[11px] text-amber-200">
+                                        {pickText('One-cycle exit', 'Ein-Zyklus-Exit')}
                                       </span>
                                     )}
                                   </div>
-                                  <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mt-3 text-xs text-nofx-text-muted">
+                                  <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3 mt-3 text-xs text-nofx-text-muted">
                                     <div>
-                                      First update:{' '}
+                                      {pickText('First update:', 'Erstes Update:')}{' '}
                                       {formatNumber(
                                         readNestedNumber(
                                           item,
@@ -3387,7 +4392,7 @@ export function AutonomousOptimizerPanel({
                                       m
                                     </div>
                                     <div>
-                                      Update to exit:{' '}
+                                      {pickText('Update to exit:', 'Update bis Exit:')}{' '}
                                       {formatNumber(
                                         readNestedNumber(
                                           item,
@@ -3397,7 +4402,7 @@ export function AutonomousOptimizerPanel({
                                       m
                                     </div>
                                     <div>
-                                      Pre-update uPnL:{' '}
+                                      {pickText('Pre-update uPnL:', 'uPnL vor Update:')}{' '}
                                       {formatNumber(
                                         readNestedNumber(
                                           item,
@@ -3413,11 +4418,33 @@ export function AutonomousOptimizerPanel({
                                       )}
                                     </div>
                                     <div>
-                                      Stop profit:{' '}
+                                      {pickText('Stop profit:', 'Stop-Gewinn:')}{' '}
                                       {formatNumber(
                                         readNestedNumber(item, 'stop_profit_pct')
                                       )}
                                       %
+                                    </div>
+                                    <div>
+                                      {pickText('Entry state:', 'Einstiegsstatus:')}{' '}
+                                      {formatLabel(
+                                        String(
+                                          readNestedString(
+                                            item,
+                                            'entry_protection_state'
+                                          ) || 'unknown'
+                                        )
+                                      )}
+                                    </div>
+                                    <div>
+                                      {pickText('Mode:', 'Modus:')}{' '}
+                                      {formatLabel(
+                                        String(
+                                          readNestedString(
+                                            item,
+                                            'trailing_mode'
+                                          ) || 'unknown'
+                                        )
+                                      )}
                                     </div>
                                   </div>
                                 </div>
@@ -3431,11 +4458,14 @@ export function AutonomousOptimizerPanel({
 
                   <div className="rounded-lg border border-white/10 bg-black/20 p-4">
                     <div className="text-xs uppercase tracking-[0.2em] text-nofx-text-muted mb-3">
-                      Adaptive Re-entry Guard
+                      {pickText('Adaptive Re-entry Guard', 'Adaptiver Wiedereinstiegs-Guard')}
                     </div>
                     {!adaptiveCooldownTelemetry ? (
                       <div className="text-sm text-nofx-text-muted">
-                        No cooldown telemetry was stored for this run window.
+                        {pickText(
+                          'No cooldown telemetry was stored for this run window.',
+                          'Fuer dieses Lauf-Fenster wurde keine Cooldown-Telemetrie gespeichert.'
+                        )}
                       </div>
                     ) : (
                       <div className="space-y-3">
@@ -3450,17 +4480,17 @@ export function AutonomousOptimizerPanel({
                                 : 'border-white/10 bg-white/5 text-nofx-text-muted'
                             }`}
                           >
-                            Guard{' '}
+                            {pickText('Guard', 'Guard')}{' '}
                             {readNestedBoolean(adaptiveCooldownConfig, 'enabled')
-                              ? 'enabled'
-                              : 'disabled'}
+                              ? pickText('enabled', 'aktiv')
+                              : pickText('disabled', 'deaktiviert')}
                           </span>
                           {readNestedBoolean(
                             adaptiveCooldownConfig,
                             'require_weak_execution_regime'
                           ) && (
                             <span className="inline-flex px-2 py-1 rounded-full border border-amber-400/25 bg-amber-500/15 text-[11px] text-amber-200">
-                              Weak regime only
+                              {pickText('Weak regime only', 'Nur schwaches Regime')}
                             </span>
                           )}
                           {typeof readNestedNumber(
@@ -3474,7 +4504,7 @@ export function AutonomousOptimizerPanel({
                                   'same_symbol_loss_cooldown_minutes'
                                 ) || 0
                               )}
-                              m cooldown
+                              m {pickText('cooldown', 'Cooldown')}
                             </span>
                           )}
                           {typeof readNestedNumber(
@@ -3488,7 +4518,7 @@ export function AutonomousOptimizerPanel({
                                   'pair_loss_lookback_hours'
                                 ) || 0
                               )}
-                              h lookback
+                              h {pickText('lookback', 'Lookback')}
                             </span>
                           )}
                         </div>
@@ -3496,7 +4526,7 @@ export function AutonomousOptimizerPanel({
                         <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
                           <div className="rounded-lg border border-white/10 bg-black/20 p-3">
                             <div className="text-xs text-nofx-text-muted">
-                              Cooldown candidates
+                              {pickText('Cooldown candidates', 'Cooldown-Kandidaten')}
                             </div>
                             <div className="mt-1 font-semibold">
                               {typeof adaptiveCooldownTelemetry.cooldown_candidate_count ===
@@ -3509,7 +4539,7 @@ export function AutonomousOptimizerPanel({
                           </div>
                           <div className="rounded-lg border border-white/10 bg-black/20 p-3">
                             <div className="text-xs text-nofx-text-muted">
-                              Repeat after loss
+                              {pickText('Repeat after loss', 'Wiederholung nach Verlust')}
                             </div>
                             <div className="mt-1 font-semibold">
                               {typeof adaptiveCooldownTelemetry.repeat_after_loss_count ===
@@ -3522,7 +4552,7 @@ export function AutonomousOptimizerPanel({
                           </div>
                           <div className="rounded-lg border border-white/10 bg-black/20 p-3">
                             <div className="text-xs text-nofx-text-muted">
-                              Same-session reentries
+                              {pickText('Same-session reentries', 'Re-Entries in derselben Session')}
                             </div>
                             <div className="mt-1 font-semibold">
                               {typeof adaptiveCooldownTelemetry.same_session_reentry_count ===
@@ -3535,7 +4565,10 @@ export function AutonomousOptimizerPanel({
                           </div>
                           <div className="rounded-lg border border-white/10 bg-black/20 p-3">
                             <div className="text-xs text-nofx-text-muted">
-                              Regime repeats after loss
+                              {pickText(
+                                'Regime repeats after loss',
+                                'Regime-Wiederholungen nach Verlust'
+                              )}
                             </div>
                             <div className="mt-1 font-semibold">
                               {typeof adaptiveCooldownTelemetry.regime_repeat_loss_count ===
@@ -3551,7 +4584,7 @@ export function AutonomousOptimizerPanel({
                         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3 text-sm">
                           <div className="rounded-lg border border-white/10 bg-black/20 p-3">
                             <div className="text-xs text-nofx-text-muted">
-                              Blocked symbol reentries
+                              {pickText('Blocked symbol reentries', 'Blockierte Symbol-Re-Entries')}
                             </div>
                             <div className="mt-1">
                               {formatCooldownOutcomeSummary(
@@ -3561,7 +4594,7 @@ export function AutonomousOptimizerPanel({
                           </div>
                           <div className="rounded-lg border border-white/10 bg-black/20 p-3">
                             <div className="text-xs text-nofx-text-muted">
-                              After symbol cooldown
+                              {pickText('After symbol cooldown', 'Nach Symbol-Cooldown')}
                             </div>
                             <div className="mt-1">
                               {formatCooldownOutcomeSummary(
@@ -3571,7 +4604,7 @@ export function AutonomousOptimizerPanel({
                           </div>
                           <div className="rounded-lg border border-white/10 bg-black/20 p-3">
                             <div className="text-xs text-nofx-text-muted">
-                              Blocked regime repeats
+                              {pickText('Blocked regime repeats', 'Blockierte Regime-Wiederholungen')}
                             </div>
                             <div className="mt-1">
                               {formatCooldownOutcomeSummary(
@@ -3581,7 +4614,7 @@ export function AutonomousOptimizerPanel({
                           </div>
                           <div className="rounded-lg border border-white/10 bg-black/20 p-3">
                             <div className="text-xs text-nofx-text-muted">
-                              After regime cooldown
+                              {pickText('After regime cooldown', 'Nach Regime-Cooldown')}
                             </div>
                             <div className="mt-1">
                               {formatCooldownOutcomeSummary(
@@ -3594,11 +4627,14 @@ export function AutonomousOptimizerPanel({
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                           <div className="rounded-lg border border-white/10 bg-black/20 p-3">
                             <div className="text-xs text-nofx-text-muted mb-2">
-                              Top Symbols
+                              {pickText('Top Symbols', 'Top Symbole')}
                             </div>
                             {adaptiveCooldownTopSymbols.length === 0 ? (
                               <div className="text-sm text-nofx-text-muted">
-                                No repeated symbol re-entry pattern was stored.
+                                {pickText(
+                                  'No repeated symbol re-entry pattern was stored.',
+                                  'Es wurde kein wiederholtes Symbol-Re-Entry-Muster gespeichert.'
+                                )}
                               </div>
                             ) : (
                               <div className="space-y-2">
@@ -3610,29 +4646,29 @@ export function AutonomousOptimizerPanel({
                                     <div className="font-semibold">
                                       {typeof item.symbol === 'string'
                                         ? item.symbol
-                                        : 'UNKNOWN'}
+                                        : pickText('UNKNOWN', 'UNBEKANNT')}
                                     </div>
                                     <div className="text-xs text-nofx-text-muted mt-1">
                                       {typeof item.reentry_count === 'number'
                                         ? Math.round(item.reentry_count)
                                         : '-'}{' '}
-                                      reentries •{' '}
+                                      {pickText('reentries', 'Re-Entries')} •{' '}
                                       {typeof item.repeat_after_loss_count ===
                                       'number'
                                         ? Math.round(
                                             item.repeat_after_loss_count
                                           )
                                         : '-'}{' '}
-                                      after loss • avg{' '}
+                                      {pickText('after loss', 'nach Verlust')} • {pickText('avg', 'Ø')}{' '}
                                       {formatNumber(item.avg_pnl_pct)}%
                                     </div>
                                     <div className="text-xs text-nofx-text-muted mt-2">
-                                      Blocked: {formatCooldownOutcomeSummary(
+                                      {pickText('Blocked:', 'Blockiert:')} {formatCooldownOutcomeSummary(
                                         readNestedObject(item, 'blocked_outcomes')
                                       )}
                                     </div>
                                     <div className="text-xs text-nofx-text-muted mt-1">
-                                      After cooldown:{' '}
+                                      {pickText('After cooldown:', 'Nach Cooldown:')}{' '}
                                       {formatCooldownOutcomeSummary(
                                         readNestedObject(
                                           item,
@@ -3648,11 +4684,14 @@ export function AutonomousOptimizerPanel({
 
                           <div className="rounded-lg border border-white/10 bg-black/20 p-3">
                             <div className="text-xs text-nofx-text-muted mb-2">
-                              Top Regimes
+                              {pickText('Top Regimes', 'Top Regime')}
                             </div>
                             {adaptiveCooldownTopRegimes.length === 0 ? (
                               <div className="text-sm text-nofx-text-muted">
-                                No repeated regime-loss pattern was stored.
+                                {pickText(
+                                  'No repeated regime-loss pattern was stored.',
+                                  'Es wurde kein wiederholtes Regime-Verlust-Muster gespeichert.'
+                                )}
                               </div>
                             ) : (
                               <div className="space-y-2">
@@ -3685,23 +4724,23 @@ export function AutonomousOptimizerPanel({
                                       {typeof item.reentry_count === 'number'
                                         ? Math.round(item.reentry_count)
                                         : '-'}{' '}
-                                      repeats •{' '}
+                                      {pickText('repeats', 'Wiederholungen')} •{' '}
                                       {typeof item.repeat_after_loss_count ===
                                       'number'
                                         ? Math.round(
                                             item.repeat_after_loss_count
                                           )
                                         : '-'}{' '}
-                                      after loss • avg{' '}
+                                      {pickText('after loss', 'nach Verlust')} • {pickText('avg', 'Ø')}{' '}
                                       {formatNumber(item.avg_pnl_pct)}%
                                     </div>
                                     <div className="text-xs text-nofx-text-muted mt-2">
-                                      Blocked: {formatCooldownOutcomeSummary(
+                                      {pickText('Blocked:', 'Blockiert:')} {formatCooldownOutcomeSummary(
                                         readNestedObject(item, 'blocked_outcomes')
                                       )}
                                     </div>
                                     <div className="text-xs text-nofx-text-muted mt-1">
-                                      After cooldown:{' '}
+                                      {pickText('After cooldown:', 'Nach Cooldown:')}{' '}
                                       {formatCooldownOutcomeSummary(
                                         readNestedObject(
                                           item,
@@ -3727,24 +4766,24 @@ export function AutonomousOptimizerPanel({
                   configValidationStatus) && (
                   <div className="rounded-lg border border-white/10 bg-black/20 p-4">
                     <div className="text-xs uppercase tracking-[0.2em] text-nofx-text-muted mb-3">
-                      Gate And Critic
+                      {pickText('Gate And Critic', 'Gate und Kritiker')}
                     </div>
                     <div className="grid grid-cols-1 xl:grid-cols-2 gap-4 text-sm">
                       <div className="space-y-2">
                         <div className="text-nofx-text-muted">
-                          Critic summary
+                          {pickText('Critic summary', 'Critic-Zusammenfassung')}
                         </div>
                         <div>{criticSummary || '-'}</div>
                         <div className="text-nofx-text-muted pt-2">
-                          Expected effect
+                          {pickText('Expected effect', 'Erwarteter Effekt')}
                         </div>
                         <div>{proposalExpectedEffect || '-'}</div>
                         <div className="text-nofx-text-muted pt-2">
-                          Config validation
+                          {pickText('Config validation', 'Config-Validierung')}
                         </div>
                         <div>{formatLabel(configValidationStatus) || '-'}</div>
                         <div className="text-nofx-text-muted pt-2">
-                          Prompt changed fields
+                          {pickText('Prompt changed fields', 'Geaenderte Prompt-Felder')}
                         </div>
                         <div>
                           {typeof promptValidationIssues === 'number'
@@ -3752,7 +4791,7 @@ export function AutonomousOptimizerPanel({
                             : '-'}
                         </div>
                         <div className="text-nofx-text-muted pt-2">
-                          Prompt requested fields
+                          {pickText('Prompt requested fields', 'Angeforderte Prompt-Felder')}
                         </div>
                         <div>
                           {typeof promptRequestedFieldCount === 'number'
@@ -3760,18 +4799,21 @@ export function AutonomousOptimizerPanel({
                             : '-'}
                         </div>
                         <div className="text-nofx-text-muted pt-2">
-                          Prompt auto-trim
+                          {pickText('Prompt auto-trim', 'Prompt Auto-Trim')}
                         </div>
-                        <div>{promptAutoTrimmed ? 'Yes' : 'No'}</div>
+                        <div>{promptAutoTrimmed ? ot('Yes') : ot('No')}</div>
                       </div>
                       <div>
                         <div className="text-nofx-text-muted mb-2">
-                          Gate reasons
+                          {pickText('Gate reasons', 'Gate-Gruende')}
                         </div>
                         {!selectedRunDetail.gate_reasons ||
                         selectedRunDetail.gate_reasons.length === 0 ? (
                           <div className="text-sm text-emerald-300">
-                            No blocking or explanatory gate reasons stored.
+                            {pickText(
+                              'No blocking or explanatory gate reasons stored.',
+                              'Keine blockierenden oder erklaerenden Gate-Gruende gespeichert.'
+                            )}
                           </div>
                         ) : (
                           <div className="space-y-2">
@@ -3786,11 +4828,11 @@ export function AutonomousOptimizerPanel({
                           </div>
                         )}
                         <div className="text-nofx-text-muted mt-4 mb-2">
-                          Deferred prompt fields
+                          {pickText('Deferred prompt fields', 'Zurueckgestellte Prompt-Felder')}
                         </div>
                         {promptDeferredFields.length === 0 ? (
                           <div className="text-sm text-nofx-text-muted">
-                            No deferred prompt fields.
+                            {pickText('No deferred prompt fields.', 'Keine zurueckgestellten Prompt-Felder.')}
                           </div>
                         ) : (
                           <div className="flex flex-wrap gap-2">
@@ -3812,7 +4854,7 @@ export function AutonomousOptimizerPanel({
                 {(proposalConversation || criticConversation) && (
                   <div className="rounded-lg border border-white/10 bg-black/20 p-4">
                     <div className="text-xs uppercase tracking-[0.2em] text-nofx-text-muted mb-3">
-                      Conversation Memory
+                      {pickText('Conversation Memory', 'Konversationsspeicher')}
                     </div>
                     <div className="grid grid-cols-1 xl:grid-cols-2 gap-4 text-sm">
                       {[proposalConversation, criticConversation]
@@ -3837,7 +4879,7 @@ export function AutonomousOptimizerPanel({
                               <div className="grid grid-cols-2 gap-3 mt-3 text-xs">
                                 <div>
                                   <div className="text-nofx-text-muted">
-                                    Mode
+                                    {pickText('Mode', 'Modus')}
                                   </div>
                                   <div className="mt-1">
                                     {typeof item.mode === 'string'
@@ -3847,7 +4889,7 @@ export function AutonomousOptimizerPanel({
                                 </div>
                                 <div>
                                   <div className="text-nofx-text-muted">
-                                    Replay messages
+                                    {pickText('Replay messages', 'Replay-Nachrichten')}
                                   </div>
                                   <div className="mt-1">
                                     {typeof item.history_messages_replayed ===
@@ -3860,7 +4902,7 @@ export function AutonomousOptimizerPanel({
                                 </div>
                                 <div>
                                   <div className="text-nofx-text-muted">
-                                    Replay limit
+                                    {pickText('Replay limit', 'Replay-Limit')}
                                   </div>
                                   <div className="mt-1">
                                     {typeof item.replay_message_limit ===
@@ -3871,7 +4913,7 @@ export function AutonomousOptimizerPanel({
                                 </div>
                                 <div>
                                   <div className="text-nofx-text-muted">
-                                    Conversation ID
+                                    {pickText('Conversation ID', 'Conversation-ID')}
                                   </div>
                                   <div className="mt-1 break-all">
                                     {typeof item.conversation_id === 'string'
@@ -3890,28 +4932,28 @@ export function AutonomousOptimizerPanel({
                 <div className="grid grid-cols-1 xl:grid-cols-3 gap-4">
                   <div className="rounded-lg border border-white/10 bg-black/20 p-4">
                     <div className="text-xs uppercase tracking-[0.2em] text-nofx-text-muted mb-3">
-                      Strategy Diff
+                      {pickText('Strategy Diff', 'Strategie-Diff')}
                     </div>
-                    {renderDiffList(selectedRunDetail.strategy_differences)}
+                    {renderDiffList(selectedRunDetail.strategy_differences, language)}
                   </div>
                   <div className="rounded-lg border border-white/10 bg-black/20 p-4">
                     <div className="text-xs uppercase tracking-[0.2em] text-nofx-text-muted mb-3">
-                      Trader Prompt Diff
+                      {pickText('Trader Prompt Diff', 'Trader-Prompt-Diff')}
                     </div>
-                    {renderDiffList(selectedRunDetail.trader_differences)}
+                    {renderDiffList(selectedRunDetail.trader_differences, language)}
                   </div>
                   <div className="rounded-lg border border-white/10 bg-black/20 p-4">
                     <div className="text-xs uppercase tracking-[0.2em] text-nofx-text-muted mb-3">
-                      Optimizer Prompt Diff
+                      {pickText('Optimizer Prompt Diff', 'Optimizer-Prompt-Diff')}
                     </div>
-                    {renderDiffList(selectedRunDetail.optimizer_differences)}
+                    {renderDiffList(selectedRunDetail.optimizer_differences, language)}
                   </div>
                 </div>
 
                 <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
                   <div className="rounded-lg border border-white/10 bg-black/20 p-4">
                     <div className="text-xs uppercase tracking-[0.2em] text-nofx-text-muted mb-3">
-                      Proposed Config Patch
+                      {pickText('Proposed Config Patch', 'Vorgeschlagener Config-Patch')}
                     </div>
                     <pre className="text-xs whitespace-pre-wrap break-words text-nofx-text-muted">
                       {prettyJSON(selectedRunDetail.config_patch)}
@@ -3919,7 +4961,7 @@ export function AutonomousOptimizerPanel({
                   </div>
                   <div className="rounded-lg border border-white/10 bg-black/20 p-4">
                     <div className="text-xs uppercase tracking-[0.2em] text-nofx-text-muted mb-3">
-                      Proposed Prompt Patch
+                      {pickText('Proposed Prompt Patch', 'Vorgeschlagener Prompt-Patch')}
                     </div>
                     <pre className="text-xs whitespace-pre-wrap break-words text-nofx-text-muted">
                       {prettyJSON(selectedRunDetail.prompt_patch)}
@@ -3930,7 +4972,7 @@ export function AutonomousOptimizerPanel({
                 <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
                   <div className="rounded-lg border border-white/10 bg-black/20 p-4">
                     <div className="text-xs uppercase tracking-[0.2em] text-nofx-text-muted mb-3">
-                      Validation Payload
+                      {pickText('Validation Payload', 'Validierungs-Payload')}
                     </div>
                     <pre className="text-xs whitespace-pre-wrap break-words text-nofx-text-muted">
                       {prettyJSON(selectedRunDetail.validation)}
@@ -3938,7 +4980,7 @@ export function AutonomousOptimizerPanel({
                   </div>
                   <div className="rounded-lg border border-white/10 bg-black/20 p-4">
                     <div className="text-xs uppercase tracking-[0.2em] text-nofx-text-muted mb-3">
-                      Metadata Payload
+                      {pickText('Metadata Payload', 'Metadaten-Payload')}
                     </div>
                     <pre className="text-xs whitespace-pre-wrap break-words text-nofx-text-muted">
                       {prettyJSON(selectedRunDetail.metadata)}

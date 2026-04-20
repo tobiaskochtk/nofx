@@ -707,7 +707,7 @@ func (s *Server) handleGetActiveStrategy(c *gin.Context) {
 // handleGetDefaultStrategyConfig Get default strategy configuration template
 func (s *Server) handleGetDefaultStrategyConfig(c *gin.Context) {
 	// Get language from query parameter, default to "en"
-	lang := c.Query("lang")
+	lang := strings.ToLower(strings.TrimSpace(c.Query("lang")))
 	if lang != "zh" {
 		lang = "en"
 	}
@@ -953,8 +953,8 @@ func (s *Server) runRealAITest(userID, modelID, systemPrompt, userPrompt string)
 		return "", fmt.Errorf("AI model %s is not enabled", model.Name)
 	}
 
-	if model.APIKey == "" {
-		return "", fmt.Errorf("AI model %s is missing API Key", model.Name)
+	if !modelHasUsableCredentials(model) {
+		return "", fmt.Errorf("AI model %s is missing authentication configuration", model.Name)
 	}
 
 	// Create AI client via registry
@@ -973,6 +973,13 @@ func (s *Server) runRealAITest(userID, modelID, systemPrompt, userPrompt string)
 	default:
 		aiClient.SetAPIKey(apiKey, model.CustomAPIURL, model.CustomModelName)
 	}
+	mcp.SetCallerContext(aiClient, mcp.CallerContext{
+		CallerType: "api",
+		CallerID:   model.ID,
+		CallerName: model.Name,
+		UserID:     userID,
+		Component:  "strategy.run_real_ai_test",
+	})
 
 	// Call AI API
 	response, err := aiClient.CallWithMessages(systemPrompt, userPrompt)

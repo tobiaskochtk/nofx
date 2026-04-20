@@ -53,6 +53,12 @@ export function FAQContent({
     }
   }
 
+  const pickText = (copy: { zh: string; de: string; en: string }) => {
+    if (language === 'zh') return copy.zh
+    if (language === 'de') return copy.de
+    return copy.en
+  }
+
   return (
     <div className="space-y-12">
       {categories.map((category) => (
@@ -85,14 +91,14 @@ export function FAQContent({
                   {item.id === 'github-projects-tasks' ? (
                     <div className="space-y-3">
                       <div className="text-base">
-                        {language === 'zh' ? '链接：' : 'Links:'}{' '}
+                        {pickText({ zh: '链接：', de: 'Links:', en: 'Links:' })}{' '}
                         <a
                           href="https://github.com/orgs/NoFxAiOS/projects/3"
                           target="_blank"
                           rel="noreferrer"
                           style={{ color: '#F0B90B' }}
                         >
-                          {language === 'zh' ? '路线图' : 'Roadmap'}
+                          {pickText({ zh: '路线图', de: 'Roadmap', en: 'Roadmap' })}
                         </a>
                         {'  |  '}
                         <a
@@ -101,7 +107,7 @@ export function FAQContent({
                           rel="noreferrer"
                           style={{ color: '#F0B90B' }}
                         >
-                          {language === 'zh' ? '任务看板' : 'Task Dashboard'}
+                          {pickText({ zh: '任务看板', de: 'Task-Board', en: 'Task Dashboard' })}
                         </a>
                       </div>
                       <ol className="list-decimal pl-5 space-y-1 text-base">
@@ -156,6 +162,58 @@ export function FAQContent({
                               ），选择正确 PR 模板；必要时与{' '}
                               <code>upstream/dev</code>{' '}
                               同步（rebase）后继续推送。
+                            </li>
+                          </>
+                        ) : language === 'de' ? (
+                          <>
+                            <li>
+                              Öffne die Links oben und filtere nach Labels
+                              (good first issue / help wanted / frontend / backend).
+                            </li>
+                            <li>
+                              Öffne das Ticket und lies Beschreibung sowie
+                              Acceptance Criteria.
+                            </li>
+                            <li>
+                              Kommentiere mit "assign me" oder weise es dir selbst zu
+                              (falls erlaubt).
+                            </li>
+                            <li>Forke das Repository in deinen GitHub-Account.</li>
+                            <li>
+                              Synchronisiere den <code>dev</code>-Branch deines Forks mit upstream:
+                              <code className="ml-2">
+                                git remote add upstream
+                                https://github.com/NoFxAiOS/nofx.git
+                              </code>
+                              <br />
+                              <code>git fetch upstream</code>
+                              <br />
+                              <code>git checkout dev</code>
+                              <br />
+                              <code>git rebase upstream/dev</code>
+                              <br />
+                              <code>git push origin dev</code>
+                            </li>
+                            <li>
+                              Erstelle einen Feature-Branch aus dem <code>dev</code>-Branch deines Forks:
+                              <code className="ml-2">
+                                git checkout -b feat/your-topic
+                              </code>
+                            </li>
+                            <li>
+                              Pushe den Branch in deinen Fork:
+                              <code className="ml-2">
+                                git push origin feat/your-topic
+                              </code>
+                            </li>
+                            <li>
+                              Öffne einen PR: Base <code>NoFxAiOS/nofx:dev</code> ←
+                              Compare <code>dein-benutzername/nofx:feat/your-topic</code>.
+                            </li>
+                            <li>
+                              Verknüpfe im PR das Issue (z. B. <code className="ml-1">Closes #123</code>)
+                              und wähle die passende PR-Vorlage; rebase bei Bedarf auf
+                              <code>upstream/dev</code>.
                             </li>
                           </>
                         ) : (
@@ -247,6 +305,31 @@ export function FAQContent({
                             </a>
                             申请。
                           </div>
+                        ) : language === 'de' ? (
+                          <div className="text-sm">
+                            <strong style={{ color: '#F0B90B' }}>Hinweis:</strong>{' '}
+                            Für Beiträge gibt es Anreize, etwa Bounties, Badges,
+                            öffentliche Erwähnungen, priorisierte Reviews/Merges
+                            und Beta-Zugang. Bevorzuge Aufgaben mit dem
+                            <a
+                              href="https://github.com/NoFxAiOS/nofx/labels/bounty"
+                              target="_blank"
+                              rel="noreferrer"
+                              style={{ color: '#F0B90B' }}
+                            >
+                              bounty label
+                            </a>
+                            , oder reiche nach Abschluss einen
+                            <a
+                              href="https://github.com/NoFxAiOS/nofx/blob/dev/.github/ISSUE_TEMPLATE/bounty_claim.md"
+                              target="_blank"
+                              rel="noreferrer"
+                              style={{ color: '#F0B90B' }}
+                            >
+                              Bounty Claim
+                            </a>
+                            ein.
+                          </div>
                         ) : (
                           <div className="text-sm">
                             <strong style={{ color: '#F0B90B' }}>Note:</strong>{' '}
@@ -278,7 +361,7 @@ export function FAQContent({
                   ) : item.id === 'contribute-pr-guidelines' ? (
                     <div className="space-y-3">
                       <div className="text-base">
-                        {language === 'zh' ? '参考文档：' : 'References:'}{' '}
+                        {pickText({ zh: '参考文档：', de: 'Referenzen:', en: 'References:' })}{' '}
                         <a
                           href="https://github.com/NoFxAiOS/nofx/blob/dev/CONTRIBUTING.md"
                           target="_blank"
@@ -330,6 +413,43 @@ export function FAQContent({
                               保持与 <code>upstream/dev</code>{' '}
                               同步（rebase），确保 CI 通过；尽量保持 PR
                               小而聚焦。
+                            </li>
+                          </>
+                        ) : language === 'de' ? (
+                          <>
+                            <li>
+                              Erstelle nach dem Forken deinen Branch aus dem
+                              <code>dev</code>-Branch deines Forks; vermeide direkte Commits
+                              auf das Upstream-<code>main</code>.
+                            </li>
+                            <li>
+                              Benenne Branches als feat/…, fix/…, docs/…; Commit-Messages
+                              sollten den Conventional Commits folgen.
+                            </li>
+                            <li>
+                              Führe vor dem PR die Checks aus:
+                              <code className="ml-2">
+                                npm --prefix web run lint && npm --prefix web
+                                run build
+                              </code>
+                            </li>
+                            <li>
+                              Hänge bei UI-Änderungen Screenshots oder ein kurzes
+                              Video an.
+                            </li>
+                            <li>
+                              Wähle die passende PR-Vorlage
+                              (frontend/backend/docs/general).
+                            </li>
+                            <li>
+                              Verlinke das Issue im PR (z. B.
+                              <code className="ml-1">Closes #123</code>) und richte den
+                              PR gegen <code>NoFxAiOS/nofx:dev</code>.
+                            </li>
+                            <li>
+                              Rebase regelmäßig auf <code>upstream/dev</code>,
+                              stelle sicher, dass CI grün ist, und halte PRs
+                              möglichst klein und fokussiert.
                             </li>
                           </>
                         ) : (
@@ -395,6 +515,32 @@ export function FAQContent({
                               Bounty Claim 模板
                             </a>
                             提交申请。
+                          </div>
+                        ) : language === 'de' ? (
+                          <div className="text-sm">
+                            <strong className="text-nofx-gold">Hinweis:</strong>{' '}
+                            Für hochwertige Beiträge bieten wir Anreize wie
+                            Bounties, Badges, öffentliche Erwähnungen,
+                            priorisierte Reviews/Merges und Beta-Zugang.
+                            Achte auf Aufgaben mit dem
+                            <a
+                              href="https://github.com/NoFxAiOS/nofx/labels/bounty"
+                              target="_blank"
+                              rel="noreferrer"
+                              style={{ color: '#F0B90B' }}
+                            >
+                              bounty label
+                            </a>
+                            oder nutze die
+                            <a
+                              href="https://github.com/NoFxAiOS/nofx/blob/dev/.github/ISSUE_TEMPLATE/bounty_claim.md"
+                              target="_blank"
+                              rel="noreferrer"
+                              style={{ color: '#F0B90B' }}
+                            >
+                              Bounty-Claim-Vorlage
+                            </a>
+                            für deinen Antrag.
                           </div>
                         ) : (
                           <div className="text-sm">

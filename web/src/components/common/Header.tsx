@@ -1,5 +1,6 @@
 import { useLanguage } from '../../contexts/LanguageContext'
 import { t } from '../../i18n/translations'
+import { LANGUAGE_OPTIONS } from '../../i18n/locale'
 import { Container } from './Container'
 
 interface HeaderProps {
@@ -35,39 +36,20 @@ export function Header({ simple = false }: HeaderProps) {
             className="flex gap-1 rounded p-1"
             style={{ background: '#1E2329' }}
           >
-            <button
-              onClick={() => setLanguage('zh')}
-              className="px-3 py-1.5 rounded text-xs font-semibold transition-all"
-              style={
-                language === 'zh'
-                  ? { background: '#F0B90B', color: '#000' }
-                  : { background: 'transparent', color: '#848E9C' }
-              }
-            >
-              中文
-            </button>
-            <button
-              onClick={() => setLanguage('en')}
-              className="px-3 py-1.5 rounded text-xs font-semibold transition-all"
-              style={
-                language === 'en'
-                  ? { background: '#F0B90B', color: '#000' }
-                  : { background: 'transparent', color: '#848E9C' }
-              }
-            >
-              EN
-            </button>
-            <button
-              onClick={() => setLanguage('id')}
-              className="px-3 py-1.5 rounded text-xs font-semibold transition-all"
-              style={
-                language === 'id'
-                  ? { background: '#F0B90B', color: '#000' }
-                  : { background: 'transparent', color: '#848E9C' }
-              }
-            >
-              ID
-            </button>
+            {LANGUAGE_OPTIONS.map((option) => (
+              <button
+                key={option.code}
+                onClick={() => setLanguage(option.code)}
+                className="px-3 py-1.5 rounded text-xs font-semibold transition-all"
+                style={
+                  language === option.code
+                    ? { background: '#F0B90B', color: '#000' }
+                    : { background: 'transparent', color: '#848E9C' }
+                }
+              >
+                {option.code === 'zh' ? option.label : option.shortLabel}
+              </button>
+            ))}
           </div>
         </div>
       </Container>

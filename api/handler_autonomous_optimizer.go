@@ -1168,7 +1168,7 @@ func (s *Server) resolveAutonomousOptimizerDefaultModels(userID string) (*store.
 	var preferred []*store.AIModel
 	var fallback []*store.AIModel
 	for _, item := range models {
-		if item == nil || !item.Enabled || strings.TrimSpace(string(item.APIKey)) == "" {
+		if item == nil || !item.Enabled || !modelHasUsableCredentials(item) {
 			continue
 		}
 		if strings.EqualFold(strings.TrimSpace(item.Provider), "openai") {

@@ -142,6 +142,25 @@ func TestClient_ParseMCPResponse_EmptyContent(t *testing.T) {
 	}
 }
 
+func TestClient_ParseMCPResponseFull_ToolCalls(t *testing.T) {
+	client := NewClient().(*Client)
+	body := []byte(`{"choices":[{"message":{"content":"","tool_calls":[{"id":"call_1","type":"function","function":{"name":"run_diff","arguments":"{\"path\":\"main.go\"}"}}]}}]}`)
+
+	resp, err := client.ParseMCPResponseFull(body)
+	if err != nil {
+		t.Fatalf("ParseMCPResponseFull() error = %v", err)
+	}
+	if resp == nil {
+		t.Fatal("response should not be nil")
+	}
+	if len(resp.ToolCalls) != 1 {
+		t.Fatalf("len(resp.ToolCalls) = %d, want 1", len(resp.ToolCalls))
+	}
+	if resp.ToolCalls[0].Function.Name != "run_diff" {
+		t.Fatalf("tool call name = %q, want run_diff", resp.ToolCalls[0].Function.Name)
+	}
+}
+
 func TestClient_CallWithMessages_HTTPError(t *testing.T) {
 	mockHTTP := NewMockHTTPClient()
 	mockHTTP.SetErrorResponse(500, "Internal Server Error")
@@ -284,6 +303,20 @@ func TestClient_BuildMCPRequestBody(t *testing.T) {
 	}
 }
 
+func TestClient_BuildMCPRequestBody_CodexUsesMaxCompletionTokens(t *testing.T) {
+	client := NewClient(WithProvider(ProviderCodex), WithModel("gpt-5.2-codex"))
+	c := client.(*Client)
+
+	body := c.BuildMCPRequestBody("system prompt", "user prompt")
+
+	if _, ok := body["max_completion_tokens"]; !ok {
+		t.Fatalf("body should include max_completion_tokens for codex provider")
+	}
+	if _, ok := body["max_tokens"]; ok {
+		t.Fatalf("body should not include max_tokens for codex provider")
+	}
+}
+
 func TestClient_BuildUrl(t *testing.T) {
 	tests := []struct {
 		name       string
@@ -404,6 +437,9 @@ func TestClient_SetTimeout(t *testing.T) {
 	c := client.(*Client)
 	if c.HTTPClient.Timeout != newTimeout {
 		t.Errorf("expected timeout %v, got %v", newTimeout, c.HTTPClient.Timeout)
+	}
+	if c.Cfg == nil || c.Cfg.Timeout != newTimeout {
+		t.Errorf("expected config timeout %v, got %#v", newTimeout, c.Cfg)
 	}
 }
 

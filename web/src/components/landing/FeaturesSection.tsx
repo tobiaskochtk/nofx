@@ -7,54 +7,119 @@ interface FeaturesSectionProps {
 }
 
 export default function FeaturesSection({ language }: FeaturesSectionProps) {
+  const pickText = (values: Record<Language, string>) => values[language]
+
   const features = [
     {
       icon: Brain,
-      title: language === 'zh' ? 'AI 策略编排引擎' : 'AI Strategy Orchestration',
-      desc: language === 'zh'
-        ? '支持 DeepSeek、GPT、Claude、Qwen 等多种大模型，自定义 Prompt 策略，AI 自主分析市场并做出交易决策'
-        : 'Support DeepSeek, GPT, Claude, Qwen and more. Custom prompts, AI autonomously analyzes markets and makes trading decisions',
+      title: pickText({
+        zh: 'AI 策略编排引擎',
+        en: 'AI Strategy Orchestration',
+        de: 'AI-Strategie-Orchestrierung',
+        id: 'AI Strategy Orchestration',
+      }),
+      desc: pickText({
+        zh: '支持 DeepSeek、GPT、Claude、Qwen 等多种大模型，自定义 Prompt 策略，AI 自主分析市场并做出交易决策',
+        en: 'Support DeepSeek, GPT, Claude, Qwen and more. Custom prompts, AI autonomously analyzes markets and makes trading decisions',
+        de: 'Unterstuetzt DeepSeek, GPT, Claude, Qwen und weitere Modelle. Eigene Prompts, autonome Marktanalyse und KI-gestuetzte Handelsentscheidungen.',
+        id: 'Support DeepSeek, GPT, Claude, Qwen and more. Custom prompts, AI autonomously analyzes markets and makes trading decisions',
+      }),
       highlight: true,
-      badge: language === 'zh' ? '核心能力' : 'Core',
+      badge: pickText({
+        zh: '核心能力',
+        en: 'Core',
+        de: 'Kern',
+        id: 'Core',
+      }),
     },
     {
       icon: Swords,
-      title: language === 'zh' ? '多 AI 竞技场' : 'Multi-AI Arena',
-      desc: language === 'zh'
-        ? '多个 AI 交易员同台竞技，实时 PnL 排行榜，自动优胜劣汰，让最强策略脱颖而出'
-        : 'Multiple AI traders compete in real-time, live PnL leaderboard, automatic survival of the fittest',
+      title: pickText({
+        zh: '多 AI 竞技场',
+        en: 'Multi-AI Arena',
+        de: 'Multi-AI-Arena',
+        id: 'Multi-AI Arena',
+      }),
+      desc: pickText({
+        zh: '多个 AI 交易员同台竞技，实时 PnL 排行榜，自动优胜劣汰，让最强策略脱颖而出',
+        en: 'Multiple AI traders compete in real-time, live PnL leaderboard, automatic survival of the fittest',
+        de: 'Mehrere AI-Trader treten in Echtzeit gegeneinander an, mit Live-PnL-Rangliste und automatischer Selektion der staerksten Strategien.',
+        id: 'Multiple AI traders compete in real-time, live PnL leaderboard, automatic survival of the fittest',
+      }),
       highlight: true,
-      badge: language === 'zh' ? '独创' : 'Unique',
+      badge: pickText({
+        zh: '独创',
+        en: 'Unique',
+        de: 'Einzigartig',
+        id: 'Unique',
+      }),
     },
     {
       icon: LineChart,
-      title: language === 'zh' ? '专业量化数据' : 'Pro Quant Data',
-      desc: language === 'zh'
-        ? '集成 K线、技术指标、市场深度、资金费率、持仓量等专业量化数据，为 AI 决策提供全面信息'
-        : 'Integrated candlesticks, indicators, order book, funding rates, open interest - comprehensive data for AI decisions',
+      title: pickText({
+        zh: '专业量化数据',
+        en: 'Pro Quant Data',
+        de: 'Professionelle Quant-Daten',
+        id: 'Pro Quant Data',
+      }),
+      desc: pickText({
+        zh: '集成 K线、技术指标、市场深度、资金费率、持仓量等专业量化数据，为 AI 决策提供全面信息',
+        en: 'Integrated candlesticks, indicators, order book, funding rates, open interest - comprehensive data for AI decisions',
+        de: 'Integrierte Candles, Indikatoren, Orderbuch, Funding-Rates und Open Interest liefern umfassende Daten fuer KI-Entscheidungen.',
+        id: 'Integrated candlesticks, indicators, order book, funding rates, open interest - comprehensive data for AI decisions',
+      }),
       highlight: true,
-      badge: language === 'zh' ? '专业' : 'Pro',
+      badge: pickText({
+        zh: '专业',
+        en: 'Pro',
+        de: 'Pro',
+        id: 'Pro',
+      }),
     },
     {
       icon: Blocks,
-      title: language === 'zh' ? '多交易所支持' : 'Multi-Exchange Support',
-      desc: language === 'zh'
-        ? 'Binance、OKX、Bybit、Hyperliquid、Aster DEX，一套系统管理多个交易所'
-        : 'Binance, OKX, Bybit, Hyperliquid, Aster DEX - one system, multiple exchanges',
+      title: pickText({
+        zh: '多交易所支持',
+        en: 'Multi-Exchange Support',
+        de: 'Multi-Exchange-Support',
+        id: 'Multi-Exchange Support',
+      }),
+      desc: pickText({
+        zh: 'Binance、OKX、Bybit、Hyperliquid、Aster DEX，一套系统管理多个交易所',
+        en: 'Binance, OKX, Bybit, Hyperliquid, Aster DEX - one system, multiple exchanges',
+        de: 'Binance, OKX, Bybit, Hyperliquid und Aster DEX in einem System verwalten.',
+        id: 'Binance, OKX, Bybit, Hyperliquid, Aster DEX - one system, multiple exchanges',
+      }),
     },
     {
       icon: BarChart3,
-      title: language === 'zh' ? '实时可视化看板' : 'Real-time Dashboard',
-      desc: language === 'zh'
-        ? '交易监控、收益曲线、持仓分析、AI 决策日志，一目了然'
-        : 'Trade monitoring, PnL curves, position analysis, AI decision logs at a glance',
+      title: pickText({
+        zh: '实时可视化看板',
+        en: 'Real-time Dashboard',
+        de: 'Echtzeit-Dashboard',
+        id: 'Real-time Dashboard',
+      }),
+      desc: pickText({
+        zh: '交易监控、收益曲线、持仓分析、AI 决策日志，一目了然',
+        en: 'Trade monitoring, PnL curves, position analysis, AI decision logs at a glance',
+        de: 'Trading-Monitoring, PnL-Verlaeufe, Positionsanalyse und AI-Entscheidungslogs auf einen Blick.',
+        id: 'Trade monitoring, PnL curves, position analysis, AI decision logs at a glance',
+      }),
     },
     {
       icon: Shield,
-      title: language === 'zh' ? '开源自托管' : 'Open Source & Self-Hosted',
-      desc: language === 'zh'
-        ? '代码完全开源可审计，数据存储在本地，API 密钥不经过第三方'
-        : 'Fully open source, data stored locally, API keys never leave your server',
+      title: pickText({
+        zh: '开源自托管',
+        en: 'Open Source & Self-Hosted',
+        de: 'Open Source und Self-Hosted',
+        id: 'Open Source & Self-Hosted',
+      }),
+      desc: pickText({
+        zh: '代码完全开源可审计，数据存储在本地，API 密钥不经过第三方',
+        en: 'Fully open source, data stored locally, API keys never leave your server',
+        de: 'Vollstaendig Open Source, lokal gespeicherte Daten und API-Schluessel, die den eigenen Server nicht verlassen.',
+        id: 'Fully open source, data stored locally, API keys never leave your server',
+      }),
     },
   ]
 
@@ -81,9 +146,12 @@ export default function FeaturesSection({ language }: FeaturesSectionProps) {
             {t('whyChooseNofx', language)}
           </h2>
           <p className="text-lg max-w-2xl mx-auto" style={{ color: '#848E9C' }}>
-            {language === 'zh'
-              ? '不只是交易机器人，而是完整的 AI 交易操作系统'
-              : 'Not just a trading bot, but a complete AI trading operating system'}
+            {pickText({
+              zh: '不只是交易机器人，而是完整的 AI 交易操作系统',
+              en: 'Not just a trading bot, but a complete AI trading operating system',
+              de: 'Nicht nur ein Trading-Bot, sondern ein vollstaendiges KI-Handelsbetriebssystem',
+              id: 'Not just a trading bot, but a complete AI trading operating system',
+            })}
           </p>
         </motion.div>
 
@@ -170,10 +238,10 @@ export default function FeaturesSection({ language }: FeaturesSectionProps) {
           viewport={{ once: true }}
         >
           {[
-            { value: '10+', label: language === 'zh' ? 'AI 模型支持' : 'AI Models' },
-            { value: '5+', label: language === 'zh' ? '交易所集成' : 'Exchanges' },
-            { value: '24/7', label: language === 'zh' ? '自动交易' : 'Auto Trading' },
-            { value: '100%', label: language === 'zh' ? '开源免费' : 'Open Source' },
+            { value: '10+', label: pickText({ zh: 'AI 模型支持', en: 'AI Models', de: 'AI-Modelle', id: 'AI Models' }) },
+            { value: '5+', label: pickText({ zh: '交易所集成', en: 'Exchanges', de: 'Boersen', id: 'Exchanges' }) },
+            { value: '24/7', label: pickText({ zh: '自动交易', en: 'Auto Trading', de: 'Auto-Trading', id: 'Auto Trading' }) },
+            { value: '100%', label: pickText({ zh: '开源免费', en: 'Open Source', de: 'Open Source', id: 'Open Source' }) },
           ].map((stat) => (
             <div
               key={stat.label}

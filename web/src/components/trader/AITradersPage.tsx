@@ -44,6 +44,11 @@ export function AITradersPage({ onTraderSelect }: AITradersPageProps) {
   const { language } = useLanguage()
   const { user, token } = useAuth()
   const navigate = useNavigate()
+  const pickText = (copy: { zh: string; de: string; en: string }) => {
+    if (language === 'zh') return copy.zh
+    if (language === 'de') return copy.de
+    return copy.en
+  }
   const [showCreateModal, setShowCreateModal] = useState(false)
   const [showEditModal, setShowEditModal] = useState(false)
   const [showModelModal, setShowModelModal] = useState(false)
@@ -72,88 +77,233 @@ export function AITradersPage({ onTraderSelect }: AITradersPageProps) {
     params: Record<string, string> = {},
     fallback: string
   ) => {
-    const traderName = params.trader_name || params.traderName || 'this trader'
-    const modelName = params.model_name || params.modelName || 'selected model'
-    const exchangeName = params.exchange_name || params.exchangeName || 'selected exchange account'
+    const traderName =
+      params.trader_name ||
+      params.traderName ||
+      pickText({
+        zh: '该机器人',
+        de: 'dieser Trader',
+        en: 'this trader',
+      })
+    const modelName =
+      params.model_name ||
+      params.modelName ||
+      pickText({
+        zh: '所选模型',
+        de: 'ausgewähltes Modell',
+        en: 'selected model',
+      })
+    const exchangeName =
+      params.exchange_name ||
+      params.exchangeName ||
+      pickText({
+        zh: '所选交易所账户',
+        de: 'ausgewähltes Börsenkonto',
+        en: 'selected exchange account',
+      })
     const reason = localizeTraderReason(params.reason_key, params.reason || fallback)
     const symbol = params.symbol || ''
 
-    const zh = language === 'zh'
-
     switch (errorKey) {
       case 'trader.create.invalid_request':
-        return zh ? '提交的信息不完整，或者格式不正确。请检查后重新提交。' : 'The submitted information is incomplete or invalid. Please review it and try again.'
+        return pickText({
+          zh: '提交的信息不完整，或者格式不正确。请检查后重新提交。',
+          de: 'Die übermittelten Angaben sind unvollständig oder ungültig. Bitte prüfe sie und versuche es erneut.',
+          en: 'The submitted information is incomplete or invalid. Please review it and try again.',
+        })
       case 'trader.create.invalid_btc_eth_leverage':
-        return zh ? 'BTC/ETH 杠杆倍数需要在 1 到 50 倍之间。' : 'BTC/ETH leverage must be between 1x and 50x.'
+        return pickText({
+          zh: 'BTC/ETH 杠杆倍数需要在 1 到 50 倍之间。',
+          de: 'Der Hebel für BTC/ETH muss zwischen 1x und 50x liegen.',
+          en: 'BTC/ETH leverage must be between 1x and 50x.',
+        })
       case 'trader.create.invalid_altcoin_leverage':
-        return zh ? '山寨币杠杆倍数需要在 1 到 20 倍之间。' : 'Altcoin leverage must be between 1x and 20x.'
+        return pickText({
+          zh: '山寨币杠杆倍数需要在 1 到 20 倍之间。',
+          de: 'Der Hebel für Altcoins muss zwischen 1x und 20x liegen.',
+          en: 'Altcoin leverage must be between 1x and 20x.',
+        })
       case 'trader.create.invalid_symbol':
-        return zh ? `交易对 ${symbol} 的格式不正确，目前只支持以 USDT 结尾的合约交易对。` : `Trading pair ${symbol} is invalid. Only perpetual pairs ending with USDT are supported.`
+        return pickText({
+          zh: `交易对 ${symbol} 的格式不正确，目前只支持以 USDT 结尾的合约交易对。`,
+          de: `Das Handelspaar ${symbol} ist ungültig. Unterstützt werden nur Perpetual-Paare, die auf USDT enden.`,
+          en: `Trading pair ${symbol} is invalid. Only perpetual pairs ending with USDT are supported.`,
+        })
       case 'trader.create.model_not_found':
-        return zh ? '还没有找到你选择的 AI 模型。请先到「设置 > 模型配置」添加并启用一个可用模型。' : 'The selected AI model was not found. Please add and enable a valid model in Settings > Model Config.'
+        return pickText({
+          zh: '还没有找到你选择的 AI 模型。请先到「设置 > 模型配置」添加并启用一个可用模型。',
+          de: 'Das ausgewählte KI-Modell wurde nicht gefunden. Bitte füge unter Einstellungen > Modellkonfiguration ein gültiges Modell hinzu und aktiviere es.',
+          en: 'The selected AI model was not found. Please add and enable a valid model in Settings > Model Config.',
+        })
       case 'trader.create.model_disabled':
-        return zh ? `AI 模型「${modelName}」目前还没有启用。请先启用它再创建机器人。` : `AI model "${modelName}" is currently disabled. Please enable it before creating a trader.`
+        return pickText({
+          zh: `AI 模型「${modelName}」目前还没有启用。请先启用它再创建机器人。`,
+          de: `Das KI-Modell "${modelName}" ist derzeit deaktiviert. Bitte aktiviere es, bevor du einen Trader erstellst.`,
+          en: `AI model "${modelName}" is currently disabled. Please enable it before creating a trader.`,
+        })
       case 'trader.create.model_missing_credentials':
-        return zh ? `AI 模型「${modelName}」缺少 API Key 或支付凭证。请先补全模型配置。` : `AI model "${modelName}" is missing API credentials or payment setup. Please complete the model configuration first.`
+        return pickText({
+          zh: `AI 模型「${modelName}」缺少 API Key 或支付凭证。请先补全模型配置。`,
+          de: `Beim KI-Modell "${modelName}" fehlen API-Zugangsdaten oder Zahlungsinformationen. Bitte vervollständige zuerst die Modellkonfiguration.`,
+          en: `AI model "${modelName}" is missing API credentials or payment setup. Please complete the model configuration first.`,
+        })
       case 'trader.create.strategy_required':
-        return zh ? '你还没有选择交易策略。请先选择一个策略，再继续创建机器人。' : 'No trading strategy is selected yet. Please choose a strategy before creating a trader.'
+        return pickText({
+          zh: '你还没有选择交易策略。请先选择一个策略，再继续创建机器人。',
+          de: 'Es wurde noch keine Handelsstrategie ausgewählt. Bitte wähle zuerst eine Strategie aus, bevor du den Trader erstellst.',
+          en: 'No trading strategy is selected yet. Please choose a strategy before creating a trader.',
+        })
       case 'trader.create.strategy_not_found':
-        return zh ? '你选择的策略不存在，或者已经被删除了。请重新选择一个可用策略。' : 'The selected strategy no longer exists. Please choose another available strategy.'
+        return pickText({
+          zh: '你选择的策略不存在，或者已经被删除了。请重新选择一个可用策略。',
+          de: 'Die ausgewählte Strategie existiert nicht mehr oder wurde gelöscht. Bitte wähle eine andere verfügbare Strategie.',
+          en: 'The selected strategy no longer exists. Please choose another available strategy.',
+        })
       case 'trader.create.exchange_not_found':
-        return zh ? '还没有找到你选择的交易所账户。请先到「设置 > 交易所配置」添加一个可用账户。' : 'The selected exchange account was not found. Please add an exchange account in Settings > Exchange Config.'
+        return pickText({
+          zh: '还没有找到你选择的交易所账户。请先到「设置 > 交易所配置」添加一个可用账户。',
+          de: 'Das ausgewählte Börsenkonto wurde nicht gefunden. Bitte füge unter Einstellungen > Börsenkonfiguration ein Konto hinzu.',
+          en: 'The selected exchange account was not found. Please add an exchange account in Settings > Exchange Config.',
+        })
       case 'trader.create.exchange_disabled':
-        return zh ? `交易所账户「${exchangeName}」目前处于未启用状态。请先启用它。` : `Exchange account "${exchangeName}" is currently disabled. Please enable it first.`
+        return pickText({
+          zh: `交易所账户「${exchangeName}」目前处于未启用状态。请先启用它。`,
+          de: `Das Börsenkonto "${exchangeName}" ist derzeit deaktiviert. Bitte aktiviere es zuerst.`,
+          en: `Exchange account "${exchangeName}" is currently disabled. Please enable it first.`,
+        })
       case 'trader.create.exchange_missing_fields':
-        return zh ? `交易所账户「${exchangeName}」的配置还不完整。请先补全必填信息。` : `Exchange account "${exchangeName}" is incomplete. Please fill in the required fields first.`
+        return pickText({
+          zh: `交易所账户「${exchangeName}」的配置还不完整。请先补全必填信息。`,
+          de: `Das Börsenkonto "${exchangeName}" ist unvollständig konfiguriert. Bitte ergänze zuerst die Pflichtfelder.`,
+          en: `Exchange account "${exchangeName}" is incomplete. Please fill in the required fields first.`,
+        })
       case 'trader.create.exchange_unsupported':
-        return zh ? `交易所账户「${exchangeName}」当前类型暂不支持机器人创建。` : `Exchange account "${exchangeName}" uses a type that is not supported for trader creation.`
+        return pickText({
+          zh: `交易所账户「${exchangeName}」当前类型暂不支持机器人创建。`,
+          de: `Der Typ des Börsenkontos "${exchangeName}" wird für die Trader-Erstellung derzeit nicht unterstützt.`,
+          en: `Exchange account "${exchangeName}" uses a type that is not supported for trader creation.`,
+        })
       case 'trader.create.exchange_probe_failed':
-        return zh ? `交易所账户「${exchangeName}」没有通过初始化校验，原因是：${reason}` : `Exchange account "${exchangeName}" failed initialization checks: ${reason}`
+        return pickText({
+          zh: `交易所账户「${exchangeName}」没有通过初始化校验，原因是：${reason}`,
+          de: `Das Börsenkonto "${exchangeName}" hat die Initialisierungsprüfung nicht bestanden: ${reason}`,
+          en: `Exchange account "${exchangeName}" failed initialization checks: ${reason}`,
+        })
       case 'trader.start.strategy_missing':
-        return zh ? `机器人「${traderName}」缺少有效的交易策略配置。` : `Trader "${traderName}" does not have a valid strategy configuration.`
+        return pickText({
+          zh: `机器人「${traderName}」缺少有效的交易策略配置。`,
+          de: `Der Trader "${traderName}" hat keine gültige Strategiekonfiguration.`,
+          en: `Trader "${traderName}" does not have a valid strategy configuration.`,
+        })
       case 'trader.start.model_not_found':
-        return zh ? `机器人「${traderName}」关联的 AI 模型不存在。请检查模型配置。` : `Trader "${traderName}" references an AI model that no longer exists. Please check the model configuration.`
+        return pickText({
+          zh: `机器人「${traderName}」关联的 AI 模型不存在。请检查模型配置。`,
+          de: `Der Trader "${traderName}" verweist auf ein KI-Modell, das nicht mehr existiert. Bitte prüfe die Modellkonfiguration.`,
+          en: `Trader "${traderName}" references an AI model that no longer exists. Please check the model configuration.`,
+        })
       case 'trader.start.model_disabled':
-        return zh ? `机器人「${traderName}」关联的 AI 模型「${modelName}」目前还没有启用。` : `Trader "${traderName}" uses AI model "${modelName}", which is currently disabled.`
+        return pickText({
+          zh: `机器人「${traderName}」关联的 AI 模型「${modelName}」目前还没有启用。`,
+          de: `Der Trader "${traderName}" verwendet das KI-Modell "${modelName}", das derzeit deaktiviert ist.`,
+          en: `Trader "${traderName}" uses AI model "${modelName}", which is currently disabled.`,
+        })
       case 'trader.start.exchange_not_found':
-        return zh ? `机器人「${traderName}」关联的交易所账户不存在。请检查交易所配置。` : `Trader "${traderName}" references an exchange account that no longer exists. Please check the exchange configuration.`
+        return pickText({
+          zh: `机器人「${traderName}」关联的交易所账户不存在。请检查交易所配置。`,
+          de: `Der Trader "${traderName}" verweist auf ein Börsenkonto, das nicht mehr existiert. Bitte prüfe die Börsenkonfiguration.`,
+          en: `Trader "${traderName}" references an exchange account that no longer exists. Please check the exchange configuration.`,
+        })
       case 'trader.start.exchange_disabled':
-        return zh ? `机器人「${traderName}」关联的交易所账户「${exchangeName}」目前还没有启用。` : `Trader "${traderName}" uses exchange account "${exchangeName}", which is currently disabled.`
+        return pickText({
+          zh: `机器人「${traderName}」关联的交易所账户「${exchangeName}」目前还没有启用。`,
+          de: `Der Trader "${traderName}" verwendet das Börsenkonto "${exchangeName}", das derzeit deaktiviert ist.`,
+          en: `Trader "${traderName}" uses exchange account "${exchangeName}", which is currently disabled.`,
+        })
       case 'trader.start.setup_invalid':
       case 'trader.start.load_failed':
-        return zh ? `机器人「${traderName}」暂时还不能启动，原因是：${reason}` : `Trader "${traderName}" cannot be started yet because ${reason}`
+        return pickText({
+          zh: `机器人「${traderName}」暂时还不能启动，原因是：${reason}`,
+          de: `Der Trader "${traderName}" kann derzeit nicht gestartet werden, weil ${reason}`,
+          en: `Trader "${traderName}" cannot be started yet because ${reason}`,
+        })
       default:
         return fallback
     }
   }
   const localizeTraderReason = (reasonKey?: string, fallback?: string) => {
-    const zh = language === 'zh'
-
     switch (reasonKey) {
       case 'trader.reason.strategy_config_invalid':
-        return zh ? '当前策略配置内容已损坏，系统暂时无法解析' : 'the current strategy configuration is corrupted and cannot be parsed'
+        return pickText({
+          zh: '当前策略配置内容已损坏，系统暂时无法解析',
+          de: 'die aktuelle Strategiekonfiguration beschädigt ist und nicht gelesen werden kann',
+          en: 'the current strategy configuration is corrupted and cannot be parsed',
+        })
       case 'trader.reason.strategy_missing':
-        return zh ? '当前机器人缺少有效的交易策略配置' : 'the trader is missing a valid strategy configuration'
+        return pickText({
+          zh: '当前机器人缺少有效的交易策略配置',
+          de: 'dem Trader eine gültige Strategiekonfiguration fehlt',
+          en: 'the trader is missing a valid strategy configuration',
+        })
       case 'trader.reason.private_key_invalid':
-        return zh ? '私钥格式不正确，系统无法识别' : 'the private key format is invalid and cannot be recognized'
+        return pickText({
+          zh: '私钥格式不正确，系统无法识别',
+          de: 'das Format des privaten Schlüssels ungültig ist und nicht erkannt werden kann',
+          en: 'the private key format is invalid and cannot be recognized',
+        })
       case 'trader.reason.hyperliquid_init_failed':
-        return zh ? 'Hyperliquid 账户初始化失败，请确认私钥、主钱包地址和 Agent Wallet 配置是否正确' : 'Hyperliquid account initialization failed. Please verify the private key, main wallet address, and Agent Wallet configuration'
+        return pickText({
+          zh: 'Hyperliquid 账户初始化失败，请确认私钥、主钱包地址和 Agent Wallet 配置是否正确',
+          de: 'die Initialisierung des Hyperliquid-Kontos fehlgeschlagen ist. Bitte prüfe privaten Schlüssel, Haupt-Wallet-Adresse und Agent-Wallet-Konfiguration',
+          en: 'Hyperliquid account initialization failed. Please verify the private key, main wallet address, and Agent Wallet configuration',
+        })
       case 'trader.reason.aster_init_failed':
-        return zh ? 'Aster 账户初始化失败，请确认 Aster User、Signer 和私钥是否正确' : 'Aster account initialization failed. Please verify the Aster User, Signer, and private key'
+        return pickText({
+          zh: 'Aster 账户初始化失败，请确认 Aster User、Signer 和私钥是否正确',
+          de: 'die Initialisierung des Aster-Kontos fehlgeschlagen ist. Bitte prüfe Aster User, Signer und privaten Schlüssel',
+          en: 'Aster account initialization failed. Please verify the Aster User, Signer, and private key',
+        })
       case 'trader.reason.exchange_meta_unavailable':
-        return zh ? '系统暂时无法从交易所读取账户元信息' : 'the system could not read account metadata from the exchange'
+        return pickText({
+          zh: '系统暂时无法从交易所读取账户元信息',
+          de: 'das System die Kontometadaten derzeit nicht von der Börse lesen kann',
+          en: 'the system could not read account metadata from the exchange',
+        })
       case 'trader.reason.hyperliquid_agent_balance_too_high':
-        return zh ? 'Hyperliquid Agent Wallet 余额过高，不符合当前安全要求' : 'the Hyperliquid Agent Wallet balance is too high for the current safety requirements'
+        return pickText({
+          zh: 'Hyperliquid Agent Wallet 余额过高，不符合当前安全要求',
+          de: 'das Guthaben des Hyperliquid Agent Wallets für die aktuellen Sicherheitsanforderungen zu hoch ist',
+          en: 'the Hyperliquid Agent Wallet balance is too high for the current safety requirements',
+        })
       case 'trader.reason.exchange_account_init_failed':
-        return zh ? '交易所账户初始化失败，请确认钱包地址和 API Key 是否匹配' : 'exchange account initialization failed. Please verify that the wallet address and API key match'
+        return pickText({
+          zh: '交易所账户初始化失败，请确认钱包地址和 API Key 是否匹配',
+          de: 'die Initialisierung des Börsenkontos fehlgeschlagen ist. Bitte prüfe, ob Wallet-Adresse und API-Key zusammenpassen',
+          en: 'exchange account initialization failed. Please verify that the wallet address and API key match',
+        })
       case 'trader.reason.exchange_unsupported':
-        return zh ? '当前交易所类型暂不支持机器人初始化' : 'the selected exchange type is not currently supported for trader initialization'
+        return pickText({
+          zh: '当前交易所类型暂不支持机器人初始化',
+          de: 'der ausgewählte Börsentyp derzeit für die Trader-Initialisierung nicht unterstützt wird',
+          en: 'the selected exchange type is not currently supported for trader initialization',
+        })
       case 'trader.reason.exchange_balance_unavailable':
-        return zh ? '系统暂时无法从交易所读取账户余额' : 'the system could not read the account balance from the exchange'
+        return pickText({
+          zh: '系统暂时无法从交易所读取账户余额',
+          de: 'das System den Kontostand derzeit nicht von der Börse lesen kann',
+          en: 'the system could not read the account balance from the exchange',
+        })
       case 'trader.reason.exchange_service_unreachable':
-        return zh ? '系统暂时无法连接交易所服务' : 'the system could not reach the exchange service right now'
+        return pickText({
+          zh: '系统暂时无法连接交易所服务',
+          de: 'das System den Börsendienst derzeit nicht erreichen kann',
+          en: 'the system could not reach the exchange service right now',
+        })
       default:
-        return fallback || (zh ? '系统返回了一个未知错误' : 'an unknown error was returned by the system')
+        return fallback || pickText({
+          zh: '系统返回了一个未知错误',
+          de: 'ein unbekannter Fehler vom System zurückgegeben wurde',
+          en: 'an unknown error was returned by the system',
+        })
     }
   }
   const normalizeActionableDescription = (error: unknown, message: string, title: string) => {
@@ -210,6 +360,11 @@ export function AITradersPage({ onTraderSelect }: AITradersPageProps) {
         ? `当前 Claw402 钱包余额为 ${balance.toFixed(6)} USDC，AI 调用无法执行。请先为这个钱包充值，再重新点击启动。`
         : `当前 Claw402 钱包余额仅剩 ${balance.toFixed(6)} USDC，虽然还能尝试启动，但很快可能因为 AI 调用费用不足而停止。建议先补一点 USDC。`
     }
+    if (language === 'de') {
+      return blocking
+        ? `Dein Claw402-Wallet hat nur ${balance.toFixed(6)} USDC. KI-Aufrufe können mit einem Nullsaldo nicht ausgeführt werden. Bitte lade das Wallet auf und starte danach erneut.`
+        : `Dein Claw402-Wallet hat nur noch ${balance.toFixed(6)} USDC. Du kannst den Start noch versuchen, aber KI-Aufrufe können bald wegen zu wenig Guthaben stoppen.`
+    }
 
     return blocking
       ? `Your Claw402 wallet balance is ${balance.toFixed(6)} USDC. AI calls cannot run with zero balance. Please top up this wallet before starting again.`
@@ -230,14 +385,22 @@ export function AITradersPage({ onTraderSelect }: AITradersPageProps) {
     if (balance <= 0) {
       return {
         blocking: true,
-        title: language === 'zh' ? '启动失败' : 'Start failed',
+        title: pickText({
+          zh: '启动失败',
+          de: 'Start fehlgeschlagen',
+          en: 'Start failed',
+        }),
         description: getClaw402BalanceMessage(balance, true),
       }
     }
     if (balance < 1) {
       return {
         blocking: false,
-        title: language === 'zh' ? 'Claw402 余额偏低' : 'Low Claw402 balance',
+        title: pickText({
+          zh: 'Claw402 余额偏低',
+          de: 'Claw402-Guthaben niedrig',
+          en: 'Low Claw402 balance',
+        }),
         description: getClaw402BalanceMessage(balance, false),
       }
     }
@@ -376,9 +539,13 @@ export function AITradersPage({ onTraderSelect }: AITradersPageProps) {
               ? enabledClaw402Balance <= 0
                 ? 'Claw402 钱包余额为 0'
                 : 'Claw402 钱包余额偏低'
-              : enabledClaw402Balance <= 0
-                ? 'Claw402 wallet balance is zero'
-                : 'Claw402 wallet balance is low',
+              : language === 'de'
+                ? enabledClaw402Balance <= 0
+                  ? 'Claw402-Wallet hat 0 Guthaben'
+                  : 'Claw402-Wallet-Guthaben niedrig'
+                : enabledClaw402Balance <= 0
+                  ? 'Claw402 wallet balance is zero'
+                  : 'Claw402 wallet balance is low',
           description: getClaw402BalanceMessage(enabledClaw402Balance, enabledClaw402Balance <= 0),
         }
       : null
@@ -872,16 +1039,20 @@ export function AITradersPage({ onTraderSelect }: AITradersPageProps) {
       const refreshedModels = await api.getModelConfigs()
       setAllModels(refreshedModels)
       toast.success(
-        language === 'zh'
-          ? 'Claw402 已默认配置为 DeepSeek'
-          : 'Claw402 is configured with DeepSeek by default'
+        pickText({
+          zh: 'Claw402 已默认配置为 DeepSeek',
+          de: 'Claw402 wurde standardmäßig mit DeepSeek konfiguriert',
+          en: 'Claw402 is configured with DeepSeek by default',
+        })
       )
     } catch (error) {
       console.error('Failed to quick setup claw402:', error)
       toast.error(
-        language === 'zh'
-          ? '一键配置 Claw402 失败'
-          : 'Failed to quick setup Claw402'
+        pickText({
+          zh: '一键配置 Claw402 失败',
+          de: 'Claw402-Schnellsetup fehlgeschlagen',
+          en: 'Failed to quick setup Claw402',
+        })
       )
     } finally {
       setQuickSetupLoading(false)
@@ -909,12 +1080,20 @@ export function AITradersPage({ onTraderSelect }: AITradersPageProps) {
               <h1 className="text-2xl md:text-3xl font-bold font-mono tracking-tight text-white flex items-center gap-3 uppercase">
                 {t('aiTraders', language)}
                 <span className="text-xs font-mono font-normal px-2 py-0.5 rounded bg-nofx-gold/10 text-nofx-gold border border-nofx-gold/20 tracking-wider">
-                  {traders?.length || 0} ACTIVE_NODES
+                  {traders?.length || 0} {pickText({
+                    zh: '活跃节点',
+                    de: 'TRADER_GESAMT',
+                    en: 'ACTIVE_NODES',
+                  })}
                 </span>
               </h1>
               <p className="text-xs font-mono text-zinc-500 uppercase tracking-widest mt-1 ml-1 flex items-center gap-2">
                 <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse"></span>
-                SYSTEM_READY
+                {pickText({
+                  zh: '系统就绪',
+                  de: 'SYSTEM_BEREIT',
+                  en: 'SYSTEM_READY',
+                })}
               </p>
             </div>
           </div>
@@ -926,7 +1105,7 @@ export function AITradersPage({ onTraderSelect }: AITradersPageProps) {
             >
               <div className="flex items-center gap-2">
                 <Plus className="w-3 h-3" />
-                <span>MODELS_CONFIG</span>
+                <span>{pickText({ zh: '模型配置', de: 'MODELLE', en: 'MODELS_CONFIG' })}</span>
               </div>
             </button>
 
@@ -936,7 +1115,7 @@ export function AITradersPage({ onTraderSelect }: AITradersPageProps) {
             >
               <div className="flex items-center gap-2">
                 <Plus className="w-3 h-3" />
-                <span>EXCHANGE_KEYS</span>
+                <span>{pickText({ zh: '交易所配置', de: 'BÖRSEN', en: 'EXCHANGE_KEYS' })}</span>
               </div>
             </button>
 
@@ -946,7 +1125,7 @@ export function AITradersPage({ onTraderSelect }: AITradersPageProps) {
             >
               <div className="flex items-center gap-2">
                 <MessageCircle className="w-3 h-3" />
-                <span>TELEGRAM_BOT</span>
+                <span>{pickText({ zh: 'Telegram 机器人', de: 'TELEGRAM', en: 'TELEGRAM_BOT' })}</span>
               </div>
             </button>
 
@@ -1021,7 +1200,11 @@ export function AITradersPage({ onTraderSelect }: AITradersPageProps) {
                 background: 'rgba(0, 0, 0, 0.18)',
               }}
             >
-              {language === 'zh' ? '查看 AI 钱包' : 'Open AI wallet'}
+              {pickText({
+                zh: '查看 AI 钱包',
+                de: 'KI-Wallet öffnen',
+                en: 'Open AI wallet',
+              })}
             </button>
           </div>
         ) : null}

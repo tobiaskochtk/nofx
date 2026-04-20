@@ -3,6 +3,10 @@ import { useNavigate } from 'react-router-dom'
 import { motion, AnimatePresence } from 'framer-motion'
 import { Menu, X, ChevronDown, Settings } from 'lucide-react'
 import { t, type Language } from '../../i18n/translations'
+import {
+  LANGUAGE_OPTIONS,
+  getLanguageOption,
+} from '../../i18n/locale'
 import { OFFICIAL_LINKS } from '../../constants/branding'
 import {
   getPostAuthPath,
@@ -59,6 +63,65 @@ export default function HeaderBar({
   )
   const dropdownRef = useRef<HTMLDivElement>(null)
   const userDropdownRef = useRef<HTMLDivElement>(null)
+
+  const pickLabel = (labels: Record<Language, string>) => labels[language]
+  const selectedLanguage = getLanguageOption(language)
+  const settingsLabel = pickLabel({
+    zh: '设置',
+    en: 'Settings',
+    de: 'Einstellungen',
+    id: 'Pengaturan',
+  })
+  const switchToAdvancedLabel = pickLabel({
+    zh: '切到老手模式',
+    en: 'Switch to Advanced',
+    de: 'Zu Advanced wechseln',
+    id: 'Beralih ke Advanced',
+  })
+  const switchToBeginnerLabel = pickLabel({
+    zh: '切到新手模式',
+    en: 'Switch to Beginner',
+    de: 'Zu Beginner wechseln',
+    id: 'Zu Beginner wechseln',
+  })
+  const headerNavLabels = {
+    data: pickLabel({
+      zh: '数据',
+      en: 'Data',
+      de: 'Daten',
+      id: 'Data',
+    }),
+    strategyMarket: pickLabel({
+      zh: '策略市场',
+      en: 'Market',
+      de: 'Markt',
+      id: 'Pasar',
+    }),
+    dealReview: pickLabel({
+      zh: '复盘',
+      en: 'Review',
+      de: 'Review',
+      id: 'Review',
+    }),
+    patternLab: pickLabel({
+      zh: 'Pattern Lab',
+      en: 'Pattern Lab',
+      de: 'Pattern Lab',
+      id: 'Pattern Lab',
+    }),
+    optimizer: pickLabel({
+      zh: '优化器',
+      en: 'Optimizer',
+      de: 'Optimierer',
+      id: 'Optimizer',
+    }),
+    memory: pickLabel({
+      zh: '语义记忆',
+      en: 'Memory',
+      de: 'Memory',
+      id: 'Memory',
+    }),
+  }
 
   const navigateInApp = (path: string) => {
     navigate(path)
@@ -124,67 +187,37 @@ export default function HeaderBar({
                 {
                   page: 'data',
                   path: '/data',
-                  label:
-                    language === 'zh'
-                      ? '数据'
-                      : language === 'id'
-                        ? 'Data'
-                        : 'Data',
+                  label: headerNavLabels.data,
                   requiresAuth: false,
                 },
                 {
                   page: 'strategy-market',
                   path: '/strategy-market',
-                  label:
-                    language === 'zh'
-                      ? '策略市场'
-                      : language === 'id'
-                        ? 'Pasar'
-                        : 'Market',
+                  label: headerNavLabels.strategyMarket,
                   requiresAuth: true,
                 },
                 {
                   page: 'deal-review',
                   path: '/deal-review',
-                  label:
-                    language === 'zh'
-                      ? '复盘'
-                      : language === 'id'
-                        ? 'Review'
-                        : 'Review',
+                  label: headerNavLabels.dealReview,
                   requiresAuth: true,
                 },
                 {
                   page: 'pattern-lab',
                   path: '/pattern-lab',
-                  label:
-                    language === 'zh'
-                      ? 'Pattern Lab'
-                      : language === 'id'
-                        ? 'Pattern Lab'
-                        : 'Pattern Lab',
+                  label: headerNavLabels.patternLab,
                   requiresAuth: true,
                 },
                 {
                   page: 'optimizer',
                   path: '/optimizer',
-                  label:
-                    language === 'zh'
-                      ? '优化器'
-                      : language === 'id'
-                        ? 'Optimizer'
-                        : 'Optimizer',
+                  label: headerNavLabels.optimizer,
                   requiresAuth: true,
                 },
                 {
                   page: 'memory',
                   path: '/memory',
-                  label:
-                    language === 'zh'
-                      ? '语义记忆'
-                      : language === 'id'
-                        ? 'Memory'
-                        : 'Memory',
+                  label: headerNavLabels.memory,
                   requiresAuth: true,
                 },
                 {
@@ -344,7 +377,7 @@ export default function HeaderBar({
                         className="w-full flex items-center gap-2 px-3 py-2 text-sm transition-colors hover:bg-white/5 text-nofx-text-muted hover:text-white"
                       >
                         <Settings className="w-3.5 h-3.5" />
-                        Settings
+                        {settingsLabel}
                       </button>
                       <button
                         onClick={() =>
@@ -356,12 +389,8 @@ export default function HeaderBar({
                       >
                         <Settings className="w-3.5 h-3.5" />
                         {userMode === 'beginner'
-                          ? language === 'zh'
-                            ? '切到老手模式'
-                            : 'Switch to Advanced'
-                          : language === 'zh'
-                            ? '切到新手模式'
-                            : 'Switch to Beginner'}
+                          ? switchToAdvancedLabel
+                          : switchToBeginnerLabel}
                       </button>
                       {onLogout && (
                         <button
@@ -397,49 +426,39 @@ export default function HeaderBar({
             <div className="relative" ref={dropdownRef}>
               <button
                 onClick={() => setLanguageDropdownOpen(!languageDropdownOpen)}
-                className="flex items-center gap-2 px-3 py-2 rounded transition-colors text-nofx-text-muted hover:bg-white/5"
+                className="flex items-center gap-2 px-3 py-2 rounded transition-colors text-nofx-text-muted hover:bg-white/5 border border-white/5"
+                title={pickLabel({
+                  zh: '切换语言',
+                  en: 'Switch language',
+                  de: 'Sprache wechseln',
+                  id: 'Ganti bahasa',
+                })}
               >
-                <span className="text-lg">
-                  {language === 'zh' ? '🇨🇳' : language === 'id' ? '🇮🇩' : '🇺🇸'}
+                <span className="text-lg">{selectedLanguage.flag}</span>
+                <span className="text-xs font-semibold tracking-wide text-white">
+                  {selectedLanguage.code === 'zh'
+                    ? selectedLanguage.label
+                    : selectedLanguage.shortLabel}
                 </span>
                 <ChevronDown className="w-4 h-4" />
               </button>
 
               {languageDropdownOpen && (
-                <div className="absolute right-0 top-full mt-2 w-32 rounded-lg shadow-lg overflow-hidden z-50 bg-nofx-bg-lighter border border-nofx-gold/20">
-                  <button
-                    onClick={() => {
-                      onLanguageChange?.('zh')
-                      setLanguageDropdownOpen(false)
-                    }}
-                    className={`w-full flex items-center gap-2 px-3 py-2 transition-colors text-nofx-text-muted hover:text-white
-                      ${language === 'zh' ? 'bg-nofx-gold/10' : 'hover:bg-white/5'}`}
-                  >
-                    <span className="text-base">🇨🇳</span>
-                    <span className="text-sm">中文</span>
-                  </button>
-                  <button
-                    onClick={() => {
-                      onLanguageChange?.('en')
-                      setLanguageDropdownOpen(false)
-                    }}
-                    className={`w-full flex items-center gap-2 px-3 py-2 transition-colors text-nofx-text-muted hover:text-white
-                      ${language === 'en' ? 'bg-nofx-gold/10' : 'hover:bg-white/5'}`}
-                  >
-                    <span className="text-base">🇺🇸</span>
-                    <span className="text-sm">English</span>
-                  </button>
-                  <button
-                    onClick={() => {
-                      onLanguageChange?.('id')
-                      setLanguageDropdownOpen(false)
-                    }}
-                    className={`w-full flex items-center gap-2 px-3 py-2 transition-colors text-nofx-text-muted hover:text-white
-                      ${language === 'id' ? 'bg-nofx-gold/10' : 'hover:bg-white/5'}`}
-                  >
-                    <span className="text-base">🇮🇩</span>
-                    <span className="text-sm">Bahasa</span>
-                  </button>
+                <div className="absolute right-0 top-full mt-2 w-40 rounded-lg shadow-lg overflow-hidden z-50 bg-nofx-bg-lighter border border-nofx-gold/20">
+                  {LANGUAGE_OPTIONS.map((option) => (
+                    <button
+                      key={option.code}
+                      onClick={() => {
+                        onLanguageChange?.(option.code)
+                        setLanguageDropdownOpen(false)
+                      }}
+                      className={`w-full flex items-center gap-2 px-3 py-2 transition-colors text-nofx-text-muted hover:text-white
+                      ${language === option.code ? 'bg-nofx-gold/10' : 'hover:bg-white/5'}`}
+                    >
+                      <span className="text-base">{option.flag}</span>
+                      <span className="text-sm">{option.label}</span>
+                    </button>
+                  ))}
                 </div>
               )}
             </div>
@@ -489,67 +508,37 @@ export default function HeaderBar({
                     {
                       page: 'data',
                       path: '/data',
-                      label:
-                        language === 'zh'
-                          ? '数据'
-                          : language === 'id'
-                            ? 'Data'
-                            : 'Data',
+                      label: headerNavLabels.data,
                       requiresAuth: false,
                     },
                     {
                       page: 'strategy-market',
                       path: '/strategy-market',
-                      label:
-                        language === 'zh'
-                          ? '策略市场'
-                          : language === 'id'
-                            ? 'Pasar'
-                            : 'Market',
+                      label: headerNavLabels.strategyMarket,
                       requiresAuth: true,
                     },
                     {
                       page: 'deal-review',
                       path: '/deal-review',
-                      label:
-                        language === 'zh'
-                          ? '复盘'
-                          : language === 'id'
-                            ? 'Review'
-                            : 'Review',
+                      label: headerNavLabels.dealReview,
                       requiresAuth: true,
                     },
                     {
                       page: 'pattern-lab',
                       path: '/pattern-lab',
-                      label:
-                        language === 'zh'
-                          ? 'Pattern Lab'
-                          : language === 'id'
-                            ? 'Pattern Lab'
-                            : 'Pattern Lab',
+                      label: headerNavLabels.patternLab,
                       requiresAuth: true,
                     },
                     {
                       page: 'optimizer',
                       path: '/optimizer',
-                      label:
-                        language === 'zh'
-                          ? '优化器'
-                          : language === 'id'
-                            ? 'Optimizer'
-                            : 'Optimizer',
+                      label: headerNavLabels.optimizer,
                       requiresAuth: true,
                     },
                     {
                       page: 'memory',
                       path: '/memory',
-                      label:
-                        language === 'zh'
-                          ? '语义记忆'
-                          : language === 'id'
-                            ? 'Memory'
-                            : 'Memory',
+                      label: headerNavLabels.memory,
                       requiresAuth: true,
                     },
                     {
@@ -692,21 +681,22 @@ export default function HeaderBar({
                 {/* Account / Lang */}
                 <div className="grid grid-cols-2 gap-4">
                   {/* Lang Switcher */}
-                  <div className="flex bg-zinc-900 rounded-lg p-1 border border-zinc-800">
-                    {['zh', 'en', 'id'].map((lang) => (
+                  <div className="grid grid-cols-2 gap-1 bg-zinc-900 rounded-lg p-1 border border-zinc-800">
+                    {LANGUAGE_OPTIONS.map((option) => (
                       <button
-                        key={lang}
+                        key={option.code}
                         onClick={() => {
-                          onLanguageChange?.(lang as Language)
+                          onLanguageChange?.(option.code)
                           setMobileMenuOpen(false)
                         }}
-                        className={`flex-1 py-3 text-sm font-bold rounded-md transition-colors ${
-                          language === lang
+                        className={`flex items-center justify-center gap-1.5 py-3 text-xs font-bold rounded-md transition-colors ${
+                          language === option.code
                             ? 'bg-zinc-800 text-white shadow-sm'
                             : 'text-zinc-500'
                         }`}
                       >
-                        {lang === 'zh' ? 'CN' : lang === 'id' ? 'ID' : 'EN'}
+                        <span>{option.flag}</span>
+                        <span>{option.code === 'zh' ? option.label : option.shortLabel}</span>
                       </button>
                     ))}
                   </div>

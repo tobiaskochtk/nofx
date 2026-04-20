@@ -57,10 +57,20 @@ export function ConfigStatusGrid({
   onToggleExchangeAddress,
   onCopyAddress,
 }: ConfigStatusGridProps) {
+  const pickText = (copy: { zh: string; de: string; en: string }) => {
+    if (language === 'zh') return copy.zh
+    if (language === 'de') return copy.de
+    return copy.en
+  }
+
   const getExchangeStateMeta = (state: ExchangeAccountState | undefined) => {
     if (!state) {
       return {
-        label: language === 'zh' ? '未检查' : 'NOT CHECKED',
+        label: pickText({
+          zh: '未检查',
+          de: 'NICHT GEPRÜFT',
+          en: 'NOT CHECKED',
+        }),
         className: 'text-zinc-400 border-zinc-700/80 bg-zinc-900/40',
       }
     }
@@ -73,27 +83,47 @@ export function ConfigStatusGrid({
         }
       case 'disabled':
         return {
-          label: language === 'zh' ? '已禁用' : 'DISABLED',
+          label: pickText({
+            zh: '已禁用',
+            de: 'DEAKTIVIERT',
+            en: 'DISABLED',
+          }),
           className: 'text-zinc-400 border-zinc-700/80 bg-zinc-900/40',
         }
       case 'missing_credentials':
         return {
-          label: language === 'zh' ? '配置不完整' : 'INCOMPLETE',
+          label: pickText({
+            zh: '配置不完整',
+            de: 'UNVOLLSTÄNDIG',
+            en: 'INCOMPLETE',
+          }),
           className: 'text-amber-300 border-amber-500/20 bg-amber-500/10',
         }
       case 'invalid_credentials':
         return {
-          label: language === 'zh' ? '密钥无效' : 'INVALID KEYS',
+          label: pickText({
+            zh: '密钥无效',
+            de: 'UNGÜLTIGE SCHLÜSSEL',
+            en: 'INVALID KEYS',
+          }),
           className: 'text-rose-300 border-rose-500/20 bg-rose-500/10',
         }
       case 'permission_denied':
         return {
-          label: language === 'zh' ? '无余额权限' : 'NO PERMISSION',
+          label: pickText({
+            zh: '无余额权限',
+            de: 'KEINE BERECHTIGUNG',
+            en: 'NO PERMISSION',
+          }),
           className: 'text-orange-300 border-orange-500/20 bg-orange-500/10',
         }
       default:
         return {
-          label: language === 'zh' ? '暂时无法获取' : 'UNAVAILABLE',
+          label: pickText({
+            zh: '暂时无法获取',
+            de: 'DERZEIT NICHT VERFÜGBAR',
+            en: 'UNAVAILABLE',
+          }),
           className: 'text-zinc-300 border-zinc-600/60 bg-zinc-800/50',
         }
     }
@@ -161,11 +191,19 @@ export function ConfigStatusGrid({
                       ? 'bg-green-500/10 border-green-500/30 text-green-400'
                       : 'bg-yellow-500/10 border-yellow-500/30 text-yellow-400'
                       }`}>
-                      {usageInfo.runningCount}/{usageInfo.totalCount} ACTIVE
+                      {usageInfo.runningCount}/{usageInfo.totalCount} {pickText({
+                        zh: '活跃',
+                        de: 'AKTIV',
+                        en: 'ACTIVE',
+                      })}
                     </span>
                   ) : (
                     <span className="text-[10px] font-mono text-zinc-600 uppercase tracking-wider">
-                      {language === 'zh' ? '就绪' : 'STANDBY'}
+                      {pickText({
+                        zh: '就绪',
+                        de: 'BEREIT',
+                        en: 'STANDBY',
+                      })}
                     </span>
                   )}
                 </div>
@@ -216,7 +254,11 @@ export function ConfigStatusGrid({
                     <div className="font-mono text-sm text-zinc-200 group-hover:text-nofx-gold transition-colors truncate">
                       {exchange.exchange_type?.toUpperCase() || getShortName(exchange.name)}
                       <span className="text-[10px] text-zinc-500 ml-2 border border-zinc-800 px-1 rounded">
-                        {exchange.account_name || 'DEFAULT'}
+                        {exchange.account_name || pickText({
+                          zh: '默认',
+                          de: 'STANDARD',
+                          en: 'DEFAULT',
+                        })}
                       </span>
                     </div>
                     <div className="text-[10px] text-zinc-500 font-mono flex items-center gap-2">
@@ -225,7 +267,11 @@ export function ConfigStatusGrid({
                     <div className="mt-1 flex flex-wrap items-center gap-2 text-[10px] font-mono">
                       <span className={`rounded border px-1.5 py-0.5 ${stateMeta.className}`}>
                         {isExchangeAccountStatesLoading && !state
-                          ? (language === 'zh' ? '检查中...' : 'CHECKING...')
+                          ? pickText({
+                            zh: '检查中...',
+                            de: 'PRÜFE...',
+                            en: 'CHECKING...',
+                          })
                           : stateMeta.label}
                       </span>
                       {state?.status !== 'ok' && state?.error_message ? (
@@ -271,11 +317,19 @@ export function ConfigStatusGrid({
                       ? 'bg-green-500/10 border-green-500/30 text-green-400'
                       : 'bg-yellow-500/10 border-yellow-500/30 text-yellow-400'
                       }`}>
-                      {usageInfo.runningCount}/{usageInfo.totalCount} ACTIVE
+                      {usageInfo.runningCount}/{usageInfo.totalCount} {pickText({
+                        zh: '活跃',
+                        de: 'AKTIV',
+                        en: 'ACTIVE',
+                      })}
                     </span>
                   ) : (
                     <span className="text-[10px] font-mono text-zinc-600 uppercase tracking-wider">
-                      {language === 'zh' ? '就绪' : 'STANDBY'}
+                      {pickText({
+                        zh: '就绪',
+                        de: 'BEREIT',
+                        en: 'STANDBY',
+                      })}
                     </span>
                   )}
                 </div>

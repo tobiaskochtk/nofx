@@ -4,7 +4,10 @@ import { api } from '../lib/api'
 import { DeepVoidBackground } from '../components/common/DeepVoidBackground'
 import { NofxSelect } from '../components/ui/select'
 import { DealReviewTimelineChart } from '../components/trader/DealReviewTimelineChart'
+import { useLanguage } from '../contexts/LanguageContext'
+import { toDateTimeLocale } from '../i18n/locale'
 import { confirmToast, notify } from '../lib/notify'
+import type { Language } from '../i18n/translations'
 import type {
   AIModel,
   DealReviewAIScanCompareResponse,
@@ -46,6 +49,10 @@ interface DealReviewPageProps {
   onTraderSelect: (traderId: string) => void
 }
 
+function pickDealReviewText(language: Language, en: string, de: string): string {
+  return language === 'de' ? de : en
+}
+
 function formatMoney(value: number): string {
   return `${value >= 0 ? '+' : ''}${value.toFixed(2)}`
 }
@@ -54,14 +61,19 @@ function formatPct(value: number): string {
   return `${value >= 0 ? '+' : ''}${value.toFixed(2)}%`
 }
 
-function formatSemanticSimilarityScore(value?: number): string {
+function formatSemanticSimilarityScore(
+  value?: number,
+  language: Language = 'en'
+): string {
   if (typeof value !== 'number' || Number.isNaN(value)) return '-'
-  return `${Math.round(Math.max(0, Math.min(1, value)) * 100)}% match`
+  return `${Math.round(Math.max(0, Math.min(1, value)) * 100)}% ${pickDealReviewText(language, 'match', 'Treffer')}`
 }
 
-function formatValidationScope(value: string): string {
+function formatValidationScope(value: string, language: Language = 'en'): string {
   if (!value) return '-'
-  if (value === 'recent') return 'Recent live-like'
+  if (value === 'recent') {
+    return pickDealReviewText(language, 'Recent live-like', 'Aktuell live-aehnlich')
+  }
   return value.charAt(0).toUpperCase() + value.slice(1)
 }
 
@@ -86,43 +98,52 @@ function formatValidationMetricValue(
   }
 }
 
-function formatValidationCheckSummary(check: DealReviewValidationCheck): string {
+function formatValidationCheckSummary(
+  check: DealReviewValidationCheck,
+  language: Language = 'en'
+): string {
   if (check.comparator === 'delta_gte') {
-    return `delta ${formatValidationMetricValue(check.metric, check.delta)} | floor ${formatValidationMetricValue(check.metric, check.threshold)}`
+    return `${pickDealReviewText(language, 'delta', 'Delta')} ${formatValidationMetricValue(check.metric, check.delta)} | ${pickDealReviewText(language, 'floor', 'Untergrenze')} ${formatValidationMetricValue(check.metric, check.threshold)}`
   }
   if (check.comparator === 'lte') {
-    return `actual ${formatValidationMetricValue(check.metric, check.actual)} | ceiling ${formatValidationMetricValue(check.metric, check.threshold)}`
+    return `${pickDealReviewText(language, 'actual', 'Ist')} ${formatValidationMetricValue(check.metric, check.actual)} | ${pickDealReviewText(language, 'ceiling', 'Obergrenze')} ${formatValidationMetricValue(check.metric, check.threshold)}`
   }
-  return `actual ${formatValidationMetricValue(check.metric, check.actual)} | floor ${formatValidationMetricValue(check.metric, check.threshold)}`
+  return `${pickDealReviewText(language, 'actual', 'Ist')} ${formatValidationMetricValue(check.metric, check.actual)} | ${pickDealReviewText(language, 'floor', 'Untergrenze')} ${formatValidationMetricValue(check.metric, check.threshold)}`
 }
 
-function formatSymbolBehaviorAction(value?: string): string {
+function formatSymbolBehaviorAction(
+  value?: string,
+  language: Language = 'en'
+): string {
   switch (value) {
     case 'penalize_setup':
-      return 'Penalize setup'
+      return pickDealReviewText(language, 'Penalize setup', 'Setup bestrafen')
     case 'favor_setup':
-      return 'Favor setup'
+      return pickDealReviewText(language, 'Favor setup', 'Setup bevorzugen')
     case 'observe':
-      return 'Observe'
+      return pickDealReviewText(language, 'Observe', 'Beobachten')
     default:
       return value || '-'
   }
 }
 
-function formatSymbolBehaviorValidationLabel(value?: string): string {
+function formatSymbolBehaviorValidationLabel(
+  value?: string,
+  language: Language = 'en'
+): string {
   switch (value) {
     case 'confirmed':
-      return 'Confirmed'
+      return pickDealReviewText(language, 'Confirmed', 'Bestaetigt')
     case 'candidate':
-      return 'Candidate'
+      return pickDealReviewText(language, 'Candidate', 'Kandidat')
     case 'insufficient_evidence':
-      return 'Need evidence'
+      return pickDealReviewText(language, 'Need evidence', 'Mehr Belege noetig')
     case 'drifting':
-      return 'Drifting'
+      return pickDealReviewText(language, 'Drifting', 'Abdriftend')
     case 'false_positive':
-      return 'False positive'
+      return pickDealReviewText(language, 'False positive', 'Falsch positiv')
     case 'false_negative_risk':
-      return 'False-negative risk'
+      return pickDealReviewText(language, 'False-negative risk', 'Falsch-negativ-Risiko')
     default:
       return value || '-'
   }
@@ -156,12 +177,15 @@ function symbolBehaviorToneClasses(value?: string): string {
   }
 }
 
-function formatLearnedPatternClass(value?: string): string {
+function formatLearnedPatternClass(
+  value?: string,
+  language: Language = 'en'
+): string {
   switch (value) {
     case 'positive_edge':
-      return 'Positive edge'
+      return pickDealReviewText(language, 'Positive edge', 'Positiver Vorteil')
     case 'negative_edge':
-      return 'Anti-edge'
+      return pickDealReviewText(language, 'Anti-edge', 'Anti-Muster')
     default:
       return value || '-'
   }
@@ -178,22 +202,25 @@ function learnedPatternClassClasses(value?: string): string {
   }
 }
 
-function formatLearnedPatternValidationLabel(value?: string): string {
+function formatLearnedPatternValidationLabel(
+  value?: string,
+  language: Language = 'en'
+): string {
   switch (value) {
     case 'confirmed':
-      return 'Confirmed'
+      return pickDealReviewText(language, 'Confirmed', 'Bestaetigt')
     case 'candidate':
-      return 'Candidate'
+      return pickDealReviewText(language, 'Candidate', 'Kandidat')
     case 'insufficient_evidence':
-      return 'Need evidence'
+      return pickDealReviewText(language, 'Need evidence', 'Mehr Belege noetig')
     case 'false_positive':
-      return 'False positive'
+      return pickDealReviewText(language, 'False positive', 'Falsch positiv')
     case 'reverse_risk':
-      return 'Reverse risk'
+      return pickDealReviewText(language, 'Reverse risk', 'Umkehrrisiko')
     case 'drifting':
-      return 'Drifting'
+      return pickDealReviewText(language, 'Drifting', 'Abdriftend')
     case 'expired':
-      return 'Expired'
+      return pickDealReviewText(language, 'Expired', 'Abgelaufen')
     default:
       return value || '-'
   }
@@ -218,30 +245,79 @@ function learnedPatternValidationClasses(value?: string): string {
   }
 }
 
-function formatLearnedPatternUse(value?: string): string {
+function formatLearnedPatternUse(
+  value?: string,
+  language: Language = 'en'
+): string {
   switch (value) {
     case 'review_hint':
-      return 'Review hint'
+      return pickDealReviewText(language, 'Review hint', 'Review-Hinweis')
     case 'prompt_hint':
-      return 'Prompt hint'
+      return pickDealReviewText(language, 'Prompt hint', 'Prompt-Hinweis')
     case 'config_candidate':
-      return 'Config candidate'
+      return pickDealReviewText(language, 'Config candidate', 'Konfig-Kandidat')
+    case 'monitoring_rule':
+      return pickDealReviewText(language, 'Monitoring rule', 'Monitoring-Regel')
     case 'monitor_only':
-      return 'Monitor only'
+      return pickDealReviewText(language, 'Monitor only', 'Nur beobachten')
     case 'expired_do_not_use':
-      return 'Do not use'
+      return pickDealReviewText(language, 'Do not use', 'Nicht verwenden')
     default:
       return value || '-'
   }
 }
 
-function formatLearnedPatternScope(pattern?: DealReviewLearnedPattern | null): string {
+function formatLearnedPatternLifecycleStatus(
+  value?: string,
+  language: Language = 'en'
+): string {
+  switch (value) {
+    case 'active':
+      return pickDealReviewText(language, 'Active', 'Aktiv')
+    case 'degrading':
+      return pickDealReviewText(language, 'Degrading', 'Verschlechternd')
+    case 'rollback_watch':
+      return pickDealReviewText(language, 'Rollback watch', 'Rollback-Watch')
+    case 'expired':
+      return pickDealReviewText(language, 'Expired', 'Abgelaufen')
+    default:
+      return value || '-'
+  }
+}
+
+function learnedPatternLifecycleClasses(value?: string): string {
+  switch (value) {
+    case 'active':
+      return 'border-emerald-400/20 bg-emerald-500/10 text-emerald-200'
+    case 'degrading':
+      return 'border-amber-400/20 bg-amber-500/10 text-amber-200'
+    case 'rollback_watch':
+      return 'border-rose-400/20 bg-rose-500/10 text-rose-200'
+    case 'expired':
+      return 'border-white/10 bg-white/5 text-nofx-text-muted'
+    default:
+      return 'border-white/10 bg-white/5 text-white'
+  }
+}
+
+function formatLearnedPatternScope(
+  pattern?: DealReviewLearnedPattern | null,
+  language: Language = 'en'
+): string {
   if (!pattern) return '-'
+  if (pattern.scope_type === 'global') {
+    return pickDealReviewText(language, 'Global', 'Global')
+  }
+  if (pattern.scope_type === 'regime_local') {
+    return pattern.regime_signature
+      ? `${pickDealReviewText(language, 'Regime', 'Regime')} ${pattern.regime_signature}`
+      : pickDealReviewText(language, 'Regime-local', 'Regime-lokal')
+  }
   if (pattern.scope_type === 'symbol' && pattern.symbol) {
-    return `${pattern.symbol} override`
+    return pickDealReviewText(language, `${pattern.symbol} override`, `${pattern.symbol} Override`)
   }
   if (pattern.scope_type === 'trader_local') {
-    return 'Trader-local'
+    return pickDealReviewText(language, 'Trader-local', 'Trader-lokal')
   }
   return pattern.scope_type || '-'
 }
@@ -266,27 +342,33 @@ function symbolBehaviorTabClasses(value: string, active: boolean): string {
   }
 }
 
-function formatSymbolBehaviorLiveGuardMode(value?: string): string {
+function formatSymbolBehaviorLiveGuardMode(
+  value?: string,
+  language: Language = 'en'
+): string {
   switch (value) {
     case 'hard_block':
-      return 'Hard block'
+      return pickDealReviewText(language, 'Hard block', 'Harter Block')
     case 'monitor':
-      return 'Monitor'
+      return pickDealReviewText(language, 'Monitor', 'Beobachten')
     default:
       return value || '-'
   }
 }
 
-function formatSymbolBehaviorLiveGuardEffect(value?: string): string {
+function formatSymbolBehaviorLiveGuardEffect(
+  value?: string,
+  language: Language = 'en'
+): string {
   switch (value) {
     case 'hard_blocked':
-      return 'Hard blocked'
+      return pickDealReviewText(language, 'Hard blocked', 'Hart blockiert')
     case 'monitor_only':
-      return 'Monitor only'
+      return pickDealReviewText(language, 'Monitor only', 'Nur beobachten')
     case 'matched_not_qualified':
-      return 'Matched, not qualified'
+      return pickDealReviewText(language, 'Matched, not qualified', 'Getroffen, nicht qualifiziert')
     case 'no_match':
-      return 'No match'
+      return pickDealReviewText(language, 'No match', 'Kein Treffer')
     default:
       return value || '-'
   }
@@ -307,41 +389,548 @@ function symbolBehaviorLiveGuardEffectClasses(value?: string): string {
   }
 }
 
-function formatTimestampLabel(value?: string): string {
+function formatLearnedPatternLiveGuardAttributionStatus(
+  value?: string,
+  language: Language = 'en'
+): string {
+  switch (value) {
+    case 'correctly_blocked':
+      return pickDealReviewText(language, 'Correctly blocked', 'Korrekt blockiert')
+    case 'overblocked':
+      return pickDealReviewText(language, 'Overblocked', 'Ueberblockiert')
+    case 'warning_confirmed':
+      return pickDealReviewText(language, 'Warning confirmed', 'Warnung bestaetigt')
+    case 'warning_not_confirmed':
+      return pickDealReviewText(language, 'Warning not confirmed', 'Warnung nicht bestaetigt')
+    case 'threshold_missed_loss':
+      return pickDealReviewText(language, 'Threshold missed loss', 'Schwellenwert verpasster Verlust')
+    case 'threshold_missed_profit':
+      return pickDealReviewText(language, 'Threshold missed profit', 'Schwellenwert verpasster Gewinn')
+    case 'followup_open':
+      return pickDealReviewText(language, 'Follow-up open', 'Follow-up offen')
+    case 'pending':
+      return pickDealReviewText(language, 'Pending', 'Ausstehend')
+    default:
+      return value || '-'
+  }
+}
+
+function learnedPatternLiveGuardAttributionClasses(value?: string): string {
+  switch (value) {
+    case 'correctly_blocked':
+    case 'warning_confirmed':
+      return 'border-emerald-400/20 bg-emerald-500/10 text-emerald-200'
+    case 'overblocked':
+    case 'warning_not_confirmed':
+    case 'threshold_missed_profit':
+      return 'border-rose-400/20 bg-rose-500/10 text-rose-200'
+    case 'threshold_missed_loss':
+      return 'border-amber-400/20 bg-amber-500/10 text-amber-200'
+    case 'followup_open':
+      return 'border-sky-400/20 bg-sky-500/10 text-sky-200'
+    case 'pending':
+      return 'border-white/10 bg-white/5 text-white'
+    default:
+      return 'border-white/10 bg-white/5 text-white'
+  }
+}
+
+function formatLearnedPatternRollupLabel(
+  value?: string,
+  language: Language = 'en'
+): string {
+  switch (value) {
+    case 'protective':
+      return pickDealReviewText(language, 'Protective', 'Schuetzend')
+    case 'overblocking':
+      return pickDealReviewText(language, 'Overblocking', 'Ueberblockierend')
+    case 'mixed':
+      return pickDealReviewText(language, 'Mixed', 'Gemischt')
+    case 'pending':
+      return pickDealReviewText(language, 'Pending', 'Ausstehend')
+    default:
+      return value || '-'
+  }
+}
+
+function learnedPatternRollupClasses(value?: string): string {
+  switch (value) {
+    case 'protective':
+      return 'border-emerald-400/20 bg-emerald-500/10 text-emerald-200'
+    case 'overblocking':
+      return 'border-rose-400/20 bg-rose-500/10 text-rose-200'
+    case 'mixed':
+      return 'border-amber-400/20 bg-amber-500/10 text-amber-200'
+    case 'pending':
+      return 'border-white/10 bg-white/5 text-white'
+    default:
+      return 'border-white/10 bg-white/5 text-white'
+  }
+}
+
+function formatLearnedPatternRollupTrendLabel(
+  value?: string,
+  language: Language = 'en'
+): string {
+  switch (value) {
+    case 'improving':
+      return pickDealReviewText(language, 'Improving', 'Verbessernd')
+    case 'stable':
+      return pickDealReviewText(language, 'Stable', 'Stabil')
+    case 'degrading':
+      return pickDealReviewText(language, 'Degrading', 'Verschlechternd')
+    case 'newly_overblocking':
+      return pickDealReviewText(language, 'Newly overblocking', 'Neu ueberblockierend')
+    case 'insufficient_evidence':
+      return pickDealReviewText(language, 'Need evidence', 'Mehr Belege noetig')
+    default:
+      return value || '-'
+  }
+}
+
+function learnedPatternRollupTrendClasses(value?: string): string {
+  switch (value) {
+    case 'improving':
+      return 'border-emerald-400/20 bg-emerald-500/10 text-emerald-200'
+    case 'stable':
+      return 'border-sky-400/20 bg-sky-500/10 text-sky-200'
+    case 'degrading':
+      return 'border-amber-400/20 bg-amber-500/10 text-amber-200'
+    case 'newly_overblocking':
+      return 'border-rose-400/20 bg-rose-500/10 text-rose-200'
+    case 'insufficient_evidence':
+      return 'border-white/10 bg-white/5 text-white'
+    default:
+      return 'border-white/10 bg-white/5 text-white'
+  }
+}
+
+function formatTimestampLabel(value?: string, language: Language = 'en'): string {
   if (!value) return '-'
   const parsed = new Date(value)
   if (Number.isNaN(parsed.getTime())) return '-'
-  return parsed.toLocaleString()
+  return parsed.toLocaleString(toDateTimeLocale(language))
 }
 
-function formatVersionCohort(targetCohort?: Record<string, unknown>): string {
+function formatCompactTimestampLabel(
+  value?: string,
+  language: Language = 'en'
+): string {
+  if (!value) return '-'
+  const parsed = new Date(value)
+  if (Number.isNaN(parsed.getTime())) return '-'
+  return parsed.toLocaleString(toDateTimeLocale(language), {
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+  })
+}
+
+function formatLifecycleSnapshotSource(
+  value?: string,
+  language: Language = 'en'
+): string {
+  switch (value) {
+    case 'live_guard_event':
+      return pickDealReviewText(language, 'guard', 'Guard')
+    case 'rebuild':
+      return pickDealReviewText(language, 'rebuild', 'Rebuild')
+    default:
+      return value || pickDealReviewText(language, 'snapshot', 'Snapshot')
+  }
+}
+
+function formatLearnedPatternManualControlState(
+  value?: string,
+  language: Language = 'en'
+): string {
+  switch (value) {
+    case 'live':
+      return pickDealReviewText(language, 'Live', 'Live')
+    case 'suppressed':
+      return pickDealReviewText(language, 'Suppressed', 'Unterdrueckt')
+    case 'retired':
+      return pickDealReviewText(language, 'Retired', 'Stillgelegt')
+    default:
+      return value || '-'
+  }
+}
+
+function learnedPatternManualControlClasses(value?: string): string {
+  switch (value) {
+    case 'live':
+      return 'border-emerald-400/20 bg-emerald-500/10 text-emerald-200'
+    case 'suppressed':
+      return 'border-amber-400/20 bg-amber-500/10 text-amber-200'
+    case 'retired':
+      return 'border-rose-400/20 bg-rose-500/10 text-rose-200'
+    default:
+      return 'border-white/10 bg-white/5 text-white'
+  }
+}
+
+function formatLearnedPatternManualControlAction(
+  value?: string,
+  language: Language = 'en'
+): string {
+  switch (value) {
+    case 'acknowledge_live':
+      return pickDealReviewText(language, 'Keep live', 'Live lassen')
+    case 'suppress':
+      return pickDealReviewText(language, 'Suppress', 'Unterdruecken')
+    case 'retire':
+      return pickDealReviewText(language, 'Retire', 'Stilllegen')
+    case 'rearm':
+      return pickDealReviewText(language, 'Re-arm', 'Reaktivieren')
+    default:
+      return value || '-'
+  }
+}
+
+function formatLearnedPatternActionHintAction(
+  value?: string,
+  language: Language = 'en'
+): string {
+  switch (value) {
+    case 'suppress':
+      return pickDealReviewText(language, 'Suggest suppress', 'Unterdruecken empfehlen')
+    case 'retire':
+      return pickDealReviewText(language, 'Suggest retire', 'Stilllegung empfehlen')
+    case 'rearm':
+      return pickDealReviewText(language, 'Suggest re-arm', 'Reaktivierung empfehlen')
+    case 'acknowledge_live':
+      return pickDealReviewText(language, 'Suggest keep live', 'Live lassen empfehlen')
+    default:
+      return value || '-'
+  }
+}
+
+function learnedPatternActionHintActionClasses(value?: string): string {
+  switch (value) {
+    case 'suppress':
+      return 'border-amber-400/20 bg-amber-500/10 text-amber-200'
+    case 'retire':
+      return 'border-rose-400/20 bg-rose-500/10 text-rose-200'
+    case 'rearm':
+      return 'border-sky-400/20 bg-sky-500/10 text-sky-200'
+    case 'acknowledge_live':
+      return 'border-emerald-400/20 bg-emerald-500/10 text-emerald-200'
+    default:
+      return 'border-white/10 bg-white/5 text-white'
+  }
+}
+
+function formatLearnedPatternActionHintPriority(
+  value?: string,
+  language: Language = 'en'
+): string {
+  switch (value) {
+    case 'critical':
+      return pickDealReviewText(language, 'Critical', 'Kritisch')
+    case 'warning':
+      return pickDealReviewText(language, 'Warning', 'Warnung')
+    case 'info':
+      return pickDealReviewText(language, 'Info', 'Info')
+    default:
+      return value || '-'
+  }
+}
+
+function learnedPatternActionHintPriorityClasses(value?: string): string {
+  switch (value) {
+    case 'critical':
+      return 'border-rose-400/20 bg-rose-500/10 text-rose-200'
+    case 'warning':
+      return 'border-amber-400/20 bg-amber-500/10 text-amber-200'
+    case 'info':
+      return 'border-sky-400/20 bg-sky-500/10 text-sky-200'
+    default:
+      return 'border-white/10 bg-white/5 text-white'
+  }
+}
+
+function formatLearnedPatternLiveActionKind(
+  value?: string,
+  language: Language = 'en'
+): string {
+  switch (value) {
+    case 'suppression':
+      return pickDealReviewText(
+        language,
+        'Direct suppression candidate',
+        'Direkter Unterdrueckungs-Kandidat'
+      )
+    case 'rollback':
+      return pickDealReviewText(language, 'Rollback-grade candidate', 'Rollback-Kandidat')
+    default:
+      return value || '-'
+  }
+}
+
+function learnedPatternLiveActionKindClasses(value?: string): string {
+  switch (value) {
+    case 'suppression':
+      return 'border-amber-400/20 bg-amber-500/10 text-amber-200'
+    case 'rollback':
+      return 'border-rose-400/20 bg-rose-500/10 text-rose-200'
+    default:
+      return 'border-white/10 bg-white/5 text-white'
+  }
+}
+
+function formatLearnedPatternInterventionEventType(
+  value?: string,
+  language: Language = 'en'
+): string {
+  switch (value) {
+    case 'suggested':
+      return pickDealReviewText(language, 'Suggested', 'Vorgeschlagen')
+    case 'manual_action':
+      return pickDealReviewText(language, 'Manual action', 'Manuelle Aktion')
+    default:
+      return value || '-'
+  }
+}
+
+function learnedPatternInterventionEventTypeClasses(value?: string): string {
+  switch (value) {
+    case 'suggested':
+      return 'border-sky-400/20 bg-sky-500/10 text-sky-200'
+    case 'manual_action':
+      return 'border-nofx-gold/30 bg-nofx-gold/10 text-nofx-gold'
+    default:
+      return 'border-white/10 bg-white/5 text-white'
+  }
+}
+
+function formatLearnedPatternInterventionStatus(
+  value?: string,
+  language: Language = 'en'
+): string {
+  switch (value) {
+    case 'open':
+      return pickDealReviewText(language, 'Open', 'Offen')
+    case 'accepted':
+      return pickDealReviewText(language, 'Accepted', 'Akzeptiert')
+    case 'overridden':
+      return pickDealReviewText(language, 'Overridden', 'Ueberschrieben')
+    case 'superseded':
+      return pickDealReviewText(language, 'Superseded', 'Ersetzt')
+    case 'cleared':
+      return pickDealReviewText(language, 'Cleared', 'Bereinigt')
+    case 'standalone':
+      return pickDealReviewText(language, 'Standalone', 'Eigenstaendig')
+    default:
+      return value || '-'
+  }
+}
+
+function learnedPatternInterventionStatusClasses(value?: string): string {
+  switch (value) {
+    case 'open':
+      return 'border-amber-400/20 bg-amber-500/10 text-amber-200'
+    case 'accepted':
+      return 'border-emerald-400/20 bg-emerald-500/10 text-emerald-200'
+    case 'overridden':
+      return 'border-rose-400/20 bg-rose-500/10 text-rose-200'
+    case 'superseded':
+      return 'border-sky-400/20 bg-sky-500/10 text-sky-200'
+    case 'cleared':
+      return 'border-white/10 bg-white/5 text-nofx-text-muted'
+    case 'standalone':
+      return 'border-white/10 bg-black/20 text-white/80'
+    default:
+      return 'border-white/10 bg-white/5 text-white'
+  }
+}
+
+function learnedPatternInterventionTimestampLabel(event: {
+  resolved_at?: string
+  last_seen_at?: string
+  first_seen_at?: string
+  created_at?: string
+}): string {
+  return (
+    event.resolved_at ||
+    event.last_seen_at ||
+    event.first_seen_at ||
+    event.created_at ||
+    ''
+  )
+}
+
+function normalizeLearnedPatternLiveActionKind(value?: string): string {
+  switch (value) {
+    case 'suppression':
+      return 'suppression'
+    case 'rollback':
+      return 'rollback'
+    default:
+      return ''
+  }
+}
+
+function normalizeLearnedPatternInterventionState(value?: string): string {
+  switch (value) {
+    case 'open':
+      return 'open'
+    case 'accepted':
+    case 'overridden':
+    case 'superseded':
+    case 'cleared':
+    case 'standalone':
+      return 'resolved'
+    default:
+      return ''
+  }
+}
+
+function learnedPatternHasOpenIntervention(
+  pattern?: DealReviewLearnedPattern | null
+): boolean {
+  return Boolean(
+    pattern?.intervention_history?.some(
+      (event) => normalizeLearnedPatternInterventionState(event.event_status) === 'open'
+    )
+  )
+}
+
+function learnedPatternHasResolvedIntervention(
+  pattern?: DealReviewLearnedPattern | null
+): boolean {
+  return Boolean(
+    pattern?.intervention_history?.some(
+      (event) =>
+        normalizeLearnedPatternInterventionState(event.event_status) === 'resolved'
+    )
+  )
+}
+
+function learnedPatternStrongestLiveActionKind(
+  pattern?: DealReviewLearnedPattern | null,
+  openOnly = false
+): string {
+  const directKinds = (pattern?.intervention_history || [])
+    .filter((event) => {
+      if (!event.direct_live_action_candidate) return false
+      if (!openOnly) return true
+      return normalizeLearnedPatternInterventionState(event.event_status) === 'open'
+    })
+    .map((event) => normalizeLearnedPatternLiveActionKind(event.direct_live_action_kind))
+    .filter(Boolean)
+
+  if (directKinds.includes('rollback')) return 'rollback'
+  if (directKinds.includes('suppression')) return 'suppression'
+  if (!openOnly) {
+    return normalizeLearnedPatternLiveActionKind(
+      pattern?.live_action_hint?.candidate_kind
+    )
+  }
+  return ''
+}
+
+function learnedPatternHasDirectLiveActionCandidate(
+  pattern?: DealReviewLearnedPattern | null
+): boolean {
+  if (normalizeLearnedPatternLiveActionKind(pattern?.live_action_hint?.candidate_kind)) {
+    return true
+  }
+  return Boolean(
+    pattern?.intervention_history?.some(
+      (event) =>
+        event.direct_live_action_candidate ||
+        Boolean(normalizeLearnedPatternLiveActionKind(event.direct_live_action_kind))
+    )
+  )
+}
+
+function learnedPatternMatchesInterventionFilter(
+  pattern: DealReviewLearnedPattern,
+  value: string
+): boolean {
+  switch (value) {
+    case '':
+      return true
+    case 'open':
+      return learnedPatternHasOpenIntervention(pattern)
+    case 'resolved':
+      return learnedPatternHasResolvedIntervention(pattern)
+    case 'none':
+      return !pattern.intervention_history || pattern.intervention_history.length === 0
+    default:
+      return true
+  }
+}
+
+function learnedPatternReviewPriorityScore(
+  pattern: DealReviewLearnedPattern
+): number {
+  let score = Math.max(0, pattern.composite_score || 0) * 100
+  score += Math.max(0, pattern.confidence_score || 0) * 35
+  score += Math.max(0, pattern.match_score || 0) * 25
+  if (learnedPatternHasOpenIntervention(pattern)) score += 120
+  if (learnedPatternHasResolvedIntervention(pattern)) score += 20
+  if (learnedPatternHasDirectLiveActionCandidate(pattern)) score += 80
+
+  switch (learnedPatternStrongestLiveActionKind(pattern, true)) {
+    case 'rollback':
+      score += 200
+      break
+    case 'suppression':
+      score += 120
+      break
+    default:
+      switch (learnedPatternStrongestLiveActionKind(pattern, false)) {
+        case 'rollback':
+          score += 40
+          break
+        case 'suppression':
+          score += 20
+          break
+      }
+  }
+
+  return score
+}
+
+function formatVersionCohort(
+  targetCohort?: Record<string, unknown>,
+  language: Language = 'en'
+): string {
   if (!targetCohort || Object.keys(targetCohort).length === 0) {
-    return 'No explicit target cohort stored'
+    return pickDealReviewText(language, 'No explicit target cohort stored', 'Keine explizite Zielkohorte gespeichert')
   }
   return Object.entries(targetCohort)
     .map(([key, value]) => `${key}: ${String(value)}`)
     .join(' | ')
 }
 
-function formatDatasetMini(summary?: DealReviewDatasetSummary): string {
-  if (!summary) return 'No closed deals'
-  return `${summary.closed_deals} deals | ${formatMoney(summary.net_pnl)} | ${summary.win_rate.toFixed(1)}% win | PF ${summary.profit_factor.toFixed(2)}`
+function formatDatasetMini(
+  summary?: DealReviewDatasetSummary,
+  language: Language = 'en'
+): string {
+  if (!summary) return pickDealReviewText(language, 'No closed deals', 'Keine geschlossenen Deals')
+  return `${summary.closed_deals} ${pickDealReviewText(language, 'deals', 'Deals')} | ${formatMoney(summary.net_pnl)} | ${summary.win_rate.toFixed(1)}% ${pickDealReviewText(language, 'win', 'Gewinn')} | PF ${summary.profit_factor.toFixed(2)}`
 }
 
-function formatClassifierIssueType(issueType?: string): string {
+function formatClassifierIssueType(
+  issueType?: string,
+  language: Language = 'en'
+): string {
   switch (issueType) {
     case 'likely_bad_trade':
-      return 'Likely bad trade'
+      return pickDealReviewText(language, 'Likely bad trade', 'Wahrscheinlich schlechter Trade')
     case 'likely_bad_exit':
-      return 'Likely bad exit'
+      return pickDealReviewText(language, 'Likely bad exit', 'Wahrscheinlich schlechter Exit')
     case 'likely_avoidable_loss':
-      return 'Likely avoidable loss'
+      return pickDealReviewText(language, 'Likely avoidable loss', 'Wahrscheinlich vermeidbarer Verlust')
     case 'likely_regime_mismatch':
-      return 'Likely regime mismatch'
+      return pickDealReviewText(language, 'Likely regime mismatch', 'Wahrscheinlich Regime-Fehlanpassung')
     case 'other_review_signal':
-      return 'Other review signal'
+      return pickDealReviewText(language, 'Other review signal', 'Sonstiges Review-Signal')
     default:
-      return 'Review signal'
+      return pickDealReviewText(language, 'Review signal', 'Review-Signal')
   }
 }
 
@@ -356,9 +945,9 @@ function classifierToneClasses(level?: string): string {
   }
 }
 
-function formatDate(ms: number): string {
+function formatDate(ms: number, language: Language = 'en'): string {
   if (!ms) return '-'
-  return new Date(ms).toLocaleString()
+  return new Date(ms).toLocaleString(toDateTimeLocale(language))
 }
 
 function formatHold(ms: number): string {
@@ -371,6 +960,13 @@ function formatHold(ms: number): string {
   const days = Math.floor(hours / 24)
   const remHours = hours % 24
   return remHours === 0 ? `${days}d` : `${days}d ${remHours}h`
+}
+
+function formatHoursCompact(value?: number): string {
+  if (typeof value !== 'number' || Number.isNaN(value) || value <= 0) return '-'
+  if (value < 24) return `${value.toFixed(value < 10 ? 1 : 0)}h`
+  const days = value / 24
+  return `${days.toFixed(days < 10 ? 1 : 0)}d`
 }
 
 function formatScore(value: number): string {
@@ -396,30 +992,52 @@ function getDealGiveBackMoney(caseRec: DealReviewCase): number {
   return Math.max(caseRec.profit_given_back || 0, 0)
 }
 
-function buildQualityNarrative(caseRec: DealReviewCase): string {
+function buildQualityNarrative(
+  caseRec: DealReviewCase,
+  language: Language = 'en'
+): string {
   if (
     caseRec.entry_timing_score >= 70 &&
     caseRec.max_favorable_excursion > 0.05 &&
     caseRec.exit_efficiency_score < 40
   ) {
-    return `Entry was valid, but exit captured only ${Math.round(caseRec.mfe_captured_pct || 0)}% of available MFE.`
+    return pickDealReviewText(
+      language,
+      `Entry was valid, but exit captured only ${Math.round(caseRec.mfe_captured_pct || 0)}% of available MFE.`,
+      `Der Einstieg war valide, aber der Exit hat nur ${Math.round(caseRec.mfe_captured_pct || 0)}% der verfuegbaren MFE eingefangen.`
+    )
   }
   if (caseRec.realized_pnl < 0 && caseRec.profit_given_back > 0.05) {
-    return `This loss was avoidable: the trade gave back ${formatMoney(caseRec.profit_given_back)} after being in profit.`
+    return pickDealReviewText(
+      language,
+      `This loss was avoidable: the trade gave back ${formatMoney(caseRec.profit_given_back)} after being in profit.`,
+      `Dieser Verlust war vermeidbar: Der Trade hat ${formatMoney(caseRec.profit_given_back)} abgegeben, nachdem er bereits im Gewinn war.`
+    )
   }
   if (
     caseRec.realized_pnl > 0 &&
     caseRec.entry_timing_score < 35
   ) {
-    return 'Weak entry recovered into profit. Treat this as a lucky exit, not a clean edge.'
+    return pickDealReviewText(
+      language,
+      'Weak entry recovered into profit. Treat this as a lucky exit, not a clean edge.',
+      'Ein schwacher Einstieg hat sich noch in Gewinn gedreht. Das ist eher ein Gluecks-Exit als ein sauberer Vorteil.'
+    )
   }
   if (caseRec.risk_sizing_score > 0 && caseRec.risk_sizing_score < 35) {
-    return `Risk sizing was aggressive for this path: planned risk was ${formatPct(caseRec.planned_risk_pct || 0)}.`
+    return pickDealReviewText(
+      language,
+      `Risk sizing was aggressive for this path: planned risk was ${formatPct(caseRec.planned_risk_pct || 0)}.`,
+      `Das Risikosizing war auf diesem Pfad aggressiv: Das geplante Risiko lag bei ${formatPct(caseRec.planned_risk_pct || 0)}.`
+    )
   }
   return ''
 }
 
-function buildQualityBadges(caseRec: DealReviewCase): Array<{
+function buildQualityBadges(
+  caseRec: DealReviewCase,
+  language: Language = 'en'
+): Array<{
   label: string
   tone: 'good' | 'warn' | 'bad'
 }> {
@@ -430,54 +1048,74 @@ function buildQualityBadges(caseRec: DealReviewCase): Array<{
     caseRec.max_favorable_excursion > 0.05 &&
     caseRec.exit_efficiency_score < 40
   ) {
-    badges.push({ label: 'Strong entry / weak exit', tone: 'warn' })
+    badges.push({
+      label: pickDealReviewText(language, 'Strong entry / weak exit', 'Starker Einstieg / schwacher Exit'),
+      tone: 'warn',
+    })
   } else if (caseRec.entry_timing_score >= 70) {
-    badges.push({ label: 'Strong entry', tone: 'good' })
+    badges.push({ label: pickDealReviewText(language, 'Strong entry', 'Starker Einstieg'), tone: 'good' })
   } else if (caseRec.entry_timing_score < 35) {
-    badges.push({ label: 'Weak entry', tone: 'bad' })
+    badges.push({ label: pickDealReviewText(language, 'Weak entry', 'Schwacher Einstieg'), tone: 'bad' })
   }
 
   if (caseRec.max_favorable_excursion > 0.05) {
     if (caseRec.exit_efficiency_score >= 75) {
-      badges.push({ label: 'Strong exit', tone: 'good' })
+      badges.push({ label: pickDealReviewText(language, 'Strong exit', 'Starker Exit'), tone: 'good' })
     } else if (caseRec.exit_efficiency_score < 35) {
-      badges.push({ label: 'Weak exit', tone: 'bad' })
+      badges.push({ label: pickDealReviewText(language, 'Weak exit', 'Schwacher Exit'), tone: 'bad' })
     }
   }
 
   if (caseRec.realized_pnl < 0 && caseRec.profit_given_back > 0.05) {
-    badges.push({ label: 'Avoidable loss', tone: 'warn' })
+    badges.push({ label: pickDealReviewText(language, 'Avoidable loss', 'Vermeidbarer Verlust'), tone: 'warn' })
   }
 
   if (
     caseRec.realized_pnl > 0 &&
     caseRec.entry_timing_score < 35
   ) {
-    badges.push({ label: 'Weak entry / lucky exit', tone: 'warn' })
+    badges.push({
+      label: pickDealReviewText(language, 'Weak entry / lucky exit', 'Schwacher Einstieg / Gluecks-Exit'),
+      tone: 'warn',
+    })
   }
 
   if (caseRec.risk_sizing_score > 0 && caseRec.risk_sizing_score < 35) {
-    badges.push({ label: 'Oversized risk', tone: 'bad' })
+    badges.push({ label: pickDealReviewText(language, 'Oversized risk', 'Ueberzogenes Risiko'), tone: 'bad' })
   }
 
   return badges.slice(0, 4)
 }
 
-function formatCompareMode(value: string): string {
+function formatCompareMode(value: string, language: Language = 'en'): string {
   switch (value) {
     case 'shared_live':
-      return 'Shared live wallet'
+      return pickDealReviewText(language, 'Shared live wallet', 'Geteilte Live-Wallet')
     case 'isolated_live':
-      return 'Isolated live wallet'
+      return pickDealReviewText(language, 'Isolated live wallet', 'Isolierte Live-Wallet')
     case 'paper':
-      return 'Paper / simulation'
+      return pickDealReviewText(language, 'Paper / simulation', 'Paper / Simulation')
     default:
       return value || '-'
   }
 }
 
-function formatCompareStatus(value: string): string {
+function formatCompareStatus(value: string, language: Language = 'en'): string {
   if (!value) return '-'
+  switch (value) {
+    case 'starting':
+      return pickDealReviewText(language, 'Starting', 'Startet')
+    case 'running':
+      return pickDealReviewText(language, 'Running', 'Laeuft')
+    case 'resolved':
+      return pickDealReviewText(language, 'Resolved', 'Abgeschlossen')
+    case 'stopped':
+      return pickDealReviewText(language, 'Stopped', 'Gestoppt')
+    case 'failed':
+      return pickDealReviewText(language, 'Failed', 'Fehlgeschlagen')
+    default:
+      break
+  }
   return value.replace(/_/g, ' ')
 }
 
@@ -503,16 +1141,20 @@ function compareLevelClasses(level?: string): string {
   }
 }
 
-function formatCompareFlagTitle(code?: string, fallback?: string): string {
+function formatCompareFlagTitle(
+  code?: string,
+  fallback?: string,
+  language: Language = 'en'
+): string {
   switch (code) {
     case 'strong_consensus':
-      return 'Strong consensus'
+      return pickDealReviewText(language, 'Strong consensus', 'Starker Konsens')
     case 'mixed_recommendation':
-      return 'Mixed recommendation'
+      return pickDealReviewText(language, 'Mixed recommendation', 'Gemischte Empfehlung')
     case 'low_confidence_disagreement':
-      return 'Low-confidence disagreement'
+      return pickDealReviewText(language, 'Low-confidence disagreement', 'Widerspruch mit niedriger Konfidenz')
     default:
-      return fallback || 'Compare signal'
+      return fallback || pickDealReviewText(language, 'Compare signal', 'Vergleichssignal')
   }
 }
 
@@ -520,30 +1162,37 @@ function isActiveCompareStatus(value: string): boolean {
   return value === 'starting' || value === 'running'
 }
 
-function formatCompareProtocolType(value: string): string {
-  if (!value) return 'Event'
+function formatCompareProtocolType(
+  value: string,
+  language: Language = 'en'
+): string {
+  if (!value) return pickDealReviewText(language, 'Event', 'Ereignis')
   return value.replace(/_/g, ' ')
 }
 
-function formatStrategyVersionSourceType(value: string): string {
+function formatStrategyVersionSourceType(
+  value: string,
+  language: Language = 'en'
+): string {
   switch (value) {
     case 'ai_apply':
-      return 'AI apply'
+      return pickDealReviewText(language, 'AI apply', 'KI-Uebernahme')
     case 'ai_challenger_candidate':
-      return 'Challenger candidate'
+      return pickDealReviewText(language, 'Challenger candidate', 'Challenger-Kandidat')
     case 'rollback':
-      return 'Rollback'
+      return pickDealReviewText(language, 'Rollback', 'Rollback')
     default:
-      return value.replace(/_/g, ' ') || 'Strategy change'
+      return value.replace(/_/g, ' ') || pickDealReviewText(language, 'Strategy change', 'Strategieaenderung')
   }
 }
 
 function buildCompareProtocolMetricSummary(
-  event?: DealReviewChallengerProtocolEvent
+  event?: DealReviewChallengerProtocolEvent,
+  language: Language = 'en'
 ): string {
   const metrics = event?.metrics
   if (!metrics) return ''
-  return `Incumbent ${formatMoney(metrics.incumbent_pnl)} (${metrics.incumbent_trade_count} trades) | Challenger ${formatMoney(metrics.challenger_pnl)} (${metrics.challenger_trade_count} trades)`
+  return `${pickDealReviewText(language, 'Incumbent', 'Inkumbent')} ${formatMoney(metrics.incumbent_pnl)} (${metrics.incumbent_trade_count} ${pickDealReviewText(language, 'trades', 'Trades')}) | ${pickDealReviewText(language, 'Challenger', 'Challenger')} ${formatMoney(metrics.challenger_pnl)} (${metrics.challenger_trade_count} ${pickDealReviewText(language, 'trades', 'Trades')})`
 }
 
 function isKeyboardTypingTarget(target: EventTarget | null): boolean {
@@ -573,27 +1222,35 @@ function getPatchOutcomeTone(delta: number | null, rollbackSuggested?: boolean):
   return 'text-amber-200'
 }
 
-function getPatchOutcomeLabel(delta: number | null, rollbackSuggested?: boolean): string {
-  if (rollbackSuggested) return 'Regression risk'
-  if (typeof delta === 'number' && delta < -0.01) return 'Weaker'
-  if (typeof delta === 'number' && delta > 0.01) return 'Improved'
-  return 'Mixed / flat'
+function getPatchOutcomeLabel(
+  delta: number | null,
+  rollbackSuggested?: boolean,
+  language: Language = 'en'
+): string {
+  if (rollbackSuggested) return pickDealReviewText(language, 'Regression risk', 'Regressionsrisiko')
+  if (typeof delta === 'number' && delta < -0.01) {
+    return pickDealReviewText(language, 'Weaker', 'Schwaecher')
+  }
+  if (typeof delta === 'number' && delta > 0.01) {
+    return pickDealReviewText(language, 'Improved', 'Verbessert')
+  }
+  return pickDealReviewText(language, 'Mixed / flat', 'Gemischt / flach')
 }
 
 function normalizePresetText(value: unknown): string {
   return typeof value === 'string' ? value : ''
 }
 
-function buildQueueLabel(queueMode: string): string {
+function buildQueueLabel(queueMode: string, language: Language = 'en'): string {
   switch (queueMode) {
     case 'unlabeled_losses':
-      return 'Unlabeled losses'
+      return pickDealReviewText(language, 'Unlabeled losses', 'Unbeschriftete Verluste')
     case 'biggest_giveback':
-      return 'Biggest give-back exits'
+      return pickDealReviewText(language, 'Biggest give-back exits', 'Groesste Gewinnabgaben')
     case 'regime_mismatch':
-      return 'Regime mismatch candidates'
+      return pickDealReviewText(language, 'Regime mismatch candidates', 'Regime-Fehlanpassungs-Kandidaten')
     default:
-      return 'All filtered deals'
+      return pickDealReviewText(language, 'All filtered deals', 'Alle gefilterten Deals')
   }
 }
 
@@ -645,9 +1302,18 @@ function buildReviewQueueItems(
   return items
 }
 
-function formatDealReasonPreview(value?: string): string {
+function formatDealReasonPreview(
+  value?: string,
+  language: Language = 'en'
+): string {
   const text = (value || '').trim()
-  if (!text) return 'No linked rationale snapshot.'
+  if (!text) {
+    return pickDealReviewText(
+      language,
+      'No linked rationale snapshot.',
+      'Kein verknuepfter Begruendungs-Snapshot.'
+    )
+  }
   return text.length > 140 ? `${text.slice(0, 137)}...` : text
 }
 
@@ -792,7 +1458,8 @@ function getLatestCompareForScan(
 
 function getScanPromotionState(
   scan: DealReviewAIScanDetail,
-  relatedCompare?: DealReviewChallengerCompareDetail
+  relatedCompare?: DealReviewChallengerCompareDetail,
+  language: Language = 'en'
 ): { label: string; tone: string; detail: string } {
   const validationStatus =
     scan.validation?.status || scan.scan.validation_status || 'pending'
@@ -800,22 +1467,34 @@ function getScanPromotionState(
     return {
       label:
         validationStatus === 'failed'
-          ? 'Blocked by validation'
-          : 'Validation pending',
+          ? pickDealReviewText(language, 'Blocked by validation', 'Durch Validierung blockiert')
+          : pickDealReviewText(language, 'Validation pending', 'Validierung ausstehend'),
       tone: validationStatus === 'failed' ? 'rose' : 'amber',
       detail:
         validationStatus === 'failed'
-          ? 'This scan cannot be promoted until the blocking validation checks pass.'
-          : 'Validation has not completed yet.',
+          ? pickDealReviewText(
+              language,
+              'This scan cannot be promoted until the blocking validation checks pass.',
+              'Dieser Scan kann erst uebernommen werden, wenn die blockierenden Validierungspruefungen bestehen.'
+            )
+          : pickDealReviewText(
+              language,
+              'Validation has not completed yet.',
+              'Die Validierung ist noch nicht abgeschlossen.'
+            ),
     }
   }
 
   if (!relatedCompare) {
     return {
-      label: 'Validated, challenger not started',
+      label: pickDealReviewText(language, 'Validated, challenger not started', 'Validiert, Challenger nicht gestartet'),
       tone: 'amber',
       detail:
-        'Validation passed. The patch is ready for direct apply or for a challenger launch.',
+        pickDealReviewText(
+          language,
+          'Validation passed. The patch is ready for direct apply or for a challenger launch.',
+          'Die Validierung ist bestanden. Der Patch ist bereit fuer direkte Uebernahme oder einen Challenger-Start.'
+        ),
     }
   }
 
@@ -823,11 +1502,15 @@ function getScanPromotionState(
     case 'starting':
     case 'running':
       return {
-        label: 'Challenger running',
+        label: pickDealReviewText(language, 'Challenger running', 'Challenger laeuft'),
         tone: 'sky',
         detail:
           relatedCompare.compare.summary ||
-          'Incumbent and challenger are currently in the comparison window.',
+          pickDealReviewText(
+            language,
+            'Incumbent and challenger are currently in the comparison window.',
+            'Inkumbent und Challenger befinden sich aktuell im Vergleichsfenster.'
+          ),
       }
     case 'completed':
       if (
@@ -836,11 +1519,15 @@ function getScanPromotionState(
           relatedCompare.compare.challenger_trader_id
       ) {
         return {
-          label: 'Winner promoted',
+          label: pickDealReviewText(language, 'Winner promoted', 'Sieger uebernommen'),
           tone: 'emerald',
           detail:
             relatedCompare.compare.summary ||
-            'The challenger won on realized PnL and the incumbent was deactivated automatically.',
+            pickDealReviewText(
+              language,
+              'The challenger won on realized PnL and the incumbent was deactivated automatically.',
+              'Der Challenger gewann beim realisierten PnL und der Inkumbent wurde automatisch deaktiviert.'
+            ),
         }
       }
       if (
@@ -849,43 +1536,63 @@ function getScanPromotionState(
           relatedCompare.compare.incumbent_trader_id
       ) {
         return {
-          label: 'Challenger rejected',
+          label: pickDealReviewText(language, 'Challenger rejected', 'Challenger abgelehnt'),
           tone: 'rose',
           detail:
             relatedCompare.compare.summary ||
-            'The incumbent stayed ahead on realized PnL and the challenger was deactivated automatically.',
+            pickDealReviewText(
+              language,
+              'The incumbent stayed ahead on realized PnL and the challenger was deactivated automatically.',
+              'Der Inkumbent blieb beim realisierten PnL vorne und der Challenger wurde automatisch deaktiviert.'
+            ),
         }
       }
       return {
-        label: 'Challenger finished',
+        label: pickDealReviewText(language, 'Challenger finished', 'Challenger abgeschlossen'),
         tone: 'emerald',
         detail:
           relatedCompare.compare.summary ||
-          'The challenger comparison finished.',
+          pickDealReviewText(
+            language,
+            'The challenger comparison finished.',
+            'Der Challenger-Vergleich wurde abgeschlossen.'
+          ),
       }
     case 'stopped':
       return {
-        label: 'Challenger finished',
+        label: pickDealReviewText(language, 'Challenger finished', 'Challenger abgeschlossen'),
         tone: 'amber',
         detail:
           relatedCompare.compare.summary ||
-          'The challenger comparison was stopped manually before auto resolution.',
+          pickDealReviewText(
+            language,
+            'The challenger comparison was stopped manually before auto resolution.',
+            'Der Challenger-Vergleich wurde vor der automatischen Aufloesung manuell gestoppt.'
+          ),
       }
     case 'failed':
       return {
-        label: 'Challenger finished',
+        label: pickDealReviewText(language, 'Challenger finished', 'Challenger abgeschlossen'),
         tone: 'rose',
         detail:
           relatedCompare.compare.summary ||
           relatedCompare.compare.error_message ||
-          'The challenger workflow failed before completion.',
+          pickDealReviewText(
+            language,
+            'The challenger workflow failed before completion.',
+            'Der Challenger-Workflow ist vor dem Abschluss fehlgeschlagen.'
+          ),
       }
     default:
       return {
-        label: 'Validated, challenger not started',
+        label: pickDealReviewText(language, 'Validated, challenger not started', 'Validiert, Challenger nicht gestartet'),
         tone: 'amber',
         detail:
-          'Validation passed. The patch is ready for direct apply or for a challenger launch.',
+          pickDealReviewText(
+            language,
+            'Validation passed. The patch is ready for direct apply or for a challenger launch.',
+            'Die Validierung ist bestanden. Der Patch ist bereit fuer direkte Uebernahme oder einen Challenger-Start.'
+          ),
       }
   }
 }
@@ -1181,6 +1888,8 @@ export function DealReviewPage({
   selectedTraderId,
   onTraderSelect,
 }: DealReviewPageProps) {
+  const { language } = useLanguage()
+  const pickText = (en: string, de: string) => pickDealReviewText(language, en, de)
   const [symbol, setSymbol] = useState('')
   const [side, setSide] = useState('')
   const [status, setStatus] = useState('CLOSED')
@@ -1245,6 +1954,14 @@ export function DealReviewPage({
   const [reviewLabelsText, setReviewLabelsText] = useState('')
   const [reviewNote, setReviewNote] = useState('')
   const [savingReview, setSavingReview] = useState(false)
+  const [controlNotes, setControlNotes] = useState<Record<string, string>>({})
+  const [controlBusyKey, setControlBusyKey] = useState('')
+  const [detailPatternDirectCandidateFilter, setDetailPatternDirectCandidateFilter] =
+    useState('')
+  const [detailPatternLiveActionKindFilter, setDetailPatternLiveActionKindFilter] =
+    useState('')
+  const [detailPatternInterventionStateFilter, setDetailPatternInterventionStateFilter] =
+    useState('')
   const [anomalies, setAnomalies] = useState<DealReviewAnomalySummary | null>(
     null
   )
@@ -1311,6 +2028,7 @@ export function DealReviewPage({
   const compareDetailRef = useRef<HTMLDivElement | null>(null)
   const versionDetailRef = useRef<HTMLDivElement | null>(null)
   const previousTraderIdRef = useRef<string | undefined>(undefined)
+  const currentTraderIdRef = useRef<string | undefined>(selectedTraderId)
   const detailRequestKeyRef = useRef(0)
   const similarCasesRequestKeyRef = useRef(0)
   const similarVersionsRequestKeyRef = useRef(0)
@@ -1340,12 +2058,359 @@ export function DealReviewPage({
   const selectedCaseVisible = Boolean(
     selectedCaseId && items.some((item) => item.case.id === selectedCaseId)
   )
+  const detailLearnedPatterns = detail?.learned_patterns || []
+  const visibleDetailLearnedPatterns = useMemo(() => {
+    const filtered = detailLearnedPatterns.filter((pattern) => {
+      if (
+        detailPatternDirectCandidateFilter === 'only' &&
+        !learnedPatternHasDirectLiveActionCandidate(pattern)
+      ) {
+        return false
+      }
+      if (
+        detailPatternLiveActionKindFilter &&
+        learnedPatternStrongestLiveActionKind(pattern, false) !==
+          detailPatternLiveActionKindFilter
+      ) {
+        return false
+      }
+      if (
+        !learnedPatternMatchesInterventionFilter(
+          pattern,
+          detailPatternInterventionStateFilter
+        )
+      ) {
+        return false
+      }
+      return true
+    })
+
+    return [...filtered].sort((left, right) => {
+      const leftScore = learnedPatternReviewPriorityScore(left)
+      const rightScore = learnedPatternReviewPriorityScore(right)
+      if (leftScore !== rightScore) return rightScore - leftScore
+      if ((left.match_score || 0) !== (right.match_score || 0)) {
+        return (right.match_score || 0) - (left.match_score || 0)
+      }
+      if ((left.composite_score || 0) !== (right.composite_score || 0)) {
+        return (right.composite_score || 0) - (left.composite_score || 0)
+      }
+      return (right.sample_count || 0) - (left.sample_count || 0)
+    })
+  }, [
+    detailLearnedPatterns,
+    detailPatternDirectCandidateFilter,
+    detailPatternInterventionStateFilter,
+    detailPatternLiveActionKindFilter,
+  ])
   const comparePeerCaseVisible = Boolean(
     comparePeerCaseId && items.some((item) => item.case.id === comparePeerCaseId)
   )
   const selectedVersionVisible = Boolean(
     selectedVersionId &&
       versions.some((item) => item.version.id === selectedVersionId)
+  )
+  const selectedCompareVisible = Boolean(
+    selectedCompareId &&
+      challengerCompares.some((item) => item.compare.id === selectedCompareId)
+  )
+  const compareScanSelectionValid = Boolean(
+    compareLeftScanId &&
+      compareRightScanId &&
+      scans.some((item) => item.scan.id === compareLeftScanId) &&
+      scans.some((item) => item.scan.id === compareRightScanId)
+  )
+
+  const localizedSideOptions = useMemo(
+    () =>
+      sideOptions.map((item) => ({
+        ...item,
+        label:
+          item.value === ''
+            ? pickText('All Sides', 'Alle Richtungen')
+            : item.label,
+      })),
+    [language]
+  )
+  const localizedStatusOptions = useMemo(
+    () =>
+      statusOptions.map((item) => ({
+        ...item,
+        label:
+          item.value === ''
+            ? pickText('All Statuses', 'Alle Status')
+            : item.label,
+      })),
+    [language]
+  )
+  const localizedOutcomeOptions = useMemo(
+    () =>
+      outcomeOptions.map((item) => ({
+        ...item,
+        label:
+          item.value === ''
+            ? pickText('All Outcomes', 'Alle Ergebnisse')
+            : item.value === 'profit'
+              ? pickText('Profit', 'Gewinn')
+              : item.value === 'loss'
+                ? pickText('Loss', 'Verlust')
+                : item.value === 'flat'
+                  ? pickText('Flat', 'Flat')
+                  : item.value === 'open'
+                    ? pickText('Open', 'Offen')
+                    : item.label,
+      })),
+    [language]
+  )
+  const localizedRangeOptions = useMemo(
+    () =>
+      rangeOptions.map((item) => ({
+        ...item,
+        label:
+          item.value === 'all'
+            ? pickText('All time', 'Gesamter Zeitraum')
+            : item.label.replace('Last ', pickText('Last ', 'Letzte ')),
+      })),
+    [language]
+  )
+  const localizedTrendRegimeOptions = useMemo(
+    () =>
+      trendRegimeOptions.map((item) => ({
+        ...item,
+        label:
+          item.value === ''
+            ? pickText('All trend regimes', 'Alle Trend-Regime')
+            : item.value === 'uptrend'
+              ? pickText('Uptrend', 'Aufwaertstrend')
+              : item.value === 'downtrend'
+                ? pickText('Downtrend', 'Abwaertstrend')
+                : item.value === 'chop'
+                  ? pickText('Chop', 'Seitwaerts')
+                  : item.value === 'mixed'
+                    ? pickText('Mixed', 'Gemischt')
+                    : item.label,
+      })),
+    [language]
+  )
+  const localizedVolatilityRegimeOptions = useMemo(
+    () =>
+      volatilityRegimeOptions.map((item) => ({
+        ...item,
+        label:
+          item.value === ''
+            ? pickText('All vol regimes', 'Alle Volatilitaets-Regime')
+            : item.value === 'high_vol'
+              ? pickText('High vol', 'Hohe Volatilitaet')
+              : item.value === 'low_vol'
+                ? pickText('Low vol', 'Niedrige Volatilitaet')
+                : item.label === 'Normal'
+                  ? pickText('Normal', 'Normal')
+                  : item.label,
+      })),
+    [language]
+  )
+  const localizedBtcStrengthOptions = useMemo(
+    () =>
+      btcStrengthOptions.map((item) => ({
+        ...item,
+        label:
+          item.value === ''
+            ? pickText('All BTC-relative states', 'Alle BTC-relativen Zustaende')
+            : item.value === 'outperform'
+              ? pickText('Outperforming BTC', 'Staerker als BTC')
+              : item.value === 'lagging'
+                ? pickText('Lagging BTC', 'Schwaecher als BTC')
+                : item.value === 'neutral'
+                  ? pickText('Neutral vs BTC', 'Neutral gegenueber BTC')
+                  : item.label,
+      })),
+    [language]
+  )
+  const localizedFundingRegimeOptions = useMemo(
+    () =>
+      fundingRegimeOptions.map((item) => ({
+        ...item,
+        label:
+          item.value === ''
+            ? pickText('All funding states', 'Alle Funding-Zustaende')
+            : item.value === 'extreme_longs'
+              ? pickText('Extreme longs', 'Extreme Longs')
+              : item.value === 'longs_pay'
+                ? pickText('Longs pay', 'Longs zahlen')
+                : item.value === 'neutral'
+                  ? pickText('Neutral funding', 'Neutrales Funding')
+                  : item.value === 'shorts_pay'
+                    ? pickText('Shorts pay', 'Shorts zahlen')
+                    : item.value === 'extreme_shorts'
+                      ? pickText('Extreme shorts', 'Extreme Shorts')
+                      : item.label,
+      })),
+    [language]
+  )
+  const localizedOiRegimeOptions = useMemo(
+    () =>
+      oiRegimeOptions.map((item) => ({
+        ...item,
+        label:
+          item.value === ''
+            ? pickText('All OI states', 'Alle OI-Zustaende')
+            : item.value === 'oi_surge'
+              ? pickText('OI surge', 'OI-Schub')
+              : item.value === 'oi_rising'
+                ? pickText('OI rising', 'Steigende OI')
+                : item.value === 'oi_flat'
+                  ? pickText('OI flat', 'Flache OI')
+                  : item.value === 'oi_falling'
+                    ? pickText('OI falling', 'Fallende OI')
+                    : item.value === 'oi_flush'
+                      ? pickText('OI flush', 'OI-Spuelung')
+                      : item.label,
+      })),
+    [language]
+  )
+  const localizedSessionOptions = useMemo(
+    () =>
+      sessionOptions.map((item) => ({
+        ...item,
+        label:
+          item.value === ''
+            ? pickText('All sessions', 'Alle Sessions')
+            : item.value === 'off_hours'
+              ? pickText('Off hours', 'Randzeiten')
+              : item.label,
+      })),
+    [language]
+  )
+  const localizedWeekdayOptions = useMemo(
+    () =>
+      weekdayOptions.map((item) => ({
+        ...item,
+        label:
+          item.value === ''
+            ? pickText('All weekdays', 'Alle Wochentage')
+            : item.value === 'monday'
+              ? pickText('Monday', 'Montag')
+              : item.value === 'tuesday'
+                ? pickText('Tuesday', 'Dienstag')
+                : item.value === 'wednesday'
+                  ? pickText('Wednesday', 'Mittwoch')
+                  : item.value === 'thursday'
+                    ? pickText('Thursday', 'Donnerstag')
+                    : item.value === 'friday'
+                      ? pickText('Friday', 'Freitag')
+                      : item.value === 'saturday'
+                        ? pickText('Saturday', 'Samstag')
+                        : item.value === 'sunday'
+                          ? pickText('Sunday', 'Sonntag')
+                          : item.label,
+      })),
+    [language]
+  )
+  const localizedVenueTierOptions = useMemo(
+    () =>
+      venueTierOptions.map((item) => ({
+        ...item,
+        label:
+          item.value === ''
+            ? pickText('All venue states', 'Alle Boersen-Zustaende')
+            : item.value === 'tradable'
+              ? pickText('Tradable', 'Handelbar')
+              : item.value === 'thin_book'
+                ? pickText('Thin book', 'Duennes Orderbuch')
+                : item.value === 'restricted'
+                  ? pickText('Restricted', 'Eingeschraenkt')
+                  : item.value === 'unsupported'
+                    ? pickText('Unsupported', 'Nicht unterstuetzt')
+                    : item.value === 'unknown'
+                      ? pickText('Unknown', 'Unbekannt')
+                      : item.label,
+      })),
+    [language]
+  )
+  const localizedLiquidityTierOptions = useMemo(
+    () =>
+      liquidityTierOptions.map((item) => ({
+        ...item,
+        label:
+          item.value === ''
+            ? pickText('All liquidity tiers', 'Alle Liquiditaetsstufen')
+            : item.value === 'high'
+              ? pickText('High liquidity', 'Hohe Liquiditaet')
+              : item.value === 'medium'
+                ? pickText('Medium liquidity', 'Mittlere Liquiditaet')
+                : item.value === 'low'
+                  ? pickText('Low liquidity', 'Niedrige Liquiditaet')
+                  : item.label,
+      })),
+    [language]
+  )
+  const localizedExecutionBucketOptions = useMemo(
+    () =>
+      executionBucketOptions.map((item) => ({
+        ...item,
+        label:
+          item.value === ''
+            ? pickText('All execution buckets', 'Alle Ausfuehrungs-Buckets')
+            : item.value === 'tight'
+              ? pickText('Tight', 'Eng')
+              : item.value === 'normal'
+                ? pickText('Normal', 'Normal')
+                : item.value === 'wide'
+                  ? pickText('Wide', 'Weit')
+                  : item.value === 'extreme'
+                    ? pickText('Extreme', 'Extrem')
+                    : item.label,
+      })),
+    [language]
+  )
+  const localizedExitReasonQualityOptions = useMemo(
+    () =>
+      exitReasonQualityOptions.map((item) => ({
+        ...item,
+        label:
+          item.value === ''
+            ? pickText('All exit evidence', 'Alle Exit-Belege')
+            : item.value === 'explicit'
+              ? pickText('Explicit', 'Explizit')
+              : item.value === 'high_confidence_inferred'
+                ? pickText('High-confidence inferred', 'Mit hoher Konfidenz abgeleitet')
+                : item.value === 'low_confidence_inferred'
+                  ? pickText('Low-confidence inferred', 'Mit niedriger Konfidenz abgeleitet')
+                  : item.label,
+      })),
+    [language]
+  )
+  const localizedReviewQueueOptions = useMemo(
+    () =>
+      reviewQueueOptions.map((item) => ({
+        ...item,
+        label:
+          item.value === ''
+            ? pickText('All filtered deals', 'Alle gefilterten Deals')
+            : item.value === 'unlabeled_losses'
+              ? pickText('Review queue: unlabeled losses', 'Review-Warteschlange: unbeschriftete Verluste')
+              : item.value === 'biggest_giveback'
+                ? pickText('Review queue: biggest give-back exits', 'Review-Warteschlange: groesste Gewinnabgaben')
+                : item.value === 'regime_mismatch'
+                  ? pickText('Review queue: regime mismatch candidates', 'Review-Warteschlange: Regime-Fehlanpassungs-Kandidaten')
+                  : item.label,
+      })),
+    [language]
+  )
+  const localizedChallengerModeOptions = useMemo(
+    () =>
+      challengerModeOptions.map((item) => ({
+        ...item,
+        label:
+          item.value === 'shared_live'
+            ? pickText('Shared live wallet', 'Geteilte Live-Wallet')
+            : item.value === 'isolated_live'
+              ? pickText('Isolated live wallet', 'Isolierte Live-Wallet')
+              : item.value === 'paper'
+                ? pickText('Paper / testnet', 'Paper / Testnet')
+                : item.label,
+      })),
+    [language]
   )
 
   const openPatternLabWithFilters = (params?: Record<string, string>) => {
@@ -1614,14 +2679,16 @@ export function DealReviewPage({
   const loadCases = async (
     overrides?: Record<string, string | number | undefined>
   ) => {
-    if (!selectedTraderId) return
+    const traderId = selectedTraderId
+    if (!traderId) return
     setLoading(true)
     setError(null)
     try {
       const result = await api.getDealReviewCases(
-        selectedTraderId,
+        traderId,
         buildFilterPayload(overrides)
       )
+      if (currentTraderIdRef.current !== traderId) return
       setItems(result.items)
       setSummary(result.summary)
       if (result.items.length > 0) {
@@ -1636,10 +2703,12 @@ export function DealReviewPage({
         setDetail(null)
       }
     } catch (err) {
+      if (currentTraderIdRef.current !== traderId) return
       setError(
         err instanceof Error ? err.message : 'Failed to fetch deal review cases'
       )
     } finally {
+      if (currentTraderIdRef.current !== traderId) return
       setLoading(false)
     }
   }
@@ -1671,6 +2740,67 @@ export function DealReviewPage({
     }
   }
 
+  const patternControlKey = (pattern: DealReviewLearnedPattern): string =>
+    pattern.stable_key || pattern.id
+
+  const canManagePattern = (pattern: DealReviewLearnedPattern): boolean =>
+    pattern.base_recommended_use === 'monitoring_rule' ||
+    pattern.recommended_use === 'monitoring_rule' ||
+    Boolean(pattern.manual_control)
+
+  const applyPatternControl = async (
+    pattern: DealReviewLearnedPattern,
+    action: 'acknowledge_live' | 'suppress' | 'retire' | 'rearm',
+    forcedNote?: string
+  ) => {
+    if (!selectedTraderId) return
+    const key = patternControlKey(pattern)
+    const note = (forcedNote || controlNotes[key] || '').trim()
+    if (!note) {
+      notify.error('A short analyst note is required.')
+      return
+    }
+    setControlBusyKey(`${key}:${action}`)
+    try {
+      await api.applyDealReviewLearnedPatternControl(selectedTraderId, {
+        pattern_id: pattern.id || undefined,
+        stable_key: pattern.stable_key || undefined,
+        action,
+        note,
+      })
+      notify.success(`${formatLearnedPatternManualControlAction(action)} saved`)
+      setControlNotes((current) => ({ ...current, [key]: '' }))
+      await Promise.all([loadDetail(), mutate(`status-${selectedTraderId}`)])
+    } catch (err) {
+      notify.error(
+        err instanceof Error
+          ? err.message
+          : 'Failed to apply learned-pattern control'
+      )
+    } finally {
+      setControlBusyKey('')
+    }
+  }
+
+  const applySuggestedPatternAction = async (pattern: DealReviewLearnedPattern) => {
+    const action = pattern.action_hint?.recommended_action
+    const autoNote = (
+      pattern.action_hint?.auto_note ||
+      pattern.live_action_hint?.summary ||
+      ''
+    ).trim()
+    if (
+      action !== 'acknowledge_live' &&
+      action !== 'suppress' &&
+      action !== 'retire' &&
+      action !== 'rearm'
+    ) {
+      notify.error('No suggested action is available for this pattern.')
+      return
+    }
+    await applyPatternControl(pattern, action, autoNote)
+  }
+
   const exportFilteredDealsJSON = () => {
     if (!selectedTraderId || displayedItems.length === 0) return
     downloadTextFile(
@@ -1689,7 +2819,12 @@ export function DealReviewPage({
       ),
       'application/json;charset=utf-8'
     )
-    notify.success('Filtered deal dataset exported as JSON')
+    notify.success(
+      pickText(
+        'Filtered deal dataset exported as JSON',
+        'Gefilterter Deal-Datensatz als JSON exportiert'
+      )
+    )
   }
 
   const exportFilteredDealsCSV = () => {
@@ -1699,7 +2834,12 @@ export function DealReviewPage({
       buildDealReviewCasesCSV(displayedItems),
       'text/csv;charset=utf-8'
     )
-    notify.success('Filtered deal dataset exported as CSV')
+    notify.success(
+      pickText(
+        'Filtered deal dataset exported as CSV',
+        'Gefilterter Deal-Datensatz als CSV exportiert'
+      )
+    )
   }
 
   const exportScansJSON = () => {
@@ -1718,7 +2858,12 @@ export function DealReviewPage({
       ),
       'application/json;charset=utf-8'
     )
-    notify.success('Saved scan outputs exported as JSON')
+    notify.success(
+      pickText(
+        'Saved scan outputs exported as JSON',
+        'Gespeicherte Scan-Ausgaben als JSON exportiert'
+      )
+    )
   }
 
   const exportScanCompareJSON = () => {
@@ -1737,17 +2882,24 @@ export function DealReviewPage({
       ),
       'application/json;charset=utf-8'
     )
-    notify.success('Scan compare exported as JSON')
+    notify.success(
+      pickText('Scan compare exported as JSON', 'Scan-Vergleich als JSON exportiert')
+    )
   }
 
   const loadScanHistory = async () => {
-    if (!selectedTraderId) return
+    const traderId = selectedTraderId
+    if (!traderId) return
     try {
-      const result = await api.getDealReviewAIScans(selectedTraderId, 8)
+      const result = await api.getDealReviewAIScans(traderId, 8)
+      if (currentTraderIdRef.current !== traderId) return
       setScans(result)
     } catch (err) {
+      if (currentTraderIdRef.current !== traderId) return
       notify.error(
-        err instanceof Error ? err.message : 'Failed to fetch AI scans'
+        err instanceof Error
+          ? err.message
+          : pickText('Failed to fetch AI scans', 'KI-Scans konnten nicht geladen werden')
       )
     }
   }
@@ -1755,14 +2907,17 @@ export function DealReviewPage({
   const loadAnomalies = async (
     overrides?: Record<string, string | number | undefined>
   ) => {
-    if (!selectedTraderId) return
+    const traderId = selectedTraderId
+    if (!traderId) return
     try {
       const result = await api.getDealReviewAnomalies(
-        selectedTraderId,
+        traderId,
         buildFilterPayload(overrides)
       )
+      if (currentTraderIdRef.current !== traderId) return
       setAnomalies(result)
     } catch (err) {
+      if (currentTraderIdRef.current !== traderId) return
       notify.error(
         err instanceof Error ? err.message : 'Failed to fetch anomalies'
       )
@@ -1770,10 +2925,11 @@ export function DealReviewPage({
   }
 
   const loadSymbolBehaviorPriors = async () => {
-    if (!selectedTraderId) return
+    const traderId = selectedTraderId
+    if (!traderId) return
     try {
       const result = await api.getDealReviewSymbolBehaviorPriors(
-        selectedTraderId,
+        traderId,
         {
           symbol: symbol || undefined,
           side: side || undefined,
@@ -1781,9 +2937,11 @@ export function DealReviewPage({
           limit: 100,
         }
       )
+      if (currentTraderIdRef.current !== traderId) return
       setSymbolBehaviorPriors(result.items || [])
       setSymbolBehaviorPriorSummary(result.summary || null)
     } catch (err) {
+      if (currentTraderIdRef.current !== traderId) return
       setSymbolBehaviorPriors([])
       setSymbolBehaviorPriorSummary(null)
       notify.error(
@@ -1795,7 +2953,8 @@ export function DealReviewPage({
   }
 
   const loadSymbolBehaviorLiveGuardEvents = async () => {
-    if (!selectedTraderId) {
+    const traderId = selectedTraderId
+    if (!traderId) {
       setSymbolBehaviorLiveGuardEvents([])
       setSymbolBehaviorLiveGuardSummary(null)
       setSymbolBehaviorLiveGuardStatus(null)
@@ -1803,17 +2962,19 @@ export function DealReviewPage({
     }
     try {
       const result = await api.getDealReviewSymbolBehaviorLiveGuardEvents(
-        selectedTraderId,
+        traderId,
         {
           symbol: symbol || undefined,
           side: side || undefined,
           limit: 12,
         }
       )
+      if (currentTraderIdRef.current !== traderId) return
       setSymbolBehaviorLiveGuardEvents(result.items || [])
       setSymbolBehaviorLiveGuardSummary(result.summary || null)
       setSymbolBehaviorLiveGuardStatus(result.guard || null)
     } catch (err) {
+      if (currentTraderIdRef.current !== traderId) return
       setSymbolBehaviorLiveGuardEvents([])
       setSymbolBehaviorLiveGuardSummary(null)
       setSymbolBehaviorLiveGuardStatus(null)
@@ -1826,7 +2987,8 @@ export function DealReviewPage({
   }
 
   const loadLearnedPatterns = async () => {
-    if (!selectedTraderId) {
+    const traderId = selectedTraderId
+    if (!traderId) {
       setLearnedPatternLiveGuardEvents([])
       setLearnedPatternLiveGuardSummary(null)
       setLearnedPatternLiveGuardStatus(null)
@@ -1835,22 +2997,24 @@ export function DealReviewPage({
     }
     try {
       const [result, guardResult] = await Promise.all([
-        api.getDealReviewLearnedPatterns(selectedTraderId, {
+        api.getDealReviewLearnedPatterns(traderId, {
           symbol: symbol || undefined,
           side: side || undefined,
           limit: 60,
         }),
-        api.getDealReviewLearnedPatternLiveGuardEvents(selectedTraderId, {
+        api.getDealReviewLearnedPatternLiveGuardEvents(traderId, {
           symbol: symbol || undefined,
           side: side || undefined,
           limit: 12,
         }),
       ])
+      if (currentTraderIdRef.current !== traderId) return
       setLearnedPatternSummary(result.summary || null)
       setLearnedPatternLiveGuardEvents(guardResult.items || [])
       setLearnedPatternLiveGuardSummary(guardResult.summary || null)
       setLearnedPatternLiveGuardStatus(guardResult.guard || null)
     } catch (err) {
+      if (currentTraderIdRef.current !== traderId) return
       setLearnedPatternLiveGuardEvents([])
       setLearnedPatternLiveGuardSummary(null)
       setLearnedPatternLiveGuardStatus(null)
@@ -1862,11 +3026,14 @@ export function DealReviewPage({
   }
 
   const loadFilterPresets = async () => {
-    if (!selectedTraderId) return
+    const traderId = selectedTraderId
+    if (!traderId) return
     try {
-      const result = await api.getDealReviewFilterPresets(selectedTraderId)
+      const result = await api.getDealReviewFilterPresets(traderId)
+      if (currentTraderIdRef.current !== traderId) return
       setFilterPresets(result)
     } catch (err) {
+      if (currentTraderIdRef.current !== traderId) return
       notify.error(
         err instanceof Error ? err.message : 'Failed to fetch review presets'
       )
@@ -1874,14 +3041,14 @@ export function DealReviewPage({
   }
 
   const loadVersions = async () => {
-    if (!selectedTraderId) return
+    const traderId = selectedTraderId
+    if (!traderId) return
     try {
-      const result = await api.getDealReviewStrategyVersions(
-        selectedTraderId,
-        20
-      )
+      const result = await api.getDealReviewStrategyVersions(traderId, 20)
+      if (currentTraderIdRef.current !== traderId) return
       setVersions(result)
     } catch (err) {
+      if (currentTraderIdRef.current !== traderId) return
       notify.error(
         err instanceof Error ? err.message : 'Failed to fetch strategy history'
       )
@@ -1900,14 +3067,14 @@ export function DealReviewPage({
   }
 
   const loadChallengerCompares = async () => {
-    if (!selectedTraderId) return
+    const traderId = selectedTraderId
+    if (!traderId) return
     try {
-      const result = await api.getDealReviewChallengerCompares(
-        selectedTraderId,
-        8
-      )
+      const result = await api.getDealReviewChallengerCompares(traderId, 8)
+      if (currentTraderIdRef.current !== traderId) return
       setChallengerCompares(result)
     } catch (err) {
+      if (currentTraderIdRef.current !== traderId) return
       notify.error(
         err instanceof Error
           ? err.message
@@ -1917,22 +3084,32 @@ export function DealReviewPage({
   }
 
   const loadChallengerCompareDetail = async () => {
-    if (!selectedTraderId || !selectedCompareId) {
+    if (
+      traderChanged ||
+      !selectedTraderId ||
+      !selectedCompareId ||
+      !selectedCompareVisible
+    ) {
       setSelectedCompareDetail(null)
+      setCompareDetailLoading(false)
       return
     }
+    const traderId = selectedTraderId
     setCompareDetailLoading(true)
     try {
       const result = await api.getDealReviewChallengerCompare(
-        selectedTraderId,
+        traderId,
         selectedCompareId
       )
+      if (currentTraderIdRef.current !== traderId) return
       setSelectedCompareDetail(result)
     } catch (err) {
+      if (currentTraderIdRef.current !== traderId) return
       notify.error(
         err instanceof Error ? err.message : 'Failed to fetch challenger detail'
       )
     } finally {
+      if (currentTraderIdRef.current !== traderId) return
       setCompareDetailLoading(false)
     }
   }
@@ -1965,6 +3142,10 @@ export function DealReviewPage({
   }, [selectedTraderId])
 
   useEffect(() => {
+    currentTraderIdRef.current = selectedTraderId
+  }, [selectedTraderId])
+
+  useEffect(() => {
     if (!traderChanged) {
       return
     }
@@ -1978,7 +3159,33 @@ export function DealReviewPage({
     setSimilarVersionsError(null)
     setComparePeerCaseId('')
     setComparePeerDetail(null)
+    setScans([])
+    setCompareLeftScanId('')
+    setCompareRightScanId('')
+    setCompareResult(null)
+    setVersions([])
+    setSelectedVersionId(null)
+    setChallengerCompares([])
+    setSelectedCompareId(null)
+    setSelectedCompareDetail(null)
+    setFilterPresets([])
+    setSelectedPresetId('')
+    setPresetName('')
+    setAnomalies(null)
+    setSymbolBehaviorPriors([])
+    setSymbolBehaviorPriorSummary(null)
+    setSymbolBehaviorLiveGuardEvents([])
+    setSymbolBehaviorLiveGuardSummary(null)
+    setSymbolBehaviorLiveGuardStatus(null)
+    setLearnedPatternSummary(null)
+    setLearnedPatternLiveGuardEvents([])
+    setLearnedPatternLiveGuardSummary(null)
+    setLearnedPatternLiveGuardStatus(null)
+    setSelectedSymbolPriorId(null)
     setReviewQueueMode('')
+    setDetailPatternDirectCandidateFilter('')
+    setDetailPatternLiveActionKindFilter('')
+    setDetailPatternInterventionStateFilter('')
     setError(null)
   }, [selectedTraderId, traderChanged])
 
@@ -2303,7 +3510,7 @@ export function DealReviewPage({
 
   useEffect(() => {
     void loadChallengerCompareDetail()
-  }, [selectedTraderId, selectedCompareId])
+  }, [selectedTraderId, selectedCompareId, selectedCompareVisible, traderChanged])
 
   useEffect(() => {
     if (versions.length === 0) {
@@ -2319,7 +3526,12 @@ export function DealReviewPage({
   }, [versions, selectedVersionId])
 
   useEffect(() => {
-    if (!selectedTraderId || !selectedVersionId || !selectedVersionVisible) {
+    if (
+      !selectedTraderId ||
+      !selectedVersionId ||
+      !selectedVersionVisible ||
+      traderChanged
+    ) {
       setSimilarVersions([])
       setSimilarVersionsError(null)
       setSimilarVersionsLoading(false)
@@ -2349,7 +3561,7 @@ export function DealReviewPage({
         setSimilarVersionsLoading(false)
       }
     })()
-  }, [selectedTraderId, selectedVersionId, selectedVersionVisible])
+  }, [selectedTraderId, selectedVersionId, selectedVersionVisible, traderChanged])
 
   useEffect(() => {
     if (!selectedPreset) {
@@ -2448,9 +3660,9 @@ export function DealReviewPage({
 
   useEffect(() => {
     if (
+      traderChanged ||
       !selectedTraderId ||
-      !compareLeftScanId ||
-      !compareRightScanId ||
+      !compareScanSelectionValid ||
       compareLeftScanId === compareRightScanId
     ) {
       setCompareResult(null)
@@ -2467,20 +3679,33 @@ export function DealReviewPage({
       .then(setCompareResult)
       .catch((err) => {
         notify.error(
-          err instanceof Error ? err.message : 'Failed to compare AI scans'
+          err instanceof Error
+            ? err.message
+            : pickText('Failed to compare AI scans', 'KI-Scans konnten nicht verglichen werden')
         )
         setCompareResult(null)
       })
       .finally(() => setCompareLoading(false))
-  }, [selectedTraderId, compareLeftScanId, compareRightScanId])
+  }, [
+    selectedTraderId,
+    compareLeftScanId,
+    compareRightScanId,
+    compareScanSelectionValid,
+    traderChanged,
+  ])
 
   const runAIScan = async (
     overrides?: Record<string, string | number | undefined>,
-    successMessage: string = 'AI scan completed'
+    successMessage: string = pickText('AI scan completed', 'KI-Scan abgeschlossen')
   ) => {
     if (!selectedTraderId) return
     if (items.length === 0) {
-      notify.error('No deals matched the selected filters')
+      notify.error(
+        pickText(
+          'No deals matched the selected filters',
+          'Keine Deals passten zu den ausgewaehlten Filtern'
+        )
+      )
       return
     }
     setRunningScan(true)
@@ -2499,7 +3724,9 @@ export function DealReviewPage({
       notify.success(successMessage)
       await mutate(`status-${selectedTraderId}`)
     } catch (err) {
-      notify.error(err instanceof Error ? err.message : 'AI scan failed')
+      notify.error(
+        err instanceof Error ? err.message : pickText('AI scan failed', 'KI-Scan fehlgeschlagen')
+      )
     } finally {
       setRunningScan(false)
     }
@@ -2509,7 +3736,9 @@ export function DealReviewPage({
     if (!selectedTraderId) return
     const trimmedName = presetName.trim()
     if (!trimmedName) {
-      notify.error('Preset name is required')
+      notify.error(
+        pickText('Preset name is required', 'Ein Preset-Name ist erforderlich')
+      )
       return
     }
     setSavingPreset(true)
@@ -2532,12 +3761,14 @@ export function DealReviewPage({
       setSelectedPresetId(savedPreset?.preset.id || '')
       notify.success(
         savedPreset && selectedPreset?.preset.id === savedPreset.preset.id
-          ? 'Review preset updated'
-          : 'Review preset saved'
+          ? pickText('Review preset updated', 'Review-Preset aktualisiert')
+          : pickText('Review preset saved', 'Review-Preset gespeichert')
       )
     } catch (err) {
       notify.error(
-        err instanceof Error ? err.message : 'Failed to save review preset'
+        err instanceof Error
+          ? err.message
+          : pickText('Failed to save review preset', 'Review-Preset konnte nicht gespeichert werden')
       )
     } finally {
       setSavingPreset(false)
@@ -2547,11 +3778,14 @@ export function DealReviewPage({
   const deleteFilterPreset = async () => {
     if (!selectedTraderId || !selectedPreset) return
     const confirmed = await confirmToast(
-      `Delete the preset "${selectedPreset.preset.name}"?`,
+      pickText(
+        `Delete the preset "${selectedPreset.preset.name}"?`,
+        `Preset "${selectedPreset.preset.name}" loeschen?`
+      ),
       {
-        title: 'Delete Preset',
-        okText: 'Delete',
-        cancelText: 'Cancel',
+        title: pickText('Delete Preset', 'Preset loeschen'),
+        okText: pickText('Delete', 'Loeschen'),
+        cancelText: pickText('Cancel', 'Abbrechen'),
       }
     )
     if (!confirmed) return
@@ -2564,10 +3798,12 @@ export function DealReviewPage({
       )
       setSelectedPresetId('')
       setPresetName('')
-      notify.success('Review preset deleted')
+      notify.success(pickText('Review preset deleted', 'Review-Preset geloescht'))
     } catch (err) {
       notify.error(
-        err instanceof Error ? err.message : 'Failed to delete review preset'
+        err instanceof Error
+          ? err.message
+          : pickText('Failed to delete review preset', 'Review-Preset konnte nicht geloescht werden')
       )
     } finally {
       setDeletingPresetId(null)
@@ -2589,11 +3825,13 @@ export function DealReviewPage({
       )
       notify.success(
         result.validation?.status === 'passed'
-          ? 'AI scan validation passed'
-          : 'AI scan validation updated'
+          ? pickText('AI scan validation passed', 'KI-Scan-Validierung bestanden')
+          : pickText('AI scan validation updated', 'KI-Scan-Validierung aktualisiert')
       )
     } catch (err) {
-      notify.error(err instanceof Error ? err.message : 'Validation failed')
+      notify.error(
+        err instanceof Error ? err.message : pickText('Validation failed', 'Validierung fehlgeschlagen')
+      )
     } finally {
       setValidatingScanId(null)
     }
@@ -2602,11 +3840,14 @@ export function DealReviewPage({
   const applyScan = async (scan: DealReviewAIScanDetail) => {
     if (!selectedTraderId) return
     const confirmed = await confirmToast(
-      'Apply the strategy patch from this AI scan and reload the trader configuration?',
+      pickText(
+        'Apply the strategy patch from this AI scan and reload the trader configuration?',
+        'Diesen Strategie-Patch aus dem KI-Scan uebernehmen und die Trader-Konfiguration neu laden?'
+      ),
       {
-        title: 'Apply AI Patch',
-        okText: 'Apply',
-        cancelText: 'Cancel',
+        title: pickText('Apply AI Patch', 'KI-Patch uebernehmen'),
+        okText: pickText('Apply', 'Uebernehmen'),
+        cancelText: pickText('Cancel', 'Abbrechen'),
       }
     )
     if (!confirmed) return
@@ -2614,12 +3855,14 @@ export function DealReviewPage({
     setApplyingScanId(scan.scan.id)
     try {
       await api.applyDealReviewAIScan(selectedTraderId, scan.scan.id)
-      notify.success('Strategy patch applied')
+      notify.success(pickText('Strategy patch applied', 'Strategie-Patch uebernommen'))
       await loadScanHistory()
       await loadVersions()
     } catch (err) {
       notify.error(
-        err instanceof Error ? err.message : 'Failed to apply AI patch'
+        err instanceof Error
+          ? err.message
+          : pickText('Failed to apply AI patch', 'KI-Patch konnte nicht uebernommen werden')
       )
     } finally {
       setApplyingScanId(null)
@@ -2629,11 +3872,14 @@ export function DealReviewPage({
   const launchChallenger = async (scan: DealReviewAIScanDetail) => {
     if (!selectedTraderId || !launchExchangeId) return
     const confirmed = await confirmToast(
-      `Launch a challenger trader in ${launchMode} mode for ${launchWindowHours}h using the selected wallet?`,
+      pickText(
+        `Launch a challenger trader in ${launchMode} mode for ${launchWindowHours}h using the selected wallet?`,
+        `Einen Challenger-Trader im Modus ${launchMode} fuer ${launchWindowHours}h mit der ausgewaehlten Wallet starten?`
+      ),
       {
-        title: 'Launch Challenger',
-        okText: 'Launch',
-        cancelText: 'Cancel',
+        title: pickText('Launch Challenger', 'Challenger starten'),
+        okText: pickText('Launch', 'Starten'),
+        cancelText: pickText('Cancel', 'Abbrechen'),
       }
     )
     if (!confirmed) return
@@ -2651,7 +3897,9 @@ export function DealReviewPage({
       )
       setSelectedCompareId(detail.compare.id)
       setSelectedCompareDetail(detail)
-      notify.success('Challenger compare started')
+      notify.success(
+        pickText('Challenger compare started', 'Challenger-Vergleich gestartet')
+      )
       await loadScanHistory()
       await loadVersions()
       await loadChallengerCompares()
@@ -3032,7 +4280,13 @@ export function DealReviewPage({
                       }
                     }}
                     options={[
-                      { value: '', label: 'Load saved cohort preset' },
+                      {
+                        value: '',
+                        label: pickText(
+                          'Load saved cohort preset',
+                          'Gespeichertes Kohorten-Preset laden'
+                        ),
+                      },
                       ...filterPresets.map((item) => ({
                         value: item.preset.id,
                         label: item.preset.name,
@@ -3043,7 +4297,7 @@ export function DealReviewPage({
                 <input
                   value={presetName}
                   onChange={(event) => setPresetName(event.target.value)}
-                  placeholder="Preset name"
+                  placeholder={pickText('Preset name', 'Preset-Name')}
                   className="h-11 rounded-lg border border-white/10 bg-black/20 px-3 text-sm"
                 />
                 <button
@@ -3052,12 +4306,12 @@ export function DealReviewPage({
                   className="h-11 rounded-lg border border-nofx-gold/30 bg-nofx-gold/10 text-nofx-gold font-semibold disabled:opacity-50"
                 >
                   {savingPreset
-                    ? 'Saving…'
+                    ? pickText('Saving…', 'Speichere…')
                     : selectedPreset &&
                         selectedPreset.preset.name.trim().toLowerCase() ===
                           presetName.trim().toLowerCase()
-                      ? 'Update preset'
-                      : 'Save preset'}
+                      ? pickText('Update preset', 'Preset aktualisieren')
+                      : pickText('Save preset', 'Preset speichern')}
                 </button>
                 <button
                   onClick={deleteFilterPreset}
@@ -3065,38 +4319,50 @@ export function DealReviewPage({
                   className="h-11 rounded-lg border border-white/10 bg-black/20 font-semibold disabled:opacity-50"
                 >
                   {deletingPresetId === selectedPreset?.preset.id
-                    ? 'Deleting…'
-                    : 'Delete preset'}
+                    ? pickText('Deleting…', 'Loesche…')
+                    : pickText('Delete preset', 'Preset loeschen')}
                 </button>
               </div>
 
               <div className="flex flex-wrap gap-2 mt-3">
                 {[
                   {
-                    label: 'Trend + high vol',
+                    label: pickText('Trend + high vol', 'Trend + hohe Volatilitaet'),
                     patch: {
                       open_trend_regime: 'uptrend',
                       open_volatility_regime: 'high_vol',
                     },
                   },
                   {
-                    label: 'Low-vol chop',
+                    label: pickText('Low-vol chop', 'Low-Vol Seitwaerts'),
                     patch: {
                       open_trend_regime: 'chop',
                       open_volatility_regime: 'low_vol',
                     },
                   },
                   {
-                    label: 'BTC-leading alt weakness',
+                    label: pickText(
+                      'BTC-leading alt weakness',
+                      'BTC-fuehrende Altcoin-Schwaeche'
+                    ),
                     patch: { open_btc_strength_regime: 'lagging' },
                   },
                   {
-                    label: 'Funding extreme longs',
+                    label: pickText('Funding extreme longs', 'Funding: extreme Longs'),
                     patch: { open_funding_regime: 'extreme_longs' },
                   },
-                  { label: 'Asia session', patch: { open_session_bucket: 'asia' } },
-                  { label: 'EU session', patch: { open_session_bucket: 'eu' } },
-                  { label: 'US session', patch: { open_session_bucket: 'us' } },
+                  {
+                    label: pickText('Asia session', 'Asien-Session'),
+                    patch: { open_session_bucket: 'asia' },
+                  },
+                  {
+                    label: pickText('EU session', 'EU-Session'),
+                    patch: { open_session_bucket: 'eu' },
+                  },
+                  {
+                    label: pickText('US session', 'US-Session'),
+                    patch: { open_session_bucket: 'us' },
+                  },
                 ].map((chip) => (
                   <button
                     key={chip.label}
@@ -3122,7 +4388,7 @@ export function DealReviewPage({
                   }}
                   className="h-8 px-3 rounded-full border border-white/10 bg-black/20 text-xs text-nofx-text-muted"
                 >
-                  Reset regime filters
+                  {pickText('Reset regime filters', 'Regime-Filter zuruecksetzen')}
                 </button>
               </div>
 
@@ -3130,28 +4396,28 @@ export function DealReviewPage({
                 <input
                   value={symbol}
                   onChange={(event) => setSymbol(event.target.value)}
-                  placeholder="Symbol"
+                  placeholder={pickText('Symbol', 'Symbol')}
                   className="h-11 rounded-lg border border-white/10 bg-black/20 px-3 text-sm"
                 />
                 <div className="h-11 rounded-lg border border-white/10 px-3 flex items-center bg-black/20">
                   <NofxSelect
                     value={side}
                     onChange={setSide}
-                    options={sideOptions}
+                    options={localizedSideOptions}
                   />
                 </div>
                 <div className="h-11 rounded-lg border border-white/10 px-3 flex items-center bg-black/20">
                   <NofxSelect
                     value={status}
                     onChange={setStatus}
-                    options={statusOptions}
+                    options={localizedStatusOptions}
                   />
                 </div>
                 <div className="h-11 rounded-lg border border-white/10 px-3 flex items-center bg-black/20">
                   <NofxSelect
                     value={outcome}
                     onChange={setOutcome}
-                    options={outcomeOptions}
+                    options={localizedOutcomeOptions}
                   />
                 </div>
                 <div className="h-11 rounded-lg border border-white/10 px-3 flex items-center bg-black/20">
@@ -3162,7 +4428,7 @@ export function DealReviewPage({
                       setCustomFromTime(null)
                       setCustomToTime(null)
                     }}
-                    options={rangeOptions}
+                    options={localizedRangeOptions}
                   />
                 </div>
                 <input
@@ -3170,20 +4436,20 @@ export function DealReviewPage({
                   onChange={(event) =>
                     setOpenSelectionBucket(event.target.value)
                   }
-                  placeholder="Selection bucket"
+                  placeholder={pickText('Selection bucket', 'Auswahl-Bucket')}
                   className="h-11 rounded-lg border border-white/10 bg-black/20 px-3 text-sm"
                 />
                 <input
                   value={closeReason}
                   onChange={(event) => setCloseReason(event.target.value)}
-                  placeholder="Close reason"
+                  placeholder={pickText('Close reason', 'Schliessungsgrund')}
                   className="h-11 rounded-lg border border-white/10 bg-black/20 px-3 text-sm"
                 />
                 <div className="h-11 rounded-lg border border-white/10 px-3 flex items-center bg-black/20">
                   <NofxSelect
                     value={exitReasonQuality}
                     onChange={setExitReasonQuality}
-                    options={exitReasonQualityOptions}
+                    options={localizedExitReasonQualityOptions}
                   />
                 </div>
                 <button
@@ -3193,7 +4459,7 @@ export function DealReviewPage({
                   }}
                   className="h-11 rounded-lg bg-nofx-gold text-black font-semibold hover:opacity-90 transition"
                 >
-                  Refresh
+                  {pickText('Refresh', 'Aktualisieren')}
                 </button>
               </div>
               <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-6 gap-3 mt-3">
@@ -3201,42 +4467,42 @@ export function DealReviewPage({
                   <NofxSelect
                     value={openTrendRegime}
                     onChange={setOpenTrendRegime}
-                    options={trendRegimeOptions}
+                    options={localizedTrendRegimeOptions}
                   />
                 </div>
                 <div className="h-11 rounded-lg border border-white/10 px-3 flex items-center bg-black/20">
                   <NofxSelect
                     value={openVolatilityRegime}
                     onChange={setOpenVolatilityRegime}
-                    options={volatilityRegimeOptions}
+                    options={localizedVolatilityRegimeOptions}
                   />
                 </div>
                 <div className="h-11 rounded-lg border border-white/10 px-3 flex items-center bg-black/20">
                   <NofxSelect
                     value={openBTCStrengthRegime}
                     onChange={setOpenBTCStrengthRegime}
-                    options={btcStrengthOptions}
+                    options={localizedBtcStrengthOptions}
                   />
                 </div>
                 <div className="h-11 rounded-lg border border-white/10 px-3 flex items-center bg-black/20">
                   <NofxSelect
                     value={openFundingRegime}
                     onChange={setOpenFundingRegime}
-                    options={fundingRegimeOptions}
+                    options={localizedFundingRegimeOptions}
                   />
                 </div>
                 <div className="h-11 rounded-lg border border-white/10 px-3 flex items-center bg-black/20">
                   <NofxSelect
                     value={openOIRegime}
                     onChange={setOpenOIRegime}
-                    options={oiRegimeOptions}
+                    options={localizedOiRegimeOptions}
                   />
                 </div>
                 <div className="h-11 rounded-lg border border-white/10 px-3 flex items-center bg-black/20">
                   <NofxSelect
                     value={openSessionBucket}
                     onChange={setOpenSessionBucket}
-                    options={sessionOptions}
+                    options={localizedSessionOptions}
                   />
                 </div>
               </div>
@@ -3245,35 +4511,35 @@ export function DealReviewPage({
                   <NofxSelect
                     value={openWeekdayBucket}
                     onChange={setOpenWeekdayBucket}
-                    options={weekdayOptions}
+                    options={localizedWeekdayOptions}
                   />
                 </div>
                 <div className="h-11 rounded-lg border border-white/10 px-3 flex items-center bg-black/20">
                   <NofxSelect
                     value={openVenueTier}
                     onChange={setOpenVenueTier}
-                    options={venueTierOptions}
+                    options={localizedVenueTierOptions}
                   />
                 </div>
                 <div className="h-11 rounded-lg border border-white/10 px-3 flex items-center bg-black/20">
                   <NofxSelect
                     value={openLiquidityTier}
                     onChange={setOpenLiquidityTier}
-                    options={liquidityTierOptions}
+                    options={localizedLiquidityTierOptions}
                   />
                 </div>
                 <div className="h-11 rounded-lg border border-white/10 px-3 flex items-center bg-black/20">
                   <NofxSelect
                     value={openSpreadBucket}
                     onChange={setOpenSpreadBucket}
-                    options={executionBucketOptions}
+                    options={localizedExecutionBucketOptions}
                   />
                 </div>
                 <div className="h-11 rounded-lg border border-white/10 px-3 flex items-center bg-black/20">
                   <NofxSelect
                     value={openSlippageBucket}
                     onChange={setOpenSlippageBucket}
-                    options={executionBucketOptions}
+                    options={localizedExecutionBucketOptions}
                   />
                 </div>
               </div>
@@ -3281,32 +4547,41 @@ export function DealReviewPage({
                 <input
                   value={minPnl}
                   onChange={(event) => setMinPnl(event.target.value)}
-                  placeholder="Min PnL"
+                  placeholder={pickText('Min PnL', 'Min. PnL')}
                   className="h-11 rounded-lg border border-white/10 bg-black/20 px-3 text-sm"
                 />
                 <input
                   value={maxPnl}
                   onChange={(event) => setMaxPnl(event.target.value)}
-                  placeholder="Max PnL"
+                  placeholder={pickText('Max PnL', 'Max. PnL')}
                   className="h-11 rounded-lg border border-white/10 bg-black/20 px-3 text-sm"
                 />
                 <div className="h-11 rounded-lg border border-white/10 px-3 flex items-center bg-black/20">
                   <NofxSelect
                     value={reviewQueueMode}
                     onChange={setReviewQueueMode}
-                    options={reviewQueueOptions}
+                    options={localizedReviewQueueOptions}
                   />
                 </div>
               </div>
               {(customFromTime || customToTime) && (
                 <div className="mt-3 rounded-lg border border-sky-400/20 bg-sky-500/10 p-3 flex flex-col md:flex-row md:items-center md:justify-between gap-3">
                   <div className="text-sm text-sky-200">
-                    Exact optimizer review window active:{' '}
+                    {pickText(
+                      'Exact optimizer review window active:',
+                      'Exaktes Optimizer-Review-Fenster aktiv:'
+                    )}{' '}
                     {customFromTime
-                      ? new Date(customFromTime).toLocaleString()
+                      ? new Date(customFromTime).toLocaleString(
+                          toDateTimeLocale(language)
+                        )
                       : '-'}{' '}
-                    to{' '}
-                    {customToTime ? new Date(customToTime).toLocaleString() : '-'}
+                    {pickText('to', 'bis')}{' '}
+                    {customToTime
+                      ? new Date(customToTime).toLocaleString(
+                          toDateTimeLocale(language)
+                        )
+                      : '-'}
                   </div>
                   <button
                     onClick={() => {
@@ -3315,7 +4590,7 @@ export function DealReviewPage({
                     }}
                     className="h-9 px-3 rounded-lg border border-sky-300/30 text-sky-200"
                   >
-                    Clear exact window
+                    {pickText('Clear exact window', 'Exaktes Fenster loeschen')}
                   </button>
                 </div>
               )}
@@ -3323,19 +4598,19 @@ export function DealReviewPage({
 
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
               <div className="nofx-glass rounded-xl p-4">
-                <div className="text-xs text-nofx-text-muted">Deals</div>
+                <div className="text-xs text-nofx-text-muted">{pickText('Deals', 'Deals')}</div>
                 <div className="text-2xl font-semibold">
                   {summary?.total_deals || 0}
                 </div>
               </div>
               <div className="nofx-glass rounded-xl p-4">
-                <div className="text-xs text-nofx-text-muted">Win Rate</div>
+                <div className="text-xs text-nofx-text-muted">{pickText('Win Rate', 'Trefferquote')}</div>
                 <div className="text-2xl font-semibold">
                   {summary ? `${summary.win_rate.toFixed(1)}%` : '-'}
                 </div>
               </div>
               <div className="nofx-glass rounded-xl p-4">
-                <div className="text-xs text-nofx-text-muted">Net PnL</div>
+                <div className="text-xs text-nofx-text-muted">{pickText('Net PnL', 'Netto-PnL')}</div>
                 <div
                   className={`text-2xl font-semibold ${summary && summary.net_pnl >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}
                 >
@@ -3343,7 +4618,7 @@ export function DealReviewPage({
                 </div>
               </div>
               <div className="nofx-glass rounded-xl p-4">
-                <div className="text-xs text-nofx-text-muted">Avg Hold</div>
+                <div className="text-xs text-nofx-text-muted">{pickText('Avg Hold', 'Ø Haltedauer')}</div>
                 <div className="text-2xl font-semibold">
                   {summary ? formatHold(summary.avg_hold_ms) : '-'}
                 </div>
@@ -3352,48 +4627,53 @@ export function DealReviewPage({
 
             <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-5 gap-3">
               <div className="nofx-glass rounded-xl p-4">
-                <div className="text-xs text-nofx-text-muted">Bad entries</div>
+                <div className="text-xs text-nofx-text-muted">{pickText('Bad entries', 'Schlechte Einstiege')}</div>
                 <div className="text-2xl font-semibold mt-1">
                   {summary?.bad_entry_deals || 0}
                 </div>
                 <div className="text-xs text-nofx-text-muted mt-2">
-                  Avg entry score {summary ? formatScore(summary.avg_entry_timing_score) : '-'}
+                  {pickText('Avg entry score', 'Ø Einstiegsscore')}{' '}
+                  {summary ? formatScore(summary.avg_entry_timing_score) : '-'}
                 </div>
               </div>
               <div className="nofx-glass rounded-xl p-4">
-                <div className="text-xs text-nofx-text-muted">Bad exits</div>
+                <div className="text-xs text-nofx-text-muted">{pickText('Bad exits', 'Schlechte Exits')}</div>
                 <div className="text-2xl font-semibold mt-1">
                   {summary?.bad_exit_deals || 0}
                 </div>
                 <div className="text-xs text-nofx-text-muted mt-2">
-                  Avg exit score {summary ? formatScore(summary.avg_exit_efficiency_score) : '-'}
+                  {pickText('Avg exit score', 'Ø Exit-Score')}{' '}
+                  {summary ? formatScore(summary.avg_exit_efficiency_score) : '-'}
                 </div>
               </div>
               <div className="nofx-glass rounded-xl p-4">
-                <div className="text-xs text-nofx-text-muted">Avoidable losses</div>
+                <div className="text-xs text-nofx-text-muted">{pickText('Avoidable losses', 'Vermeidbare Verluste')}</div>
                 <div className="text-2xl font-semibold mt-1">
                   {summary?.avoidable_loss_deals || 0}
                 </div>
                 <div className="text-xs text-nofx-text-muted mt-2">
-                  Avg give-back {summary ? formatPct(summary.avg_profit_given_back_pct) : '-'}
+                  {pickText('Avg give-back', 'Ø Gewinnabgabe')}{' '}
+                  {summary ? formatPct(summary.avg_profit_given_back_pct) : '-'}
                 </div>
               </div>
               <div className="nofx-glass rounded-xl p-4">
-                <div className="text-xs text-nofx-text-muted">Strong entry / weak exit</div>
+                <div className="text-xs text-nofx-text-muted">{pickText('Strong entry / weak exit', 'Starker Einstieg / schwacher Exit')}</div>
                 <div className="text-2xl font-semibold mt-1">
                   {summary?.strong_entry_weak_exit_deals || 0}
                 </div>
                 <div className="text-xs text-nofx-text-muted mt-2">
-                  Avg MFE capture {summary ? formatPct(summary.avg_mfe_captured_pct) : '-'}
+                  {pickText('Avg MFE capture', 'Ø MFE-Erfassung')}{' '}
+                  {summary ? formatPct(summary.avg_mfe_captured_pct) : '-'}
                 </div>
               </div>
               <div className="nofx-glass rounded-xl p-4">
-                <div className="text-xs text-nofx-text-muted">Weak entry / lucky exit</div>
+                <div className="text-xs text-nofx-text-muted">{pickText('Weak entry / lucky exit', 'Schwacher Einstieg / Gluecks-Exit')}</div>
                 <div className="text-2xl font-semibold mt-1">
                   {summary?.weak_entry_lucky_exit_deals || 0}
                 </div>
                 <div className="text-xs text-nofx-text-muted mt-2">
-                  Avg sizing score {summary ? formatScore(summary.avg_risk_sizing_score) : '-'}
+                  {pickText('Avg sizing score', 'Ø Sizing-Score')}{' '}
+                  {summary ? formatScore(summary.avg_risk_sizing_score) : '-'}
                 </div>
               </div>
             </div>
@@ -3402,11 +4682,16 @@ export function DealReviewPage({
               <div className="flex items-center justify-between gap-4">
                 <div>
                   <h2 className="font-semibold text-lg">
-                    What changed after last patch?
+                    {pickText(
+                      'What changed after last patch?',
+                      'Was hat sich nach dem letzten Patch geaendert?'
+                    )}
                   </h2>
                   <p className="text-xs text-nofx-text-muted mt-1">
-                    Fast readout from the most recent strategy version and its
-                    observed attribution window.
+                    {pickText(
+                      'Fast readout from the most recent strategy version and its observed attribution window.',
+                      'Schnelle Einordnung der juengsten Strategieversion und ihres beobachteten Attributionsfensters.'
+                    )}
                   </p>
                 </div>
                 {latestVersion && (
@@ -3414,36 +4699,42 @@ export function DealReviewPage({
                     onClick={() => openVersionDetail(latestVersion.version.id)}
                     className="h-10 px-4 rounded-lg border border-nofx-gold/30 text-nofx-gold font-semibold"
                   >
-                    Open patch detail
+                    {pickText('Open patch detail', 'Patch-Details oeffnen')}
                   </button>
                 )}
               </div>
 
               {!latestVersion ? (
                 <div className="text-sm text-nofx-text-muted mt-4">
-                  No strategy patch has been applied yet for this trader.
+                  {pickText(
+                    'No strategy patch has been applied yet for this trader.',
+                    'Fuer diesen Trader wurde noch kein Strategie-Patch uebernommen.'
+                  )}
                 </div>
               ) : (
                 <div className="space-y-4 mt-4">
                   <div className="rounded-xl border border-white/10 bg-black/20 p-4">
                     <div className="text-xs uppercase tracking-[0.2em] text-nofx-gold">
                       {formatStrategyVersionSourceType(
-                        latestVersion.version.source_type
+                        latestVersion.version.source_type,
+                        language
                       )}
                     </div>
                     <div className="font-semibold mt-2">
-                      {latestVersion.version.summary || 'Strategy change'}
+                      {latestVersion.version.summary ||
+                        pickText('Strategy change', 'Strategieaenderung')}
                     </div>
                     <div className="text-xs text-nofx-text-muted mt-2">
-                      Applied{' '}
+                      {pickText('Applied', 'Uebernommen')}{' '}
                       {new Date(
                         latestVersion.version.applied_at ||
                           latestVersion.version.created_at
-                      ).toLocaleString()}
+                      ).toLocaleString(toDateTimeLocale(language))}
                     </div>
                     {latestVersion.version.expected_effect && (
                       <div className="text-sm text-nofx-text-muted mt-3">
-                        Intended effect: {latestVersion.version.expected_effect}
+                        {pickText('Intended effect:', 'Beabsichtigter Effekt:')}{' '}
+                        {latestVersion.version.expected_effect}
                       </div>
                     )}
                     {latestVersion.attribution?.note && (
@@ -3455,7 +4746,7 @@ export function DealReviewPage({
 
                   <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3">
                     <div className="rounded-xl border border-white/10 bg-black/20 p-4">
-                      <div className="text-xs text-nofx-text-muted">Status</div>
+                      <div className="text-xs text-nofx-text-muted">{pickText('Status', 'Status')}</div>
                       <div
                         className={`text-lg font-semibold mt-1 ${getPatchOutcomeTone(
                           latestFullDelta,
@@ -3464,13 +4755,14 @@ export function DealReviewPage({
                       >
                         {getPatchOutcomeLabel(
                           latestFullDelta,
-                          latestVersion.attribution?.rollback_suggested
+                          latestVersion.attribution?.rollback_suggested,
+                          language
                         )}
                       </div>
                     </div>
                     <div className="rounded-xl border border-white/10 bg-black/20 p-4">
                       <div className="text-xs text-nofx-text-muted">
-                        Full-strategy delta
+                        {pickText('Full-strategy delta', 'Delta Gesamtstrategie')}
                       </div>
                       <div
                         className={`text-lg font-semibold mt-1 ${getPatchOutcomeTone(
@@ -3478,13 +4770,13 @@ export function DealReviewPage({
                         )}`}
                       >
                         {latestFullDelta === null
-                          ? 'No observation yet'
+                          ? pickText('No observation yet', 'Noch keine Beobachtung')
                           : formatMoney(latestFullDelta)}
                       </div>
                     </div>
                     <div className="rounded-xl border border-white/10 bg-black/20 p-4">
                       <div className="text-xs text-nofx-text-muted">
-                        Target-cohort delta
+                        {pickText('Target-cohort delta', 'Delta Zielkohorte')}
                       </div>
                       <div
                         className={`text-lg font-semibold mt-1 ${getPatchOutcomeTone(
@@ -3492,13 +4784,13 @@ export function DealReviewPage({
                         )}`}
                       >
                         {latestTargetDelta === null
-                          ? 'Not cohort-scoped'
+                          ? pickText('Not cohort-scoped', 'Nicht kohortenbezogen')
                           : formatMoney(latestTargetDelta)}
                       </div>
                     </div>
                     <div className="rounded-xl border border-white/10 bg-black/20 p-4">
                       <div className="text-xs text-nofx-text-muted">
-                        Rollback suggestion
+                        {pickText('Rollback suggestion', 'Rollback-Empfehlung')}
                       </div>
                       <div
                         className={`text-lg font-semibold mt-1 ${
@@ -3508,8 +4800,8 @@ export function DealReviewPage({
                         }`}
                       >
                         {latestVersion.attribution?.rollback_suggested
-                          ? 'Suggested'
-                          : 'Not suggested'}
+                          ? pickText('Suggested', 'Empfohlen')
+                          : pickText('Not suggested', 'Nicht empfohlen')}
                       </div>
                     </div>
                   </div>
@@ -3517,30 +4809,32 @@ export function DealReviewPage({
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
                     <div className="rounded-xl border border-white/10 bg-black/20 p-4">
                       <div className="text-xs text-nofx-text-muted">
-                        Full before
+                        {pickText('Full before', 'Gesamt davor')}
                       </div>
                       <div className="text-sm text-nofx-text-muted mt-1">
                         {formatDatasetMini(
-                          latestVersion.attribution?.full_before_summary
+                          latestVersion.attribution?.full_before_summary,
+                          language
                         )}
                       </div>
                     </div>
                     <div className="rounded-xl border border-white/10 bg-black/20 p-4">
                       <div className="text-xs text-nofx-text-muted">
-                        Full after
+                        {pickText('Full after', 'Gesamt danach')}
                       </div>
                       <div className="text-sm text-nofx-text-muted mt-1">
                         {formatDatasetMini(
-                          latestVersion.attribution?.full_after_summary
+                          latestVersion.attribution?.full_after_summary,
+                          language
                         )}
                       </div>
                     </div>
                     <div className="rounded-xl border border-white/10 bg-black/20 p-4">
                       <div className="text-xs text-nofx-text-muted">
-                        Target cohort
+                        {pickText('Target cohort', 'Zielkohorte')}
                       </div>
                       <div className="text-sm text-nofx-text-muted mt-1">
-                        {formatVersionCohort(latestVersion.target_cohort)}
+                        {formatVersionCohort(latestVersion.target_cohort, language)}
                       </div>
                     </div>
                   </div>
@@ -3558,15 +4852,19 @@ export function DealReviewPage({
             <div className="nofx-glass rounded-xl overflow-hidden">
               <div className="px-5 py-4 border-b border-white/10 flex items-center justify-between">
                 <div>
-                  <h2 className="font-semibold text-lg">Filtered deals</h2>
+                  <h2 className="font-semibold text-lg">
+                    {pickText('Filtered deals', 'Gefilterte Deals')}
+                  </h2>
                   <p className="text-xs text-nofx-text-muted mt-1">
                     {selectedTrader
-                      ? `Trader: ${selectedTrader.trader_name}`
-                      : 'Select a trader'}
+                      ? `${pickText('Trader', 'Trader')}: ${selectedTrader.trader_name}`
+                      : pickText('Select a trader', 'Trader auswaehlen')}
                   </p>
                   <p className="text-xs text-nofx-text-muted mt-1">
-                    Queue: {buildQueueLabel(reviewQueueMode)} · {displayedItems.length}{' '}
-                    visible / {items.length} loaded
+                    {pickText('Queue:', 'Warteschlange:')}{' '}
+                    {buildQueueLabel(reviewQueueMode, language)} · {displayedItems.length}{' '}
+                    {pickText('visible', 'sichtbar')} / {items.length}{' '}
+                    {pickText('loaded', 'geladen')}
                   </p>
                 </div>
                 <div className="text-right">
@@ -3576,21 +4874,23 @@ export function DealReviewPage({
                       disabled={displayedItems.length === 0}
                       className="h-8 px-3 rounded-lg border border-white/10 bg-black/20 text-xs disabled:opacity-40"
                     >
-                      Export JSON
+                      {pickText('Export JSON', 'JSON exportieren')}
                     </button>
                     <button
                       onClick={exportFilteredDealsCSV}
                       disabled={displayedItems.length === 0}
                       className="h-8 px-3 rounded-lg border border-white/10 bg-black/20 text-xs disabled:opacity-40"
                     >
-                      Export CSV
+                      {pickText('Export CSV', 'CSV exportieren')}
                     </button>
                   </div>
                   <div className="text-xs text-nofx-text-muted">
-                    Hotkeys: `J` / `K` or `↑` / `↓`
+                    {pickText('Hotkeys:', 'Hotkeys:')} `J` / `K` {pickText('or', 'oder')} `↑` / `↓`
                   </div>
                   {loading && (
-                    <div className="text-xs text-nofx-text-muted mt-1">Loading…</div>
+                    <div className="text-xs text-nofx-text-muted mt-1">
+                      {pickText('Loading…', 'Laedt…')}
+                    </div>
                   )}
                 </div>
               </div>
@@ -3599,8 +4899,14 @@ export function DealReviewPage({
               ) : displayedItems.length === 0 ? (
                 <div className="p-5 text-nofx-text-muted">
                   {reviewQueueMode
-                    ? 'No deals matched the current review queue.'
-                    : 'No deals matched the current filters.'}
+                    ? pickText(
+                        'No deals matched the current review queue.',
+                        'Keine Deals passten zur aktuellen Review-Warteschlange.'
+                      )
+                    : pickText(
+                        'No deals matched the current filters.',
+                        'Keine Deals passten zu den aktuellen Filtern.'
+                      )}
                 </div>
               ) : (
                 <div className="divide-y divide-white/5">
@@ -3610,7 +4916,7 @@ export function DealReviewPage({
                       item.classifier_assist?.highlight_level
                     )
                     const giveBackPct = getDealGiveBackPct(item.case)
-                    const qualityBadges = buildQualityBadges(item.case)
+                    const qualityBadges = buildQualityBadges(item.case, language)
                     return (
                       <button
                         key={item.case.id}
@@ -3639,12 +4945,15 @@ export function DealReviewPage({
                               </span>
                             </div>
                             <div className="text-xs text-nofx-text-muted mt-2">
-                              Open: {formatDate(item.case.entry_time_ms)} | Close:{' '}
-                              {formatDate(item.case.exit_time_ms)}
+                              {pickText('Open:', 'Open:')} {formatDate(item.case.entry_time_ms, language)} |{' '}
+                              {pickText('Close:', 'Close:')} {formatDate(item.case.exit_time_ms, language)}
                             </div>
                             <div className="text-sm text-nofx-text-muted mt-2 line-clamp-2">
                               {item.open_reasoning ||
-                                'No open reasoning snapshot linked yet.'}
+                                pickText(
+                                  'No open reasoning snapshot linked yet.',
+                                  'Noch kein Snapshot der Open-Begruendung verknuepft.'
+                                )}
                             </div>
                             {buildOpenRegimeBadges(item).length > 0 && (
                               <div className="flex flex-wrap gap-2 mt-3">
@@ -3670,7 +4979,8 @@ export function DealReviewPage({
                                 </span>
                                 <span className="text-xs text-nofx-text-muted">
                                   {formatClassifierIssueType(
-                                    topSuggestion.issue_type
+                                    topSuggestion.issue_type,
+                                    language
                                   )}
                                 </span>
                               </div>
@@ -3704,8 +5014,10 @@ export function DealReviewPage({
                             {reviewQueueMode === 'biggest_giveback' &&
                               giveBackPct > 0 && (
                                 <div className="mt-2 text-xs text-amber-300">
-                                  Give-back {formatPct(giveBackPct)}
-                                  {' · '}Peak{' '}
+                                  {pickText('Give-back', 'Gewinnabgabe')}{' '}
+                                  {formatPct(giveBackPct)}
+                                  {' · '}
+                                  {pickText('Peak', 'Peak')}{' '}
                                   {formatPct(
                                     item.case.max_favorable_excursion_pct || 0
                                   )}
@@ -3742,7 +5054,9 @@ export function DealReviewPage({
             <div className="nofx-glass rounded-xl p-5">
               <div className="flex items-center justify-between gap-4 mb-4">
                 <div>
-                  <h2 className="font-semibold text-lg">Deal detail</h2>
+                  <h2 className="font-semibold text-lg">
+                    {pickText('Deal detail', 'Deal-Details')}
+                  </h2>
                   {detail?.case && (
                     <div className="text-xs text-nofx-text-muted mt-1">
                       {detail.trader_name}{' '}
@@ -3756,7 +5070,7 @@ export function DealReviewPage({
                     disabled={selectedCaseIndex <= 0}
                     className="h-9 px-3 rounded-lg border border-white/10 bg-black/20 text-sm disabled:opacity-40"
                   >
-                    Previous
+                    {pickText('Previous', 'Zurueck')}
                   </button>
                   <button
                     onClick={() => goToReviewCase(1)}
@@ -3766,60 +5080,65 @@ export function DealReviewPage({
                     }
                     className="h-9 px-3 rounded-lg border border-white/10 bg-black/20 text-sm disabled:opacity-40"
                   >
-                    Next
+                    {pickText('Next', 'Weiter')}
                   </button>
                 </div>
               </div>
               {detailLoading ? (
-                <div className="text-nofx-text-muted">Loading detail…</div>
+                <div className="text-nofx-text-muted">
+                  {pickText('Loading detail…', 'Details werden geladen…')}
+                </div>
               ) : !detail ? (
                 <div className="text-nofx-text-muted">
-                  Select a deal to inspect its open and close rationale.
+                  {pickText(
+                    'Select a deal to inspect its open and close rationale.',
+                    'Waehle einen Deal aus, um seine Open- und Close-Begruendung zu pruefen.'
+                  )}
                 </div>
               ) : (
                 <div className="space-y-5">
                   <div className="grid grid-cols-2 gap-3 text-sm">
                     <div>
-                      <span className="text-nofx-text-muted">Symbol</span>
+                      <span className="text-nofx-text-muted">{pickText('Symbol', 'Symbol')}</span>
                       <div className="font-semibold mt-1">
                         {detail.case.symbol}
                       </div>
                     </div>
                     <div>
-                      <span className="text-nofx-text-muted">Side</span>
+                      <span className="text-nofx-text-muted">{pickText('Side', 'Richtung')}</span>
                       <div className="font-semibold mt-1">
                         {detail.case.side}
                       </div>
                     </div>
                     <div>
-                      <span className="text-nofx-text-muted">Outcome</span>
+                      <span className="text-nofx-text-muted">{pickText('Outcome', 'Ergebnis')}</span>
                       <div className="font-semibold mt-1">
                         {detail.case.outcome}
                       </div>
                     </div>
                     <div>
-                      <span className="text-nofx-text-muted">Hold</span>
+                      <span className="text-nofx-text-muted">{pickText('Hold', 'Haltedauer')}</span>
                       <div className="font-semibold mt-1">
                         {formatHold(detail.case.hold_duration_ms)}
                       </div>
                     </div>
                     <div>
-                      <span className="text-nofx-text-muted">Entry</span>
+                      <span className="text-nofx-text-muted">{pickText('Entry', 'Einstieg')}</span>
                       <div className="font-semibold mt-1">
                         {formatMoney(detail.case.entry_price)} @{' '}
-                        {formatDate(detail.case.entry_time_ms)}
+                        {formatDate(detail.case.entry_time_ms, language)}
                       </div>
                     </div>
                     <div>
-                      <span className="text-nofx-text-muted">Exit</span>
+                      <span className="text-nofx-text-muted">{pickText('Exit', 'Exit')}</span>
                       <div className="font-semibold mt-1">
                         {detail.case.exit_time_ms
-                          ? `${formatMoney(detail.case.exit_price)} @ ${formatDate(detail.case.exit_time_ms)}`
+                          ? `${formatMoney(detail.case.exit_price)} @ ${formatDate(detail.case.exit_time_ms, language)}`
                           : '-'}
                       </div>
                     </div>
                     <div className="col-span-2">
-                      <span className="text-nofx-text-muted">PnL</span>
+                      <span className="text-nofx-text-muted">{pickText('PnL', 'PnL')}</span>
                       <div
                         className={
                           detail.case.realized_pnl >= 0
@@ -3872,79 +5191,101 @@ export function DealReviewPage({
                   <div className="rounded-xl border border-white/10 bg-black/20 p-4 space-y-4">
                     <div className="flex items-start justify-between gap-4">
                       <div>
-                        <div className="font-semibold">Quality readout</div>
+                        <div className="font-semibold">
+                          {pickText('Quality readout', 'Qualitaetsauswertung')}
+                        </div>
                         <div className="text-xs text-nofx-text-muted mt-1">
-                          Entry, exit, and sizing quality derived from the full
-                          deal path.
+                          {pickText(
+                            'Entry, exit, and sizing quality derived from the full deal path.',
+                            'Einstiegs-, Exit- und Sizing-Qualitaet abgeleitet aus dem vollstaendigen Deal-Verlauf.'
+                          )}
                         </div>
                       </div>
                       <div className="text-right text-xs text-nofx-text-muted">
-                        MFE capture {formatPct(detail.case.mfe_captured_pct || 0)}
+                        {pickText('MFE capture', 'MFE-Erfassung')}{' '}
+                        {formatPct(detail.case.mfe_captured_pct || 0)}
                       </div>
                     </div>
 
-                    {buildQualityNarrative(detail.case) && (
+                    {buildQualityNarrative(detail.case, language) && (
                       <div className="rounded-lg border border-amber-400/20 bg-amber-500/10 px-3 py-2 text-sm text-amber-100">
-                        {buildQualityNarrative(detail.case)}
+                        {buildQualityNarrative(detail.case, language)}
                       </div>
                     )}
 
                     <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
                       <div className="rounded-lg border border-white/10 bg-black/20 p-3">
-                        <div className="text-xs text-nofx-text-muted">Entry timing score</div>
+                        <div className="text-xs text-nofx-text-muted">
+                          {pickText('Entry timing score', 'Einstiegs-Timing-Score')}
+                        </div>
                         <div className="text-lg font-semibold mt-1">
                           {formatScore(detail.case.entry_timing_score)}
                         </div>
                         <div className="text-xs text-nofx-text-muted mt-2">
-                          First profit {formatHold(detail.case.time_to_first_profit_ms)}
+                          {pickText('First profit', 'Erster Gewinn')}{' '}
+                          {formatHold(detail.case.time_to_first_profit_ms)}
                         </div>
                       </div>
                       <div className="rounded-lg border border-white/10 bg-black/20 p-3">
-                        <div className="text-xs text-nofx-text-muted">Exit efficiency score</div>
+                        <div className="text-xs text-nofx-text-muted">
+                          {pickText('Exit efficiency score', 'Exit-Effizienz-Score')}
+                        </div>
                         <div className="text-lg font-semibold mt-1">
                           {formatScore(detail.case.exit_efficiency_score)}
                         </div>
                         <div className="text-xs text-nofx-text-muted mt-2">
-                          Give-back {formatMoney(detail.case.profit_given_back)} /{' '}
+                          {pickText('Give-back', 'Gewinnabgabe')}{' '}
+                          {formatMoney(detail.case.profit_given_back)} /{' '}
                           {formatPct(detail.case.profit_given_back_pct)}
                         </div>
                       </div>
                       <div className="rounded-lg border border-white/10 bg-black/20 p-3">
-                        <div className="text-xs text-nofx-text-muted">Risk sizing score</div>
+                        <div className="text-xs text-nofx-text-muted">
+                          {pickText('Risk sizing score', 'Risiko-Sizing-Score')}
+                        </div>
                         <div className="text-lg font-semibold mt-1">
                           {formatScore(detail.case.risk_sizing_score)}
                         </div>
                         <div className="text-xs text-nofx-text-muted mt-2">
-                          Planned risk {formatPct(detail.case.planned_risk_pct)}
+                          {pickText('Planned risk', 'Geplantes Risiko')}{' '}
+                          {formatPct(detail.case.planned_risk_pct)}
                         </div>
                       </div>
                     </div>
 
                     <div className="grid grid-cols-2 xl:grid-cols-4 gap-3 text-sm">
                       <div>
-                        <div className="text-xs text-nofx-text-muted">Max favorable excursion</div>
+                        <div className="text-xs text-nofx-text-muted">
+                          {pickText('Max favorable excursion', 'Maximale positive Auslenkung')}
+                        </div>
                         <div className="font-semibold mt-1">
                           {formatMoney(detail.case.max_favorable_excursion)} /{' '}
                           {formatPct(detail.case.max_favorable_excursion_pct)}
                         </div>
                       </div>
                       <div>
-                        <div className="text-xs text-nofx-text-muted">Max adverse excursion</div>
+                        <div className="text-xs text-nofx-text-muted">
+                          {pickText('Max adverse excursion', 'Maximale negative Auslenkung')}
+                        </div>
                         <div className="font-semibold mt-1 text-rose-300">
                           {formatMoney(detail.case.max_adverse_excursion)} /{' '}
                           {formatPct(detail.case.max_adverse_excursion_pct)}
                         </div>
                       </div>
                       <div>
-                        <div className="text-xs text-nofx-text-muted">Time to first profit</div>
+                        <div className="text-xs text-nofx-text-muted">
+                          {pickText('Time to first profit', 'Zeit bis zum ersten Gewinn')}
+                        </div>
                         <div className="font-semibold mt-1">
                           {detail.case.time_to_first_profit_ms
                             ? formatHold(detail.case.time_to_first_profit_ms)
-                            : 'Never'}
+                            : pickText('Never', 'Nie')}
                         </div>
                       </div>
                       <div>
-                        <div className="text-xs text-nofx-text-muted">Time to max drawdown</div>
+                        <div className="text-xs text-nofx-text-muted">
+                          {pickText('Time to max drawdown', 'Zeit bis zum maximalen Drawdown')}
+                        </div>
                         <div className="font-semibold mt-1">
                           {detail.case.time_to_max_drawdown_ms
                             ? formatHold(detail.case.time_to_max_drawdown_ms)
@@ -3957,21 +5298,29 @@ export function DealReviewPage({
                   <div className="rounded-xl border border-white/10 bg-black/20 p-4 space-y-4">
                     <div className="flex items-start justify-between gap-4">
                       <div>
-                        <div className="font-semibold">Matching symbol priors</div>
+                        <div className="font-semibold">
+                          {pickText('Matching symbol priors', 'Passende Symbol-Priors')}
+                        </div>
                         <div className="text-xs text-nofx-text-muted mt-1">
-                          Learned symbol+side+regime patterns from prior closed
-                          deals for this trader.
+                          {pickText(
+                            'Learned symbol+side+regime patterns from prior closed deals for this trader.',
+                            'Gelernte Symbol+Richtung+Regime-Muster aus frueheren geschlossenen Deals dieses Traders.'
+                          )}
                         </div>
                       </div>
                       <div className="text-xs text-nofx-text-muted">
-                        {detail.symbol_behavior_priors?.length || 0} matches
+                        {detail.symbol_behavior_priors?.length || 0}{' '}
+                        {pickText('matches', 'Treffer')}
                       </div>
                     </div>
 
                     {!detail.symbol_behavior_priors ||
                     detail.symbol_behavior_priors.length === 0 ? (
                       <div className="text-sm text-nofx-text-muted">
-                        No learned symbol prior matched this deal yet.
+                        {pickText(
+                          'No learned symbol prior matched this deal yet.',
+                          'Bisher passt noch kein gelerntes Symbol-Prior zu diesem Deal.'
+                        )}
                       </div>
                     ) : (
                       <div className="space-y-3">
@@ -3991,7 +5340,8 @@ export function DealReviewPage({
                                       prior.behavior_bias
                                     )}`}
                                   >
-                                    {prior.behavior_bias || 'mixed'}
+                                    {prior.behavior_bias ||
+                                      pickText('mixed', 'gemischt')}
                                   </span>
                                 <span className="px-2 py-1 rounded-full text-[11px] border border-white/10 bg-white/5 text-white">
                                   {prior.status}
@@ -4002,7 +5352,8 @@ export function DealReviewPage({
                                   )}`}
                                 >
                                   {formatSymbolBehaviorValidationLabel(
-                                    prior.validation_label
+                                    prior.validation_label,
+                                    language
                                   )}
                                 </span>
                               </div>
@@ -4012,10 +5363,12 @@ export function DealReviewPage({
                               </div>
                               <div className="text-right text-xs text-nofx-text-muted">
                                 <div>
-                                  Match {formatSemanticSimilarityScore(prior.match_score)}
+                                  {pickText('Match', 'Treffer')}{' '}
+                                  {formatSemanticSimilarityScore(prior.match_score, language)}
                                 </div>
                                 <div className="mt-1">
-                                  Action {formatSymbolBehaviorAction(prior.recommended_action)}
+                                  {pickText('Action', 'Aktion')}{' '}
+                                  {formatSymbolBehaviorAction(prior.recommended_action, language)}
                                 </div>
                               </div>
                             </div>
@@ -4354,10 +5707,14 @@ export function DealReviewPage({
                   <div className="rounded-xl border border-white/10 bg-black/20 p-4 space-y-4">
                     <div className="flex items-start justify-between gap-4">
                       <div>
-                        <div className="font-semibold">Deal compare</div>
+                        <div className="font-semibold">
+                          {pickText('Deal compare', 'Deal-Vergleich')}
+                        </div>
                         <div className="text-xs text-nofx-text-muted mt-1">
-                          Compare the current deal against another loaded case
-                          side by side.
+                          {pickText(
+                            'Compare the current deal against another loaded case side by side.',
+                            'Vergleiche den aktuellen Deal direkt mit einem anderen geladenen Fall.'
+                          )}
                         </div>
                       </div>
                       <div className="w-full max-w-xs h-10 rounded-lg border border-white/10 px-3 flex items-center bg-black/20">
@@ -4365,7 +5722,13 @@ export function DealReviewPage({
                           value={comparePeerCaseId}
                           onChange={setComparePeerCaseId}
                           options={[
-                            { value: '', label: 'Select compare deal' },
+                            {
+                              value: '',
+                              label: pickText(
+                                'Select compare deal',
+                                'Vergleichsdeal auswaehlen'
+                              ),
+                            },
                             ...displayedItems
                               .filter((item) => item.case.id !== detail.case.id)
                               .map((item) => ({
@@ -4379,16 +5742,18 @@ export function DealReviewPage({
 
                     {!comparePeerCaseId ? (
                       <div className="text-sm text-nofx-text-muted">
-                        Choose another visible deal to compare it against the
-                        currently selected one.
+                        {pickText(
+                          'Choose another visible deal to compare it against the currently selected one.',
+                          'Waehle einen anderen sichtbaren Deal aus, um ihn mit dem aktuell ausgewaehlten zu vergleichen.'
+                        )}
                       </div>
                     ) : comparePeerLoading ? (
                       <div className="text-sm text-nofx-text-muted">
-                        Loading compare deal…
+                        {pickText('Loading compare deal…', 'Vergleichsdeal wird geladen…')}
                       </div>
                     ) : !comparePeerDetail ? (
                       <div className="text-sm text-nofx-text-muted">
-                        No compare deal loaded yet.
+                        {pickText('No compare deal loaded yet.', 'Noch kein Vergleichsdeal geladen.')}
                       </div>
                     ) : (
                       <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
@@ -4406,7 +5771,9 @@ export function DealReviewPage({
                               <div className="flex items-start justify-between gap-3">
                                 <div>
                                   <div className="text-xs text-nofx-text-muted">
-                                    {index === 0 ? 'Current deal' : 'Compare deal'}
+                                    {index === 0
+                                      ? pickText('Current deal', 'Aktueller Deal')
+                                      : pickText('Compare deal', 'Vergleichsdeal')}
                                   </div>
                                   <div className="font-semibold mt-1">
                                     {entry.case.symbol} · {entry.case.side}
@@ -4420,45 +5787,45 @@ export function DealReviewPage({
                                     onClick={() => setSelectedCaseId(entry.case.id)}
                                     className="h-8 px-3 rounded-lg border border-white/10 bg-black/20 text-xs"
                                   >
-                                    Focus deal
+                                    {pickText('Focus deal', 'Deal fokussieren')}
                                   </button>
                                 )}
                               </div>
 
                               <div className="grid grid-cols-2 gap-3 text-xs">
                                 <div>
-                                  Outcome:{' '}
+                                  {pickText('Outcome:', 'Ergebnis:')}{' '}
                                   <span className="text-white">
                                     {entry.case.outcome}
                                   </span>
                                 </div>
                                 <div>
-                                  Hold:{' '}
+                                  {pickText('Hold:', 'Haltedauer:')}{' '}
                                   <span className="text-white">
                                     {formatHold(entry.case.hold_duration_ms)}
                                   </span>
                                 </div>
                                 <div>
-                                  PnL:{' '}
+                                  {pickText('PnL:', 'PnL:')}{' '}
                                   <span className={tone}>
                                     {formatMoney(entry.case.realized_pnl)} /{' '}
                                     {formatPct(entry.case.realized_pnl_pct)}
                                   </span>
                                 </div>
                                 <div>
-                                  Close reason:{' '}
+                                  {pickText('Close reason:', 'Schliessungsgrund:')}{' '}
                                   <span className="text-white">
                                     {entry.case.close_reason || '-'}
                                   </span>
                                 </div>
                                 <div>
-                                  Entry:{' '}
+                                  {pickText('Entry:', 'Einstieg:')}{' '}
                                   <span className="text-white">
                                     {formatMoney(entry.case.entry_price)}
                                   </span>
                                 </div>
                                 <div>
-                                  Exit:{' '}
+                                  {pickText('Exit:', 'Exit:')}{' '}
                                   <span className="text-white">
                                     {entry.case.exit_price
                                       ? formatMoney(entry.case.exit_price)
@@ -4466,56 +5833,56 @@ export function DealReviewPage({
                                   </span>
                                 </div>
                                 <div>
-                                  Peak MFE:{' '}
+                                  {pickText('Peak MFE:', 'Peak-MFE:')}{' '}
                                   <span className="text-emerald-300">
                                     {formatPct(entry.case.max_favorable_excursion_pct || 0)}
                                   </span>
                                 </div>
                                 <div>
-                                  Max adverse:{' '}
+                                  {pickText('Max adverse:', 'Max negativ:')}{' '}
                                   <span className="text-rose-300">
                                     {formatPct(entry.case.max_adverse_excursion_pct || 0)}
                                   </span>
                                 </div>
                                 <div>
-                                  Give-back:{' '}
+                                  {pickText('Give-back:', 'Gewinnabgabe:')}{' '}
                                   <span className="text-amber-300">
                                     {formatPct(maxGiveBackPct)}
                                   </span>
                                 </div>
                                 <div>
-                                  Exit efficiency:{' '}
+                                  {pickText('Exit efficiency:', 'Exit-Effizienz:')}{' '}
                                   <span className="text-white">
                                     {formatScore(entry.case.exit_efficiency_score)}
                                   </span>
                                 </div>
                                 <div>
-                                  Entry timing:{' '}
+                                  {pickText('Entry timing:', 'Einstiegs-Timing:')}{' '}
                                   <span className="text-white">
                                     {formatScore(entry.case.entry_timing_score)}
                                   </span>
                                 </div>
                                 <div>
-                                  Risk sizing:{' '}
+                                  {pickText('Risk sizing:', 'Risiko-Sizing:')}{' '}
                                   <span className="text-white">
                                     {formatScore(entry.case.risk_sizing_score)}
                                   </span>
                                 </div>
                                 <div>
-                                  Path points:{' '}
+                                  {pickText('Path points:', 'Pfadpunkte:')}{' '}
                                   <span className="text-white">
                                     {entry.price_timeline?.summary.point_count || 0}
                                   </span>
                                 </div>
                                 <div>
-                                  Cycle / platform:{' '}
+                                  {pickText('Cycle / platform:', 'Zyklus / Plattform:')}{' '}
                                   <span className="text-white">
                                     {entry.price_timeline?.summary.cycle_samples || 0} /{' '}
                                     {entry.price_timeline?.summary.platform_samples || 0}
                                   </span>
                                 </div>
                                 <div>
-                                  Labels:{' '}
+                                  {pickText('Labels:', 'Labels:')}{' '}
                                   <span className="text-white">
                                     {(entry.labels || []).length
                                       ? entry.labels?.join(', ')
@@ -4526,19 +5893,25 @@ export function DealReviewPage({
 
                               <div className="rounded-lg border border-white/10 bg-black/20 p-3">
                                 <div className="text-xs uppercase tracking-[0.2em] text-nofx-text-muted">
-                                  Open rationale
+                                  {pickText('Open rationale', 'Open-Begruendung')}
                                 </div>
                                 <div className="text-sm text-nofx-text-muted mt-2">
-                                  {formatDealReasonPreview(entry.open?.event.reasoning)}
+                                  {formatDealReasonPreview(
+                                    entry.open?.event.reasoning,
+                                    language
+                                  )}
                                 </div>
                               </div>
 
                               <div className="rounded-lg border border-white/10 bg-black/20 p-3">
                                 <div className="text-xs uppercase tracking-[0.2em] text-nofx-text-muted">
-                                  Close rationale
+                                  {pickText('Close rationale', 'Close-Begruendung')}
                                 </div>
                                 <div className="text-sm text-nofx-text-muted mt-2">
-                                  {formatDealReasonPreview(entry.close?.event.reasoning)}
+                                  {formatDealReasonPreview(
+                                    entry.close?.event.reasoning,
+                                    language
+                                  )}
                                 </div>
                               </div>
                             </div>
@@ -4552,7 +5925,7 @@ export function DealReviewPage({
                     detail.open_candidate_sources.length > 0 && (
                       <div>
                         <div className="text-xs uppercase tracking-[0.2em] text-nofx-text-muted mb-2">
-                          Open sources
+                          {pickText('Open sources', 'Open-Quellen')}
                         </div>
                         <div className="flex flex-wrap gap-2">
                           {detail.open_candidate_sources.map((source) => (
@@ -4570,10 +5943,14 @@ export function DealReviewPage({
                   <div className="rounded-xl border border-white/10 bg-black/20 p-4 space-y-4">
                     <div className="flex items-start justify-between gap-4">
                       <div>
-                        <div className="font-semibold">Learned review assist</div>
+                        <div className="font-semibold">
+                          {pickText('Learned review assist', 'Gelernte Review-Hilfe')}
+                        </div>
                         <div className="text-xs text-nofx-text-muted mt-1">
-                          Label-memory heuristic trained from previously reviewed
-                          deals for this trader.
+                          {pickText(
+                            'Label-memory heuristic trained from previously reviewed deals for this trader.',
+                            'Label-Memory-Heuristik, trainiert auf zuvor geprueften Deals dieses Traders.'
+                          )}
                         </div>
                       </div>
                       {detail.classifier_assist?.highlight_level && (
@@ -4582,14 +5959,18 @@ export function DealReviewPage({
                             detail.classifier_assist.highlight_level
                           )}`}
                         >
-                          {detail.classifier_assist.highlight_level} signal
+                          {detail.classifier_assist.highlight_level}{' '}
+                          {pickText('signal', 'Signal')}
                         </span>
                       )}
                     </div>
 
                     <div className="text-sm text-nofx-text-muted">
                       {detail.classifier_assist?.summary ||
-                        'No learned review signal yet. Add more labels to give the heuristic model better examples.'}
+                        pickText(
+                          'No learned review signal yet. Add more labels to give the heuristic model better examples.',
+                          'Noch kein gelerntes Review-Signal vorhanden. Fuege mehr Labels hinzu, damit die Heuristik bessere Beispiele erhaelt.'
+                        )}
                     </div>
 
                     {detail.classifier_assist?.suggestions &&
@@ -4610,7 +5991,8 @@ export function DealReviewPage({
                                     </span>
                                     <span className="text-xs text-nofx-text-muted">
                                       {formatClassifierIssueType(
-                                        suggestion.issue_type
+                                        suggestion.issue_type,
+                                        language
                                       )}
                                     </span>
                                     <span
@@ -4621,7 +6003,8 @@ export function DealReviewPage({
                                       {suggestion.highlight_level || 'low'}
                                     </span>
                                     <span className="text-xs text-nofx-text-muted">
-                                      {suggestion.evidence_count} matches
+                                      {suggestion.evidence_count}{' '}
+                                      {pickText('matches', 'Treffer')}
                                     </span>
                                   </div>
                                   {suggestion.rationale && (
@@ -4644,8 +6027,8 @@ export function DealReviewPage({
                                       className="h-8 px-3 rounded-lg border border-emerald-400/25 text-emerald-300 disabled:opacity-50"
                                     >
                                       {classifierActionKey === actionKeyAccept
-                                        ? 'Applying…'
-                                        : 'Accept + label'}
+                                        ? pickText('Applying…', 'Wende an…')
+                                        : pickText('Accept + label', 'Akzeptieren + labeln')}
                                     </button>
                                     <button
                                       onClick={() =>
@@ -4661,14 +6044,16 @@ export function DealReviewPage({
                                       className="h-8 px-3 rounded-lg border border-white/15 text-white disabled:opacity-50"
                                     >
                                       {classifierActionKey === actionKeyReject
-                                        ? 'Saving…'
-                                        : 'Reject'}
+                                        ? pickText('Saving…', 'Speichere…')
+                                        : pickText('Reject', 'Ablehnen')}
                                     </button>
                                     {(suggestion.accepted_count > 0 ||
                                       suggestion.rejected_count > 0) && (
                                       <span className="text-xs text-nofx-text-muted">
-                                        Accepted {suggestion.accepted_count} ·
-                                        Rejected {suggestion.rejected_count}
+                                        {pickText('Accepted', 'Akzeptiert')}{' '}
+                                        {suggestion.accepted_count} ·{' '}
+                                        {pickText('Rejected', 'Abgelehnt')}{' '}
+                                        {suggestion.rejected_count}
                                       </span>
                                     )}
                                   </div>
@@ -4683,25 +6068,126 @@ export function DealReviewPage({
                   <div className="rounded-xl border border-white/10 bg-black/20 p-4 space-y-4">
                     <div className="flex items-start justify-between gap-4">
                       <div>
-                        <div className="font-semibold">Matching learned patterns</div>
+                        <div className="font-semibold">
+                          {pickText('Matching learned patterns', 'Passende gelernte Muster')}
+                        </div>
                         <div className="text-xs text-nofx-text-muted mt-1">
                           Learned feature combinations replayed from prior closed
                           deals for this trader.
                         </div>
                       </div>
                       <div className="text-xs text-nofx-text-muted">
-                        {detail.learned_patterns?.length || 0} matches
+                        {visibleDetailLearnedPatterns.length} / {detailLearnedPatterns.length}{' '}
+                        {pickText('visible', 'sichtbar')}
                       </div>
                     </div>
 
-                    {!detail.learned_patterns ||
-                    detail.learned_patterns.length === 0 ? (
+                    {detailLearnedPatterns.length > 0 && (
+                      <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                        <div className="h-10 rounded-lg border border-white/10 px-3 flex items-center bg-black/20">
+                          <NofxSelect
+                            value={detailPatternDirectCandidateFilter}
+                            onChange={setDetailPatternDirectCandidateFilter}
+                            options={[
+                              {
+                                value: '',
+                                label: pickText(
+                                  'All candidate states',
+                                  'Alle Kandidatenzustaende'
+                                ),
+                              },
+                              {
+                                value: 'only',
+                                label: pickText(
+                                  'Only direct candidates',
+                                  'Nur direkte Kandidaten'
+                                ),
+                              },
+                            ]}
+                          />
+                        </div>
+                        <div className="h-10 rounded-lg border border-white/10 px-3 flex items-center bg-black/20">
+                          <NofxSelect
+                            value={detailPatternLiveActionKindFilter}
+                            onChange={setDetailPatternLiveActionKindFilter}
+                            options={[
+                              {
+                                value: '',
+                                label: pickText(
+                                  'All live-action kinds',
+                                  'Alle Live-Aktionsarten'
+                                ),
+                              },
+                              {
+                                value: 'suppression',
+                                label: formatLearnedPatternLiveActionKind(
+                                  'suppression',
+                                  language
+                                ),
+                              },
+                              {
+                                value: 'rollback',
+                                label: formatLearnedPatternLiveActionKind(
+                                  'rollback',
+                                  language
+                                ),
+                              },
+                            ]}
+                          />
+                        </div>
+                        <div className="h-10 rounded-lg border border-white/10 px-3 flex items-center bg-black/20">
+                          <NofxSelect
+                            value={detailPatternInterventionStateFilter}
+                            onChange={setDetailPatternInterventionStateFilter}
+                            options={[
+                              {
+                                value: '',
+                                label: pickText(
+                                  'All intervention states',
+                                  'Alle Interventionszustaende'
+                                ),
+                              },
+                              {
+                                value: 'open',
+                                label: pickText(
+                                  'Open interventions',
+                                  'Offene Interventionen'
+                                ),
+                              },
+                              {
+                                value: 'resolved',
+                                label: pickText(
+                                  'Resolved interventions',
+                                  'Abgeschlossene Interventionen'
+                                ),
+                              },
+                              {
+                                value: 'none',
+                                label: pickText(
+                                  'No interventions',
+                                  'Keine Interventionen'
+                                ),
+                              },
+                            ]}
+                          />
+                        </div>
+                      </div>
+                    )}
+
+                    {detailLearnedPatterns.length === 0 ? (
                       <div className="text-sm text-nofx-text-muted">
                         No learned pattern matched this deal yet.
                       </div>
+                    ) : visibleDetailLearnedPatterns.length === 0 ? (
+                      <div className="text-sm text-nofx-text-muted">
+                        {pickText(
+                          'No learned pattern matches the current local review filters.',
+                          'Kein gelerntes Muster passt auf die aktuellen lokalen Review-Filter.'
+                        )}
+                      </div>
                     ) : (
                       <div className="space-y-3">
-                        {detail.learned_patterns.map((pattern) => (
+                        {visibleDetailLearnedPatterns.map((pattern) => (
                           <div
                             key={pattern.id}
                             className="rounded-xl border border-white/10 bg-black/20 p-4 space-y-3"
@@ -4731,6 +6217,62 @@ export function DealReviewPage({
                                   <span className="px-2 py-1 rounded-full text-[11px] border border-white/10 bg-white/5 text-white">
                                     {formatLearnedPatternScope(pattern)}
                                   </span>
+                                  {learnedPatternHasDirectLiveActionCandidate(
+                                    pattern
+                                  ) && (
+                                    <span
+                                      className={`px-2 py-1 rounded-full text-[11px] border ${learnedPatternLiveActionKindClasses(
+                                        learnedPatternStrongestLiveActionKind(
+                                          pattern,
+                                          false
+                                        )
+                                      )}`}
+                                    >
+                                      {formatLearnedPatternLiveActionKind(
+                                        learnedPatternStrongestLiveActionKind(
+                                          pattern,
+                                          false
+                                        )
+                                      )}
+                                    </span>
+                                  )}
+                                  {learnedPatternHasOpenIntervention(pattern) && (
+                                    <span className="px-2 py-1 rounded-full text-[11px] border border-amber-400/20 bg-amber-500/10 text-amber-200">
+                                      {pickText('Open interventions', 'Offene Interventionen')}
+                                    </span>
+                                  )}
+                                  {!learnedPatternHasOpenIntervention(pattern) &&
+                                    learnedPatternHasResolvedIntervention(pattern) && (
+                                      <span className="px-2 py-1 rounded-full text-[11px] border border-emerald-400/20 bg-emerald-500/10 text-emerald-200">
+                                        {pickText(
+                                          'Resolved interventions',
+                                          'Abgeschlossene Interventionen'
+                                        )}
+                                      </span>
+                                    )}
+                                  {pattern.manual_control?.control_state && (
+                                    <span
+                                      className={`px-2 py-1 rounded-full text-[11px] border ${learnedPatternManualControlClasses(
+                                        pattern.manual_control.control_state
+                                      )}`}
+                                    >
+                                      Analyst{' '}
+                                      {formatLearnedPatternManualControlState(
+                                        pattern.manual_control.control_state
+                                      )}
+                                    </span>
+                                  )}
+                                  {pattern.lifecycle?.status && (
+                                    <span
+                                      className={`px-2 py-1 rounded-full text-[11px] border ${learnedPatternLifecycleClasses(
+                                        pattern.lifecycle.status
+                                      )}`}
+                                    >
+                                      {formatLearnedPatternLifecycleStatus(
+                                        pattern.lifecycle.status
+                                      )}
+                                    </span>
+                                  )}
                                 </div>
                                 <div className="text-xs text-nofx-text-muted mt-1">
                                   {pattern.regime_signature || 'No regime signature stored'}
@@ -4753,6 +6295,584 @@ export function DealReviewPage({
                             {pattern.validation_alert && (
                               <div className="rounded-lg border border-sky-400/15 bg-sky-500/5 px-3 py-2 text-xs text-sky-100">
                                 {pattern.validation_alert}
+                              </div>
+                            )}
+
+                            {pattern.lifecycle?.summary && (
+                              <div
+                                className={`rounded-lg border px-3 py-2 text-xs ${learnedPatternLifecycleClasses(
+                                  pattern.lifecycle.status
+                                )}`}
+                              >
+                                <div className="font-medium">
+                                  {formatLearnedPatternLifecycleStatus(
+                                    pattern.lifecycle.status
+                                  )}
+                                </div>
+                                <div className="mt-1">
+                                  {pattern.lifecycle.summary}
+                                </div>
+                              </div>
+                            )}
+
+                            {pattern.lifecycle_trend?.summary && (
+                              <div className="rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-xs text-nofx-text-muted">
+                                <div className="flex flex-wrap items-center gap-2">
+                                  <span className="font-medium text-white/90">
+                                    Lifecycle trend
+                                  </span>
+                                  {pattern.lifecycle_trend.fragile && (
+                                    <span className="px-2 py-1 rounded-full text-[11px] border border-amber-400/20 bg-amber-500/10 text-amber-200">
+                                      Fragile
+                                    </span>
+                                  )}
+                                  <span className="px-2 py-1 rounded-full text-[11px] border border-white/10 bg-black/20 text-white/80">
+                                    {pattern.lifecycle_trend.snapshot_count || 0} snapshots
+                                  </span>
+                                  <span className="px-2 py-1 rounded-full text-[11px] border border-white/10 bg-black/20 text-white/80">
+                                    span {formatHoursCompact(pattern.lifecycle_trend.span_hours)}
+                                  </span>
+                                </div>
+                                <div className="mt-2">{pattern.lifecycle_trend.summary}</div>
+                                <div className="mt-2 flex flex-wrap gap-3">
+                                  <span>
+                                    active {formatHoursCompact(pattern.lifecycle_trend.active_hours)}
+                                  </span>
+                                  <span>
+                                    degrading{' '}
+                                    {formatHoursCompact(
+                                      pattern.lifecycle_trend.degrading_hours
+                                    )}
+                                  </span>
+                                  <span>
+                                    rollback{' '}
+                                    {formatHoursCompact(
+                                      pattern.lifecycle_trend.rollback_watch_hours
+                                    )}
+                                  </span>
+                                  <span>
+                                    stale lag{' '}
+                                    {pattern.lifecycle_trend.stale_guard_snapshot_count || 0}
+                                  </span>
+                                </div>
+                              </div>
+                            )}
+
+                            {pattern.live_guard_attribution?.summary && (
+                              <div className="rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-xs text-nofx-text-muted">
+                                <div className="flex flex-wrap items-center gap-2">
+                                  <span className="font-medium text-white/90">
+                                    Live-guard attribution
+                                  </span>
+                                  <span
+                                    className={`px-2 py-1 rounded-full text-[11px] border ${learnedPatternRollupClasses(
+                                      pattern.live_guard_attribution.attribution_label
+                                    )}`}
+                                  >
+                                    {formatLearnedPatternRollupLabel(
+                                      pattern.live_guard_attribution.attribution_label
+                                    )}
+                                  </span>
+                                  <span className="px-2 py-1 rounded-full text-[11px] border border-white/10 bg-black/20 text-white/80">
+                                    {pattern.live_guard_attribution.event_count || 0} events
+                                  </span>
+                                  <span className="px-2 py-1 rounded-full text-[11px] border border-white/10 bg-black/20 text-white/80">
+                                    {pattern.live_guard_attribution.resolved_event_count || 0} resolved
+                                  </span>
+                                </div>
+                                <div className="mt-2">
+                                  {pattern.live_guard_attribution.summary}
+                                </div>
+                                <div className="mt-2 flex flex-wrap gap-3">
+                                  <span>
+                                    protective{' '}
+                                    {formatPct(
+                                      (pattern.live_guard_attribution.protective_rate || 0) *
+                                        100
+                                    )}
+                                  </span>
+                                  <span>
+                                    overblocking{' '}
+                                    {formatPct(
+                                      (pattern.live_guard_attribution.overblocking_rate || 0) *
+                                        100
+                                    )}
+                                  </span>
+                                  <span>
+                                    pending{' '}
+                                    {pattern.live_guard_attribution.pending_count || 0}
+                                  </span>
+                                  <span>
+                                    follow-up open{' '}
+                                    {pattern.live_guard_attribution.followup_open_count || 0}
+                                  </span>
+                                </div>
+                              </div>
+                            )}
+
+                            {pattern.live_guard_attribution_delta?.summary && (
+                              <div className="rounded-lg border border-white/10 bg-black/20 px-3 py-2 text-xs text-nofx-text-muted">
+                                <div className="flex flex-wrap items-center gap-2">
+                                  <span className="font-medium text-white/90">
+                                    Live-guard trend
+                                  </span>
+                                  <span
+                                    className={`px-2 py-1 rounded-full text-[11px] border ${learnedPatternRollupTrendClasses(
+                                      pattern.live_guard_attribution_delta.trend_label
+                                    )}`}
+                                  >
+                                    {formatLearnedPatternRollupTrendLabel(
+                                      pattern.live_guard_attribution_delta.trend_label
+                                    )}
+                                  </span>
+                                  <span className="px-2 py-1 rounded-full text-[11px] border border-white/10 bg-black/20 text-white/80">
+                                    recent{' '}
+                                    {pattern.live_guard_attribution_delta
+                                      .recent_resolved_event_count || 0}{' '}
+                                    resolved
+                                  </span>
+                                  <span className="px-2 py-1 rounded-full text-[11px] border border-white/10 bg-black/20 text-white/80">
+                                    prior{' '}
+                                    {pattern.live_guard_attribution_delta
+                                      .prior_resolved_event_count || 0}{' '}
+                                    resolved
+                                  </span>
+                                </div>
+                                <div className="mt-2">
+                                  {pattern.live_guard_attribution_delta.summary}
+                                </div>
+                                <div className="mt-2 flex flex-wrap gap-3">
+                                  <span>
+                                    recent overblocking{' '}
+                                    {formatPct(
+                                      (pattern.live_guard_attribution_delta
+                                        .recent_overblocking_rate || 0) * 100
+                                    )}
+                                  </span>
+                                  <span>
+                                    prior overblocking{' '}
+                                    {formatPct(
+                                      (pattern.live_guard_attribution_delta
+                                        .prior_overblocking_rate || 0) * 100
+                                    )}
+                                  </span>
+                                  <span>
+                                    delta{' '}
+                                    {formatPct(
+                                      (pattern.live_guard_attribution_delta
+                                        .overblocking_rate_delta || 0) * 100
+                                    )}
+                                  </span>
+                                  <span>
+                                    confidence{' '}
+                                    {formatPct(
+                                      (pattern.live_guard_attribution_delta
+                                        .confidence_score || 0) * 100
+                                    )}
+                                  </span>
+                                </div>
+                              </div>
+                            )}
+
+                            {pattern.action_hint?.summary && (
+                              <div className="rounded-lg border border-white/10 bg-black/20 px-3 py-3 space-y-2">
+                                <div className="flex flex-wrap items-center gap-2">
+                                  <span className="font-medium text-white/90">
+                                    Suggested analyst action
+                                  </span>
+                                  {pattern.action_hint.recommended_action && (
+                                    <span
+                                      className={`px-2 py-1 rounded-full text-[11px] border ${learnedPatternActionHintActionClasses(
+                                        pattern.action_hint.recommended_action
+                                      )}`}
+                                    >
+                                      {formatLearnedPatternActionHintAction(
+                                        pattern.action_hint.recommended_action
+                                      )}
+                                    </span>
+                                  )}
+                                  {pattern.action_hint.priority_label && (
+                                    <span
+                                      className={`px-2 py-1 rounded-full text-[11px] border ${learnedPatternActionHintPriorityClasses(
+                                        pattern.action_hint.priority_label
+                                      )}`}
+                                    >
+                                      {formatLearnedPatternActionHintPriority(
+                                        pattern.action_hint.priority_label
+                                      )}
+                                    </span>
+                                  )}
+                                  <span className="px-2 py-1 rounded-full text-[11px] border border-white/10 bg-black/20 text-white/80">
+                                    confidence{' '}
+                                    {formatPct(
+                                      (pattern.action_hint.confidence_score || 0) *
+                                        100
+                                    )}
+                                  </span>
+                                </div>
+                                <div className="text-xs text-nofx-text-muted">
+                                  {pattern.action_hint.summary}
+                                </div>
+                                {pattern.action_hint.auto_note && (
+                                  <div className="rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-xs text-nofx-text-muted">
+                                    {pattern.action_hint.auto_note}
+                                  </div>
+                                )}
+                                {pattern.action_hint.recommended_action && (
+                                  <div className="flex flex-wrap gap-2">
+                                    <button
+                                      onClick={() =>
+                                        void applySuggestedPatternAction(pattern)
+                                      }
+                                      disabled={controlBusyKey !== ''}
+                                      className="h-9 px-3 rounded-lg border border-nofx-gold/30 bg-nofx-gold/10 text-sm text-nofx-gold disabled:opacity-50"
+                                    >
+                                      {controlBusyKey ===
+                                      `${patternControlKey(pattern)}:${pattern.action_hint.recommended_action}`
+                                        ? 'Saving...'
+                                        : formatLearnedPatternActionHintAction(
+                                            pattern.action_hint.recommended_action
+                                          )}
+                                    </button>
+                                    <button
+                                      onClick={() =>
+                                        setControlNotes((current) => ({
+                                          ...current,
+                                          [patternControlKey(pattern)]:
+                                            pattern.action_hint?.auto_note || '',
+                                        }))
+                                      }
+                                      className="h-9 px-3 rounded-lg border border-white/10 bg-white/5 text-sm text-white"
+                                    >
+                                      Use suggested note
+                                    </button>
+                                  </div>
+                                )}
+                              </div>
+                            )}
+
+                            {pattern.live_action_hint?.summary && (
+                              <div className="rounded-lg border border-rose-400/15 bg-rose-500/5 px-3 py-3 space-y-2 text-xs text-nofx-text-muted">
+                                <div className="flex flex-wrap items-center gap-2">
+                                  <span className="font-medium text-white/90">
+                                    Direct live action
+                                  </span>
+                                  <span
+                                    className={`px-2 py-1 rounded-full text-[11px] border ${learnedPatternLiveActionKindClasses(
+                                      pattern.live_action_hint.candidate_kind
+                                    )}`}
+                                  >
+                                    {formatLearnedPatternLiveActionKind(
+                                      pattern.live_action_hint.candidate_kind
+                                    )}
+                                  </span>
+                                  {pattern.live_action_hint.recommended_action && (
+                                    <span
+                                      className={`px-2 py-1 rounded-full text-[11px] border ${learnedPatternActionHintActionClasses(
+                                        pattern.live_action_hint.recommended_action
+                                      )}`}
+                                    >
+                                      {formatLearnedPatternActionHintAction(
+                                        pattern.live_action_hint.recommended_action
+                                      )}
+                                    </span>
+                                  )}
+                                  <span className="px-2 py-1 rounded-full text-[11px] border border-white/10 bg-black/20 text-white/80">
+                                    confidence{' '}
+                                    {formatPct(
+                                      (pattern.live_action_hint.confidence_score ||
+                                        0) * 100
+                                    )}
+                                  </span>
+                                </div>
+                                <div>{pattern.live_action_hint.summary}</div>
+                              </div>
+                            )}
+
+                            {pattern.lifecycle_history &&
+                              pattern.lifecycle_history.length > 0 && (
+                                <div className="rounded-lg border border-white/10 bg-black/20 px-3 py-2">
+                                  <div className="text-[11px] uppercase tracking-[0.18em] text-nofx-text-muted">
+                                    Lifecycle trail
+                                  </div>
+                                  <div className="mt-2 flex flex-wrap gap-2">
+                                    {pattern.lifecycle_history.map((snapshot) => (
+                                      <div
+                                        key={snapshot.id}
+                                        className={`rounded-full border px-2 py-1 text-[11px] ${learnedPatternLifecycleClasses(
+                                          snapshot.lifecycle_status
+                                        )}`}
+                                        title={snapshot.summary || undefined}
+                                      >
+                                        {formatLearnedPatternLifecycleStatus(
+                                          snapshot.lifecycle_status
+                                        )}{' '}
+                                        ·{' '}
+                                        {formatCompactTimestampLabel(
+                                          snapshot.captured_at
+                                        )}{' '}
+                                        ·{' '}
+                                        {formatLifecycleSnapshotSource(
+                                          snapshot.snapshot_source
+                                        )}
+                                      </div>
+                                    ))}
+                                  </div>
+                                </div>
+                              )}
+
+                            {pattern.manual_control && (
+                              <div className="rounded-lg border border-white/10 bg-black/20 px-3 py-2 text-xs text-nofx-text-muted">
+                                <div className="flex flex-wrap items-center gap-2">
+                                  <span
+                                    className={`px-2 py-1 rounded-full text-[11px] border ${learnedPatternManualControlClasses(
+                                      pattern.manual_control.control_state
+                                    )}`}
+                                  >
+                                    {formatLearnedPatternManualControlState(
+                                      pattern.manual_control.control_state
+                                    )}
+                                  </span>
+                                  <span>
+                                    {formatLearnedPatternManualControlAction(
+                                      pattern.manual_control.last_action
+                                    )}{' '}
+                                    · {formatTimestampLabel(pattern.manual_control.applied_at)}
+                                  </span>
+                                </div>
+                                {pattern.manual_control.note && (
+                                  <div className="mt-1 text-white/85">
+                                    {pattern.manual_control.note}
+                                  </div>
+                                )}
+                              </div>
+                            )}
+
+                            {pattern.manual_control_history &&
+                              pattern.manual_control_history.length > 0 && (
+                                <div className="flex flex-wrap gap-2">
+                                  {pattern.manual_control_history.map((event) => (
+                                    <div
+                                      key={event.id}
+                                      className="rounded-full border border-white/10 bg-white/5 px-2 py-1 text-[11px] text-white/80"
+                                      title={event.note || undefined}
+                                    >
+                                      {formatLearnedPatternManualControlAction(
+                                        event.action
+                                      )}{' '}
+                                      · {formatCompactTimestampLabel(event.applied_at)}
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
+
+                            {pattern.intervention_history &&
+                              pattern.intervention_history.length > 0 && (
+                                <div className="rounded-lg border border-white/10 bg-black/20 px-3 py-3 space-y-3">
+                                  <div className="text-[11px] uppercase tracking-[0.18em] text-nofx-text-muted">
+                                    Intervention history
+                                  </div>
+                                  <div className="space-y-2">
+                                    {pattern.intervention_history.map((event) => (
+                                      <div
+                                        key={event.id}
+                                        className="rounded-lg border border-white/10 bg-white/[0.03] px-3 py-2 text-xs text-nofx-text-muted"
+                                      >
+                                        <div className="flex flex-wrap items-center gap-2">
+                                          <span
+                                            className={`px-2 py-1 rounded-full text-[11px] border ${learnedPatternInterventionEventTypeClasses(
+                                              event.event_type
+                                            )}`}
+                                          >
+                                            {formatLearnedPatternInterventionEventType(
+                                              event.event_type
+                                            )}
+                                          </span>
+                                          <span
+                                            className={`px-2 py-1 rounded-full text-[11px] border ${learnedPatternInterventionStatusClasses(
+                                              event.event_status
+                                            )}`}
+                                          >
+                                            {formatLearnedPatternInterventionStatus(
+                                              event.event_status
+                                            )}
+                                          </span>
+                                          {event.suggested_action && (
+                                            <span
+                                              className={`px-2 py-1 rounded-full text-[11px] border ${learnedPatternActionHintActionClasses(
+                                                event.suggested_action
+                                              )}`}
+                                            >
+                                              {formatLearnedPatternActionHintAction(
+                                                event.suggested_action
+                                              )}
+                                            </span>
+                                          )}
+                                          {event.applied_action && (
+                                            <span className="px-2 py-1 rounded-full text-[11px] border border-white/10 bg-black/20 text-white/80">
+                                              Applied{' '}
+                                              {formatLearnedPatternManualControlAction(
+                                                event.applied_action
+                                              )}
+                                            </span>
+                                          )}
+                                          <span className="px-2 py-1 rounded-full text-[11px] border border-white/10 bg-black/20 text-white/70">
+                                            {formatCompactTimestampLabel(
+                                              learnedPatternInterventionTimestampLabel(
+                                                event
+                                              )
+                                            )}
+                                          </span>
+                                          {event.event_type === 'suggested' &&
+                                            (event.seen_count || 0) > 1 && (
+                                              <span className="px-2 py-1 rounded-full text-[11px] border border-white/10 bg-black/20 text-white/70">
+                                                seen {event.seen_count}x
+                                              </span>
+                                            )}
+                                        </div>
+                                        {event.summary && (
+                                          <div className="mt-2 text-white/85">
+                                            {event.summary}
+                                          </div>
+                                        )}
+                                        {event.note && (
+                                          <div className="mt-2 rounded-lg border border-white/10 bg-black/20 px-3 py-2 text-white/75">
+                                            {event.note}
+                                          </div>
+                                        )}
+                                        {event.direct_live_action_candidate && (
+                                          <div className="mt-2 rounded-lg border border-rose-400/15 bg-rose-500/5 px-3 py-2 text-white/80">
+                                            <div className="flex flex-wrap items-center gap-2">
+                                              <span
+                                                className={`px-2 py-1 rounded-full text-[11px] border ${learnedPatternLiveActionKindClasses(
+                                                  event.direct_live_action_kind
+                                                )}`}
+                                              >
+                                                {formatLearnedPatternLiveActionKind(
+                                                  event.direct_live_action_kind
+                                                )}
+                                              </span>
+                                              <span className="px-2 py-1 rounded-full text-[11px] border border-white/10 bg-black/20 text-white/70">
+                                                confidence{' '}
+                                                {formatPct(
+                                                  (event.direct_live_action_confidence ||
+                                                    0) * 100
+                                                )}
+                                              </span>
+                                            </div>
+                                            {event.direct_live_action_summary && (
+                                              <div className="mt-2">
+                                                {event.direct_live_action_summary}
+                                              </div>
+                                            )}
+                                          </div>
+                                        )}
+                                      </div>
+                                    ))}
+                                  </div>
+                                </div>
+                              )}
+
+                            {canManagePattern(pattern) && (
+                              <div className="rounded-lg border border-white/10 bg-black/20 px-3 py-3 space-y-3">
+                                <div className="flex flex-wrap items-center justify-between gap-2">
+                                  <div>
+                                    <div className="text-[11px] uppercase tracking-[0.18em] text-nofx-text-muted">
+                                      Analyst control
+                                    </div>
+                                    <div className="text-xs text-nofx-text-muted mt-1">
+                                      Base {formatLearnedPatternUse(pattern.base_recommended_use)}{' '}
+                                      · effective{' '}
+                                      {formatLearnedPatternUse(pattern.recommended_use)}
+                                    </div>
+                                  </div>
+                                  {pattern.manual_control?.control_state ? (
+                                    <span
+                                      className={`px-2 py-1 rounded-full text-[11px] border ${learnedPatternManualControlClasses(
+                                        pattern.manual_control.control_state
+                                      )}`}
+                                    >
+                                      {formatLearnedPatternManualControlState(
+                                        pattern.manual_control.control_state
+                                      )}
+                                    </span>
+                                  ) : (
+                                    <span className="px-2 py-1 rounded-full text-[11px] border border-white/10 bg-white/5 text-white">
+                                      Inherit
+                                    </span>
+                                  )}
+                                </div>
+
+                                <textarea
+                                  value={controlNotes[patternControlKey(pattern)] || ''}
+                                  onChange={(event) =>
+                                    setControlNotes((current) => ({
+                                      ...current,
+                                      [patternControlKey(pattern)]: event.target.value,
+                                    }))
+                                  }
+                                  placeholder="Why should this rule stay live, be suppressed, retired, or re-armed?"
+                                  className="w-full min-h-[84px] rounded-lg border border-white/10 bg-black/20 px-3 py-2 text-sm text-white placeholder:text-nofx-text-muted/70"
+                                />
+
+                                <div className="flex flex-wrap gap-2">
+                                  <button
+                                    onClick={() =>
+                                      void applyPatternControl(
+                                        pattern,
+                                        'acknowledge_live'
+                                      )
+                                    }
+                                    disabled={controlBusyKey !== ''}
+                                    className="h-9 px-3 rounded-lg border border-emerald-400/20 bg-emerald-500/10 text-sm text-emerald-200 disabled:opacity-50"
+                                  >
+                                    {controlBusyKey ===
+                                    `${patternControlKey(pattern)}:acknowledge_live`
+                                      ? 'Refreshing...'
+                                      : 'Keep live'}
+                                  </button>
+                                  <button
+                                    onClick={() =>
+                                      void applyPatternControl(pattern, 'suppress')
+                                    }
+                                    disabled={controlBusyKey !== ''}
+                                    className="h-9 px-3 rounded-lg border border-amber-400/20 bg-amber-500/10 text-sm text-amber-200 disabled:opacity-50"
+                                  >
+                                    {controlBusyKey ===
+                                    `${patternControlKey(pattern)}:suppress`
+                                      ? 'Refreshing...'
+                                      : 'Suppress'}
+                                  </button>
+                                  <button
+                                    onClick={() =>
+                                      void applyPatternControl(pattern, 'retire')
+                                    }
+                                    disabled={controlBusyKey !== ''}
+                                    className="h-9 px-3 rounded-lg border border-rose-400/20 bg-rose-500/10 text-sm text-rose-200 disabled:opacity-50"
+                                  >
+                                    {controlBusyKey ===
+                                    `${patternControlKey(pattern)}:retire`
+                                      ? 'Refreshing...'
+                                      : 'Retire'}
+                                  </button>
+                                  {(pattern.manual_control?.control_state ===
+                                    'suppressed' ||
+                                    pattern.manual_control?.control_state ===
+                                      'retired') && (
+                                    <button
+                                      onClick={() =>
+                                        void applyPatternControl(pattern, 'rearm')
+                                      }
+                                      disabled={controlBusyKey !== ''}
+                                      className="h-9 px-3 rounded-lg border border-sky-400/20 bg-sky-500/10 text-sm text-sky-200 disabled:opacity-50"
+                                    >
+                                      {controlBusyKey ===
+                                      `${patternControlKey(pattern)}:rearm`
+                                        ? 'Refreshing...'
+                                        : 'Re-arm'}
+                                    </button>
+                                  )}
+                                </div>
                               </div>
                             )}
 
@@ -4932,7 +7052,9 @@ export function DealReviewPage({
                   <div className="rounded-xl border border-white/10 bg-black/20 p-4 space-y-4">
                     <div className="flex items-start justify-between gap-4">
                       <div>
-                        <div className="font-semibold">Similar historical deals</div>
+                        <div className="font-semibold">
+                          {pickText('Similar historical deals', 'Aehnliche historische Deals')}
+                        </div>
                         <div className="text-xs text-nofx-text-muted mt-1">
                           Semantic matches from the internal review corpus for this trader.
                         </div>
@@ -4989,7 +7111,9 @@ export function DealReviewPage({
                   <div className="rounded-xl border border-white/10 bg-black/20 p-4 space-y-4">
                     <div className="flex items-start justify-between gap-4">
                       <div>
-                        <div className="font-semibold">AI review assist</div>
+                        <div className="font-semibold">
+                          {pickText('AI review assist', 'KI-Review-Hilfe')}
+                        </div>
                         <div className="text-xs text-nofx-text-muted mt-1">
                           Optional single-deal review using the current AI model
                           selection from the scan controls.
@@ -5088,7 +7212,9 @@ export function DealReviewPage({
                   <div className="rounded-xl border border-white/10 bg-black/20 p-4 space-y-3">
                     <div className="flex items-center justify-between gap-4">
                       <div>
-                        <div className="font-semibold">Analyst review</div>
+                        <div className="font-semibold">
+                          {pickText('Analyst review', 'Analysten-Review')}
+                        </div>
                         <div className="text-xs text-nofx-text-muted mt-1">
                           Add reusable labels and a manual note for this deal.
                         </div>
@@ -5803,25 +7929,30 @@ export function DealReviewPage({
             <div className="nofx-glass rounded-xl p-5">
               <div className="flex items-center justify-between gap-4">
                 <div>
-                  <h2 className="font-semibold text-lg">Anomaly scan</h2>
+                  <h2 className="font-semibold text-lg">
+                    {pickText('Anomaly scan', 'Anomalie-Scan')}
+                  </h2>
                   <p className="text-xs text-nofx-text-muted mt-1">
-                    Heuristic hotspots from the currently filtered closed deals.
+                    {pickText(
+                      'Heuristic hotspots from the currently filtered closed deals.',
+                      'Heuristische Hotspots aus den aktuell gefilterten geschlossenen Deals.'
+                    )}
                   </p>
                 </div>
                 <div className="text-xs text-nofx-text-muted">
-                  {anomalies?.closed_deals || 0} closed deals
+                  {anomalies?.closed_deals || 0} {pickText('closed deals', 'geschlossene Deals')}
                 </div>
               </div>
 
               {!anomalies ? (
                 <div className="text-sm text-nofx-text-muted mt-4">
-                  No anomaly data available.
+                  {pickText('No anomaly data available.', 'Keine Anomaliedaten verfuegbar.')}
                 </div>
               ) : (
                 <div className="space-y-4 mt-4">
                   <div>
                     <div className="text-xs uppercase tracking-[0.2em] text-nofx-text-muted mb-2">
-                      Learned symbol priors
+                      {pickText('Learned symbol priors', 'Gelernte Symbol-Priors')}
                     </div>
                     <div className="space-y-3">
                       {(symbolBehaviorLiveGuardStatus ||
@@ -5830,16 +7961,22 @@ export function DealReviewPage({
                           <div className="flex flex-wrap items-start justify-between gap-3">
                             <div>
                               <div className="text-xs uppercase tracking-[0.2em] text-nofx-text-muted">
-                                Live guard
+                                {pickText('Live guard', 'Live-Guard')}
                               </div>
                               <div className="text-sm mt-1">
                                 {symbolBehaviorLiveGuardStatus?.strategy_name ||
-                                  'Strategy config'}
+                                  pickText('Strategy config', 'Strategie-Konfiguration')}
                               </div>
                               <div className="text-xs text-nofx-text-muted mt-1">
                                 {symbolBehaviorLiveGuardStatus?.config.enabled
-                                  ? 'Live symbol-prior gating is active for this trader.'
-                                  : 'Live symbol-prior gating is currently disabled for this trader.'}
+                                  ? pickText(
+                                      'Live symbol-prior gating is active for this trader.',
+                                      'Das Live-Gating fuer Symbol-Priors ist fuer diesen Trader aktiv.'
+                                    )
+                                  : pickText(
+                                      'Live symbol-prior gating is currently disabled for this trader.',
+                                      'Das Live-Gating fuer Symbol-Priors ist fuer diesen Trader derzeit deaktiviert.'
+                                    )}
                               </div>
                             </div>
                             <div className="flex flex-wrap items-center gap-2">
@@ -5851,13 +7988,14 @@ export function DealReviewPage({
                                 }`}
                               >
                                 {symbolBehaviorLiveGuardStatus?.config.enabled
-                                  ? 'Enabled'
-                                  : 'Disabled'}
+                                  ? pickText('Enabled', 'Aktiviert')
+                                  : pickText('Disabled', 'Deaktiviert')}
                               </span>
                               {symbolBehaviorLiveGuardStatus?.config.mode && (
                                 <span className="px-2 py-1 rounded-full text-[11px] border border-sky-400/20 bg-sky-500/10 text-sky-200">
                                   {formatSymbolBehaviorLiveGuardMode(
-                                    symbolBehaviorLiveGuardStatus.config.mode
+                                    symbolBehaviorLiveGuardStatus.config.mode,
+                                    language
                                   )}
                                 </span>
                               )}
@@ -5867,19 +8005,19 @@ export function DealReviewPage({
                           {symbolBehaviorLiveGuardSummary && (
                             <div className="grid grid-cols-2 xl:grid-cols-5 gap-3 text-xs">
                               <div className="rounded-lg border border-white/10 bg-black/20 px-3 py-3">
-                                <div className="text-nofx-text-muted">Recent checks</div>
+                                <div className="text-nofx-text-muted">{pickText('Recent checks', 'Juengste Pruefungen')}</div>
                                 <div className="text-lg font-semibold mt-1">
                                   {symbolBehaviorLiveGuardSummary.total_visible || 0}
                                 </div>
                               </div>
                               <div className="rounded-lg border border-rose-400/15 bg-rose-500/5 px-3 py-3">
-                                <div className="text-nofx-text-muted">Hard blocked</div>
+                                <div className="text-nofx-text-muted">{pickText('Hard blocked', 'Hart blockiert')}</div>
                                 <div className="text-lg font-semibold mt-1 text-rose-300">
                                   {symbolBehaviorLiveGuardSummary.hard_blocked_count || 0}
                                 </div>
                               </div>
                               <div className="rounded-lg border border-amber-400/15 bg-amber-500/5 px-3 py-3">
-                                <div className="text-nofx-text-muted">Monitor only</div>
+                                <div className="text-nofx-text-muted">{pickText('Monitor only', 'Nur beobachten')}</div>
                                 <div className="text-lg font-semibold mt-1 text-amber-200">
                                   {symbolBehaviorLiveGuardSummary.monitor_only_count || 0}
                                 </div>
@@ -5894,7 +8032,9 @@ export function DealReviewPage({
                                 </div>
                               </div>
                               <div className="rounded-lg border border-white/10 bg-white/5 px-3 py-3">
-                                <div className="text-nofx-text-muted">Last check</div>
+                                <div className="text-nofx-text-muted">
+                                  {pickText('Last check', 'Letzte Pruefung')}
+                                </div>
                                 <div className="text-xs font-medium mt-1">
                                   {formatTimestampLabel(
                                     symbolBehaviorLiveGuardSummary.latest_decision_timestamp
@@ -6046,31 +8186,41 @@ export function DealReviewPage({
                       {symbolBehaviorPriorSummary && (
                         <div className="grid grid-cols-2 xl:grid-cols-5 gap-3 text-xs">
                           <div className="rounded-lg border border-white/10 bg-black/20 px-3 py-3">
-                            <div className="text-nofx-text-muted">Tracked priors</div>
+                            <div className="text-nofx-text-muted">
+                              {pickText('Tracked priors', 'Verfolgte Priors')}
+                            </div>
                             <div className="text-lg font-semibold mt-1">
                               {symbolBehaviorPriorSummary.total_count || 0}
                             </div>
                           </div>
                           <div className="rounded-lg border border-emerald-400/15 bg-emerald-500/5 px-3 py-3">
-                            <div className="text-nofx-text-muted">Confirmed</div>
+                            <div className="text-nofx-text-muted">
+                              {pickText('Confirmed', 'Bestaetigt')}
+                            </div>
                             <div className="text-lg font-semibold mt-1 text-emerald-300">
                               {symbolBehaviorPriorSummary.confirmed_count || 0}
                             </div>
                           </div>
                           <div className="rounded-lg border border-rose-400/15 bg-rose-500/5 px-3 py-3">
-                            <div className="text-nofx-text-muted">False positives</div>
+                            <div className="text-nofx-text-muted">
+                              {pickText('False positives', 'Falsch positive')}
+                            </div>
                             <div className="text-lg font-semibold mt-1 text-rose-300">
                               {symbolBehaviorPriorSummary.false_positive_count || 0}
                             </div>
                           </div>
                           <div className="rounded-lg border border-amber-400/15 bg-amber-500/5 px-3 py-3">
-                            <div className="text-nofx-text-muted">Reverse-edge risk</div>
+                            <div className="text-nofx-text-muted">
+                              {pickText('Reverse-edge risk', 'Umkehr-Vorteils-Risiko')}
+                            </div>
                             <div className="text-lg font-semibold mt-1 text-amber-300">
                               {symbolBehaviorPriorSummary.false_negative_risk_count || 0}
                             </div>
                           </div>
                           <div className="rounded-lg border border-orange-400/15 bg-orange-500/5 px-3 py-3">
-                            <div className="text-nofx-text-muted">Drifting</div>
+                            <div className="text-nofx-text-muted">
+                              {pickText('Drifting', 'Abdriftend')}
+                            </div>
                             <div className="text-lg font-semibold mt-1 text-orange-300">
                               {symbolBehaviorPriorSummary.drifting_count || 0}
                             </div>
@@ -6511,34 +8661,120 @@ export function DealReviewPage({
                       <div className="space-y-3">
                         <div className="grid grid-cols-2 xl:grid-cols-5 gap-3 text-xs">
                           <div className="rounded-lg border border-white/10 bg-black/20 px-3 py-3">
-                            <div className="text-nofx-text-muted">Tracked patterns</div>
+                            <div className="text-nofx-text-muted">
+                              {pickText('Tracked patterns', 'Verfolgte Muster')}
+                            </div>
                             <div className="text-lg font-semibold mt-1">
                               {learnedPatternSummary.total_count || 0}
                             </div>
                           </div>
                           <div className="rounded-lg border border-emerald-400/15 bg-emerald-500/5 px-3 py-3">
-                            <div className="text-nofx-text-muted">Positive edges</div>
+                            <div className="text-nofx-text-muted">
+                              {pickText('Positive edges', 'Positive Vorteile')}
+                            </div>
                             <div className="text-lg font-semibold mt-1 text-emerald-300">
                               {learnedPatternSummary.positive_count || 0}
                             </div>
                           </div>
                           <div className="rounded-lg border border-rose-400/15 bg-rose-500/5 px-3 py-3">
-                            <div className="text-nofx-text-muted">Anti-edges</div>
+                            <div className="text-nofx-text-muted">
+                              {pickText('Anti-edges', 'Anti-Muster')}
+                            </div>
                             <div className="text-lg font-semibold mt-1 text-rose-300">
                               {learnedPatternSummary.negative_count || 0}
                             </div>
                           </div>
                           <div className="rounded-lg border border-sky-400/15 bg-sky-500/5 px-3 py-3">
-                            <div className="text-nofx-text-muted">Confirmed</div>
+                            <div className="text-nofx-text-muted">
+                              {pickText('Confirmed', 'Bestaetigt')}
+                            </div>
                             <div className="text-lg font-semibold mt-1 text-sky-200">
                               {learnedPatternSummary.confirmed_count || 0}
                             </div>
                           </div>
                           <div className="rounded-lg border border-amber-400/15 bg-amber-500/5 px-3 py-3">
-                            <div className="text-nofx-text-muted">Reverse / drifting</div>
+                            <div className="text-nofx-text-muted">
+                              {pickText('Reverse / drifting', 'Umkehr / Drift')}
+                            </div>
                             <div className="text-lg font-semibold mt-1 text-amber-200">
                               {(learnedPatternSummary.reverse_risk_count || 0) +
                                 (learnedPatternSummary.drifting_count || 0)}
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="grid grid-cols-2 xl:grid-cols-6 gap-3 text-xs">
+                          <div className="rounded-lg border border-sky-400/15 bg-sky-500/5 px-3 py-3">
+                            <div className="text-nofx-text-muted">
+                              {pickText('Monitoring rules', 'Monitoring-Regeln')}
+                            </div>
+                            <div className="text-lg font-semibold mt-1 text-sky-200">
+                              {learnedPatternSummary.monitoring_rule_count || 0}
+                            </div>
+                          </div>
+                          <div className="rounded-lg border border-orange-400/15 bg-orange-500/5 px-3 py-3">
+                            <div className="text-nofx-text-muted">
+                              {pickText('Degrading / rollback', 'Verschlechterung / Rollback')}
+                            </div>
+                            <div className="text-lg font-semibold mt-1 text-orange-200">
+                              {(learnedPatternSummary.lifecycle_degrading_count || 0) +
+                                (learnedPatternSummary.lifecycle_rollback_watch_count || 0)}
+                            </div>
+                          </div>
+                          <div className="rounded-lg border border-amber-400/15 bg-amber-500/5 px-3 py-3">
+                            <div className="text-nofx-text-muted">
+                              {pickText('Fragile live rules', 'Fragile Live-Regeln')}
+                            </div>
+                            <div className="text-lg font-semibold mt-1 text-amber-200">
+                              {learnedPatternSummary.lifecycle_fragile_count || 0}
+                            </div>
+                          </div>
+                          <div className="rounded-lg border border-white/10 bg-white/5 px-3 py-3">
+                            <div className="text-nofx-text-muted">
+                              {pickText('Lagging guard trails', 'Nachlaufende Guard-Spuren')}
+                            </div>
+                            <div className="text-lg font-semibold mt-1">
+                              {learnedPatternSummary.lifecycle_lagging_guard_count || 0}
+                            </div>
+                          </div>
+                          <div className="rounded-lg border border-emerald-400/15 bg-emerald-500/5 px-3 py-3">
+                            <div className="text-nofx-text-muted">
+                              {pickText('Protective live rules', 'Schuetzende Live-Regeln')}
+                            </div>
+                            <div className="text-lg font-semibold mt-1 text-emerald-300">
+                              {learnedPatternSummary.live_guard_protective_count || 0}
+                            </div>
+                          </div>
+                          <div className="rounded-lg border border-rose-400/15 bg-rose-500/5 px-3 py-3">
+                            <div className="text-nofx-text-muted">
+                              {pickText('Overblocking live rules', 'Ueberblockierende Live-Regeln')}
+                            </div>
+                            <div className="text-lg font-semibold mt-1 text-rose-300">
+                              {learnedPatternSummary.live_guard_overblocking_count || 0}
+                            </div>
+                          </div>
+                          <div className="rounded-lg border border-emerald-400/15 bg-emerald-500/5 px-3 py-3">
+                            <div className="text-nofx-text-muted">
+                              {pickText('Improving live rules', 'Verbessernde Live-Regeln')}
+                            </div>
+                            <div className="text-lg font-semibold mt-1 text-emerald-300">
+                              {learnedPatternSummary.live_guard_improving_count || 0}
+                            </div>
+                          </div>
+                          <div className="rounded-lg border border-amber-400/15 bg-amber-500/5 px-3 py-3">
+                            <div className="text-nofx-text-muted">
+                              {pickText('Degrading live rules', 'Verschlechternde Live-Regeln')}
+                            </div>
+                            <div className="text-lg font-semibold mt-1 text-amber-200">
+                              {learnedPatternSummary.live_guard_degrading_count || 0}
+                            </div>
+                          </div>
+                          <div className="rounded-lg border border-rose-400/15 bg-rose-500/5 px-3 py-3">
+                            <div className="text-nofx-text-muted">
+                              {pickText('Newly overblocking', 'Neu ueberblockierend')}
+                            </div>
+                            <div className="text-lg font-semibold mt-1 text-rose-300">
+                              {learnedPatternSummary.live_guard_newly_overblocking_count || 0}
                             </div>
                           </div>
                         </div>
@@ -6598,42 +8834,111 @@ export function DealReviewPage({
                             </div>
 
                             {learnedPatternLiveGuardSummary && (
-                              <div className="grid grid-cols-2 xl:grid-cols-5 gap-3 text-xs">
-                                <div className="rounded-lg border border-white/10 bg-black/20 px-3 py-3">
-                                  <div className="text-nofx-text-muted">Recent checks</div>
-                                  <div className="text-lg font-semibold mt-1">
-                                    {learnedPatternLiveGuardSummary.total_visible || 0}
+                              <div className="space-y-3">
+                                <div className="grid grid-cols-2 xl:grid-cols-5 gap-3 text-xs">
+                                  <div className="rounded-lg border border-white/10 bg-black/20 px-3 py-3">
+                                    <div className="text-nofx-text-muted">
+                                      {pickText('Recent checks', 'Juengste Pruefungen')}
+                                    </div>
+                                    <div className="text-lg font-semibold mt-1">
+                                      {learnedPatternLiveGuardSummary.total_visible || 0}
+                                    </div>
+                                  </div>
+                                  <div className="rounded-lg border border-rose-400/15 bg-rose-500/5 px-3 py-3">
+                                    <div className="text-nofx-text-muted">
+                                      {pickText('Hard blocked', 'Hart blockiert')}
+                                    </div>
+                                    <div className="text-lg font-semibold mt-1 text-rose-300">
+                                      {learnedPatternLiveGuardSummary.hard_blocked_count || 0}
+                                    </div>
+                                  </div>
+                                  <div className="rounded-lg border border-amber-400/15 bg-amber-500/5 px-3 py-3">
+                                    <div className="text-nofx-text-muted">
+                                      {pickText('Monitor only', 'Nur beobachten')}
+                                    </div>
+                                    <div className="text-lg font-semibold mt-1 text-amber-200">
+                                      {learnedPatternLiveGuardSummary.monitor_only_count || 0}
+                                    </div>
+                                  </div>
+                                  <div className="rounded-lg border border-sky-400/15 bg-sky-500/5 px-3 py-3">
+                                    <div className="text-nofx-text-muted">
+                                      Matched, not qualified
+                                    </div>
+                                    <div className="text-lg font-semibold mt-1 text-sky-200">
+                                      {learnedPatternLiveGuardSummary.matched_unqualified_count ||
+                                        0}
+                                    </div>
+                                  </div>
+                                  <div className="rounded-lg border border-white/10 bg-white/5 px-3 py-3">
+                                    <div className="text-nofx-text-muted">
+                                      {pickText('Last check', 'Letzte Pruefung')}
+                                    </div>
+                                    <div className="text-xs font-medium mt-1">
+                                      {formatTimestampLabel(
+                                        learnedPatternLiveGuardSummary.latest_decision_timestamp
+                                      )}
+                                    </div>
                                   </div>
                                 </div>
-                                <div className="rounded-lg border border-rose-400/15 bg-rose-500/5 px-3 py-3">
-                                  <div className="text-nofx-text-muted">Hard blocked</div>
-                                  <div className="text-lg font-semibold mt-1 text-rose-300">
-                                    {learnedPatternLiveGuardSummary.hard_blocked_count || 0}
+
+                                <div className="grid grid-cols-2 xl:grid-cols-5 gap-3 text-xs">
+                                  <div className="rounded-lg border border-emerald-400/15 bg-emerald-500/5 px-3 py-3">
+                                    <div className="text-nofx-text-muted">
+                                      {pickText('Correctly blocked', 'Korrekt blockiert')}
+                                    </div>
+                                    <div className="text-lg font-semibold mt-1 text-emerald-200">
+                                      {learnedPatternLiveGuardSummary.correctly_blocked_count || 0}
+                                    </div>
+                                  </div>
+                                  <div className="rounded-lg border border-rose-400/15 bg-rose-500/5 px-3 py-3">
+                                    <div className="text-nofx-text-muted">
+                                      {pickText('Overblocked', 'Ueberblockiert')}
+                                    </div>
+                                    <div className="text-lg font-semibold mt-1 text-rose-300">
+                                      {learnedPatternLiveGuardSummary.overblocked_count || 0}
+                                    </div>
+                                  </div>
+                                  <div className="rounded-lg border border-emerald-400/15 bg-emerald-500/5 px-3 py-3">
+                                    <div className="text-nofx-text-muted">
+                                      {pickText('Warning confirmed', 'Warnung bestaetigt')}
+                                    </div>
+                                    <div className="text-lg font-semibold mt-1 text-emerald-200">
+                                      {learnedPatternLiveGuardSummary.warning_confirmed_count || 0}
+                                    </div>
+                                  </div>
+                                  <div className="rounded-lg border border-rose-400/15 bg-rose-500/5 px-3 py-3">
+                                    <div className="text-nofx-text-muted">
+                                      {pickText('Warning not confirmed', 'Warnung nicht bestaetigt')}
+                                    </div>
+                                    <div className="text-lg font-semibold mt-1 text-rose-300">
+                                      {learnedPatternLiveGuardSummary.warning_not_confirmed_count ||
+                                        0}
+                                    </div>
+                                  </div>
+                                  <div className="rounded-lg border border-white/10 bg-white/5 px-3 py-3">
+                                    <div className="text-nofx-text-muted">
+                                      {pickText('Pending / open', 'Ausstehend / offen')}
+                                    </div>
+                                    <div className="text-lg font-semibold mt-1">
+                                      {(learnedPatternLiveGuardSummary.attribution_pending_count ||
+                                        0) +
+                                        (learnedPatternLiveGuardSummary.followup_open_count || 0)}
+                                    </div>
                                   </div>
                                 </div>
-                                <div className="rounded-lg border border-amber-400/15 bg-amber-500/5 px-3 py-3">
-                                  <div className="text-nofx-text-muted">Monitor only</div>
-                                  <div className="text-lg font-semibold mt-1 text-amber-200">
-                                    {learnedPatternLiveGuardSummary.monitor_only_count || 0}
-                                  </div>
-                                </div>
-                                <div className="rounded-lg border border-sky-400/15 bg-sky-500/5 px-3 py-3">
-                                  <div className="text-nofx-text-muted">
-                                    Matched, not qualified
-                                  </div>
-                                  <div className="text-lg font-semibold mt-1 text-sky-200">
-                                    {learnedPatternLiveGuardSummary.matched_unqualified_count ||
+
+                                {(learnedPatternLiveGuardSummary.threshold_missed_loss_count > 0 ||
+                                  learnedPatternLiveGuardSummary.threshold_missed_profit_count >
+                                    0) && (
+                                  <div className="rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-xs text-nofx-text-muted">
+                                    Threshold misses: loss{' '}
+                                    {learnedPatternLiveGuardSummary.threshold_missed_loss_count ||
+                                      0}{' '}
+                                    · profit{' '}
+                                    {learnedPatternLiveGuardSummary.threshold_missed_profit_count ||
                                       0}
                                   </div>
-                                </div>
-                                <div className="rounded-lg border border-white/10 bg-white/5 px-3 py-3">
-                                  <div className="text-nofx-text-muted">Last check</div>
-                                  <div className="text-xs font-medium mt-1">
-                                    {formatTimestampLabel(
-                                      learnedPatternLiveGuardSummary.latest_decision_timestamp
-                                    )}
-                                  </div>
-                                </div>
+                                )}
                               </div>
                             )}
 
@@ -6671,7 +8976,9 @@ export function DealReviewPage({
                                 {formatPct(
                                   (learnedPatternLiveGuardStatus.config.max_drift_score ||
                                     0) * 100
-                                )}
+                                )}{' '}
+                                · only `monitoring_rule` anti-patterns can qualify for
+                                live monitor / block effects
                               </div>
                             )}
 
@@ -6757,6 +9064,77 @@ export function DealReviewPage({
                                       {event.summary || 'No summary stored.'}
                                     </div>
 
+                                    {event.attribution && (
+                                      <div className="mt-3 rounded-lg border border-white/10 bg-white/5 px-3 py-3">
+                                        <div className="flex flex-wrap items-center gap-2">
+                                          <span
+                                            className={`px-2 py-1 rounded-full text-[11px] border ${learnedPatternLiveGuardAttributionClasses(
+                                              event.attribution.status
+                                            )}`}
+                                          >
+                                            {formatLearnedPatternLiveGuardAttributionStatus(
+                                              event.attribution.status
+                                            )}
+                                          </span>
+                                          {typeof event.attribution.horizon_hours === 'number' && (
+                                            <span className="px-2 py-1 rounded-full text-[11px] border border-white/10 bg-black/20 text-white/80">
+                                              {event.attribution.horizon_hours}h window
+                                            </span>
+                                          )}
+                                          {event.attribution.followup_case_outcome && (
+                                            <span className="px-2 py-1 rounded-full text-[11px] border border-white/10 bg-black/20 text-white/80">
+                                              outcome {event.attribution.followup_case_outcome}
+                                            </span>
+                                          )}
+                                        </div>
+                                        <div className="mt-2 text-xs text-nofx-text-muted">
+                                          {event.attribution.summary || 'No follow-up attribution stored yet.'}
+                                        </div>
+                                        <div className="mt-2 flex flex-wrap gap-3 text-xs text-nofx-text-muted">
+                                          {event.attribution.followup_entry_delay_ms ? (
+                                            <span>
+                                              Follow-up delay{' '}
+                                              {formatHold(event.attribution.followup_entry_delay_ms)}
+                                            </span>
+                                          ) : null}
+                                          {event.attribution.next_attempt_cycle_number ? (
+                                            <span>
+                                              Next attempt cycle{' '}
+                                              {event.attribution.next_attempt_cycle_number}
+                                            </span>
+                                          ) : null}
+                                          {event.attribution.next_attempt_terminal_status ? (
+                                            <span>
+                                              Next attempt{' '}
+                                              {event.attribution.next_attempt_terminal_status}
+                                            </span>
+                                          ) : null}
+                                          {typeof event.attribution.followup_realized_pnl ===
+                                          'number' &&
+                                          (event.attribution.followup_case_id ||
+                                            event.attribution.followup_realized_pnl !== 0 ||
+                                            event.attribution.followup_realized_pnl_pct !== 0) ? (
+                                            <span
+                                              className={
+                                                (event.attribution.followup_realized_pnl || 0) >= 0
+                                                  ? 'text-emerald-300'
+                                                  : 'text-rose-300'
+                                              }
+                                            >
+                                              Follow-up PnL{' '}
+                                              {formatMoney(
+                                                event.attribution.followup_realized_pnl || 0
+                                              )}{' '}
+                                              /{' '}
+                                              {formatPct(
+                                                event.attribution.followup_realized_pnl_pct || 0
+                                              )}
+                                            </span>
+                                          ) : null}
+                                        </div>
+                                      </div>
+                                    )}
+
                                     {(event.block_reason ||
                                       event.matched_pattern_signature ||
                                       event.matched_pattern_recommended_use) && (
@@ -6782,11 +9160,14 @@ export function DealReviewPage({
                                     )}
 
                                     <div className="flex flex-wrap gap-2 mt-3">
-                                      {event.matched_pattern_id && (
+                                      {(event.matched_pattern_id ||
+                                        event.matched_pattern_stable_key) && (
                                         <button
                                           onClick={() =>
                                             openPatternLabWithFilters({
                                               pattern_id: event.matched_pattern_id || '',
+                                              stable_key:
+                                                event.matched_pattern_stable_key || '',
                                               symbol: event.symbol || '',
                                               side: event.side || '',
                                             })
@@ -6805,6 +9186,18 @@ export function DealReviewPage({
                                       >
                                         Filter review to this setup
                                       </button>
+                                      {event.attribution?.followup_case_id && (
+                                        <button
+                                          onClick={() => {
+                                            if (event.symbol) setSymbol(event.symbol)
+                                            if (event.side) setSide(event.side)
+                                            setSelectedCaseId(event.attribution?.followup_case_id || null)
+                                          }}
+                                          className="h-8 px-3 rounded-lg border border-white/10 bg-white/5 text-xs"
+                                        >
+                                          Open follow-up deal
+                                        </button>
+                                      )}
                                     </div>
                                   </div>
                                 ))}
@@ -6944,6 +9337,360 @@ export function DealReviewPage({
                             )}
                           </div>
                         </div>
+
+                        {((learnedPatternSummary.top_expiring_monitoring_rules &&
+                          learnedPatternSummary.top_expiring_monitoring_rules.length > 0) ||
+                          (learnedPatternSummary.top_rollback_watch_patterns &&
+                            learnedPatternSummary.top_rollback_watch_patterns.length > 0) ||
+                          (learnedPatternSummary.top_improving_monitoring_rules &&
+                            learnedPatternSummary.top_improving_monitoring_rules.length > 0) ||
+                          (learnedPatternSummary.top_degrading_monitoring_rules &&
+                            learnedPatternSummary.top_degrading_monitoring_rules.length > 0) ||
+                          (learnedPatternSummary.top_overblocking_monitoring_rules &&
+                            learnedPatternSummary.top_overblocking_monitoring_rules.length > 0) ||
+                          (learnedPatternSummary.top_fragile_monitoring_rules &&
+                            learnedPatternSummary.top_fragile_monitoring_rules.length > 0)) && (
+                          <div className="grid xl:grid-cols-3 2xl:grid-cols-6 gap-3">
+                            <div className="rounded-lg border border-orange-400/15 bg-orange-500/5 px-3 py-3 space-y-2">
+                              <div className="text-xs uppercase tracking-[0.2em] text-orange-200">
+                                Expiring Monitoring Rules
+                              </div>
+                              {!learnedPatternSummary.top_expiring_monitoring_rules ||
+                              learnedPatternSummary.top_expiring_monitoring_rules.length ===
+                                0 ? (
+                                <div className="text-sm text-nofx-text-muted">
+                                  No monitoring rules are expiring for this slice.
+                                </div>
+                              ) : (
+                                learnedPatternSummary.top_expiring_monitoring_rules.map(
+                                  (pattern) => (
+                                    <div
+                                      key={`learned-pattern-expiring-${pattern.id}`}
+                                      className="rounded-lg border border-white/10 bg-black/20 px-3 py-3"
+                                    >
+                                      <div className="flex flex-wrap items-center gap-2">
+                                        <span className="font-medium">
+                                          {pattern.pattern_signature}
+                                        </span>
+                                        <span
+                                          className={`px-2 py-1 rounded-full text-[11px] border ${learnedPatternLifecycleClasses(
+                                            pattern.lifecycle?.status
+                                          )}`}
+                                        >
+                                          {formatLearnedPatternLifecycleStatus(
+                                            pattern.lifecycle?.status
+                                          )}
+                                        </span>
+                                      </div>
+                                      <div className="text-xs text-nofx-text-muted mt-1">
+                                        expiry{' '}
+                                        {formatPct(
+                                          (pattern.lifecycle?.expiry_score || 0) * 100
+                                        )}{' '}
+                                        · validation{' '}
+                                        {formatPct(
+                                          (pattern.validation_support_score || 0) * 100
+                                        )}{' '}
+                                        · recent {pattern.recent_support_count || 0}/
+                                        {pattern.recent_sample_count || 0}
+                                      </div>
+                                      {pattern.lifecycle?.summary && (
+                                        <div className="text-xs text-nofx-text-muted mt-2">
+                                          {pattern.lifecycle.summary}
+                                        </div>
+                                      )}
+                                    </div>
+                                  )
+                                )
+                              )}
+                            </div>
+
+                            <div className="rounded-lg border border-rose-400/15 bg-rose-500/5 px-3 py-3 space-y-2">
+                              <div className="text-xs uppercase tracking-[0.2em] text-emerald-200">
+                                Improving Rules
+                              </div>
+                              {!learnedPatternSummary.top_improving_monitoring_rules ||
+                              learnedPatternSummary.top_improving_monitoring_rules.length ===
+                                0 ? (
+                                <div className="text-sm text-nofx-text-muted">
+                                  No monitoring rules are currently improving.
+                                </div>
+                              ) : (
+                                learnedPatternSummary.top_improving_monitoring_rules.map(
+                                  (pattern) => (
+                                    <div
+                                      key={`learned-pattern-improving-${pattern.id}`}
+                                      className="rounded-lg border border-white/10 bg-black/20 px-3 py-3"
+                                    >
+                                      <div className="flex flex-wrap items-center gap-2">
+                                        <span className="font-medium">
+                                          {pattern.pattern_signature}
+                                        </span>
+                                        <span
+                                          className={`px-2 py-1 rounded-full text-[11px] border ${learnedPatternRollupTrendClasses(
+                                            pattern.live_guard_attribution_delta?.trend_label
+                                          )}`}
+                                        >
+                                          {formatLearnedPatternRollupTrendLabel(
+                                            pattern.live_guard_attribution_delta?.trend_label
+                                          )}
+                                        </span>
+                                      </div>
+                                      <div className="text-xs text-nofx-text-muted mt-1">
+                                        protective delta{' '}
+                                        {formatPct(
+                                          (pattern.live_guard_attribution_delta
+                                            ?.protective_rate_delta || 0) * 100
+                                        )}{' '}
+                                        · recent{' '}
+                                        {formatPct(
+                                          (pattern.live_guard_attribution_delta
+                                            ?.recent_protective_rate || 0) * 100
+                                        )}{' '}
+                                        · prior{' '}
+                                        {formatPct(
+                                          (pattern.live_guard_attribution_delta
+                                            ?.prior_protective_rate || 0) * 100
+                                        )}
+                                      </div>
+                                      {pattern.live_guard_attribution_delta?.summary && (
+                                        <div className="text-xs text-nofx-text-muted mt-2">
+                                          {pattern.live_guard_attribution_delta.summary}
+                                        </div>
+                                      )}
+                                    </div>
+                                  )
+                                )
+                              )}
+                            </div>
+
+                            <div className="rounded-lg border border-rose-400/15 bg-rose-500/5 px-3 py-3 space-y-2">
+                              <div className="text-xs uppercase tracking-[0.2em] text-amber-200">
+                                Degrading Rules
+                              </div>
+                              {!learnedPatternSummary.top_degrading_monitoring_rules ||
+                              learnedPatternSummary.top_degrading_monitoring_rules.length ===
+                                0 ? (
+                                <div className="text-sm text-nofx-text-muted">
+                                  No monitoring rules are currently degrading.
+                                </div>
+                              ) : (
+                                learnedPatternSummary.top_degrading_monitoring_rules.map(
+                                  (pattern) => (
+                                    <div
+                                      key={`learned-pattern-degrading-${pattern.id}`}
+                                      className="rounded-lg border border-white/10 bg-black/20 px-3 py-3"
+                                    >
+                                      <div className="flex flex-wrap items-center gap-2">
+                                        <span className="font-medium">
+                                          {pattern.pattern_signature}
+                                        </span>
+                                        <span
+                                          className={`px-2 py-1 rounded-full text-[11px] border ${learnedPatternRollupTrendClasses(
+                                            pattern.live_guard_attribution_delta?.trend_label
+                                          )}`}
+                                        >
+                                          {formatLearnedPatternRollupTrendLabel(
+                                            pattern.live_guard_attribution_delta?.trend_label
+                                          )}
+                                        </span>
+                                      </div>
+                                      <div className="text-xs text-nofx-text-muted mt-1">
+                                        overblocking delta{' '}
+                                        {formatPct(
+                                          (pattern.live_guard_attribution_delta
+                                            ?.overblocking_rate_delta || 0) * 100
+                                        )}{' '}
+                                        · recent{' '}
+                                        {formatPct(
+                                          (pattern.live_guard_attribution_delta
+                                            ?.recent_overblocking_rate || 0) * 100
+                                        )}{' '}
+                                        · prior{' '}
+                                        {formatPct(
+                                          (pattern.live_guard_attribution_delta
+                                            ?.prior_overblocking_rate || 0) * 100
+                                        )}
+                                      </div>
+                                      {pattern.live_guard_attribution_delta?.summary && (
+                                        <div className="text-xs text-nofx-text-muted mt-2">
+                                          {pattern.live_guard_attribution_delta.summary}
+                                        </div>
+                                      )}
+                                    </div>
+                                  )
+                                )
+                              )}
+                            </div>
+
+                            <div className="rounded-lg border border-rose-400/15 bg-rose-500/5 px-3 py-3 space-y-2">
+                              <div className="text-xs uppercase tracking-[0.2em] text-rose-200">
+                                Overblocking Rules
+                              </div>
+                              {!learnedPatternSummary.top_overblocking_monitoring_rules ||
+                              learnedPatternSummary.top_overblocking_monitoring_rules.length ===
+                                0 ? (
+                                <div className="text-sm text-nofx-text-muted">
+                                  No monitoring rules currently look overblocking.
+                                </div>
+                              ) : (
+                                learnedPatternSummary.top_overblocking_monitoring_rules.map(
+                                  (pattern) => (
+                                    <div
+                                      key={`learned-pattern-overblocking-${pattern.id}`}
+                                      className="rounded-lg border border-white/10 bg-black/20 px-3 py-3"
+                                    >
+                                      <div className="flex flex-wrap items-center gap-2">
+                                        <span className="font-medium">
+                                          {pattern.pattern_signature}
+                                        </span>
+                                        <span
+                                          className={`px-2 py-1 rounded-full text-[11px] border ${learnedPatternRollupClasses(
+                                            pattern.live_guard_attribution?.attribution_label
+                                          )}`}
+                                        >
+                                          {formatLearnedPatternRollupLabel(
+                                            pattern.live_guard_attribution?.attribution_label
+                                          )}
+                                        </span>
+                                      </div>
+                                      <div className="text-xs text-nofx-text-muted mt-1">
+                                        overblocking{' '}
+                                        {formatPct(
+                                          (pattern.live_guard_attribution?.overblocking_rate || 0) *
+                                            100
+                                        )}{' '}
+                                        · resolved{' '}
+                                        {pattern.live_guard_attribution?.resolved_event_count || 0}{' '}
+                                        · confidence{' '}
+                                        {formatPct(
+                                          (pattern.live_guard_attribution?.confidence_score || 0) *
+                                            100
+                                        )}
+                                      </div>
+                                      {pattern.live_guard_attribution?.summary && (
+                                        <div className="text-xs text-nofx-text-muted mt-2">
+                                          {pattern.live_guard_attribution.summary}
+                                        </div>
+                                      )}
+                                    </div>
+                                  )
+                                )
+                              )}
+                            </div>
+
+                            <div className="rounded-lg border border-amber-400/15 bg-amber-500/5 px-3 py-3 space-y-2">
+                              <div className="text-xs uppercase tracking-[0.2em] text-amber-200">
+                                Fragile Monitoring Rules
+                              </div>
+                              {!learnedPatternSummary.top_fragile_monitoring_rules ||
+                              learnedPatternSummary.top_fragile_monitoring_rules.length ===
+                                0 ? (
+                                <div className="text-sm text-nofx-text-muted">
+                                  No monitoring rules currently look structurally fragile.
+                                </div>
+                              ) : (
+                                learnedPatternSummary.top_fragile_monitoring_rules.map(
+                                  (pattern) => (
+                                    <div
+                                      key={`learned-pattern-fragile-${pattern.id}`}
+                                      className="rounded-lg border border-white/10 bg-black/20 px-3 py-3"
+                                    >
+                                      <div className="flex flex-wrap items-center gap-2">
+                                        <span className="font-medium">
+                                          {pattern.pattern_signature}
+                                        </span>
+                                        {pattern.lifecycle?.status && (
+                                          <span
+                                            className={`px-2 py-1 rounded-full text-[11px] border ${learnedPatternLifecycleClasses(
+                                              pattern.lifecycle.status
+                                            )}`}
+                                          >
+                                            {formatLearnedPatternLifecycleStatus(
+                                              pattern.lifecycle.status
+                                            )}
+                                          </span>
+                                        )}
+                                        <span className="px-2 py-1 rounded-full text-[11px] border border-amber-400/20 bg-amber-500/10 text-amber-200">
+                                          Fragile
+                                        </span>
+                                      </div>
+                                      <div className="text-xs text-nofx-text-muted mt-1">
+                                        degrade{' '}
+                                        {formatPct(
+                                          ((pattern.lifecycle_trend?.degrading_share || 0) +
+                                            (pattern.lifecycle_trend?.rollback_watch_share || 0)) *
+                                            100
+                                        )}{' '}
+                                        · stale lag{' '}
+                                        {pattern.lifecycle_trend?.stale_guard_snapshot_count || 0}
+                                        {' '}· changes{' '}
+                                        {pattern.lifecycle_trend?.status_change_count || 0}
+                                      </div>
+                                      {pattern.lifecycle_trend?.summary && (
+                                        <div className="text-xs text-nofx-text-muted mt-2">
+                                          {pattern.lifecycle_trend.summary}
+                                        </div>
+                                      )}
+                                    </div>
+                                  )
+                                )
+                              )}
+                            </div>
+
+                            <div className="rounded-lg border border-rose-400/15 bg-rose-500/5 px-3 py-3 space-y-2">
+                              <div className="text-xs uppercase tracking-[0.2em] text-rose-200">
+                                Rollback Watch
+                              </div>
+                              {!learnedPatternSummary.top_rollback_watch_patterns ||
+                              learnedPatternSummary.top_rollback_watch_patterns.length ===
+                                0 ? (
+                                <div className="text-sm text-nofx-text-muted">
+                                  No monitoring rules are currently on rollback watch.
+                                </div>
+                              ) : (
+                                learnedPatternSummary.top_rollback_watch_patterns.map(
+                                  (pattern) => (
+                                    <div
+                                      key={`learned-pattern-rollback-${pattern.id}`}
+                                      className="rounded-lg border border-white/10 bg-black/20 px-3 py-3"
+                                    >
+                                      <div className="flex flex-wrap items-center gap-2">
+                                        <span className="font-medium">
+                                          {pattern.pattern_signature}
+                                        </span>
+                                        <span
+                                          className={`px-2 py-1 rounded-full text-[11px] border ${learnedPatternLifecycleClasses(
+                                            pattern.lifecycle?.status
+                                          )}`}
+                                        >
+                                          {formatLearnedPatternLifecycleStatus(
+                                            pattern.lifecycle?.status
+                                          )}
+                                        </span>
+                                      </div>
+                                      <div className="text-xs text-nofx-text-muted mt-1">
+                                        rollback{' '}
+                                        {formatPct(
+                                          (pattern.lifecycle?.rollback_score || 0) * 100
+                                        )}{' '}
+                                        · guard hits{' '}
+                                        {pattern.lifecycle?.recent_guard_event_count || 0}{' '}
+                                        · hard block{' '}
+                                        {pattern.lifecycle?.recent_hard_blocked_count || 0}
+                                      </div>
+                                      {pattern.lifecycle?.summary && (
+                                        <div className="text-xs text-nofx-text-muted mt-2">
+                                          {pattern.lifecycle.summary}
+                                        </div>
+                                      )}
+                                    </div>
+                                  )
+                                )
+                              )}
+                            </div>
+                          </div>
+                        )}
                       </div>
                     )}
                   </div>
@@ -7260,7 +10007,7 @@ export function DealReviewPage({
                                     }
                                     className="px-2.5 py-1 rounded-lg border border-white/10 bg-white/5 text-xs font-medium"
                                   >
-                                    Filter
+                                    {pickText('Filter', 'Filtern')}
                                   </button>
                                   <button
                                     onClick={() =>
@@ -7276,7 +10023,7 @@ export function DealReviewPage({
                                     }
                                     className="px-2.5 py-1 rounded-lg border border-nofx-gold/30 bg-nofx-gold/10 text-nofx-gold text-xs font-medium disabled:opacity-50"
                                   >
-                                    Scan this cohort
+                                    {pickText('Scan this cohort', 'Diese Kohorte scannen')}
                                   </button>
                                 </div>
                               </div>
@@ -7296,11 +10043,14 @@ export function DealReviewPage({
             <div className="nofx-glass rounded-xl p-5">
               <div className="flex items-center justify-between gap-4">
                 <div>
-                  <h2 className="font-semibold text-lg">AI scan</h2>
+                  <h2 className="font-semibold text-lg">
+                    {pickText('AI scan', 'KI-Scan')}
+                  </h2>
                   <p className="text-xs text-nofx-text-muted mt-1">
-                    Run a model against the current filtered dataset, validate
-                    the evidence gate, then either apply directly or launch a
-                    timed challenger compare.
+                    {pickText(
+                      'Run a model against the current filtered dataset, validate the evidence gate, then either apply directly or launch a timed challenger compare.',
+                      'Fuehre ein Modell auf dem aktuell gefilterten Datensatz aus, pruefe das Evidence-Gate und uebernimm dann direkt oder starte einen zeitgesteuerten Challenger-Vergleich.'
+                    )}
                   </p>
                 </div>
                 <div className="flex items-center gap-2">
@@ -7309,7 +10059,7 @@ export function DealReviewPage({
                     disabled={!selectedTraderId || scans.length === 0}
                     className="h-10 px-4 rounded-lg border border-white/10 bg-black/20 text-sm disabled:opacity-40"
                   >
-                    Export scans
+                    {pickText('Export scans', 'Scans exportieren')}
                   </button>
                   <button
                     onClick={() => void runAIScan()}
@@ -7318,7 +10068,9 @@ export function DealReviewPage({
                     }
                     className="h-10 px-4 rounded-lg bg-nofx-gold text-black font-semibold disabled:opacity-50"
                   >
-                    {runningScan ? 'Running…' : 'Run scan'}
+                    {runningScan
+                      ? pickText('Running…', 'Laeuft…')
+                      : pickText('Run scan', 'Scan starten')}
                   </button>
                 </div>
               </div>
@@ -7345,7 +10097,7 @@ export function DealReviewPage({
                       : [
                           {
                             id: '',
-                            label: 'Configured default',
+                            label: pickText('Configured default', 'Konfigurierter Standard'),
                             provider: '',
                             available: true,
                           },
@@ -7363,7 +10115,7 @@ export function DealReviewPage({
                   <NofxSelect
                     value={launchMode}
                     onChange={setLaunchMode}
-                    options={challengerModeOptions}
+                    options={localizedChallengerModeOptions}
                   />
                 </div>
                 <div className="h-11 rounded-lg border border-white/10 px-3 flex items-center bg-black/20">
@@ -7386,15 +10138,16 @@ export function DealReviewPage({
               </div>
 
               <div className="text-xs text-nofx-text-muted mt-2">
-                `paper / simulation` currently uses a selected testnet wallet.
-                `isolated_live` requires a different live wallet than the
-                incumbent. `shared_live` can use the same live wallet.
+                {pickText(
+                  '`paper / simulation` currently uses a selected testnet wallet. `isolated_live` requires a different live wallet than the incumbent. `shared_live` can use the same live wallet.',
+                  '`paper / simulation` nutzt derzeit die ausgewaehlte Testnet-Wallet. `isolated_live` benoetigt eine andere Live-Wallet als der Inkumbent. `shared_live` kann dieselbe Live-Wallet verwenden.'
+                )}
               </div>
 
               <div className="space-y-4 mt-5">
                 {scans.length === 0 ? (
                   <div className="text-sm text-nofx-text-muted">
-                    No AI scans saved yet.
+                    {pickText('No AI scans saved yet.', 'Noch keine KI-Scans gespeichert.')}
                   </div>
                 ) : (
                   scans.map((scan) => {
@@ -7408,7 +10161,8 @@ export function DealReviewPage({
                     )
                     const promotionState = getScanPromotionState(
                       scan,
-                      relatedCompare
+                      relatedCompare,
+                      language
                     )
                     const hasPatch =
                       !!scan.strategy_patch &&
@@ -7427,8 +10181,10 @@ export function DealReviewPage({
                               {scan.result.executive_summary || scan.scan.summary}
                             </div>
                             <div className="text-xs text-nofx-text-muted mt-2">
-                              {new Date(scan.scan.created_at).toLocaleString()} |{' '}
-                              {scan.scan.dataset_count} deals
+                              {new Date(scan.scan.created_at).toLocaleString(
+                                toDateTimeLocale(language)
+                              )}{' '}
+                              | {scan.scan.dataset_count} {pickText('deals', 'Deals')}
                             </div>
                             <div className="flex flex-wrap items-center gap-2 mt-3">
                               <span
@@ -7444,7 +10200,10 @@ export function DealReviewPage({
                               </span>
                               <span className="text-xs text-nofx-text-muted">
                                 {scan.scan.validation_summary ||
-                                  'Validation required before apply or challenger launch.'}
+                                  pickText(
+                                    'Validation required before apply or challenger launch.',
+                                    'Validierung erforderlich, bevor uebernommen oder ein Challenger gestartet werden kann.'
+                                  )}
                               </span>
                             </div>
                             <div className="flex flex-wrap items-center gap-2 mt-2">
@@ -7473,10 +10232,10 @@ export function DealReviewPage({
                               className="h-9 px-3 rounded-lg border border-white/15 text-white disabled:opacity-50"
                             >
                               {validatingScanId === scan.scan.id
-                                ? 'Validating…'
+                                ? pickText('Validating…', 'Validiere…')
                                 : validationStatus === 'passed'
-                                  ? 'Revalidate'
-                                  : 'Validate'}
+                                  ? pickText('Revalidate', 'Erneut validieren')
+                                  : pickText('Validate', 'Validieren')}
                             </button>
                             <button
                               onClick={() => launchChallenger(scan)}
@@ -7489,8 +10248,8 @@ export function DealReviewPage({
                               className="h-9 px-3 rounded-lg border border-sky-400/30 text-sky-300 disabled:opacity-50"
                             >
                               {launchingScanId === scan.scan.id
-                                ? 'Launching…'
-                                : 'Launch challenger'}
+                                ? pickText('Launching…', 'Starte…')
+                                : pickText('Launch challenger', 'Challenger starten')}
                             </button>
                             <button
                               onClick={() => applyScan(scan)}
@@ -7502,8 +10261,8 @@ export function DealReviewPage({
                               className="h-9 px-3 rounded-lg border border-nofx-gold/30 text-nofx-gold disabled:opacity-50"
                             >
                               {applyingScanId === scan.scan.id
-                                ? 'Applying…'
-                                : 'Apply patch'}
+                                ? pickText('Applying…', 'Wende an…')
+                                : pickText('Apply patch', 'Patch anwenden')}
                             </button>
                           </div>
                         </div>
@@ -7512,25 +10271,29 @@ export function DealReviewPage({
                           <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3 mt-4 text-sm">
                             <div className="rounded-lg border border-white/10 bg-black/20 p-3">
                               <div className="text-xs uppercase tracking-[0.2em] text-nofx-text-muted mb-2">
-                                Evidence gate
+                                {pickText('Evidence gate', 'Evidence-Gate')}
                               </div>
                               <div className="space-y-1 text-nofx-text-muted">
                                 <div>
-                                  Closed deals: {validation.closed_deal_count} /{' '}
+                                  {pickText('Closed deals:', 'Geschlossene Deals:')}{' '}
+                                  {validation.closed_deal_count} /{' '}
                                   {validation.min_closed_deal_count}
                                 </div>
                                 <div>
-                                  Train / holdout / recent: {validation.training_closed_deal_count} /{' '}
+                                  {pickText('Train / holdout / recent:', 'Train / Holdout / aktuell:')}{' '}
+                                  {validation.training_closed_deal_count} /{' '}
                                   {validation.holdout_closed_deal_count} /{' '}
                                   {validation.recent_closed_deal_count || 0}
                                 </div>
                                 <div>
-                                  Config valid:{' '}
-                                  {validation.config_valid ? 'yes' : 'no'}
+                                  {pickText('Config valid:', 'Config gueltig:')}{' '}
+                                  {validation.config_valid
+                                    ? pickText('yes', 'ja')
+                                    : pickText('no', 'nein')}
                                 </div>
                                 {validation.recent_slice_label && (
                                   <div>
-                                    Recent slice:{' '}
+                                    {pickText('Recent slice:', 'Aktueller Ausschnitt:')}{' '}
                                     {validation.recent_slice_label}
                                   </div>
                                 )}
@@ -7538,11 +10301,14 @@ export function DealReviewPage({
                             </div>
                             <div className="rounded-lg border border-white/10 bg-black/20 p-3">
                               <div className="text-xs uppercase tracking-[0.2em] text-nofx-text-muted mb-2">
-                                Gate output
+                                {pickText('Gate output', 'Gate-Ausgabe')}
                               </div>
                               {(validation.blocking_issues || []).length === 0 ? (
                                 <div className="text-sm text-emerald-300">
-                                  Ready for direct apply or challenger launch.
+                                  {pickText(
+                                    'Ready for direct apply or challenger launch.',
+                                    'Bereit fuer direkte Uebernahme oder Challenger-Start.'
+                                  )}
                                 </div>
                               ) : (
                                 <div className="space-y-1 text-sm text-rose-300">
@@ -7554,17 +10320,19 @@ export function DealReviewPage({
                             </div>
                             <div className="rounded-lg border border-white/10 bg-black/20 p-3">
                               <div className="text-xs uppercase tracking-[0.2em] text-nofx-text-muted mb-2">
-                                Replay gate
+                                {pickText('Replay gate', 'Replay-Gate')}
                               </div>
                               {!validation.replay?.supported ? (
                                 <div className="text-sm text-nofx-text-muted">
-                                  No supported historical replay for this patch
-                                  yet.
+                                  {pickText(
+                                    'No supported historical replay for this patch yet.',
+                                    'Fuer diesen Patch gibt es noch kein unterstuetztes historisches Replay.'
+                                  )}
                                 </div>
                               ) : (
                                 <div className="space-y-1 text-nofx-text-muted">
                                   <div>
-                                    Holdout delta:{' '}
+                                    {pickText('Holdout delta:', 'Holdout-Delta:')}{' '}
                                     <span
                                       className={
                                         validation.replay.holdout_net_pnl_delta >= 0
@@ -7578,7 +10346,7 @@ export function DealReviewPage({
                                     </span>
                                   </div>
                                   <div>
-                                    Training delta:{' '}
+                                    {pickText('Training delta:', 'Trainings-Delta:')}{' '}
                                     <span
                                       className={
                                         validation.replay.training_net_pnl_delta >= 0
@@ -7592,7 +10360,7 @@ export function DealReviewPage({
                                     </span>
                                   </div>
                                   <div>
-                                    Recent delta:{' '}
+                                    {pickText('Recent delta:', 'Aktuelles Delta:')}{' '}
                                     <span
                                       className={
                                         validation.replay.recent_net_pnl_delta >= 0
@@ -7606,7 +10374,7 @@ export function DealReviewPage({
                                     </span>
                                   </div>
                                   <div>
-                                    Covered fields:{' '}
+                                    {pickText('Covered fields:', 'Abgedeckte Felder:')}{' '}
                                     {(validation.replay.supported_paths || []).join(
                                       ', '
                                     ) || '-'}
@@ -7617,16 +10385,20 @@ export function DealReviewPage({
                             <div className="rounded-lg border border-white/10 bg-black/20 p-3 xl:col-span-2">
                               <div className="flex items-center justify-between gap-3 mb-2">
                                 <div className="text-xs uppercase tracking-[0.2em] text-nofx-text-muted">
-                                  Metric gates
+                                  {pickText('Metric gates', 'Metrik-Gates')}
                                 </div>
                                 <div className="text-xs text-nofx-text-muted">
                                   {(validation.checks || []).filter((item) => item.passed).length} /{' '}
-                                  {(validation.checks || []).length} passed
+                                  {(validation.checks || []).length}{' '}
+                                  {pickText('passed', 'bestanden')}
                                 </div>
                               </div>
                               {!(validation.checks || []).length ? (
                                 <div className="text-sm text-nofx-text-muted">
-                                  No metric checks recorded yet.
+                                  {pickText(
+                                    'No metric checks recorded yet.',
+                                    'Noch keine Metrik-Pruefungen gespeichert.'
+                                  )}
                                 </div>
                               ) : (
                                 <div className="space-y-2 max-h-72 overflow-auto pr-1">
@@ -7643,8 +10415,9 @@ export function DealReviewPage({
                                               {item.label}
                                             </div>
                                             <div className="text-xs text-nofx-text-muted mt-1">
-                                              {formatValidationScope(item.scope)} |{' '}
-                                              {item.source || 'baseline'}
+                                              {formatValidationScope(item.scope, language)} |{' '}
+                                              {item.source ||
+                                                pickText('baseline', 'Baseline')}
                                             </div>
                                           </div>
                                           <span
@@ -7654,21 +10427,24 @@ export function DealReviewPage({
                                                 : 'bg-rose-500/15 text-rose-300'
                                             }`}
                                           >
-                                            {item.passed ? 'pass' : 'block'}
+                                            {item.passed
+                                              ? pickText('pass', 'pass')
+                                              : pickText('block', 'block')}
                                           </span>
                                         </div>
                                         <div className="text-xs text-nofx-text-muted mt-2">
-                                          {formatValidationCheckSummary(item)}
+                                          {formatValidationCheckSummary(item, language)}
                                         </div>
                                         {typeof item.baseline === 'number' &&
                                           item.comparator === 'delta_gte' && (
                                             <div className="text-xs text-nofx-text-muted mt-1">
-                                              baseline{' '}
+                                              {pickText('baseline', 'Baseline')}{' '}
                                               {formatValidationMetricValue(
                                                 item.metric,
                                                 item.baseline
                                               )}
-                                              {' | '}projected{' '}
+                                              {' | '}
+                                              {pickText('projected', 'projiziert')}{' '}
                                               {formatValidationMetricValue(
                                                 item.metric,
                                                 item.actual
@@ -7692,7 +10468,7 @@ export function DealReviewPage({
                           scan.result.weaknesses.length > 0 && (
                             <div className="mt-4">
                               <div className="text-xs uppercase tracking-[0.2em] text-nofx-text-muted mb-2">
-                                Weaknesses
+                                {pickText('Weaknesses', 'Schwaechen')}
                               </div>
                               <div className="space-y-2 text-sm text-nofx-text-muted">
                                 {scan.result.weaknesses
@@ -7708,7 +10484,7 @@ export function DealReviewPage({
                           scan.result.immediate_actions.length > 0 && (
                             <div className="mt-4">
                               <div className="text-xs uppercase tracking-[0.2em] text-nofx-text-muted mb-2">
-                                Immediate actions
+                                {pickText('Immediate actions', 'Sofortmassnahmen')}
                               </div>
                               <div className="space-y-3">
                                 {scan.result.immediate_actions
@@ -7738,22 +10514,28 @@ export function DealReviewPage({
               <div className="mt-6 rounded-xl border border-white/10 bg-black/20 p-4">
                 <div className="flex items-center justify-between gap-4">
                   <div>
-                    <div className="font-semibold">Scan compare</div>
+                    <div className="font-semibold">
+                      {pickText('Scan compare', 'Scan-Vergleich')}
+                    </div>
                     <div className="text-xs text-nofx-text-muted mt-1">
-                      Compare two saved AI scans on filters, overlaps and patch
-                      deltas.
+                      {pickText(
+                        'Compare two saved AI scans on filters, overlaps and patch deltas.',
+                        'Vergleiche zwei gespeicherte KI-Scans anhand von Filtern, Ueberschneidungen und Patch-Deltas.'
+                      )}
                     </div>
                   </div>
                   <div className="flex items-center gap-2">
                     {compareLoading && (
-                      <div className="text-xs text-nofx-text-muted">Loading…</div>
+                      <div className="text-xs text-nofx-text-muted">
+                        {pickText('Loading…', 'Laedt…')}
+                      </div>
                     )}
                     <button
                       onClick={exportScanCompareJSON}
                       disabled={!compareResult}
                       className="h-8 px-3 rounded-lg border border-white/10 bg-black/20 text-xs disabled:opacity-40"
                     >
-                      Export compare
+                      {pickText('Export compare', 'Vergleich exportieren')}
                     </button>
                   </div>
                 </div>
@@ -7761,21 +10543,25 @@ export function DealReviewPage({
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mt-4">
                   <div className="h-11 rounded-lg border border-white/10 px-3 flex items-center bg-black/20">
                     <NofxSelect
-                      value={compareLeftScanId}
-                      onChange={setCompareLeftScanId}
+                        value={compareLeftScanId}
+                        onChange={setCompareLeftScanId}
                       options={scans.map((item) => ({
                         value: item.scan.id,
-                        label: `${item.scan.model_name} · ${new Date(item.scan.created_at).toLocaleDateString()}`,
+                        label: `${item.scan.model_name} · ${new Date(
+                          item.scan.created_at
+                        ).toLocaleDateString(toDateTimeLocale(language))}`,
                       }))}
                     />
                   </div>
                   <div className="h-11 rounded-lg border border-white/10 px-3 flex items-center bg-black/20">
                     <NofxSelect
-                      value={compareRightScanId}
-                      onChange={setCompareRightScanId}
+                        value={compareRightScanId}
+                        onChange={setCompareRightScanId}
                       options={scans.map((item) => ({
                         value: item.scan.id,
-                        label: `${item.scan.model_name} · ${new Date(item.scan.created_at).toLocaleDateString()}`,
+                        label: `${item.scan.model_name} · ${new Date(
+                          item.scan.created_at
+                        ).toLocaleDateString(toDateTimeLocale(language))}`,
                       }))}
                     />
                   </div>
@@ -7783,13 +10569,18 @@ export function DealReviewPage({
 
                 {!compareResult ? (
                   <div className="text-sm text-nofx-text-muted mt-4">
-                    Select two different scans to compare.
+                    {pickText(
+                      'Select two different scans to compare.',
+                      'Waehle zwei unterschiedliche Scans zum Vergleichen aus.'
+                    )}
                   </div>
                 ) : (
                   <div className="space-y-4 mt-4">
                     <div className="grid grid-cols-2 gap-3 text-sm">
                       <div className="rounded-lg border border-white/10 bg-black/20 p-3">
-                        <div className="text-xs text-nofx-text-muted">Left</div>
+                        <div className="text-xs text-nofx-text-muted">
+                          {pickText('Left', 'Links')}
+                        </div>
                         <div className="font-medium mt-1">
                           {compareResult.left.scan.provider} /{' '}
                           {compareResult.left.scan.model_name}
@@ -7797,7 +10588,7 @@ export function DealReviewPage({
                       </div>
                       <div className="rounded-lg border border-white/10 bg-black/20 p-3">
                         <div className="text-xs text-nofx-text-muted">
-                          Right
+                          {pickText('Right', 'Rechts')}
                         </div>
                         <div className="font-medium mt-1">
                           {compareResult.right.scan.provider} /{' '}
@@ -7810,7 +10601,7 @@ export function DealReviewPage({
                       <div className="flex flex-wrap items-start justify-between gap-3">
                         <div>
                           <div className="text-xs uppercase tracking-[0.2em] text-nofx-text-muted">
-                            Disagreement score
+                            {pickText('Disagreement score', 'Widerspruchs-Score')}
                           </div>
                           <div
                             className={`mt-2 text-2xl font-semibold ${compareLevelClasses(compareResult.disagreement_level)}`}
@@ -7819,11 +10610,16 @@ export function DealReviewPage({
                           </div>
                           <div className="text-sm text-nofx-text-muted mt-2 max-w-2xl">
                             {compareResult.disagreement_summary ||
-                              'No disagreement summary available.'}
+                              pickText(
+                                'No disagreement summary available.',
+                                'Keine Zusammenfassung der Widersprueche verfuegbar.'
+                              )}
                           </div>
                         </div>
                         <div className="text-sm">
-                          <span className="text-nofx-text-muted">Filters:</span>{' '}
+                          <span className="text-nofx-text-muted">
+                            {pickText('Filters:', 'Filter:')}
+                          </span>{' '}
                           <span
                             className={
                               compareResult.same_filters
@@ -7832,8 +10628,8 @@ export function DealReviewPage({
                             }
                           >
                             {compareResult.same_filters
-                              ? 'Same dataset'
-                              : 'Different dataset filters'}
+                              ? pickText('Same dataset', 'Gleicher Datensatz')
+                              : pickText('Different dataset filters', 'Unterschiedliche Datensatz-Filter')}
                           </span>
                         </div>
                       </div>
@@ -7846,7 +10642,11 @@ export function DealReviewPage({
                               className={`px-2 py-1 rounded-full text-xs border ${compareFlagClasses(flag.tone)}`}
                               title={flag.note}
                             >
-                              {formatCompareFlagTitle(flag.code, flag.title)}
+                              {formatCompareFlagTitle(
+                                flag.code,
+                                flag.title,
+                                language
+                              )}
                             </span>
                           ))}
                         </div>
@@ -8090,7 +10890,9 @@ export function DealReviewPage({
                     {compareResult.model_leaderboards &&
                       compareResult.model_leaderboards.length > 0 && (
                         <div className="rounded-xl border border-white/10 bg-black/20 p-4">
-                          <div className="font-semibold">Model usefulness by cohort</div>
+                          <div className="font-semibold">
+                            {pickText('Model usefulness by cohort', 'Modell-Nutzen nach Kohorte')}
+                          </div>
                           <div className="text-xs text-nofx-text-muted mt-1">
                             Aggregated from saved scans plus observed apply /
                             challenger outcomes.
@@ -8161,7 +10963,9 @@ export function DealReviewPage({
             <div className="nofx-glass rounded-xl p-5">
               <div className="flex items-center justify-between gap-4">
                 <div>
-                  <h2 className="font-semibold text-lg">Challenger history</h2>
+                  <h2 className="font-semibold text-lg">
+                    {pickText('Challenger history', 'Challenger-Historie')}
+                  </h2>
                   <p className="text-xs text-nofx-text-muted mt-1">
                     Timed old-vs-new comparisons launched from validated AI
                     scans.
@@ -8515,10 +11319,14 @@ export function DealReviewPage({
             <div className="nofx-glass rounded-xl p-5">
               <div className="flex items-center justify-between gap-4">
                 <div>
-                  <h2 className="font-semibold text-lg">Strategy history</h2>
+                  <h2 className="font-semibold text-lg">
+                    {pickText('Strategy history', 'Strategiehistorie')}
+                  </h2>
                   <p className="text-xs text-nofx-text-muted mt-1">
-                    Applied AI patches and rollback points for the current
-                    trader strategy.
+                    {pickText(
+                      'Applied AI patches and rollback points for the current trader strategy.',
+                      'Uebernommene KI-Patches und Rollback-Punkte fuer die aktuelle Trader-Strategie.'
+                    )}
                   </p>
                 </div>
               </div>
@@ -8526,7 +11334,10 @@ export function DealReviewPage({
               <div className="space-y-3 mt-4">
                 {versions.length === 0 ? (
                   <div className="text-sm text-nofx-text-muted">
-                    No strategy versions captured yet.
+                    {pickText(
+                      'No strategy versions captured yet.',
+                      'Noch keine Strategieversionen erfasst.'
+                    )}
                   </div>
                 ) : (
                   versions.map((version) => {
@@ -8540,7 +11351,10 @@ export function DealReviewPage({
                     const compareNote = relatedCompare
                       ? relatedCompare.compare.summary
                       : hasCompareLink
-                        ? 'Linked challenger compare available.'
+                        ? pickText(
+                            'Linked challenger compare available.',
+                            'Verknuepfter Challenger-Vergleich verfuegbar.'
+                          )
                         : ''
                     return (
                       <div
@@ -8556,27 +11370,31 @@ export function DealReviewPage({
                           <div>
                             <div className="text-xs text-nofx-gold uppercase">
                               {formatStrategyVersionSourceType(
-                                version.version.source_type
+                                version.version.source_type,
+                                language
                               )}
                             </div>
                             <div className="font-medium mt-1">
-                              {version.version.summary || 'Strategy change'}
+                              {version.version.summary ||
+                                pickText('Strategy change', 'Strategieaenderung')}
                             </div>
                             <div className="text-xs text-nofx-text-muted mt-2">
-                              Applied{' '}
+                              {pickText('Applied', 'Uebernommen')}{' '}
                               {new Date(
                                 version.version.applied_at ||
                                   version.version.created_at
-                              ).toLocaleString()}
+                              ).toLocaleString(toDateTimeLocale(language))}
                             </div>
                             {version.version.expected_effect && (
                               <div className="text-xs text-nofx-text-muted mt-2">
-                                Intended effect: {version.version.expected_effect}
+                                {pickText('Intended effect:', 'Beabsichtigter Effekt:')}{' '}
+                                {version.version.expected_effect}
                               </div>
                             )}
                             {hasCompareLink && (
                               <div className="text-xs text-sky-300 mt-2">
-                                Compare note: {compareNote}
+                                {pickText('Compare note:', 'Vergleichsnotiz:')}{' '}
+                                {compareNote}
                               </div>
                             )}
                             {version.attribution?.warnings &&
@@ -8594,7 +11412,7 @@ export function DealReviewPage({
                               }}
                               className="h-9 px-3 rounded-lg border border-nofx-gold/30 text-nofx-gold"
                             >
-                              Open detail
+                              {pickText('Open detail', 'Details oeffnen')}
                             </button>
                             {hasCompareLink && (
                               <button
@@ -8610,8 +11428,8 @@ export function DealReviewPage({
                               >
                                 {openingCompareId ===
                                 version.version.source_compare_id
-                                  ? 'Opening…'
-                                  : 'Open compare'}
+                                  ? pickText('Opening…', 'Oeffne…')
+                                  : pickText('Open compare', 'Vergleich oeffnen')}
                               </button>
                             )}
                             <button
@@ -8623,8 +11441,8 @@ export function DealReviewPage({
                               className="h-9 px-3 rounded-lg border border-white/15 text-white disabled:opacity-50"
                             >
                               {rollingBackVersionId === version.version.id
-                                ? 'Rolling back…'
-                                : 'Rollback'}
+                                ? pickText('Rolling back…', 'Rollback laeuft…')
+                                : pickText('Rollback', 'Rollback')}
                             </button>
                           </div>
                         </div>
@@ -8642,35 +11460,39 @@ export function DealReviewPage({
                   <div className="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-4">
                     <div>
                       <div className="text-xs uppercase tracking-[0.2em] text-nofx-gold">
-                        Strategy version detail
+                        {pickText('Strategy version detail', 'Details zur Strategieversion')}
                       </div>
                       <h3 className="font-semibold text-lg mt-1">
-                        {selectedVersion.version.summary || 'Strategy change'}
+                        {selectedVersion.version.summary ||
+                          pickText('Strategy change', 'Strategieaenderung')}
                       </h3>
                       <div className="text-sm text-nofx-text-muted mt-2">
                         {formatStrategyVersionSourceType(
-                          selectedVersion.version.source_type
+                          selectedVersion.version.source_type,
+                          language
                         )}{' '}
-                        · applied{' '}
+                        · {pickText('applied', 'uebernommen')}{' '}
                         {new Date(
                           selectedVersion.version.applied_at ||
                             selectedVersion.version.created_at
-                        ).toLocaleString()}
+                        ).toLocaleString(toDateTimeLocale(language))}
                       </div>
                       {selectedVersion.version.expected_effect && (
                         <div className="text-sm text-nofx-text-muted mt-2">
-                          Intended effect:{' '}
+                          {pickText('Intended effect:', 'Beabsichtigter Effekt:')}{' '}
                           {selectedVersion.version.expected_effect}
                         </div>
                       )}
                       {selectedVersion.source_scan_summary && (
                         <div className="text-sm text-nofx-text-muted mt-2">
-                          Source scan: {selectedVersion.source_scan_summary}
+                          {pickText('Source scan:', 'Quell-Scan:')}{' '}
+                          {selectedVersion.source_scan_summary}
                         </div>
                       )}
                       {selectedVersion.compare_summary && (
                         <div className="text-sm text-sky-300 mt-2">
-                          Linked compare: {selectedVersion.compare_summary}
+                          {pickText('Linked compare:', 'Verknuepfter Vergleich:')}{' '}
+                          {selectedVersion.compare_summary}
                         </div>
                       )}
                     </div>
@@ -8687,8 +11509,8 @@ export function DealReviewPage({
                         >
                           {openingCompareId ===
                           selectedVersion.version.source_compare_id
-                            ? 'Opening…'
-                            : 'Open compare'}
+                            ? pickText('Opening…', 'Oeffne…')
+                            : pickText('Open compare', 'Vergleich oeffnen')}
                         </button>
                       )}
                       <button
@@ -8699,8 +11521,8 @@ export function DealReviewPage({
                         className="h-9 px-3 rounded-lg border border-white/15 text-white disabled:opacity-50"
                       >
                         {rollingBackVersionId === selectedVersion.version.id
-                          ? 'Rolling back…'
-                          : 'Rollback'}
+                          ? pickText('Rolling back…', 'Rollback laeuft…')
+                          : pickText('Rollback', 'Rollback')}
                       </button>
                     </div>
                   </div>
@@ -8708,35 +11530,37 @@ export function DealReviewPage({
                   <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3 mt-5 text-sm">
                     <div className="rounded-lg border border-white/10 bg-black/20 p-3">
                       <div className="text-xs text-nofx-text-muted">
-                        Target cohort
+                        {pickText('Target cohort', 'Zielkohorte')}
                       </div>
                       <div className="text-sm mt-1 text-nofx-text-muted">
-                        {formatVersionCohort(selectedVersion.target_cohort)}
+                        {formatVersionCohort(selectedVersion.target_cohort, language)}
                       </div>
                     </div>
                     <div className="rounded-lg border border-white/10 bg-black/20 p-3">
                       <div className="text-xs text-nofx-text-muted">
-                        Full before
+                        {pickText('Full before', 'Gesamt davor')}
                       </div>
                       <div className="text-sm mt-1 text-nofx-text-muted">
                         {formatDatasetMini(
-                          selectedVersion.attribution?.full_before_summary
+                          selectedVersion.attribution?.full_before_summary,
+                          language
                         )}
                       </div>
                     </div>
                     <div className="rounded-lg border border-white/10 bg-black/20 p-3">
                       <div className="text-xs text-nofx-text-muted">
-                        Full after
+                        {pickText('Full after', 'Gesamt danach')}
                       </div>
                       <div className="text-sm mt-1 text-nofx-text-muted">
                         {formatDatasetMini(
-                          selectedVersion.attribution?.full_after_summary
+                          selectedVersion.attribution?.full_after_summary,
+                          language
                         )}
                       </div>
                     </div>
                     <div className="rounded-lg border border-white/10 bg-black/20 p-3">
                       <div className="text-xs text-nofx-text-muted">
-                        Rollback suggestion
+                        {pickText('Rollback suggestion', 'Rollback-Empfehlung')}
                       </div>
                       <div
                         className={`font-semibold mt-1 ${
@@ -8746,8 +11570,8 @@ export function DealReviewPage({
                         }`}
                       >
                         {selectedVersion.attribution?.rollback_suggested
-                          ? 'Suggested'
-                          : 'Not suggested'}
+                          ? pickText('Suggested', 'Empfohlen')
+                          : pickText('Not suggested', 'Nicht empfohlen')}
                       </div>
                     </div>
                   </div>
@@ -8755,31 +11579,34 @@ export function DealReviewPage({
                   <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3 mt-4 text-sm">
                     <div className="rounded-lg border border-white/10 bg-black/20 p-3">
                       <div className="text-xs text-nofx-text-muted">
-                        Target before
+                        {pickText('Target before', 'Ziel davor')}
                       </div>
                       <div className="text-sm mt-1 text-nofx-text-muted">
                         {formatDatasetMini(
-                          selectedVersion.attribution?.target_before_summary
+                          selectedVersion.attribution?.target_before_summary,
+                          language
                         )}
                       </div>
                     </div>
                     <div className="rounded-lg border border-white/10 bg-black/20 p-3">
                       <div className="text-xs text-nofx-text-muted">
-                        Target after
+                        {pickText('Target after', 'Ziel danach')}
                       </div>
                       <div className="text-sm mt-1 text-nofx-text-muted">
                         {formatDatasetMini(
-                          selectedVersion.attribution?.target_after_summary
+                          selectedVersion.attribution?.target_after_summary,
+                          language
                         )}
                       </div>
                     </div>
                     <div className="rounded-lg border border-white/10 bg-black/20 p-3">
                       <div className="text-xs text-nofx-text-muted">
-                        Non-target after
+                        {pickText('Non-target after', 'Nicht-Ziel danach')}
                       </div>
                       <div className="text-sm mt-1 text-nofx-text-muted">
                         {formatDatasetMini(
-                          selectedVersion.attribution?.non_target_after_summary
+                          selectedVersion.attribution?.non_target_after_summary,
+                          language
                         )}
                       </div>
                     </div>
@@ -8787,34 +11614,34 @@ export function DealReviewPage({
 
                   <div className="rounded-lg border border-white/10 bg-black/20 p-4 mt-4">
                     <div className="text-xs uppercase tracking-[0.2em] text-nofx-text-muted mb-2">
-                      Observation window
+                      {pickText('Observation window', 'Beobachtungsfenster')}
                     </div>
                     <div className="text-sm text-nofx-text-muted">
-                      Before:{' '}
+                      {pickText('Before:', 'Davor:')}{' '}
                       {selectedVersion.attribution?.before_start
                         ? new Date(
                             selectedVersion.attribution.before_start
-                          ).toLocaleString()
+                          ).toLocaleString(toDateTimeLocale(language))
                         : '-'}{' '}
-                      to{' '}
+                      {pickText('to', 'bis')}{' '}
                       {selectedVersion.attribution?.before_end
                         ? new Date(
                             selectedVersion.attribution.before_end
-                          ).toLocaleString()
+                          ).toLocaleString(toDateTimeLocale(language))
                         : '-'}
                     </div>
                     <div className="text-sm text-nofx-text-muted mt-1">
-                      After:{' '}
+                      {pickText('After:', 'Danach:')}{' '}
                       {selectedVersion.attribution?.after_start
                         ? new Date(
                             selectedVersion.attribution.after_start
-                          ).toLocaleString()
+                          ).toLocaleString(toDateTimeLocale(language))
                         : '-'}{' '}
-                      to{' '}
+                      {pickText('to', 'bis')}{' '}
                       {selectedVersion.attribution?.after_end
                         ? new Date(
                             selectedVersion.attribution.after_end
-                          ).toLocaleString()
+                          ).toLocaleString(toDateTimeLocale(language))
                         : '-'}
                     </div>
                     {selectedVersion.attribution?.note && (
@@ -8826,12 +11653,15 @@ export function DealReviewPage({
 
                   <div className="rounded-lg border border-white/10 bg-black/20 p-4 mt-4">
                     <div className="text-xs uppercase tracking-[0.2em] text-nofx-text-muted mb-2">
-                      Regression warnings
+                      {pickText('Regression warnings', 'Regressionswarnungen')}
                     </div>
                     {!selectedVersion.attribution?.warnings ||
                     selectedVersion.attribution.warnings.length === 0 ? (
                       <div className="text-sm text-emerald-300">
-                        No regression warning triggered for the observed window.
+                        {pickText(
+                          'No regression warning triggered for the observed window.',
+                          'Fuer das beobachtete Fenster wurde keine Regressionswarnung ausgeloest.'
+                        )}
                       </div>
                     ) : (
                       <div className="space-y-1 text-sm text-rose-300">
@@ -8845,16 +11675,19 @@ export function DealReviewPage({
                   <div className="rounded-lg border border-white/10 bg-black/20 p-4 mt-4 space-y-4">
                     <div>
                       <div className="text-xs uppercase tracking-[0.2em] text-nofx-text-muted">
-                        Similar strategy versions
+                        {pickText('Similar strategy versions', 'Aehnliche Strategieversionen')}
                       </div>
                       <div className="text-sm text-nofx-text-muted mt-2">
-                        Semantic matches from prior strategy patches for this trader.
+                        {pickText(
+                          'Semantic matches from prior strategy patches for this trader.',
+                          'Semantische Treffer aus frueheren Strategie-Patches dieses Traders.'
+                        )}
                       </div>
                     </div>
 
                     {similarVersionsLoading ? (
                       <div className="text-sm text-nofx-text-muted">
-                        Loading similar strategy versions…
+                        {pickText('Loading similar strategy versions…', 'Aehnliche Strategieversionen werden geladen…')}
                       </div>
                     ) : similarVersionsError ? (
                       <div className="text-sm text-amber-200">
@@ -8862,7 +11695,10 @@ export function DealReviewPage({
                       </div>
                     ) : similarVersions.length === 0 ? (
                       <div className="text-sm text-nofx-text-muted">
-                        No similar strategy versions were found yet.
+                        {pickText(
+                          'No similar strategy versions were found yet.',
+                          'Es wurden noch keine aehnlichen Strategieversionen gefunden.'
+                        )}
                       </div>
                     ) : (
                       <div className="space-y-3">
@@ -8877,11 +11713,15 @@ export function DealReviewPage({
                                   {hit.document.title || hit.document.source_id}
                                 </div>
                                 <div className="text-xs text-nofx-text-muted mt-1">
-                                  {formatSemanticSimilarityScore(hit.similarity_score)} · updated{' '}
+                                  {formatSemanticSimilarityScore(
+                                    hit.similarity_score,
+                                    language
+                                  )}{' '}
+                                  · {pickText('updated', 'aktualisiert')}{' '}
                                   {hit.document.source_updated_at
                                     ? new Date(
                                         hit.document.source_updated_at
-                                      ).toLocaleString()
+                                      ).toLocaleString(toDateTimeLocale(language))
                                     : '-'}
                                 </div>
                               </div>
@@ -8891,11 +11731,12 @@ export function DealReviewPage({
                                 }
                                 className="h-9 px-3 rounded-lg border border-white/10 bg-black/20 text-sm"
                               >
-                                Focus version
+                                {pickText('Focus version', 'Version fokussieren')}
                               </button>
                             </div>
                             <div className="text-sm text-nofx-text-muted mt-3">
-                              {hit.document.summary || 'No summary stored'}
+                              {hit.document.summary ||
+                                pickText('No summary stored', 'Keine Zusammenfassung gespeichert')}
                             </div>
                           </div>
                         ))}

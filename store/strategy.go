@@ -791,9 +791,9 @@ func (s *StrategyStore) initDefaultData() error {
 
 // GetDefaultStrategyConfig returns the default strategy configuration for the given language
 func GetDefaultStrategyConfig(lang string) StrategyConfig {
-	// Normalize language to "zh" or "en"
+	// Normalize language to supported prompt locales.
 	normalizedLang := "en"
-	if lang == "zh" {
+	if strings.EqualFold(strings.TrimSpace(lang), "zh") {
 		normalizedLang = "zh"
 	}
 
@@ -875,7 +875,7 @@ func GetDefaultStrategyConfig(lang string) StrategyConfig {
 		},
 	}
 
-	if lang == "zh" {
+	if normalizedLang == "zh" {
 		config.PromptSections = PromptSectionsConfig{
 			RoleDefinition: `# 你是一个专业的加密货币交易AI
 
@@ -1141,6 +1141,7 @@ type ModelLimit struct {
 const (
 	contextLimitDeepSeek = 131_072   // 128K
 	contextLimitOpenAI   = 128_000   // 128K
+	contextLimitCodex    = 400_000   // GPT-5 Codex family
 	contextLimitClaude   = 200_000   // 200K
 	contextLimitQwen     = 131_072   // 128K
 	contextLimitGemini   = 1_000_000 // 1M
@@ -1153,6 +1154,7 @@ const (
 var ModelContextLimits = map[string]int{
 	"deepseek": contextLimitDeepSeek,
 	"openai":   contextLimitOpenAI,
+	"codex":    contextLimitCodex,
 	"claude":   contextLimitClaude,
 	"qwen":     contextLimitQwen,
 	"gemini":   contextLimitGemini,

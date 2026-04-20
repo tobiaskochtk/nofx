@@ -11,7 +11,8 @@ export function OnboardingModeSelector({
   mode,
   onChange,
 }: OnboardingModeSelectorProps) {
-  const isZh = language === 'zh'
+  const pickText = (values: Record<string, string>) =>
+    values[language] ?? values.en
 
   const options: Array<{
     id: UserMode
@@ -21,25 +22,45 @@ export function OnboardingModeSelector({
   }> = [
     {
       id: 'beginner',
-      title: isZh ? '新手模式' : 'Beginner Mode',
-      badge: isZh ? '推荐' : 'Recommended',
-      description: isZh
-        ? '自动生成 Base 钱包，默认接入 Claw402 + DeepSeek，最快完成首次启动。'
-        : 'Generate a Base wallet automatically and start with Claw402 + DeepSeek by default.',
+      title: pickText({
+        zh: '新手模式',
+        en: 'Beginner Mode',
+        de: 'Beginner-Modus',
+      }),
+      badge: pickText({
+        zh: '推荐',
+        en: 'Recommended',
+        de: 'Empfohlen',
+      }),
+      description: pickText({
+        zh: '自动生成 Base 钱包，默认接入 Claw402 + DeepSeek，最快完成首次启动。',
+        en: 'Generate a Base wallet automatically and start with Claw402 + DeepSeek by default.',
+        de: 'Erstellt automatisch ein Base-Wallet und startet standardmaessig mit Claw402 + DeepSeek.',
+      }),
     },
     {
       id: 'advanced',
-      title: isZh ? '老手模式' : 'Advanced Mode',
-      description: isZh
-        ? '保持现在的完整配置流程，你自己决定模型、钱包和交易所。'
-        : 'Keep the full manual flow and configure models, wallets, and exchanges yourself.',
+      title: pickText({
+        zh: '老手模式',
+        en: 'Advanced Mode',
+        de: 'Advanced-Modus',
+      }),
+      description: pickText({
+        zh: '保持现在的完整配置流程，你自己决定模型、钱包和交易所。',
+        en: 'Keep the full manual flow and configure models, wallets, and exchanges yourself.',
+        de: 'Behalte den vollstaendigen manuellen Ablauf und entscheide selbst ueber Modelle, Wallets und Boersen.',
+      }),
     },
   ]
 
   return (
     <div className="space-y-2">
       <div className="text-xs font-medium text-zinc-400">
-        {isZh ? '使用模式' : 'Experience'}
+        {pickText({
+          zh: '使用模式',
+          en: 'Experience',
+          de: 'Modus',
+        })}
       </div>
       <div className="grid grid-cols-1 gap-2">
         {options.map((option) => {

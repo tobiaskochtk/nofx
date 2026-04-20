@@ -7,9 +7,11 @@ import (
 	"net/http"
 	"nofx/auth"
 	"nofx/crypto"
+	"nofx/decision"
 	"nofx/logger"
 	"nofx/manager"
 	"nofx/store"
+	"sort"
 	"strings"
 	"time"
 
@@ -80,11 +82,10 @@ func (s *Server) setupRoutes() {
 		// Health check
 		api.Any("/health", s.handleHealth)
 
-		// Admin login (used in admin mode, public)
-
 		// System supported models and exchanges (no authentication required)
 		s.route(api, "GET", "/supported-models", "List supported AI model providers", s.handleGetSupportedModels)
 		s.route(api, "GET", "/supported-exchanges", "List supported exchange types", s.handleGetSupportedExchanges)
+		s.route(api, "GET", "/prompt-templates", "List available system prompt templates", s.handleGetPromptTemplates)
 
 		// System config (no authentication required, for frontend to determine admin mode/registration status)
 		s.route(api, "GET", "/config", "Get system configuration", s.handleGetSystemConfig)
@@ -105,6 +106,7 @@ func (s *Server) setupRoutes() {
 		s.route(api, "GET", "/equity-history", "Equity history for a trader", s.handleEquityHistory)
 		s.route(api, "POST", "/equity-history-batch", "Batch equity history for multiple traders", s.handleEquityHistoryBatch)
 		s.route(api, "GET", "/traders/:id/public-config", "Public trader configuration", s.handleGetPublicTraderConfig)
+		s.route(api, "GET", "/trader/:id/config", "Legacy public trader configuration alias", s.handleGetPublicTraderConfig)
 
 		// Market data (no authentication required)
 		s.route(api, "GET", "/klines", "Candlestick data (?symbol=&interval=&limit=)", s.handleKlines)
@@ -270,15 +272,32 @@ Returns persisted review-first symbol+side+regime priors derived from closed dea
 			s.routeWithSchema(protected, "GET", "/traders/:id/deal-review/learned-patterns", "List learned indicator/context patterns for a trader",
 				`:id = trader_id from GET /api/my-traders.
 Query params:
+  pattern_id=<uuid>
+  stable_key=<rebuild-stable learned-pattern key>
   symbol=<string>
   side=LONG|SHORT
-  scope_type=trader_local|symbol
+  scope_type=global|trader_local|regime_local|symbol
   pattern_class=positive_edge|negative_edge
   validation_label=confirmed|candidate|insufficient_evidence|false_positive|reverse_risk|drifting|expired
   feature=<normalized feature token like bucket_breakout or trend_uptrend>
+  regime=<normalized regime token like trend_uptrend or session_asia>
+  min_confidence_pct=<0-100>
+  min_drift_pct=<0-100>
+  min_sample_count=<int>
   limit=<int, default 24, max 100>
 Returns replayed learned patterns derived from persisted closed deal-review cases using normalized structured features.`,
 				s.handleTraderDealReviewLearnedPatterns)
+			s.routeWithSchema(protected, "POST", "/traders/:id/deal-review/learned-patterns/control", "Apply analyst control to a learned monitoring rule",
+				`:id = trader_id from GET /api/my-traders.
+Body:
+  {
+    "pattern_id":"<optional current learned-pattern id>",
+    "stable_key":"<preferred rebuild-stable learned-pattern key>",
+    "action":"acknowledge_live|suppress|retire|rearm",
+    "note":"<required analyst rationale>"
+  }
+Stores a rebuild-stable analyst override plus a control-history event for the selected learned pattern.`,
+				s.handleTraderDealReviewLearnedPatternManualControl)
 			s.routeWithSchema(protected, "GET", "/traders/:id/deal-review/symbol-prior-live-guard-events", "List recent live symbol-prior guard evaluations for a trader",
 				`:id = trader_id from GET /api/my-traders.
 Query params:
@@ -439,19 +458,25 @@ Body: {"id":"<optional>","name":"Re-entry losses","config":{"query":"same-symbol
 			// AI cost tracking
 			s.route(protected, "GET", "/ai-costs", "Get AI call costs for a trader (?trader_id=xxx&period=today)", s.handleGetAICosts)
 			s.route(protected, "GET", "/ai-costs/summary", "Get AI cost summary (?period=today)", s.handleGetAICostsSummary)
+			s.routeWithSchema(protected, "GET", "/codex-call-logs", "List recent real Codex CLI transport logs",
+				`Query params:
+  limit=<int, default 100, max 100>
+  trader_id=<optional trader_id from GET /api/my-traders>
+Returns the provider-side Codex CLI request/response audit trail, capped to the newest 100 entries and including caller/trader attribution.`,
+				s.handleGetCodexCallLogs)
 
 			// AI model configuration
 			s.routeWithSchema(protected, "GET", "/models", "List AI model configs",
 				`Returns: [{"id":"<EXACT id — use this as ai_model_id when creating/updating a trader>","name":"<display name>","provider":"<short provider name — NOT a valid id>","enabled":<bool>}]
 CRITICAL: The "id" field (e.g. "abc123_deepseek") is what you must use for ai_model_id. The "provider" field ("deepseek") is NOT valid as an id.`,
 				s.handleGetModelConfigs)
-			s.routeWithSchema(protected, "GET", "/models/:id/available-models", "List remotely available model names for a configured AI account",
-				`:id = configured model id from GET /api/models. OpenAI accounts query the live /models catalog; other providers return the configured/default model names.`,
+			s.routeWithSchema(protected, "GET", "/models/:id/available-models", "List available model names for a configured AI account",
+				`:id = configured model id from GET /api/models. OpenAI accounts query the live /models catalog; Codex reads the local CLI models cache and does not require a stored API key; other providers return the configured/default model names.`,
 				s.handleModelAvailableModels)
 			s.routeWithSchema(protected, "PUT", "/models", "Configure an AI model provider",
 				`Body: {"models":{"<model_id>":{"enabled":<bool>,"api_key":"<string>","custom_api_url":"<string, leave empty to use provider default>","custom_model_name":"<string, leave empty to use provider default>"}}}
-model_id values: "openai","deepseek","qwen","kimi","grok","gemini","claude"
-Defaults when custom fields empty: openai→api.openai.com/v1, deepseek→api.deepseek.com, qwen→dashscope.aliyuncs.com/compatible-mode/v1, kimi→api.moonshot.ai/v1, grok→api.x.ai/v1, gemini→generativelanguage.googleapis.com/v1beta/openai, claude→api.anthropic.com/v1`,
+model_id values: "openai","codex","deepseek","qwen","kimi","grok","gemini","claude"
+Defaults when custom fields empty: openai→api.openai.com/v1, codex→local Codex CLI auth with cached model catalog, deepseek→api.deepseek.com, qwen→dashscope.aliyuncs.com/compatible-mode/v1, kimi→api.moonshot.ai/v1, grok→api.x.ai/v1, gemini→generativelanguage.googleapis.com/v1beta/openai, claude→api.anthropic.com/v1`,
 				s.handleUpdateModelConfigs)
 
 			// Exchange configuration
@@ -576,6 +601,7 @@ StrategyConfig fields:
   risk_control.symbol_behavior_live_guard.min_contradiction_score: minimum contradiction strength 0-1 (default 0.80)
   risk_control.learned_pattern_live_guard.enabled: enable learned-pattern monitoring / veto
   risk_control.learned_pattern_live_guard.mode: "monitor" | "hard_block" (hard_block requires explicit opt-in)
+  risk_control.learned_pattern_live_guard note: only negative learned patterns whose recommended_use resolves to "monitoring_rule" can qualify for live monitoring / veto
   risk_control.learned_pattern_live_guard.min_composite_score: minimum composite score 0-1 (default 0.85)
   risk_control.learned_pattern_live_guard.min_confidence_score: minimum pattern confidence 0-1 (default 0.90)
   risk_control.learned_pattern_live_guard.min_sample_count: minimum learned-pattern sample count (default 8)
@@ -670,6 +696,22 @@ func (s *Server) handleGetSystemConfig(c *gin.Context) {
 		"initialized":      userCount > 0,
 		"btc_eth_leverage": 10,
 		"altcoin_leverage": 5,
+	})
+}
+
+// handleGetPromptTemplates lists the currently loaded prompt template names.
+func (s *Server) handleGetPromptTemplates(c *gin.Context) {
+	templates := decision.GetAllPromptTemplateNames()
+	sort.Strings(templates)
+
+	c.JSON(http.StatusOK, gin.H{
+		"templates": func() []gin.H {
+			items := make([]gin.H, 0, len(templates))
+			for _, name := range templates {
+				items = append(items, gin.H{"name": name})
+			}
+			return items
+		}(),
 	})
 }
 

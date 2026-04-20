@@ -1149,10 +1149,14 @@ func TestBuildAutonomousOptimizerLearnedPatternPayload(t *testing.T) {
 
 func TestBuildAutonomousOptimizerTrailingStopTelemetry(t *testing.T) {
 	base := time.Now().UTC().Add(-2 * time.Hour)
+	strategyCfg := store.GetDefaultStrategyConfig("en")
 	cases := []store.DealReviewCaseDetail{
 		{
 			Case: store.DealReviewCase{
 				Status:         store.DealReviewCaseStatusClosed,
+				Symbol:         "ALPHAUSDT",
+				Side:           "LONG",
+				EntryPrice:     100,
 				PositionID:     1,
 				EntryTimeMs:    base.UnixMilli(),
 				ExitTimeMs:     base.Add(20 * time.Minute).UnixMilli(),
@@ -1163,6 +1167,9 @@ func TestBuildAutonomousOptimizerTrailingStopTelemetry(t *testing.T) {
 		{
 			Case: store.DealReviewCase{
 				Status:         store.DealReviewCaseStatusClosed,
+				Symbol:         "BETAUSDT",
+				Side:           "LONG",
+				EntryPrice:     200,
 				PositionID:     2,
 				EntryTimeMs:    base.Add(30 * time.Minute).UnixMilli(),
 				ExitTimeMs:     base.Add(70 * time.Minute).UnixMilli(),
@@ -1173,35 +1180,59 @@ func TestBuildAutonomousOptimizerTrailingStopTelemetry(t *testing.T) {
 		{
 			Case: store.DealReviewCase{
 				Status:         store.DealReviewCaseStatusClosed,
+				Symbol:         "GAMMAUSDT",
+				Side:           "LONG",
+				EntryPrice:     100,
 				PositionID:     3,
 				EntryTimeMs:    base.Add(90 * time.Minute).UnixMilli(),
-				ExitTimeMs:     base.Add(120 * time.Minute).UnixMilli(),
+				ExitTimeMs:     base.Add(100*time.Minute + 20*time.Second).UnixMilli(),
 				CloseReason:    "stop_loss",
 				RealizedPnLPct: -1.2,
+				ExitEvidence: &store.DealReviewExitEvidence{
+					PreviousStopPrice:         99.2,
+					NewStopPrice:              100.05,
+					TrailingMode:              "lock_profit",
+					TrailingTriggerProfitPct:  0.5,
+					TrailingUpdatedAtMs:       base.Add(100 * time.Minute).UnixMilli(),
+					TrailingUnrealizedPnL:     0.45,
+					TrailingUnrealizedPnLPct:  0.45,
+					TrailingStopProfitPct:     0.1,
+					TrailingProtectsBreakeven: true,
+				},
 			},
 		},
 	}
 
 	updates := map[int64]store.DealReviewTrailingUpdateRecord{
 		1: {
-			PositionID:        1,
-			TimestampMs:       base.Add(5 * time.Minute).UnixMilli(),
-			UnrealizedPnL:     0.3,
-			UnrealizedPnLPct:  0.3,
-			StopProfitPct:     -0.2,
-			ProtectsBreakeven: false,
+			PositionID:           1,
+			EntryPrice:           100,
+			PreviousStopPrice:    98.5,
+			NewStopPrice:         99.8,
+			TimestampMs:          base.Add(5 * time.Minute).UnixMilli(),
+			UnrealizedPnL:        0.3,
+			UnrealizedPnLPct:     0.3,
+			StopProfitPct:        -0.2,
+			ProtectsBreakeven:    false,
+			TierTriggerProfitPct: 0.5,
+			TrailingMode:         "lock_profit",
 		},
 		2: {
-			PositionID:        2,
-			TimestampMs:       base.Add(55 * time.Minute).UnixMilli(),
-			UnrealizedPnL:     1.1,
-			UnrealizedPnLPct:  1.1,
-			StopProfitPct:     0.5,
-			ProtectsBreakeven: true,
+			PositionID:           2,
+			EntryPrice:           200,
+			PreviousStopPrice:    200.2,
+			NewStopPrice:         201,
+			TimestampMs:          base.Add(55 * time.Minute).UnixMilli(),
+			UnrealizedPnL:        1.1,
+			UnrealizedPnLPct:     1.1,
+			StopProfitPct:        0.5,
+			ProtectsBreakeven:    true,
+			TierTriggerProfitPct: 1.0,
+			TrailingMode:         "trail_offset",
 		},
 	}
 
-	telemetry := buildAutonomousOptimizerTrailingStopTelemetry(cases, updates)
+	telemetry := buildAutonomousOptimizerTrailingStopTelemetry(&strategyCfg, cases, updates)
 	if telemetry == nil {
 		t.Fatal("telemetry = nil, want trailing-stop summary")
 	}
@@ -1211,11 +1242,20 @@ func TestBuildAutonomousOptimizerTrailingStopTelemetry(t *testing.T) {
 	if telemetry.InitialStopLossCount != 1 {
 		t.Fatalf("InitialStopLossCount = %d, want 1", telemetry.InitialStopLossCount)
 	}
-	if telemetry.EarlyTighteningCount != 1 || telemetry.EarlyTighteningLossCount != 1 {
-		t.Fatalf("telemetry = %#v, want one early-tightening loss", telemetry)
+	if telemetry.EarlyTighteningCount != 2 || telemetry.EarlyTighteningLossCount != 2 {
+		t.Fatalf("telemetry = %#v, want two early-tightening losses", telemetry)
 	}
-	if telemetry.FirstUpdateAuditCount != 2 || telemetry.BreakevenProtectedCount != 1 {
-		t.Fatalf("telemetry = %#v, want 2 audited first updates with 1 breakeven-protected stop", telemetry)
+	if telemetry.EarlyTighteningBelowEntryCount != 1 || telemetry.EarlyTighteningProtectedCount != 1 {
+		t.Fatalf("telemetry = %#v, want one below-entry and one protected early tightening", telemetry)
+	}
+	if telemetry.OneCycleExitCount != 1 || telemetry.EarlyTighteningOneCycleExitCount != 1 {
+		t.Fatalf("telemetry = %#v, want one one-cycle exit and it should be early-tightened", telemetry)
+	}
+	if telemetry.OneCycleExitThresholdSec != 30 {
+		t.Fatalf("OneCycleExitThresholdSec = %d, want 30", telemetry.OneCycleExitThresholdSec)
+	}
+	if telemetry.FirstUpdateAuditCount != 3 || telemetry.BreakevenProtectedCount != 2 {
+		t.Fatalf("telemetry = %#v, want 3 audited first updates with 2 breakeven-protected stops", telemetry)
 	}
 	if telemetry.AvgMinutesToFirstUpdate != 15 {
 		t.Fatalf("AvgMinutesToFirstUpdate = %.1f, want 15.0", telemetry.AvgMinutesToFirstUpdate)
@@ -1229,11 +1269,46 @@ func TestBuildAutonomousOptimizerTrailingStopTelemetry(t *testing.T) {
 	if telemetry.InitialStopLossAvgPnLPct != -1.2 {
 		t.Fatalf("InitialStopLossAvgPnLPct = %.2f, want -1.20", telemetry.InitialStopLossAvgPnLPct)
 	}
-	if len(telemetry.SampleUpdates) != 2 {
-		t.Fatalf("SampleUpdates len = %d, want 2", len(telemetry.SampleUpdates))
+	if len(telemetry.TierBreakdown) != 2 {
+		t.Fatalf("TierBreakdown len = %d, want 2", len(telemetry.TierBreakdown))
 	}
-	if telemetry.SampleUpdates[0].PositionID != 1 || telemetry.SampleUpdates[0].PreUpdateUnrealizedPnLPct != 0.3 {
-		t.Fatalf("SampleUpdates[0] = %#v, want position 1 with pre-update uPnL pct 0.3", telemetry.SampleUpdates[0])
+	if telemetry.TierBreakdown[0].TierTriggerProfitPct != 0.5 || telemetry.TierBreakdown[0].AuditCount != 2 || telemetry.TierBreakdown[0].EarlyTighteningLossCount != 2 {
+		t.Fatalf("TierBreakdown[0] = %#v, want 0.5%% tier with two harmful early tightenings", telemetry.TierBreakdown[0])
+	}
+	if telemetry.TierBreakdown[0].BelowEntryCount != 1 || telemetry.TierBreakdown[0].BreakevenOrBetterCount != 1 || telemetry.TierBreakdown[0].OneCycleExitCount != 1 {
+		t.Fatalf("TierBreakdown[0] = %#v, want split entry protection and one one-cycle exit", telemetry.TierBreakdown[0])
+	}
+	if len(telemetry.ProfitBandBreakdown) != 2 {
+		t.Fatalf("ProfitBandBreakdown len = %d, want 2", len(telemetry.ProfitBandBreakdown))
+	}
+	if telemetry.ProfitBandBreakdown[0].ProfitBand != "0.25-0.5%" || telemetry.ProfitBandBreakdown[0].AuditCount != 2 || telemetry.ProfitBandBreakdown[0].EarlyTighteningLossCount != 2 {
+		t.Fatalf("ProfitBandBreakdown[0] = %#v, want two harmful updates in the 0.25-0.5%% band", telemetry.ProfitBandBreakdown[0])
+	}
+	if len(telemetry.EntryProtectionBreakdown) != 2 {
+		t.Fatalf("EntryProtectionBreakdown len = %d, want 2", len(telemetry.EntryProtectionBreakdown))
+	}
+	if telemetry.EntryProtectionBreakdown[0].EntryProtectionState != "below_entry" || telemetry.EntryProtectionBreakdown[0].AuditCount != 1 {
+		t.Fatalf("EntryProtectionBreakdown[0] = %#v, want one below-entry audit", telemetry.EntryProtectionBreakdown[0])
+	}
+	if telemetry.EntryProtectionBreakdown[1].EntryProtectionState != "breakeven_or_better" || telemetry.EntryProtectionBreakdown[1].OneCycleExitCount != 1 {
+		t.Fatalf("EntryProtectionBreakdown[1] = %#v, want protected state to include the one-cycle exit", telemetry.EntryProtectionBreakdown[1])
+	}
+	if len(telemetry.SampleUpdates) != 3 {
+		t.Fatalf("SampleUpdates len = %d, want 3", len(telemetry.SampleUpdates))
+	}
+	byPosition := make(map[int64]autonomousOptimizerTrailingStopUpdateAuditItem, len(telemetry.SampleUpdates))
+	for _, item := range telemetry.SampleUpdates {
+		byPosition[item.PositionID] = item
+	}
+	if item, ok := byPosition[3]; !ok {
+		t.Fatalf("SampleUpdates = %#v, want position 3 exit-evidence audit", telemetry.SampleUpdates)
+	} else {
+		if item.UpdateSource != "exit_evidence" || !item.ExitWithinOneCycle {
+			t.Fatalf("position 3 sample = %#v, want exit_evidence one-cycle audit", item)
+		}
+		if item.EntryProtectionState != "breakeven_or_better" || item.PreUpdateProfitBand != "0.25-0.5%" {
+			t.Fatalf("position 3 sample = %#v, want protected 0.25-0.5%% band", item)
+		}
 	}
 }
 
@@ -1288,17 +1363,40 @@ func TestBuildAutonomousOptimizerLearnedPatternBacklogProposalsSynthesizesAction
 				FeatureSet:             []string{"bucket:momentum", "trend:uptrend"},
 				Summary:                "Momentum longs look promising but holdout coverage is still thin.",
 			},
+			{
+				PatternID:                                "pattern-delta",
+				ScopeType:                                store.DealReviewLearnedPatternScopeSymbol,
+				Symbol:                                   "SPACEUSDT",
+				Side:                                     "SHORT",
+				PatternClass:                             store.DealReviewLearnedPatternClassNegativeEdge,
+				ValidationLabel:                          store.DealReviewLearnedPatternValidationLabelConfirmed,
+				RecommendedUse:                           store.DealReviewLearnedPatternRecommendedUseMonitoringRule,
+				ImplicationType:                          "monitor_only",
+				LiveGuardAttributionDeltaTrendLabel:      store.DealReviewLearnedPatternLiveGuardAttributionTrendNewlyOverblocking,
+				LiveGuardAttributionDeltaConfidenceScore: 0.88,
+				LiveGuardAttributionDeltaRecentResolvedCount:    3,
+				LiveGuardAttributionDeltaPriorResolvedCount:     3,
+				LiveGuardAttributionDeltaRecentOverblockingRate: 1,
+				LiveGuardAttributionDeltaPriorOverblockingRate:  0.33,
+				LiveGuardAttributionDeltaRecentProtectiveRate:   0,
+				LiveGuardAttributionDeltaPriorProtectiveRate:    0.67,
+				LiveGuardAttributionDeltaOverblockingRateDelta:  0.67,
+				LiveGuardAttributionDeltaSummary:                "Recent live-guard follow-up newly looks overblocking.",
+				LifecycleRollbackScore:                          0.72,
+				FeatureSet:                                      []string{"bucket:fade", "oi:rising"},
+				Summary:                                         "The live monitoring rule flipped from protective to overblocking.",
+			},
 		},
 	}
 
 	proposals := buildAutonomousOptimizerLearnedPatternBacklogProposals(payload)
-	if len(proposals) != 3 {
-		t.Fatalf("len(proposals) = %d, want 3", len(proposals))
+	if len(proposals) != 4 {
+		t.Fatalf("len(proposals) = %d, want 4", len(proposals))
 	}
 
-	categories := map[string]autonomousOptimizerBacklogProposal{}
+	byTitle := map[string]autonomousOptimizerBacklogProposal{}
 	for _, proposal := range proposals {
-		categories[proposal.Category] = proposal
+		byTitle[proposal.Title] = proposal
 		if len(proposal.Evidence) == 0 {
 			t.Fatalf("proposal %q evidence = %#v, want synthesized evidence", proposal.Title, proposal.Evidence)
 		}
@@ -1306,13 +1404,18 @@ func TestBuildAutonomousOptimizerLearnedPatternBacklogProposalsSynthesizesAction
 			t.Fatalf("proposal %q metadata = %#v, want synthesized metadata", proposal.Title, proposal.Metadata)
 		}
 	}
-	if guard, ok := categories["missing_risk_control"]; !ok {
-		t.Fatalf("missing_risk_control proposal not found in %#v", proposals)
+	if guard, ok := byTitle["Encode RAVEUSDT LONG learned anti-pattern guard"]; !ok {
+		t.Fatalf("guard proposal not found in %#v", proposals)
 	} else if guard.Metadata["pattern_id"] != "pattern-guard" {
 		t.Fatalf("guard metadata pattern_id = %#v, want pattern-guard", guard.Metadata["pattern_id"])
 	}
-	if drift, ok := categories["missing_review_metric"]; !ok {
-		t.Fatalf("missing_review_metric proposal not found in %#v", proposals)
+	if delta, ok := byTitle["Add auto-rollback trigger for SPACEUSDT SHORT monitoring rule"]; !ok {
+		t.Fatalf("delta rollback proposal not found in %#v", proposals)
+	} else if delta.Metadata["pattern_id"] != "pattern-delta" {
+		t.Fatalf("delta metadata pattern_id = %#v, want pattern-delta", delta.Metadata["pattern_id"])
+	}
+	if drift, ok := byTitle["Add drift expiry monitor for trader local SHORT learned pattern"]; !ok {
+		t.Fatalf("drift proposal not found in %#v", proposals)
 	} else if drift.Metadata["derived_goal"] == nil {
 		t.Fatalf("drift proposal metadata = %#v, want derived_goal", drift.Metadata)
 	}

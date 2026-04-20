@@ -70,6 +70,7 @@ type Client struct {
 	Model      string
 	UseFullURL bool // Whether to use full URL (without appending /chat/completions)
 	MaxTokens  int  // Maximum tokens for AI response
+	Caller     CallerContext
 
 	HTTPClient *http.Client // Exported for sub-packages
 	Log        Logger       // Exported for sub-packages
@@ -79,6 +80,10 @@ type Client struct {
 	// When provider.DeepSeekClient embeds Client, Hooks point to DeepSeekClient
 	// This way methods called in Call() are automatically dispatched to the overridden version
 	Hooks ClientHooks
+}
+
+func usesMaxCompletionTokens(provider string) bool {
+	return provider == ProviderOpenAI || provider == ProviderCodex
 }
 
 // New creates default client (backward compatible)
@@ -161,6 +166,9 @@ func (client *Client) SetAPIKey(apiKey, apiURL, customModel string) {
 
 func (client *Client) SetTimeout(timeout time.Duration) {
 	client.HTTPClient.Timeout = timeout
+	if client.Cfg != nil {
+		client.Cfg.Timeout = timeout
+	}
 }
 
 // CallWithMessages template method - fixed retry flow (cannot be overridden)
@@ -241,8 +249,8 @@ func (client *Client) BuildMCPRequestBody(systemPrompt, userPrompt string) map[s
 		"messages":    messages,
 		"temperature": client.Cfg.Temperature, // Use configured temperature
 	}
-	// OpenAI newer models use max_completion_tokens instead of max_tokens
-	if client.Provider == ProviderOpenAI {
+	// OpenAI-compatible reasoning models use max_completion_tokens instead of max_tokens.
+	if usesMaxCompletionTokens(client.Provider) {
 		requestBody["max_completion_tokens"] = client.MaxTokens
 	} else {
 		requestBody["max_tokens"] = client.MaxTokens
@@ -619,7 +627,7 @@ func (client *Client) BuildRequestBodyFromRequest(req *Request) map[string]any {
 
 	// OpenAI newer models use max_completion_tokens instead of max_tokens
 	tokenKey := "max_tokens"
-	if client.Provider == ProviderOpenAI {
+	if usesMaxCompletionTokens(client.Provider) {
 		tokenKey = "max_completion_tokens"
 	}
 	if req.MaxTokens != nil {

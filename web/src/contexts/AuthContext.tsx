@@ -145,7 +145,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         }
 
         // Unexpected success response
-        return { success: false, message: data.message || 'Unexpected login response' }
+        return {
+          success: false,
+          message: data.message || 'Unexpected login response',
+        }
       } else {
         return {
           success: false,
@@ -158,45 +161,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }
 
   const loginAdmin = async (password: string) => {
-    try {
-      const response = await fetch('/api/admin-login', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ password }),
-      })
-      const data = await response.json()
-      if (response.ok) {
-        // Reset 401 flag on successful login
-        reset401Flag()
-
-        const userInfo = {
-          id: data.user_id || 'admin',
-          email: data.email || 'admin@localhost',
-        }
-        localStorage.setItem('auth_token', data.token)
-        localStorage.setItem('auth_user', JSON.stringify(userInfo))
-        flushSync(() => {
-          setToken(data.token)
-          setUser(userInfo)
-        })
-
-        // Check and redirect to returnUrl if exists
-        const returnUrl = sessionStorage.getItem('returnUrl')
-        if (returnUrl) {
-          sessionStorage.removeItem('returnUrl')
-          window.history.pushState({}, '', returnUrl)
-          window.dispatchEvent(new PopStateEvent('popstate'))
-        } else {
-          // Redirect to dashboard
-          window.history.pushState({}, '', '/dashboard')
-          window.dispatchEvent(new PopStateEvent('popstate'))
-        }
-        return { success: true }
-      } else {
-        return { success: false, message: data.error || 'Login failed' }
-      }
-    } catch (e) {
-      return { success: false, message: 'Login failed, please try again' }
+    void password
+    return {
+      success: false,
+      message:
+        'Admin mode was removed. Please sign in with your email and password.',
     }
   }
 
@@ -244,13 +213,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         message: result.message || 'Registration failed',
       }
     } catch (error) {
-      console.error('Auth register error:', error);
+      console.error('Auth register error:', error)
       // Re-throw if it's a critical error, or return structured error
       // Since httpClient throws on 500, we should return a structured error response
       // to let the UI display it gracefully without crashing.
       return {
         success: false,
-        message: error instanceof Error ? error.message : 'Detailed server error'
+        message:
+          error instanceof Error ? error.message : 'Detailed server error',
       }
     }
   }
@@ -276,7 +246,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         return { success: false, message: data.error }
       }
     } catch (error) {
-      return { success: false, message: 'Password reset failed, please try again' }
+      return {
+        success: false,
+        message: 'Password reset failed, please try again',
+      }
     }
   }
 

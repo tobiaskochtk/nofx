@@ -1,3 +1,5 @@
+import type { Language } from '../i18n/translations'
+
 // Strategy Studio Types
 export interface Strategy {
   id: string
@@ -47,9 +49,9 @@ export interface SignalProviderConfig {
 export interface StrategyConfig {
   // Strategy type: "ai_trading" (default) or "grid_trading"
   strategy_type?: 'ai_trading' | 'grid_trading'
-  // Language setting: "zh" for Chinese, "en" for English
+  // Language setting for prompt generation and locale-aware defaults
   // Determines the language used for data formatting and prompt generation
-  language?: 'zh' | 'en'
+  language?: Language
   coin_source: CoinSourceConfig
   indicators: IndicatorConfig
   signal_provider?: SignalProviderConfig

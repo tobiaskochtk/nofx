@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, memo } from 'react'
 import { useLanguage } from '../../contexts/LanguageContext'
 import { t } from '../../i18n/translations'
+import { toTradingViewLocale } from '../../i18n/locale'
 import { ChevronDown, TrendingUp, X } from 'lucide-react'
 
 // 支持的交易所列表 (合约格式)
@@ -128,7 +129,7 @@ function TradingViewChartComponent({
       timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || 'Asia/Shanghai',
       theme: 'dark',
       style: '1',
-      locale: language === 'zh' ? 'zh_CN' : 'en',
+      locale: toTradingViewLocale(language),
       enable_publishing: false,
       backgroundColor: 'rgba(11, 14, 17, 1)',
       gridColor: 'rgba(43, 49, 57, 0.5)',

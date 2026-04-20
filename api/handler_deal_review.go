@@ -3,6 +3,7 @@ package api
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"math"
@@ -18,6 +19,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"gorm.io/gorm"
 )
 
 type dealReviewListResponse struct {
@@ -38,6 +40,13 @@ type dealReviewLearnedPatternListResponse struct {
 	Summary     *store.DealReviewLearnedPatternReportingSummary `json:"summary,omitempty"`
 	Refreshed   bool                                            `json:"refreshed"`
 	GeneratedAt time.Time                                       `json:"generated_at"`
+}
+
+type dealReviewLearnedPatternManualControlRequest struct {
+	PatternID string `json:"pattern_id"`
+	StableKey string `json:"stable_key"`
+	Action    string `json:"action"`
+	Note      string `json:"note"`
 }
 
 type dealReviewSymbolBehaviorLiveGuardStatusResponse struct {
@@ -457,6 +466,15 @@ func (s *Server) handleTraderDealReviewCaseAIAssist(c *gin.Context) {
 	}
 
 	aiClient := newClientFromModelConfig(modelCfg, modelName)
+	mcp.SetCallerContext(aiClient, mcp.CallerContext{
+		CallerType: "deal_review",
+		CallerID:   caseID,
+		CallerName: "deal_review_case_classifier",
+		UserID:     userID,
+		TraderID:   traderID,
+		TraderName: traderCfg.Name,
+		Component:  "deal_review.case_classifier",
+	})
 	response, err := aiClient.CallWithMessages(systemPrompt, userPrompt)
 	if err != nil {
 		SafeInternalError(c, "AI review assist failed", err)
@@ -689,6 +707,15 @@ func (s *Server) handleTraderDealReviewAIScan(c *gin.Context) {
 	}
 
 	aiClient := newClientFromModelConfig(modelCfg, modelName)
+	mcp.SetCallerContext(aiClient, mcp.CallerContext{
+		CallerType: "deal_review",
+		CallerID:   traderID,
+		CallerName: "deal_review_ai_scan",
+		UserID:     userID,
+		TraderID:   traderID,
+		TraderName: traderCfg.Name,
+		Component:  "deal_review.ai_scan",
+	})
 	response, err := aiClient.CallWithMessages(systemPrompt, userPrompt)
 	if err != nil {
 		SafeInternalError(c, "AI scan failed", err)
@@ -1317,6 +1344,31 @@ func (s *Server) handleTraderDealReviewLearnedPatterns(c *gin.Context) {
 			limit = parsed
 		}
 	}
+	minConfidence := 0.0
+	if raw := strings.TrimSpace(c.Query("min_confidence_pct")); raw != "" {
+		if parsed, err := strconv.ParseFloat(raw, 64); err == nil {
+			minConfidence = parsed / 100.0
+		}
+	}
+	minDrift := 0.0
+	if raw := strings.TrimSpace(c.Query("min_drift_pct")); raw != "" {
+		if parsed, err := strconv.ParseFloat(raw, 64); err == nil {
+			minDrift = parsed / 100.0
+		}
+	}
+	minSampleCount := 0
+	if raw := strings.TrimSpace(c.Query("min_sample_count")); raw != "" {
+		if parsed, err := strconv.Atoi(raw); err == nil && parsed > 0 {
+			minSampleCount = parsed
+		}
+	}
+	directLiveActionCandidate := false
+	if raw := strings.TrimSpace(c.Query("direct_live_action_candidate")); raw != "" {
+		switch strings.ToLower(raw) {
+		case "1", "true", "yes", "y", "on":
+			directLiveActionCandidate = true
+		}
+	}
 
 	refreshResult, err := s.store.DealReview().RefreshLearnedPatternsIfStale(userID, traderID)
 	if err != nil {
@@ -1325,14 +1377,22 @@ func (s *Server) handleTraderDealReviewLearnedPatterns(c *gin.Context) {
 	}
 
 	items, err := s.store.DealReview().ListLearnedPatterns(userID, traderID, store.DealReviewLearnedPatternFilter{
-		PatternID:       c.Query("pattern_id"),
-		Symbol:          c.Query("symbol"),
-		Side:            c.Query("side"),
-		ScopeType:       c.Query("scope_type"),
-		PatternClass:    c.Query("pattern_class"),
-		ValidationLabel: c.Query("validation_label"),
-		Feature:         c.Query("feature"),
-		Limit:           limit,
+		PatternID:                 c.Query("pattern_id"),
+		StableKey:                 c.Query("stable_key"),
+		Symbol:                    c.Query("symbol"),
+		Side:                      c.Query("side"),
+		ScopeType:                 c.Query("scope_type"),
+		PatternClass:              c.Query("pattern_class"),
+		ValidationLabel:           c.Query("validation_label"),
+		Feature:                   c.Query("feature"),
+		Regime:                    c.Query("regime"),
+		LiveActionKind:            c.Query("live_action_kind"),
+		InterventionState:         c.Query("intervention_state"),
+		DirectLiveActionCandidate: directLiveActionCandidate,
+		MinConfidence:             minConfidence,
+		MinDrift:                  minDrift,
+		MinSampleCount:            minSampleCount,
+		Limit:                     limit,
 	})
 	if err != nil {
 		SafeInternalError(c, "Failed to fetch learned patterns", err)
@@ -1349,6 +1409,40 @@ func (s *Server) handleTraderDealReviewLearnedPatterns(c *gin.Context) {
 		Refreshed:   refreshResult != nil && refreshResult.Rebuilt,
 		GeneratedAt: generatedAt,
 	})
+}
+
+func (s *Server) handleTraderDealReviewLearnedPatternManualControl(c *gin.Context) {
+	userID := c.GetString("user_id")
+	traderID := c.Param("id")
+	if _, err := s.store.Trader().Get(userID, traderID); err != nil {
+		SafeNotFound(c, "Trader")
+		return
+	}
+
+	var req dealReviewLearnedPatternManualControlRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		SafeBadRequest(c, "Invalid learned-pattern control payload")
+		return
+	}
+
+	control, err := s.store.DealReview().ApplyLearnedPatternManualControl(
+		userID,
+		traderID,
+		req.PatternID,
+		req.StableKey,
+		req.Action,
+		req.Note,
+	)
+	if err != nil {
+		switch {
+		case errors.Is(err, gorm.ErrRecordNotFound):
+			SafeNotFound(c, "Learned pattern")
+		default:
+			SafeBadRequest(c, err.Error())
+		}
+		return
+	}
+	c.JSON(http.StatusOK, control)
 }
 
 func (s *Server) handleTraderDealReviewSymbolBehaviorLiveGuardEvents(c *gin.Context) {
@@ -1561,10 +1655,17 @@ func (s *Server) handleModelAvailableModels(c *gin.Context) {
 
 	modelCfg, err := s.store.AIModel().Get(userID, modelID)
 	if err != nil {
-		SafeNotFound(c, "AI model config")
-		return
+		if !errors.Is(err, gorm.ErrRecordNotFound) {
+			SafeInternalError(c, "Failed to load AI model config", err)
+			return
+		}
+		modelCfg = buildAmbientModelConfig(modelID)
+		if modelCfg == nil {
+			SafeNotFound(c, "AI model config")
+			return
+		}
 	}
-	if strings.TrimSpace(string(modelCfg.APIKey)) == "" {
+	if !modelHasUsableCredentials(modelCfg) {
 		SafeBadRequest(c, "Selected AI model config has no API key")
 		return
 	}
@@ -3032,7 +3133,7 @@ func (s *Server) resolveAIScanModel(userID, requestedModelID, overrideModelName 
 		if !modelCfg.Enabled {
 			return nil, "", fmt.Errorf("AI model %s is disabled", modelCfg.Name)
 		}
-		if strings.TrimSpace(string(modelCfg.APIKey)) == "" {
+		if !modelHasUsableCredentials(modelCfg) {
 			return nil, "", fmt.Errorf("AI model %s has no API key configured", modelCfg.Name)
 		}
 		modelName := strings.TrimSpace(overrideModelName)
@@ -3051,7 +3152,7 @@ func (s *Server) resolveAIScanModel(userID, requestedModelID, overrideModelName 
 	}
 	var fallback *store.AIModel
 	for _, model := range models {
-		if !model.Enabled || strings.TrimSpace(string(model.APIKey)) == "" {
+		if !model.Enabled || !modelHasUsableCredentials(model) {
 			continue
 		}
 		if model.Provider == "openai" {
@@ -3069,7 +3170,7 @@ func (s *Server) resolveAIScanModel(userID, requestedModelID, overrideModelName 
 		}
 	}
 	if fallback == nil {
-		return nil, "", fmt.Errorf("no enabled AI model with credentials found")
+		return nil, "", fmt.Errorf("no enabled AI model with usable authentication found")
 	}
 	modelName := strings.TrimSpace(overrideModelName)
 	if modelName == "" {
@@ -3429,6 +3530,8 @@ func defaultModelForProvider(provider string) string {
 	switch provider {
 	case "openai":
 		return "gpt-5.1"
+	case "codex":
+		return "gpt-5.4"
 	case "claude":
 		return "claude-opus-4-6"
 	case "gemini":
@@ -3448,27 +3551,53 @@ func defaultModelForProvider(provider string) string {
 	}
 }
 
+func providerUsesRemoteModelCatalog(provider string) bool {
+	switch strings.TrimSpace(provider) {
+	case "openai":
+		return true
+	default:
+		return false
+	}
+}
+
 func (s *Server) listAvailableModelsForConfig(modelCfg *store.AIModel) ([]remoteModelInfo, error) {
 	provider := strings.TrimSpace(modelCfg.Provider)
-	if provider != "openai" {
-		models := []remoteModelInfo{}
+	if providerUsesLocalModelCatalog(provider) {
+		cachedModels, err := mcp.LoadCodexVisibleModels()
+		if err != nil {
+			return buildStaticModelCatalog(provider, modelCfg.CustomModelName, defaultModelForProvider(provider)), nil
+		}
+
+		items := make([]remoteModelInfo, 0, len(cachedModels)+2)
 		seen := map[string]bool{}
-		for _, candidate := range []string{
-			strings.TrimSpace(modelCfg.CustomModelName),
-			defaultModelForProvider(provider),
-		} {
-			if candidate == "" || seen[candidate] {
-				continue
+		appendItem := func(id, label string) {
+			id = strings.TrimSpace(id)
+			label = strings.TrimSpace(label)
+			if id == "" || seen[id] {
+				return
 			}
-			seen[candidate] = true
-			models = append(models, remoteModelInfo{
-				ID:        candidate,
-				Label:     candidate,
+			if label == "" {
+				label = id
+			}
+			seen[id] = true
+			items = append(items, remoteModelInfo{
+				ID:        id,
+				Label:     label,
 				Provider:  provider,
 				Available: true,
 			})
 		}
-		return models, nil
+
+		for _, item := range cachedModels {
+			appendItem(item.ID, item.Label)
+		}
+		appendItem(modelCfg.CustomModelName, modelCfg.CustomModelName)
+		appendItem(defaultModelForProvider(provider), defaultModelForProvider(provider))
+		return items, nil
+	}
+
+	if !providerUsesRemoteModelCatalog(provider) {
+		return buildStaticModelCatalog(provider, modelCfg.CustomModelName, defaultModelForProvider(provider)), nil
 	}
 
 	baseURL := resolveModelsURL(provider, modelCfg.CustomAPIURL)
@@ -3503,7 +3632,7 @@ func (s *Server) listAvailableModelsForConfig(modelCfg *store.AIModel) ([]remote
 	items := make([]remoteModelInfo, 0, len(parsed.Data))
 	for _, item := range parsed.Data {
 		id := strings.TrimSpace(item.ID)
-		if !isLikelyChatModel(id) {
+		if !isLikelyRemoteModel(provider, id) {
 			continue
 		}
 		items = append(items, remoteModelInfo{
@@ -3518,7 +3647,7 @@ func (s *Server) listAvailableModelsForConfig(modelCfg *store.AIModel) ([]remote
 }
 
 func resolveModelsURL(provider, customURL string) string {
-	if provider != "openai" {
+	if !providerUsesRemoteModelCatalog(provider) {
 		return ""
 	}
 	base := strings.TrimSpace(customURL)
@@ -3537,7 +3666,7 @@ func resolveModelsURL(provider, customURL string) string {
 	return base + "/models"
 }
 
-func isLikelyChatModel(id string) bool {
+func isLikelyRemoteModel(provider, id string) bool {
 	lower := strings.ToLower(strings.TrimSpace(id))
 	if lower == "" {
 		return false
@@ -3553,6 +3682,25 @@ func isLikelyChatModel(id string) bool {
 		}
 	}
 	return false
+}
+
+func buildStaticModelCatalog(provider string, candidates ...string) []remoteModelInfo {
+	items := []remoteModelInfo{}
+	seen := map[string]bool{}
+	for _, candidate := range candidates {
+		candidate = strings.TrimSpace(candidate)
+		if candidate == "" || seen[candidate] {
+			continue
+		}
+		seen[candidate] = true
+		items = append(items, remoteModelInfo{
+			ID:        candidate,
+			Label:     candidate,
+			Provider:  provider,
+			Available: true,
+		})
+	}
+	return items
 }
 
 func buildDealReviewAnalysisPayload(traderCfg *store.Trader, strategyRecord *store.Strategy, strategyCfg *store.StrategyConfig, filter store.DealReviewListFilter, cases []store.DealReviewCaseDetail, summary *store.DealReviewDatasetSummary) (map[string]any, error) {

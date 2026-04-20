@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"nofx/logger"
+	"nofx/mcp"
 	"nofx/store"
 
 	"github.com/google/uuid"
@@ -67,19 +68,62 @@ type autonomousOptimizerRunMetadata struct {
 }
 
 type autonomousOptimizerTrailingStopTelemetry struct {
-	TrailingExitCount               int                                              `json:"trailing_exit_count"`
-	TrailingProfitExitCount         int                                              `json:"trailing_profit_exit_count"`
-	TrailingLossExitCount           int                                              `json:"trailing_loss_exit_count"`
-	InitialStopLossCount            int                                              `json:"initial_stop_loss_count"`
-	TrailingExitAvgPnLPct           float64                                          `json:"trailing_exit_avg_pnl_pct"`
-	InitialStopLossAvgPnLPct        float64                                          `json:"initial_stop_loss_avg_pnl_pct"`
-	AvgMinutesToFirstUpdate         float64                                          `json:"avg_minutes_to_first_update"`
-	AvgMinutesFromFirstUpdateToExit float64                                          `json:"avg_minutes_from_first_update_to_exit"`
-	EarlyTighteningCount            int                                              `json:"early_tightening_count"`
-	EarlyTighteningLossCount        int                                              `json:"early_tightening_loss_count"`
-	FirstUpdateAuditCount           int                                              `json:"first_update_audit_count"`
-	BreakevenProtectedCount         int                                              `json:"breakeven_protected_count"`
-	SampleUpdates                   []autonomousOptimizerTrailingStopUpdateAuditItem `json:"sample_updates,omitempty"`
+	TrailingExitCount                int                                                       `json:"trailing_exit_count"`
+	TrailingProfitExitCount          int                                                       `json:"trailing_profit_exit_count"`
+	TrailingLossExitCount            int                                                       `json:"trailing_loss_exit_count"`
+	InitialStopLossCount             int                                                       `json:"initial_stop_loss_count"`
+	TrailingExitAvgPnLPct            float64                                                   `json:"trailing_exit_avg_pnl_pct"`
+	InitialStopLossAvgPnLPct         float64                                                   `json:"initial_stop_loss_avg_pnl_pct"`
+	AvgMinutesToFirstUpdate          float64                                                   `json:"avg_minutes_to_first_update"`
+	AvgMinutesFromFirstUpdateToExit  float64                                                   `json:"avg_minutes_from_first_update_to_exit"`
+	EarlyTighteningCount             int                                                       `json:"early_tightening_count"`
+	EarlyTighteningLossCount         int                                                       `json:"early_tightening_loss_count"`
+	EarlyTighteningBelowEntryCount   int                                                       `json:"early_tightening_below_entry_count"`
+	EarlyTighteningProtectedCount    int                                                       `json:"early_tightening_protected_count"`
+	OneCycleExitCount                int                                                       `json:"one_cycle_exit_count"`
+	EarlyTighteningOneCycleExitCount int                                                       `json:"early_tightening_one_cycle_exit_count"`
+	OneCycleExitThresholdSec         int                                                       `json:"one_cycle_exit_threshold_sec"`
+	FirstUpdateAuditCount            int                                                       `json:"first_update_audit_count"`
+	BreakevenProtectedCount          int                                                       `json:"breakeven_protected_count"`
+	TierBreakdown                    []autonomousOptimizerTrailingStopTierBreakdown            `json:"tier_breakdown,omitempty"`
+	ProfitBandBreakdown              []autonomousOptimizerTrailingStopProfitBandBreakdown      `json:"profit_band_breakdown,omitempty"`
+	EntryProtectionBreakdown         []autonomousOptimizerTrailingStopEntryProtectionBreakdown `json:"entry_protection_breakdown,omitempty"`
+	SampleUpdates                    []autonomousOptimizerTrailingStopUpdateAuditItem          `json:"sample_updates,omitempty"`
+}
+
+type autonomousOptimizerTrailingStopTierBreakdown struct {
+	TierTriggerProfitPct         float64 `json:"tier_trigger_profit_pct,omitempty"`
+	TrailingMode                 string  `json:"trailing_mode,omitempty"`
+	AuditCount                   int     `json:"audit_count"`
+	EarlyTighteningCount         int     `json:"early_tightening_count"`
+	EarlyTighteningLossCount     int     `json:"early_tightening_loss_count"`
+	LossExitCount                int     `json:"loss_exit_count"`
+	ProfitExitCount              int     `json:"profit_exit_count"`
+	BelowEntryCount              int     `json:"below_entry_count"`
+	BreakevenOrBetterCount       int     `json:"breakeven_or_better_count"`
+	OneCycleExitCount            int     `json:"one_cycle_exit_count"`
+	AvgPreUpdateUnrealizedPnLPct float64 `json:"avg_pre_update_unrealized_pnl_pct,omitempty"`
+}
+
+type autonomousOptimizerTrailingStopProfitBandBreakdown struct {
+	ProfitBand               string  `json:"profit_band"`
+	AuditCount               int     `json:"audit_count"`
+	EarlyTighteningCount     int     `json:"early_tightening_count"`
+	EarlyTighteningLossCount int     `json:"early_tightening_loss_count"`
+	LossExitCount            int     `json:"loss_exit_count"`
+	ProfitExitCount          int     `json:"profit_exit_count"`
+	OneCycleExitCount        int     `json:"one_cycle_exit_count"`
+	AvgMinutesToFirstUpdate  float64 `json:"avg_minutes_to_first_update,omitempty"`
+}
+
+type autonomousOptimizerTrailingStopEntryProtectionBreakdown struct {
+	EntryProtectionState     string `json:"entry_protection_state"`
+	AuditCount               int    `json:"audit_count"`
+	EarlyTighteningCount     int    `json:"early_tightening_count"`
+	EarlyTighteningLossCount int    `json:"early_tightening_loss_count"`
+	LossExitCount            int    `json:"loss_exit_count"`
+	ProfitExitCount          int    `json:"profit_exit_count"`
+	OneCycleExitCount        int    `json:"one_cycle_exit_count"`
 }
 
 type autonomousOptimizerTrailingStopUpdateAuditItem struct {
@@ -87,14 +131,18 @@ type autonomousOptimizerTrailingStopUpdateAuditItem struct {
 	Symbol                    string  `json:"symbol,omitempty"`
 	Side                      string  `json:"side,omitempty"`
 	CloseReason               string  `json:"close_reason,omitempty"`
+	UpdateSource              string  `json:"update_source,omitempty"`
 	TrailingMode              string  `json:"trailing_mode,omitempty"`
 	UpdateTimeMs              int64   `json:"update_time_ms,omitempty"`
 	MinutesToFirstUpdate      float64 `json:"minutes_to_first_update,omitempty"`
 	MinutesFromUpdateToExit   float64 `json:"minutes_from_update_to_exit,omitempty"`
 	PreUpdateUnrealizedPnL    float64 `json:"pre_update_unrealized_pnl,omitempty"`
 	PreUpdateUnrealizedPnLPct float64 `json:"pre_update_unrealized_pnl_pct,omitempty"`
+	PreUpdateProfitBand       string  `json:"pre_update_profit_band,omitempty"`
 	StopProfitPct             float64 `json:"stop_profit_pct,omitempty"`
 	ProtectsBreakeven         bool    `json:"protects_breakeven,omitempty"`
+	EntryProtectionState      string  `json:"entry_protection_state,omitempty"`
+	ExitWithinOneCycle        bool    `json:"exit_within_one_cycle,omitempty"`
 	RealizedPnLPct            float64 `json:"realized_pnl_pct,omitempty"`
 	PreviousStopPrice         float64 `json:"previous_stop_price,omitempty"`
 	NewStopPrice              float64 `json:"new_stop_price,omitempty"`
@@ -559,6 +607,15 @@ func (s *Server) runAutonomousOptimizerCycle(cfg *store.AutonomousOptimizerConfi
 		return nil, err
 	}
 	proposerClient := newClientFromModelConfig(proposerCfg, proposerModelName)
+	mcp.SetCallerContext(proposerClient, mcp.CallerContext{
+		CallerType: "autonomous_optimizer",
+		CallerID:   run.ID,
+		CallerName: "autonomous_optimizer_proposer",
+		UserID:     cfg.UserID,
+		TraderID:   cfg.TraderID,
+		TraderName: traderCfg.Name,
+		Component:  "autonomous_optimizer.proposer",
+	})
 	proposalConversation, err := s.store.AutonomousOptimizer().GetOrCreateConversation(
 		cfg.UserID,
 		cfg.TraderID,
@@ -638,6 +695,15 @@ func (s *Server) runAutonomousOptimizerCycle(cfg *store.AutonomousOptimizerConfi
 		return nil, err
 	}
 	criticClient := newClientFromModelConfig(criticCfg, criticModelName)
+	mcp.SetCallerContext(criticClient, mcp.CallerContext{
+		CallerType: "autonomous_optimizer",
+		CallerID:   run.ID,
+		CallerName: "autonomous_optimizer_critic",
+		UserID:     cfg.UserID,
+		TraderID:   cfg.TraderID,
+		TraderName: traderCfg.Name,
+		Component:  "autonomous_optimizer.critic",
+	})
 	criticConversation, err := s.store.AutonomousOptimizer().GetOrCreateConversation(
 		cfg.UserID,
 		cfg.TraderID,

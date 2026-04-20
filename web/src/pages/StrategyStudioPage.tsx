@@ -151,6 +151,8 @@ function normalizeStrategy(strategy: Strategy): Strategy {
 export function StrategyStudioPage() {
   const { token } = useAuth()
   const { language } = useLanguage()
+  const strategyLanguage: StrategyConfig['language'] =
+    language === 'zh' ? 'zh' : 'en'
 
   const [strategies, setStrategies] = useState<Strategy[]>([])
   const [selectedStrategy, setSelectedStrategy] = useState<Strategy | null>(
@@ -310,7 +312,7 @@ export function StrategyStudioPage() {
       try {
         // Fetch default config for the new language
         const response = await fetch(
-          `${API_BASE}/api/strategies/default-config?lang=${language}`,
+          `${API_BASE}/api/strategies/default-config?lang=${strategyLanguage}`,
           { headers: { Authorization: `Bearer ${token}` } }
         )
         if (!response.ok) return
@@ -321,7 +323,7 @@ export function StrategyStudioPage() {
           if (!prev) return prev
           return {
             ...prev,
-            language: language as 'zh' | 'en',
+            language: strategyLanguage,
             prompt_sections: defaultConfig.prompt_sections,
           }
         })
@@ -332,14 +334,14 @@ export function StrategyStudioPage() {
     }
 
     updatePromptSectionsForLanguage()
-  }, [language, token]) // Only trigger when language changes
+  }, [language, strategyLanguage, token]) // Only trigger when language changes
 
   // Create new strategy
   const handleCreateStrategy = async () => {
     if (!token) return
     try {
       const configResponse = await fetch(
-        `${API_BASE}/api/strategies/default-config?lang=${language}`,
+        `${API_BASE}/api/strategies/default-config?lang=${strategyLanguage}`,
         { headers: { Authorization: `Bearer ${token}` } }
       )
       if (!configResponse.ok) throw new Error('Failed to fetch default config')
@@ -557,7 +559,7 @@ export function StrategyStudioPage() {
       // Always sync the config language with the current interface language
       const configWithLanguage = {
         ...normalizeStrategyConfig(editingConfig),
-        language: language as 'zh' | 'en',
+        language: strategyLanguage,
       }
       const response = await fetch(
         `${API_BASE}/api/strategies/${selectedStrategy.id}`,

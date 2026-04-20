@@ -1,12 +1,6 @@
 import { Globe } from 'lucide-react'
 import { useLanguage } from '../../contexts/LanguageContext'
-import type { Language } from '../../i18n/translations'
-
-const languages: { code: Language; label: string }[] = [
-  { code: 'zh', label: '中文' },
-  { code: 'en', label: 'EN' },
-  { code: 'id', label: 'ID' },
-]
+import { LANGUAGE_OPTIONS } from '../../i18n/locale'
 
 export function LanguageSwitcher() {
   const { language, setLanguage } = useLanguage()
@@ -14,7 +8,7 @@ export function LanguageSwitcher() {
   return (
     <div className="absolute top-4 right-4 z-50 flex items-center gap-1 rounded-lg p-1 border border-white/10 bg-white/5 backdrop-blur-sm">
       <Globe size={14} className="text-zinc-500 ml-1.5 mr-0.5" />
-      {languages.map(({ code, label }) => (
+      {LANGUAGE_OPTIONS.map(({ code, shortLabel }) => (
         <button
           key={code}
           type="button"
@@ -25,7 +19,7 @@ export function LanguageSwitcher() {
               : 'text-zinc-500 hover:text-zinc-300 bg-transparent'
           }`}
         >
-          {label}
+          {shortLabel}
         </button>
       ))}
     </div>

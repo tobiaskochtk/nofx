@@ -66,6 +66,43 @@ func TestApplyStrategyPatchMergesNestedMaps(t *testing.T) {
 	}
 }
 
+func TestDefaultModelForProvider_Codex(t *testing.T) {
+	if got := defaultModelForProvider("codex"); got != "gpt-5.4" {
+		t.Fatalf("defaultModelForProvider(codex) = %q, want gpt-5.4", got)
+	}
+}
+
+func TestResolveModelsURLOpenAI(t *testing.T) {
+	if got := resolveModelsURL("openai", ""); got != "https://api.openai.com/v1/models" {
+		t.Fatalf("resolveModelsURL(openai) = %q, want https://api.openai.com/v1/models", got)
+	}
+}
+
+func TestIsLikelyRemoteModelForProvider(t *testing.T) {
+	tests := []struct {
+		name     string
+		provider string
+		modelID  string
+		want     bool
+	}{
+		{name: "openai standard gpt", provider: "openai", modelID: "gpt-5.1", want: true},
+		{name: "openai codex alias", provider: "openai", modelID: "gpt-5-codex", want: true},
+		{name: "openai blocks embeddings", provider: "openai", modelID: "text-embedding-3-small", want: false},
+		{name: "codex accepts gpt frontier", provider: "codex", modelID: "gpt-5.4", want: true},
+		{name: "codex accepts gpt codex", provider: "codex", modelID: "gpt-5.2-codex", want: true},
+		{name: "codex accepts codex mini latest", provider: "codex", modelID: "codex-mini-latest", want: true},
+		{name: "codex blocks embeddings", provider: "codex", modelID: "text-embedding-3-small", want: false},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := isLikelyRemoteModel(tc.provider, tc.modelID); got != tc.want {
+				t.Fatalf("isLikelyRemoteModel(%q, %q) = %v, want %v", tc.provider, tc.modelID, got, tc.want)
+			}
+		})
+	}
+}
+
 func TestBuildDealReviewAnalysisPayloadIncludesCaseContexts(t *testing.T) {
 	traderCfg := &store.Trader{ID: "trader-1", Name: "Prompt Trader"}
 	strategyRecord := &store.Strategy{ID: "strategy-1", Name: "Prompt Strategy", Config: `{"risk":{"max_positions":3}}`}

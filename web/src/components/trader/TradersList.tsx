@@ -40,6 +40,12 @@ interface TradersListProps {
   onCopyAddress: (id: string, address: string) => void
 }
 
+function pickText(language: Language, copy: { zh: string; de: string; en: string }) {
+  if (language === 'zh') return copy.zh
+  if (language === 'de') return copy.de
+  return copy.en
+}
+
 export function TradersList({
   traders,
   isLoading,
@@ -241,7 +247,7 @@ function TraderRow({
             {getModelDisplayName(
               trader.ai_model.split('_').pop() || trader.ai_model
             )}{' '}
-            Model • {getExchangeDisplayName(trader.exchange_id, allExchanges)}
+            {pickText(language, { zh: '模型', de: 'Modell', en: 'Model' })} • {getExchangeDisplayName(trader.exchange_id, allExchanges)}
           </div>
         </div>
       </div>
@@ -266,7 +272,9 @@ function TraderRow({
                 onToggleTraderAddress(trader.trader_id)
               }}
               className="p-0.5 rounded hover:bg-gray-700 transition-colors"
-              title={isVisible ? (language === 'zh' ? '隐藏' : 'Hide') : (language === 'zh' ? '显示' : 'Show')}
+              title={isVisible
+                ? pickText(language, { zh: '隐藏', de: 'Ausblenden', en: 'Hide' })
+                : pickText(language, { zh: '显示', de: 'Anzeigen', en: 'Show' })}
             >
               {isVisible ? (
                 <EyeOff className="w-3 h-3" style={{ color: '#848E9C' }} />
@@ -281,7 +289,7 @@ function TraderRow({
                 onCopyAddress(trader.trader_id, walletAddr)
               }}
               className="p-0.5 rounded hover:bg-gray-700 transition-colors"
-              title={language === 'zh' ? '复制' : 'Copy'}
+              title={pickText(language, { zh: '复制', de: 'Kopieren', en: 'Copy' })}
             >
               {isCopied ? (
                 <Check className="w-3 h-3" style={{ color: '#0ECB81' }} />
@@ -391,7 +399,9 @@ function TraderRow({
                   color: '#848E9C',
                 }
             }
-            title={trader.show_in_competition !== false ? '在竞技场显示' : '在竞技场隐藏'}
+            title={trader.show_in_competition !== false
+              ? pickText(language, { zh: '在竞技场显示', de: 'Im Wettbewerb anzeigen', en: 'Show in competition' })
+              : pickText(language, { zh: '在竞技场隐藏', de: 'Im Wettbewerb ausblenden', en: 'Hide in competition' })}
           >
             {trader.show_in_competition !== false ? (
               <Eye className="w-3 h-3 md:w-4 md:h-4" />

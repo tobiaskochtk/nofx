@@ -418,6 +418,7 @@ func (at *AutoTrader) RunGridCycle() error {
 	}
 
 	// Get AI decisions
+	at.setAICallerContext("grid_trader", at.cycleNumber+1)
 	decision, err := kernel.GetGridDecisions(gridCtx, at.mcpClient, gridConfig, lang)
 	if err != nil {
 		return fmt.Errorf("failed to get grid decisions: %w", err)

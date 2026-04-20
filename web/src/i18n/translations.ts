@@ -1,6 +1,8 @@
-export type Language = 'en' | 'zh' | 'id'
+import { buildGermanTranslations } from './de-translations'
 
-export const translations = {
+export type Language = 'en' | 'zh' | 'de' | 'id'
+
+const baseTranslations = {
   en: {
     // Header
     appTitle: 'NOFX',
@@ -3769,6 +3771,11 @@ export const translations = {
     },
 
   },
+}
+
+export const translations = {
+  ...baseTranslations,
+  de: buildGermanTranslations(baseTranslations.en),
 }
 
 export function t(

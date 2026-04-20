@@ -7,33 +7,64 @@ interface HowItWorksSectionProps {
 }
 
 export default function HowItWorksSection({ language }: HowItWorksSectionProps) {
+  const pickText = (values: Record<Language, string>) => values[language]
+
   const steps = [
     {
       icon: Download,
       number: '01',
-      title: language === 'zh' ? '一键部署' : 'One-Click Deploy',
-      desc: language === 'zh'
-        ? '在你的服务器上运行一条命令即可完成部署'
-        : 'Run a single command on your server to deploy',
+      title: pickText({
+        zh: '一键部署',
+        en: 'One-Click Deploy',
+        de: 'One-Click-Deployment',
+        id: 'One-Click Deploy',
+      }),
+      desc: pickText({
+        zh: '在你的服务器上运行一条命令即可完成部署',
+        en: 'Run a single command on your server to deploy',
+        de: 'Fuehre einen einzigen Befehl auf deinem Server aus, um zu deployen',
+        id: 'Run a single command on your server to deploy',
+      }),
       code: 'curl -fsSL https://raw.githubusercontent.com/NoFxAiOS/nofx/main/install.sh | bash',
     },
     {
       icon: Rocket,
       number: '02',
-      title: language === 'zh' ? '访问面板' : 'Access Dashboard',
-      desc: language === 'zh'
-        ? '通过浏览器访问你的服务器'
-        : 'Access your server via browser',
+      title: pickText({
+        zh: '访问面板',
+        en: 'Access Dashboard',
+        de: 'Dashboard aufrufen',
+        id: 'Access Dashboard',
+      }),
+      desc: pickText({
+        zh: '通过浏览器访问你的服务器',
+        en: 'Access your server via browser',
+        de: 'Greife ueber den Browser auf deinen Server zu',
+        id: 'Access your server via browser',
+      }),
       code: 'http://YOUR_SERVER_IP:3000',
     },
     {
       icon: TrendingUp,
       number: '03',
-      title: language === 'zh' ? '开始交易' : 'Start Trading',
-      desc: language === 'zh'
-        ? '创建交易员，让 AI 开始工作'
-        : 'Create trader, let AI do the work',
-      code: language === 'zh' ? '配置模型 → 配置交易所 → 创建交易员' : 'Configure Model → Exchange → Create Trader',
+      title: pickText({
+        zh: '开始交易',
+        en: 'Start Trading',
+        de: 'Trading starten',
+        id: 'Start Trading',
+      }),
+      desc: pickText({
+        zh: '创建交易员，让 AI 开始工作',
+        en: 'Create trader, let AI do the work',
+        de: 'Einen Trader anlegen und die AI arbeiten lassen',
+        id: 'Create trader, let AI do the work',
+      }),
+      code: pickText({
+        zh: '配置模型 → 配置交易所 → 创建交易员',
+        en: 'Configure Model → Exchange → Create Trader',
+        de: 'Modell konfigurieren → Boerse konfigurieren → Trader erstellen',
+        id: 'Configure Model → Exchange → Create Trader',
+      }),
     },
   ]
 

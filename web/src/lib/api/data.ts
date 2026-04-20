@@ -22,6 +22,7 @@ import type {
   DealReviewFilterPresetDetail,
   DealReviewSymbolBehaviorPriorListResponse,
   DealReviewLearnedPatternListResponse,
+  DealReviewLearnedPatternManualControl,
   DealReviewLearnedPatternLiveGuardEventListResponse,
   DealReviewSymbolBehaviorLiveGuardEventListResponse,
   DealReviewStrategyVersionDetail,
@@ -130,7 +131,7 @@ export const dataApi = {
 
   async getPublicTraderConfig(traderId: string): Promise<any> {
     const result = await httpClient.get<any>(
-      `${API_BASE}/trader/${traderId}/config`
+      `${API_BASE}/traders/${traderId}/public-config`
     )
     if (!result.success) throw new Error('Failed to fetch public trader config')
     return result.data!
@@ -178,7 +179,9 @@ export const dataApi = {
       `${API_BASE}/traders/${traderId}/semantic-memory/status`
     )
     if (!result.success) {
-      throw new Error(result.message || 'Failed to fetch semantic memory status')
+      throw new Error(
+        result.message || 'Failed to fetch semantic memory status'
+      )
     }
     return result.data!
   },
@@ -186,11 +189,13 @@ export const dataApi = {
   async getTraderSemanticMemoryBenchmarks(
     traderId: string
   ): Promise<SemanticMemoryBenchmarkRun[]> {
-    const result = await httpClient.get<{ items: SemanticMemoryBenchmarkRun[] }>(
-      `${API_BASE}/traders/${traderId}/semantic-memory/benchmarks`
-    )
+    const result = await httpClient.get<{
+      items: SemanticMemoryBenchmarkRun[]
+    }>(`${API_BASE}/traders/${traderId}/semantic-memory/benchmarks`)
     if (!result.success) {
-      throw new Error(result.message || 'Failed to fetch semantic memory benchmarks')
+      throw new Error(
+        result.message || 'Failed to fetch semantic memory benchmarks'
+      )
     }
     return result.data?.items || []
   },
@@ -204,7 +209,9 @@ export const dataApi = {
       body
     )
     if (!result.success) {
-      throw new Error(result.message || 'Failed to run semantic memory benchmark')
+      throw new Error(
+        result.message || 'Failed to run semantic memory benchmark'
+      )
     }
     return result.data!
   },
@@ -226,11 +233,13 @@ export const dataApi = {
   async getTraderSemanticMemoryPresets(
     traderId: string
   ): Promise<SemanticMemorySearchPresetDetail[]> {
-    const result = await httpClient.get<{ items: SemanticMemorySearchPresetDetail[] }>(
-      `${API_BASE}/traders/${traderId}/semantic-memory/presets`
-    )
+    const result = await httpClient.get<{
+      items: SemanticMemorySearchPresetDetail[]
+    }>(`${API_BASE}/traders/${traderId}/semantic-memory/presets`)
     if (!result.success) {
-      throw new Error(result.message || 'Failed to fetch semantic memory presets')
+      throw new Error(
+        result.message || 'Failed to fetch semantic memory presets'
+      )
     }
     return result.data?.items || []
   },
@@ -239,10 +248,9 @@ export const dataApi = {
     traderId: string,
     body: Record<string, unknown>
   ): Promise<SemanticMemorySearchPresetDetail[]> {
-    const result = await httpClient.post<{ items: SemanticMemorySearchPresetDetail[] }>(
-      `${API_BASE}/traders/${traderId}/semantic-memory/presets`,
-      body
-    )
+    const result = await httpClient.post<{
+      items: SemanticMemorySearchPresetDetail[]
+    }>(`${API_BASE}/traders/${traderId}/semantic-memory/presets`, body)
     if (!result.success) {
       throw new Error(result.message || 'Failed to save semantic memory preset')
     }
@@ -253,11 +261,13 @@ export const dataApi = {
     traderId: string,
     presetId: string
   ): Promise<SemanticMemorySearchPresetDetail[]> {
-    const result = await httpClient.delete<{ items: SemanticMemorySearchPresetDetail[] }>(
-      `${API_BASE}/traders/${traderId}/semantic-memory/presets/${presetId}`
-    )
+    const result = await httpClient.delete<{
+      items: SemanticMemorySearchPresetDetail[]
+    }>(`${API_BASE}/traders/${traderId}/semantic-memory/presets/${presetId}`)
     if (!result.success) {
-      throw new Error(result.message || 'Failed to delete semantic memory preset')
+      throw new Error(
+        result.message || 'Failed to delete semantic memory preset'
+      )
     }
     return result.data?.items || []
   },
@@ -304,9 +314,9 @@ export const dataApi = {
   async getTraderAutonomousOptimizerModelOutcomes(
     traderId: string
   ): Promise<AutonomousOptimizerModelOutcome[]> {
-    const result = await httpClient.get<{ items: AutonomousOptimizerModelOutcome[] }>(
-      `${API_BASE}/traders/${traderId}/autonomous-optimizer/model-outcomes`
-    )
+    const result = await httpClient.get<{
+      items: AutonomousOptimizerModelOutcome[]
+    }>(`${API_BASE}/traders/${traderId}/autonomous-optimizer/model-outcomes`)
     if (!result.success) {
       throw new Error('Failed to fetch autonomous optimizer model outcomes')
     }
@@ -447,9 +457,9 @@ export const dataApi = {
   async getDealReviewFilterPresets(
     traderId: string
   ): Promise<DealReviewFilterPresetDetail[]> {
-    const result = await httpClient.get<{ items: DealReviewFilterPresetDetail[] }>(
-      `${API_BASE}/traders/${traderId}/deal-review/filter-presets`
-    )
+    const result = await httpClient.get<{
+      items: DealReviewFilterPresetDetail[]
+    }>(`${API_BASE}/traders/${traderId}/deal-review/filter-presets`)
     if (!result.success) {
       throw new Error('Failed to fetch deal review filter presets')
     }
@@ -460,10 +470,9 @@ export const dataApi = {
     traderId: string,
     body: Record<string, unknown>
   ): Promise<DealReviewFilterPresetDetail[]> {
-    const result = await httpClient.post<{ items: DealReviewFilterPresetDetail[] }>(
-      `${API_BASE}/traders/${traderId}/deal-review/filter-presets`,
-      body
-    )
+    const result = await httpClient.post<{
+      items: DealReviewFilterPresetDetail[]
+    }>(`${API_BASE}/traders/${traderId}/deal-review/filter-presets`, body)
     if (!result.success) {
       throw new Error('Failed to save deal review filter preset')
     }
@@ -513,8 +522,7 @@ export const dataApi = {
       `${API_BASE}/traders/${traderId}/deal-review/cases/${caseId}/classifier-feedback`,
       body
     )
-    if (!result.success)
-      throw new Error('Failed to apply classifier feedback')
+    if (!result.success) throw new Error('Failed to apply classifier feedback')
     return result.data!
   },
 
@@ -559,9 +567,10 @@ export const dataApi = {
         search.set(key, String(value))
       }
     })
-    const result = await httpClient.get<DealReviewSymbolBehaviorPriorListResponse>(
-      `${API_BASE}/traders/${traderId}/deal-review/symbol-priors?${search.toString()}`
-    )
+    const result =
+      await httpClient.get<DealReviewSymbolBehaviorPriorListResponse>(
+        `${API_BASE}/traders/${traderId}/deal-review/symbol-priors?${search.toString()}`
+      )
     if (!result.success)
       throw new Error('Failed to fetch symbol behavior priors')
     return (
@@ -594,6 +603,27 @@ export const dataApi = {
         generated_at: '',
       }
     )
+  },
+
+  async applyDealReviewLearnedPatternControl(
+    traderId: string,
+    body: {
+      pattern_id?: string
+      stable_key?: string
+      action: string
+      note: string
+    }
+  ): Promise<DealReviewLearnedPatternManualControl> {
+    const result = await httpClient.post<DealReviewLearnedPatternManualControl>(
+      `${API_BASE}/traders/${traderId}/deal-review/learned-patterns/control`,
+      body
+    )
+    if (!result.success) {
+      throw new Error(
+        result.message || 'Failed to apply learned-pattern control'
+      )
+    }
+    return result.data!
   },
 
   async getDealReviewSymbolBehaviorLiveGuardEvents(
@@ -741,7 +771,9 @@ export const dataApi = {
       `${API_BASE}/traders/${traderId}/deal-review/strategy-versions/${versionId}/similar${suffix}`
     )
     if (!result.success) {
-      throw new Error(result.message || 'Failed to fetch similar strategy versions')
+      throw new Error(
+        result.message || 'Failed to fetch similar strategy versions'
+      )
     }
     return result.data!
   },
@@ -804,8 +836,7 @@ export const dataApi = {
         winner_trader_id: winnerTraderId,
       }
     )
-    if (!result.success)
-      throw new Error('Failed to resolve challenger compare')
+    if (!result.success) throw new Error('Failed to resolve challenger compare')
     return result.data!
   },
 }

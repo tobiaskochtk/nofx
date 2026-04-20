@@ -5,6 +5,7 @@ package store
 import (
 	"database/sql"
 	"fmt"
+	"nofx/codexaudit"
 	"nofx/logger"
 	"sync"
 
@@ -28,10 +29,12 @@ type Store struct {
 	equity              *EquityStore
 	order               *OrderStore
 	grid                *GridStore
+	derivsLiquidation   *DerivsLiquidationStore
 	dealReview          *DealReviewStore
 	autonomousOptimizer *AutonomousOptimizerStore
 	semanticMemory      *SemanticMemoryStore
 	aiCharge            *AIChargeStore
+	codexCallLog        *CodexCallLogStore
 	telegramConfig      TelegramConfigStore
 
 	mu sync.RWMutex
@@ -51,6 +54,7 @@ func New(dbPath string) (*Store, error) {
 	}
 
 	s := &Store{gdb: gdb, db: sqlDB}
+	codexaudit.SetDB(gdb)
 
 	// Initialize all table structures
 	if err := s.initTables(); err != nil {
@@ -82,6 +86,7 @@ func NewWithConfig(cfg DBConfig) (*Store, error) {
 	}
 
 	s := &Store{gdb: gdb, db: sqlDB}
+	codexaudit.SetDB(gdb)
 
 	// Initialize all table structures
 	if err := s.initTables(); err != nil {
@@ -109,6 +114,7 @@ func NewFromGorm(gdb *gorm.DB) (*Store, error) {
 	if err != nil {
 		return nil, err
 	}
+	codexaudit.SetDB(gdb)
 	return &Store{gdb: gdb, db: sqlDB}, nil
 }
 
@@ -161,6 +167,9 @@ func (s *Store) initTables() error {
 	if err := s.Grid().InitTables(); err != nil {
 		return fmt.Errorf("failed to initialize grid tables: %w", err)
 	}
+	if err := s.DerivsLiquidation().initTables(); err != nil {
+		return fmt.Errorf("failed to initialize derivs liquidation tables: %w", err)
+	}
 	if err := s.DealReview().initTables(); err != nil {
 		return fmt.Errorf("failed to initialize deal review tables: %w", err)
 	}
@@ -175,6 +184,9 @@ func (s *Store) initTables() error {
 	}
 	if err := s.AICharge().initTables(); err != nil {
 		return fmt.Errorf("failed to initialize AI charge tables: %w", err)
+	}
+	if err := s.CodexCallLog().initTables(); err != nil {
+		return fmt.Errorf("failed to initialize codex call log tables: %w", err)
 	}
 	return nil
 }
@@ -299,6 +311,16 @@ func (s *Store) Grid() *GridStore {
 	return s.grid
 }
 
+// DerivsLiquidation gets persisted derivs liquidation storage.
+func (s *Store) DerivsLiquidation() *DerivsLiquidationStore {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.derivsLiquidation == nil {
+		s.derivsLiquidation = NewDerivsLiquidationStore(s.gdb)
+	}
+	return s.derivsLiquidation
+}
+
 // DealReview gets deal review storage.
 func (s *Store) DealReview() *DealReviewStore {
 	s.mu.Lock()
@@ -337,6 +359,16 @@ func (s *Store) AICharge() *AIChargeStore {
 		s.aiCharge = NewAIChargeStore(s.gdb)
 	}
 	return s.aiCharge
+}
+
+// CodexCallLog gets Codex call log storage.
+func (s *Store) CodexCallLog() *CodexCallLogStore {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.codexCallLog == nil {
+		s.codexCallLog = NewCodexCallLogStore(s.gdb)
+	}
+	return s.codexCallLog
 }
 
 // TelegramConfig gets Telegram bot configuration storage

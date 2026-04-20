@@ -9,6 +9,7 @@ const MODEL_COLORS: Record<string, string> = {
   deepseek: '#4A90E2',
   qwen: '#9B59B6',
   n8n: '#EA4B71',
+  codex: '#10A37F',
   claude: '#D97757',
   kimi: '#6366F1',
   gemini: '#4285F4',
@@ -34,6 +35,9 @@ export const getModelIcon = (modelType: string, props: IconProps = {}) => {
       break
     case 'n8n':
       iconPath = '/icons/n8n.svg'
+      break
+    case 'codex':
+      iconPath = '/icons/openai.svg'
       break
     case 'claude':
       iconPath = '/icons/claude.svg'
