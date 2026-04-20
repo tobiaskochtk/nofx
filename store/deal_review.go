@@ -4355,9 +4355,19 @@ func (s *DealReviewStore) inferCloseReasonFromTrailingUpdateTx(tx *gorm.DB, case
 	if trailingUpdate.PreviousStopPrice > 0 {
 		summary += fmt.Sprintf(" Previous stop was %.8f.", trailingUpdate.PreviousStopPrice)
 	}
+	reason := "trailing_stop"
+	if !stopPriceCountsAsProfitProtection(caseRec, matchPrice) {
+		reason = "stop_loss"
+		switch {
+		case stopPriceOnLossSide(caseRec, matchPrice):
+			summary += " The tightened stop was still on the loss side of entry, so the exit is classified as stop loss."
+		case caseRec != nil && caseRec.RealizedPnLPct < 0:
+			summary += " Net realized PnL still finished negative, so the exit is classified as stop loss."
+		}
+	}
 
 	return dealReviewCloseInferenceResult{
-		Reason:              "trailing_stop",
+		Reason:              reason,
 		InferredBy:          "matched persisted trailing-stop update",
 		ExitOrigin:          DealReviewExitOriginTrailingEngine,
 		ExitReasonQuality:   quality,
@@ -6064,12 +6074,19 @@ func inferCloseReasonFromMovedStopOrder(caseRec *DealReviewCase, ctx *dealReview
 		matchPrice,
 		caseRec.OpenStopLoss,
 	)
-	if !stopPriceProtectsProfit(caseRec, matchPrice) {
-		summary += " The tightened stop was still on the loss side of entry."
+	reason := "trailing_stop"
+	if !stopPriceCountsAsProfitProtection(caseRec, matchPrice) {
+		reason = "stop_loss"
+		switch {
+		case stopPriceOnLossSide(caseRec, matchPrice):
+			summary += " The tightened stop was still on the loss side of entry, so the exit is classified as stop loss."
+		case caseRec != nil && caseRec.RealizedPnLPct < 0:
+			summary += " Net realized PnL still finished negative, so the exit is classified as stop loss."
+		}
 	}
 
 	return dealReviewCloseInferenceResult{
-		Reason:              "trailing_stop",
+		Reason:              reason,
 		InferredBy:          "matched synced close fill / order",
 		ExitOrigin:          DealReviewExitOriginTrailingEngine,
 		ExitReasonQuality:   DealReviewExitReasonQualityHighConfidence,
@@ -6109,12 +6126,18 @@ func inferCloseReasonFromGenericStopOrder(caseRec *DealReviewCase, ctx *dealRevi
 			ExitEvidence:        evidence,
 		}
 	case stopPriceProtectsProfit(caseRec, matchPrice):
+		reason := "trailing_stop"
+		summary := fmt.Sprintf("Matched generic %s trigger order at %.8f on the profit side of entry; classifying the exit as trailing protection.", orderTypeLabel, matchPrice)
+		if !stopPriceCountsAsProfitProtection(caseRec, matchPrice) {
+			reason = "stop_loss"
+			summary = fmt.Sprintf("Matched generic %s trigger order at %.8f on the profit side of entry, but net realized PnL still finished negative; classifying the exit as stop loss.", orderTypeLabel, matchPrice)
+		}
 		return dealReviewCloseInferenceResult{
-			Reason:              "trailing_stop",
+			Reason:              reason,
 			InferredBy:          "matched synced close fill / order",
 			ExitOrigin:          DealReviewExitOriginTrailingEngine,
 			ExitReasonQuality:   DealReviewExitReasonQualityHighConfidence,
-			ExitEvidenceSummary: fmt.Sprintf("Matched generic %s trigger order at %.8f on the profit side of entry; classifying the exit as trailing protection.", orderTypeLabel, matchPrice),
+			ExitEvidenceSummary: summary,
 			ExitEvidence:        evidence,
 		}
 	default:
@@ -6183,6 +6206,13 @@ func stopPriceProtectsProfit(caseRec *DealReviewCase, stopPrice float64) bool {
 	default:
 		return false
 	}
+}
+
+func stopPriceCountsAsProfitProtection(caseRec *DealReviewCase, stopPrice float64) bool {
+	if caseRec == nil || caseRec.RealizedPnLPct < 0 {
+		return false
+	}
+	return stopPriceProtectsProfit(caseRec, stopPrice)
 }
 
 func buildDealReviewOrderExitEvidence(order *TraderOrder, fill *TraderFill, matchedBy string) *DealReviewExitEvidence {

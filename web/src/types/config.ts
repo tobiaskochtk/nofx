@@ -28,6 +28,13 @@ export interface Exchange {
   secretKey?: string
   passphrase?: string            // OKX specific
   testnet?: boolean
+  execution_environment?: 'live' | 'testnet' | 'paper'
+  paper_initial_balance?: number
+  paper_asset?: string
+  paper_fee_bps?: number
+  paper_slippage_bps?: number
+  paper_funding_enabled?: boolean
+  paper_liquidation_enabled?: boolean
   // Hyperliquid specific
   hyperliquidWalletAddr?: string
   // Aster specific
@@ -52,6 +59,7 @@ export type ExchangeAccountStatus =
 export interface ExchangeAccountState {
   exchange_id: string
   status: ExchangeAccountStatus
+  execution_environment?: 'live' | 'testnet' | 'paper'
   display_balance?: string
   asset?: string
   total_equity?: number
@@ -73,6 +81,13 @@ export interface CreateExchangeRequest {
   secret_key?: string
   passphrase?: string
   testnet?: boolean
+  execution_environment?: 'live' | 'testnet' | 'paper'
+  paper_initial_balance?: number
+  paper_asset?: string
+  paper_fee_bps?: number
+  paper_slippage_bps?: number
+  paper_funding_enabled?: boolean
+  paper_liquidation_enabled?: boolean
   hyperliquid_wallet_addr?: string
   aster_user?: string
   aster_signer?: string
@@ -122,6 +137,13 @@ export interface UpdateExchangeConfigRequest {
       secret_key: string
       passphrase?: string
       testnet?: boolean
+      execution_environment?: 'live' | 'testnet' | 'paper'
+      paper_initial_balance?: number
+      paper_asset?: string
+      paper_fee_bps?: number
+      paper_slippage_bps?: number
+      paper_funding_enabled?: boolean
+      paper_liquidation_enabled?: boolean
       // Hyperliquid 特定字段
       hyperliquid_wallet_addr?: string
       // Aster 特定字段

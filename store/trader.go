@@ -42,7 +42,7 @@ type Trader struct {
 	UseOITop             bool   `gorm:"column:use_oi_top;default:false" json:"use_oi_top,omitempty"`
 	CustomPrompt         string `gorm:"column:custom_prompt;default:''" json:"custom_prompt,omitempty"`
 	OverrideBasePrompt   bool   `gorm:"column:override_base_prompt;default:false" json:"override_base_prompt,omitempty"`
-	SystemPromptTemplate string `gorm:"column:system_prompt_template;default:v4_2026" json:"system_prompt_template,omitempty"`
+	SystemPromptTemplate string `gorm:"column:system_prompt_template;default:v5_2026" json:"system_prompt_template,omitempty"`
 }
 
 // TableName returns the table name for Trader

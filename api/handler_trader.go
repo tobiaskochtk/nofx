@@ -86,6 +86,13 @@ func missingExchangeFields(exchange *store.Exchange) []string {
 	}
 
 	var missing []string
+	if exchange.IsPaper() {
+		if exchange.PaperInitialBalance <= 0 {
+			missing = append(missing, "Paper Start Capital")
+		}
+		return missing
+	}
+
 	switch exchange.ExchangeType {
 	case "binance", "bybit", "gate", "indodax":
 		if exchange.APIKey == "" {
@@ -168,6 +175,16 @@ func validateExchangeForTraderCreation(exchange *store.Exchange) (string, string
 			)
 	}
 
+	if exchange.IsPaper() && exchange.ExchangeType != "bybit" {
+		return formatTraderCreationError(
+				fmt.Sprintf("交易所账户「%s」当前使用了尚未开放的 Paper 交易环境", exchangeDisplayName(exchange)),
+				"目前只有 Bybit 支持 Paper 交易账户，请改用 Bybit Paper 账户后再继续",
+			), "trader.create.exchange_paper_unsupported", mapStringPairs(
+				"exchange_name", exchangeDisplayName(exchange),
+				"exchange_type", exchange.ExchangeType,
+			)
+	}
+
 	switch exchange.ExchangeType {
 	case "binance", "bybit", "okx", "bitget", "gate", "kucoin", "hyperliquid", "aster", "lighter", "indodax":
 		return "", "", nil
@@ -191,6 +208,8 @@ func classifyTraderSetupReason(reason string) (string, string) {
 	lower := strings.ToLower(trimmed)
 
 	switch {
+	case strings.Contains(lower, "paper trading runtime is not implemented yet"):
+		return "trader.reason.paper_runtime_pending", "Paper-Trading ist bereits im Datenmodell vorbereitet, aber die eigentliche Ausfuehrungs-Engine ist noch nicht aktiviert"
 	case strings.Contains(lower, "failed to parse strategy config"),
 		strings.Contains(lower, "failed to parse strategy configuration"):
 		return "trader.reason.strategy_config_invalid", "当前策略配置内容已损坏，系统暂时无法解析"
@@ -218,6 +237,16 @@ func classifyTraderSetupReason(reason string) (string, string) {
 	default:
 		return "trader.reason.unknown", trimmed
 	}
+}
+
+func configuredInitialBalanceForExchange(exchange *store.Exchange, requested float64) float64 {
+	if requested > 0 {
+		return requested
+	}
+	if exchange != nil && exchange.IsPaper() && exchange.PaperInitialBalance > 0 {
+		return exchange.PaperInitialBalance
+	}
+	return requested
 }
 
 func humanizeTraderSetupReason(reason string) string {
@@ -413,7 +442,7 @@ func (s *Server) handleCreateTrader(c *gin.Context) {
 	}
 
 	// Set system prompt template default value
-	systemPromptTemplate := "v4_2026"
+	systemPromptTemplate := "v5_2026"
 	if req.SystemPromptTemplate != "" {
 		systemPromptTemplate = req.SystemPromptTemplate
 	}
@@ -424,8 +453,9 @@ func (s *Server) handleCreateTrader(c *gin.Context) {
 		scanIntervalMinutes = 3 // Default 3 minutes, not allowed to be less than 3
 	}
 
-	// Query exchange actual balance, override user input
-	actualBalance := req.InitialBalance // Default to use user input
+	// Query exchange actual balance, override user input when appropriate.
+	// Paper accounts use their configured paper-wallet starting capital instead.
+	actualBalance := req.InitialBalance
 	exchanges, err := s.store.Exchange().List(userID)
 	if err != nil {
 		SafeError(c, http.StatusInternalServerError,
@@ -449,7 +479,11 @@ func (s *Server) handleCreateTrader(c *gin.Context) {
 		return
 	}
 
-	{
+	actualBalance = configuredInitialBalanceForExchange(exchangeCfg, actualBalance)
+
+	if exchangeCfg != nil && exchangeCfg.IsPaper() {
+		logger.Infof("📄 Using configured paper start capital for trader %s: %.2f %s", req.Name, actualBalance, exchangeCfg.PaperAsset)
+	} else {
 		tempTrader, createErr := buildExchangeProbeTrader(exchangeCfg, userID)
 		if createErr != nil {
 			SafeBadRequestWithDetails(c, formatTraderCreationError(
@@ -630,6 +664,16 @@ func (s *Server) handleUpdateTrader(c *gin.Context) {
 		strategyID = existingTrader.StrategyID
 	}
 
+	selectedExchange, err := s.store.Exchange().GetByID(userID, req.ExchangeID)
+	if err != nil {
+		SafeBadRequest(c, "Selected exchange does not exist")
+		return
+	}
+	if exchangeMsg, _, _ := validateExchangeForTraderCreation(selectedExchange); exchangeMsg != "" {
+		SafeBadRequest(c, exchangeMsg)
+		return
+	}
+
 	exchangeChanged := req.ExchangeID != "" && req.ExchangeID != existingTrader.ExchangeID
 	resetInitialBalance := exchangeChanged && req.InitialBalance <= 0
 
@@ -638,7 +682,7 @@ func (s *Server) handleUpdateTrader(c *gin.Context) {
 		initialBalance = req.InitialBalance
 	}
 	if resetInitialBalance {
-		initialBalance = 0
+		initialBalance = configuredInitialBalanceForExchange(selectedExchange, 0)
 	}
 
 	// Update trader configuration
@@ -683,8 +727,8 @@ func (s *Server) handleUpdateTrader(c *gin.Context) {
 	}
 
 	if resetInitialBalance {
-		logger.Infof("🔄 Exchange changed for trader %s, resetting stale initial_balance to 0", traderID)
-		if err := s.store.Trader().UpdateInitialBalance(userID, traderID, 0); err != nil {
+		logger.Infof("🔄 Exchange changed for trader %s, refreshing initial_balance to %.2f", traderID, initialBalance)
+		if err := s.store.Trader().UpdateInitialBalance(userID, traderID, initialBalance); err != nil {
 			SafeInternalError(c, "Failed to reset trader initial balance", err)
 			return
 		}

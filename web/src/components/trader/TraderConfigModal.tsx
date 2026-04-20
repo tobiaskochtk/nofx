@@ -229,6 +229,8 @@ export function TraderConfigModal({
   }
 
   const selectedStrategy = strategies.find(s => s.id === formData.strategy_id)
+  const selectedExchange = availableExchanges.find((exchange) => exchange.id === formData.exchange_id)
+  const isPaperExchange = selectedExchange?.execution_environment === 'paper'
   const getCoinSourceLabel = (sourceType?: string) => {
     switch (sourceType) {
       case 'static':
@@ -331,16 +333,16 @@ export function TraderConfigModal({
                     options={availableExchanges.map((exchange) => ({
                       value: exchange.id,
                       label: getShortName(exchange.name || exchange.exchange_type || exchange.id).toUpperCase()
-                        + (exchange.account_name ? ` - ${exchange.account_name}` : ''),
+                        + (exchange.account_name ? ` - ${exchange.account_name}` : '')
+                        + (exchange.execution_environment ? ` · ${exchange.execution_environment}` : exchange.testnet ? ' · testnet' : ''),
                     }))}
                   />
                   {/* Exchange Registration Link */}
                   {formData.exchange_id && (() => {
                     // Find the selected exchange to get its type
-                    const selectedExchange = availableExchanges.find(e => e.id === formData.exchange_id)
                     const exchangeType = selectedExchange?.exchange_type?.toLowerCase() || ''
                     const regLink = EXCHANGE_REGISTRATION_LINKS[exchangeType]
-                    if (!regLink) return null
+                    if (!regLink || selectedExchange?.execution_environment === 'paper') return null
                     return (
                       <a
                         href={regLink.url}
@@ -591,7 +593,13 @@ export function TraderConfigModal({
                     <line x1="12" x2="12.01" y1="16" y2="16" />
                   </svg>
                   <span className="text-sm text-[#848E9C]">
-                    {t('autoFetchBalanceInfo', language)}
+                    {isPaperExchange
+                      ? pickText({
+                          zh: '将使用该 Paper 账户上配置的起始资金，不会去交易所抓取真实余额。',
+                          de: 'Es wird das im Paper-Konto konfigurierte Startkapital verwendet; es wird kein Live-Saldo von der Boerse abgefragt.',
+                          en: 'The trader will use the paper account start capital configured on the wallet and will not fetch a live exchange balance.',
+                        })
+                      : t('autoFetchBalanceInfo', language)}
                   </span>
                 </div>
               )}

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"nofx/crypto"
 	"nofx/logger"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -14,6 +15,16 @@ import (
 type ExchangeStore struct {
 	db *gorm.DB
 }
+
+const (
+	ExecutionEnvironmentLive    = "live"
+	ExecutionEnvironmentTestnet = "testnet"
+	ExecutionEnvironmentPaper   = "paper"
+
+	DefaultPaperAsset       = "USDT"
+	DefaultBybitPaperFeeBps = 5.5
+	DefaultPaperSlippageBps = 0.0
+)
 
 // Exchange exchange configuration
 type Exchange struct {
@@ -28,6 +39,13 @@ type Exchange struct {
 	SecretKey               crypto.EncryptedString `gorm:"column:secret_key;default:''" json:"secretKey"`
 	Passphrase              crypto.EncryptedString `gorm:"column:passphrase;default:''" json:"passphrase"`
 	Testnet                 bool                   `gorm:"default:false" json:"testnet"`
+	ExecutionEnvironment    string                 `gorm:"column:execution_environment;not null;default:live" json:"execution_environment"`
+	PaperInitialBalance     float64                `gorm:"column:paper_initial_balance;default:0" json:"paper_initial_balance"`
+	PaperAsset              string                 `gorm:"column:paper_asset;default:USDT" json:"paper_asset"`
+	PaperFeeBps             float64                `gorm:"column:paper_fee_bps;default:5.5" json:"paper_fee_bps"`
+	PaperSlippageBps        float64                `gorm:"column:paper_slippage_bps;default:0" json:"paper_slippage_bps"`
+	PaperFundingEnabled     bool                   `gorm:"column:paper_funding_enabled;default:true" json:"paper_funding_enabled"`
+	PaperLiquidationEnabled bool                   `gorm:"column:paper_liquidation_enabled;default:true" json:"paper_liquidation_enabled"`
 	HyperliquidWalletAddr   string                 `gorm:"column:hyperliquid_wallet_addr;default:''" json:"hyperliquidWalletAddr"`
 	HyperliquidUnifiedAcct  bool                   `gorm:"column:hyperliquid_unified_account;default:true" json:"hyperliquidUnifiedAccount"` // Unified Account mode (Spot as collateral)
 	AsterUser               string                 `gorm:"column:aster_user;default:''" json:"asterUser"`
@@ -48,6 +66,45 @@ func NewExchangeStore(db *gorm.DB) *ExchangeStore {
 	return &ExchangeStore{db: db}
 }
 
+func NormalizeExecutionEnvironment(value string, testnet bool) string {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case ExecutionEnvironmentPaper:
+		return ExecutionEnvironmentPaper
+	case ExecutionEnvironmentTestnet:
+		return ExecutionEnvironmentTestnet
+	case ExecutionEnvironmentLive:
+		return ExecutionEnvironmentLive
+	default:
+		if testnet {
+			return ExecutionEnvironmentTestnet
+		}
+		return ExecutionEnvironmentLive
+	}
+}
+
+func normalizePaperAsset(value string) string {
+	asset := strings.ToUpper(strings.TrimSpace(value))
+	if asset == "" {
+		return DefaultPaperAsset
+	}
+	return asset
+}
+
+func (e *Exchange) ResolvedExecutionEnvironment() string {
+	if e == nil {
+		return ExecutionEnvironmentLive
+	}
+	return NormalizeExecutionEnvironment(e.ExecutionEnvironment, e.Testnet)
+}
+
+func (e *Exchange) IsPaper() bool {
+	return e != nil && e.ResolvedExecutionEnvironment() == ExecutionEnvironmentPaper
+}
+
+func (e *Exchange) IsTestnetEnvironment() bool {
+	return e != nil && e.ResolvedExecutionEnvironment() == ExecutionEnvironmentTestnet
+}
+
 func (s *ExchangeStore) initTables() error {
 	// For PostgreSQL with existing table, skip AutoMigrate
 	if s.db.Dialector.Name() == "postgres" {
@@ -56,6 +113,26 @@ func (s *ExchangeStore) initTables() error {
 		if tableExists > 0 {
 			// Still run data migrations
 			s.migrateToMultiAccount()
+			s.db.Exec(`ALTER TABLE exchanges ADD COLUMN IF NOT EXISTS execution_environment TEXT NOT NULL DEFAULT 'live'`)
+			s.db.Exec(`ALTER TABLE exchanges ADD COLUMN IF NOT EXISTS paper_initial_balance DOUBLE PRECISION NOT NULL DEFAULT 0`)
+			s.db.Exec(`ALTER TABLE exchanges ADD COLUMN IF NOT EXISTS paper_asset TEXT NOT NULL DEFAULT 'USDT'`)
+			s.db.Exec(`ALTER TABLE exchanges ADD COLUMN IF NOT EXISTS paper_fee_bps DOUBLE PRECISION NOT NULL DEFAULT 5.5`)
+			s.db.Exec(`ALTER TABLE exchanges ADD COLUMN IF NOT EXISTS paper_slippage_bps DOUBLE PRECISION NOT NULL DEFAULT 0`)
+			s.db.Exec(`ALTER TABLE exchanges ADD COLUMN IF NOT EXISTS paper_funding_enabled BOOLEAN NOT NULL DEFAULT true`)
+			s.db.Exec(`ALTER TABLE exchanges ADD COLUMN IF NOT EXISTS paper_liquidation_enabled BOOLEAN NOT NULL DEFAULT true`)
+			s.db.Exec(`UPDATE exchanges
+				SET execution_environment = CASE
+					WHEN COALESCE(execution_environment, '') != '' THEN execution_environment
+					WHEN COALESCE(testnet, false) THEN 'testnet'
+					ELSE 'live'
+				END`)
+			s.db.Exec(`UPDATE exchanges SET paper_asset = 'USDT' WHERE COALESCE(paper_asset, '') = ''`)
+			s.db.Exec(`ALTER TABLE exchanges ALTER COLUMN execution_environment SET DEFAULT 'live'`)
+			s.db.Exec(`ALTER TABLE exchanges ALTER COLUMN paper_asset SET DEFAULT 'USDT'`)
+			s.db.Exec(`ALTER TABLE exchanges ALTER COLUMN paper_fee_bps SET DEFAULT 5.5`)
+			s.db.Exec(`ALTER TABLE exchanges ALTER COLUMN paper_slippage_bps SET DEFAULT 0`)
+			s.db.Exec(`ALTER TABLE exchanges ALTER COLUMN paper_funding_enabled SET DEFAULT true`)
+			s.db.Exec(`ALTER TABLE exchanges ALTER COLUMN paper_liquidation_enabled SET DEFAULT true`)
 			s.db.Model(&Exchange{}).Where("account_name = '' OR account_name IS NULL").Update("account_name", "Default")
 			return nil
 		}
@@ -183,7 +260,9 @@ func getExchangeNameAndType(exchangeType string) (name string, typ string) {
 
 // Create creates a new exchange account with UUID
 func (s *ExchangeStore) Create(userID, exchangeType, accountName string, enabled bool,
-	apiKey, secretKey, passphrase string, testnet bool,
+	apiKey, secretKey, passphrase string, testnet bool, executionEnvironment string,
+	paperInitialBalance float64, paperAsset string, paperFeeBps, paperSlippageBps float64,
+	paperFundingEnabled, paperLiquidationEnabled bool,
 	hyperliquidWalletAddr string, hyperliquidUnifiedAcct bool,
 	asterUser, asterSigner, asterPrivateKey,
 	lighterWalletAddr, lighterPrivateKey, lighterApiKeyPrivateKey string, lighterApiKeyIndex int) (string, error) {
@@ -198,6 +277,18 @@ func (s *ExchangeStore) Create(userID, exchangeType, accountName string, enabled
 	logger.Debugf("🔧 ExchangeStore.Create: userID=%s, exchangeType=%s, accountName=%s, id=%s",
 		userID, exchangeType, accountName, id)
 
+	normalizedEnvironment := NormalizeExecutionEnvironment(executionEnvironment, testnet)
+	testnet = normalizedEnvironment == ExecutionEnvironmentTestnet
+	paperAsset = normalizePaperAsset(paperAsset)
+	if normalizedEnvironment != ExecutionEnvironmentPaper {
+		paperInitialBalance = 0
+		paperAsset = DefaultPaperAsset
+		paperFeeBps = DefaultBybitPaperFeeBps
+		paperSlippageBps = DefaultPaperSlippageBps
+		paperFundingEnabled = true
+		paperLiquidationEnabled = true
+	}
+
 	exchange := &Exchange{
 		ID:                      id,
 		ExchangeType:            exchangeType,
@@ -210,6 +301,13 @@ func (s *ExchangeStore) Create(userID, exchangeType, accountName string, enabled
 		SecretKey:               crypto.EncryptedString(secretKey),
 		Passphrase:              crypto.EncryptedString(passphrase),
 		Testnet:                 testnet,
+		ExecutionEnvironment:    normalizedEnvironment,
+		PaperInitialBalance:     paperInitialBalance,
+		PaperAsset:              paperAsset,
+		PaperFeeBps:             paperFeeBps,
+		PaperSlippageBps:        paperSlippageBps,
+		PaperFundingEnabled:     paperFundingEnabled,
+		PaperLiquidationEnabled: paperLiquidationEnabled,
 		HyperliquidWalletAddr:   hyperliquidWalletAddr,
 		HyperliquidUnifiedAcct:  hyperliquidUnifiedAcct,
 		AsterUser:               asterUser,
@@ -224,19 +322,45 @@ func (s *ExchangeStore) Create(userID, exchangeType, accountName string, enabled
 	if err := s.db.Create(exchange).Error; err != nil {
 		return "", err
 	}
+	if exchange.IsPaper() {
+		if _, err := NewPaperWalletStore(s.db).EnsureForExchange(exchange); err != nil {
+			return "", err
+		}
+	}
 	return id, nil
 }
 
 // Update updates exchange configuration by UUID
-func (s *ExchangeStore) Update(userID, id string, enabled bool, apiKey, secretKey, passphrase string, testnet bool,
+func (s *ExchangeStore) Update(userID, id string, enabled bool, apiKey, secretKey, passphrase string, testnet bool, executionEnvironment string,
+	paperInitialBalance float64, paperAsset string, paperFeeBps, paperSlippageBps float64,
+	paperFundingEnabled, paperLiquidationEnabled bool, clearCredentials bool,
 	hyperliquidWalletAddr string, hyperliquidUnifiedAcct bool,
 	asterUser, asterSigner, asterPrivateKey, lighterWalletAddr, lighterPrivateKey, lighterApiKeyPrivateKey string, lighterApiKeyIndex int) error {
 
 	logger.Debugf("🔧 ExchangeStore.Update: userID=%s, id=%s, enabled=%v", userID, id, enabled)
 
+	normalizedEnvironment := NormalizeExecutionEnvironment(executionEnvironment, testnet)
+	testnet = normalizedEnvironment == ExecutionEnvironmentTestnet
+	paperAsset = normalizePaperAsset(paperAsset)
+	if normalizedEnvironment != ExecutionEnvironmentPaper {
+		paperInitialBalance = 0
+		paperAsset = DefaultPaperAsset
+		paperFeeBps = DefaultBybitPaperFeeBps
+		paperSlippageBps = DefaultPaperSlippageBps
+		paperFundingEnabled = true
+		paperLiquidationEnabled = true
+	}
+
 	updates := map[string]interface{}{
 		"enabled":                     enabled,
 		"testnet":                     testnet,
+		"execution_environment":       normalizedEnvironment,
+		"paper_initial_balance":       paperInitialBalance,
+		"paper_asset":                 paperAsset,
+		"paper_fee_bps":               paperFeeBps,
+		"paper_slippage_bps":          paperSlippageBps,
+		"paper_funding_enabled":       paperFundingEnabled,
+		"paper_liquidation_enabled":   paperLiquidationEnabled,
 		"hyperliquid_wallet_addr":     hyperliquidWalletAddr,
 		"hyperliquid_unified_account": hyperliquidUnifiedAcct,
 		"aster_user":                  asterUser,
@@ -246,23 +370,32 @@ func (s *ExchangeStore) Update(userID, id string, enabled bool, apiKey, secretKe
 		"updated_at":                  time.Now().UTC(),
 	}
 
+	if clearCredentials {
+		updates["api_key"] = crypto.EncryptedString("")
+		updates["secret_key"] = crypto.EncryptedString("")
+		updates["passphrase"] = crypto.EncryptedString("")
+		updates["aster_private_key"] = crypto.EncryptedString("")
+		updates["lighter_private_key"] = crypto.EncryptedString("")
+		updates["lighter_api_key_private_key"] = crypto.EncryptedString("")
+	}
+
 	// Only update encrypted fields if not empty
-	if apiKey != "" {
+	if !clearCredentials && apiKey != "" {
 		updates["api_key"] = crypto.EncryptedString(apiKey)
 	}
-	if secretKey != "" {
+	if !clearCredentials && secretKey != "" {
 		updates["secret_key"] = crypto.EncryptedString(secretKey)
 	}
-	if passphrase != "" {
+	if !clearCredentials && passphrase != "" {
 		updates["passphrase"] = crypto.EncryptedString(passphrase)
 	}
-	if asterPrivateKey != "" {
+	if !clearCredentials && asterPrivateKey != "" {
 		updates["aster_private_key"] = crypto.EncryptedString(asterPrivateKey)
 	}
-	if lighterPrivateKey != "" {
+	if !clearCredentials && lighterPrivateKey != "" {
 		updates["lighter_private_key"] = crypto.EncryptedString(lighterPrivateKey)
 	}
-	if lighterApiKeyPrivateKey != "" {
+	if !clearCredentials && lighterApiKeyPrivateKey != "" {
 		updates["lighter_api_key_private_key"] = crypto.EncryptedString(lighterApiKeyPrivateKey)
 	}
 
@@ -272,6 +405,15 @@ func (s *ExchangeStore) Update(userID, id string, enabled bool, apiKey, secretKe
 	}
 	if result.RowsAffected == 0 {
 		return fmt.Errorf("exchange not found: id=%s, userID=%s", id, userID)
+	}
+	if normalizedEnvironment == ExecutionEnvironmentPaper {
+		exchange, err := s.GetByID(userID, id)
+		if err != nil {
+			return err
+		}
+		if _, err := NewPaperWalletStore(s.db).EnsureForExchange(exchange); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -313,7 +455,8 @@ func (s *ExchangeStore) CreateLegacy(userID, id, name, typ string, enabled bool,
 
 	// Check if this is an old-style ID (exchange type as ID)
 	if id == "binance" || id == "bybit" || id == "okx" || id == "bitget" || id == "hyperliquid" || id == "aster" || id == "lighter" {
-		_, err := s.Create(userID, id, "Default", enabled, apiKey, secretKey, "", testnet,
+		_, err := s.Create(userID, id, "Default", enabled, apiKey, secretKey, "", testnet, "",
+			0, DefaultPaperAsset, DefaultBybitPaperFeeBps, DefaultPaperSlippageBps, true, true,
 			hyperliquidWalletAddr, true, // Default to Unified Account mode
 			asterUser, asterSigner, asterPrivateKey, "", "", "", 0)
 		return err
@@ -329,6 +472,9 @@ func (s *ExchangeStore) CreateLegacy(userID, id, name, typ string, enabled bool,
 		APIKey:                crypto.EncryptedString(apiKey),
 		SecretKey:             crypto.EncryptedString(secretKey),
 		Testnet:               testnet,
+		ExecutionEnvironment:  NormalizeExecutionEnvironment("", testnet),
+		PaperAsset:            DefaultPaperAsset,
+		PaperFeeBps:           DefaultBybitPaperFeeBps,
 		HyperliquidWalletAddr: hyperliquidWalletAddr,
 		AsterUser:             asterUser,
 		AsterSigner:           asterSigner,

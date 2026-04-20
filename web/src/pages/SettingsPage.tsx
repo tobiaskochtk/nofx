@@ -12,6 +12,7 @@ import {
 } from '../lib/onboarding'
 import { LANGUAGE_OPTIONS } from '../i18n/locale'
 import { ExchangeConfigModal } from '../components/trader/ExchangeConfigModal'
+import type { ExchangeSavePayload } from '../components/trader/ExchangeConfigModal'
 import { TelegramConfigModal } from '../components/trader/TelegramConfigModal'
 import { ModelConfigModal } from '../components/trader/ModelConfigModal'
 import type { Exchange, AIModel } from '../types'
@@ -282,41 +283,32 @@ export function SettingsPage() {
     }
   }
 
-  const handleSaveExchange = async (
-    exchangeId: string | null,
-    exchangeType: string,
-    accountName: string,
-    apiKey: string,
-    secretKey?: string,
-    passphrase?: string,
-    testnet?: boolean,
-    hyperliquidWalletAddr?: string,
-    asterUser?: string,
-    asterSigner?: string,
-    asterPrivateKey?: string,
-    lighterWalletAddr?: string,
-    lighterPrivateKey?: string,
-    lighterApiKeyPrivateKey?: string,
-    lighterApiKeyIndex?: number
-  ) => {
+  const handleSaveExchange = async (exchangeId: string | null, payload: ExchangeSavePayload) => {
     try {
       if (exchangeId) {
         const request = {
           exchanges: {
             [exchangeId]: {
               enabled: true,
-              api_key: apiKey || '',
-              secret_key: secretKey || '',
-              passphrase: passphrase || '',
-              testnet: testnet || false,
-              hyperliquid_wallet_addr: hyperliquidWalletAddr || '',
-              aster_user: asterUser || '',
-              aster_signer: asterSigner || '',
-              aster_private_key: asterPrivateKey || '',
-              lighter_wallet_addr: lighterWalletAddr || '',
-              lighter_private_key: lighterPrivateKey || '',
-              lighter_api_key_private_key: lighterApiKeyPrivateKey || '',
-              lighter_api_key_index: lighterApiKeyIndex || 0,
+              api_key: payload.apiKey || '',
+              secret_key: payload.secretKey || '',
+              passphrase: payload.passphrase || '',
+              testnet: payload.testnet || false,
+              execution_environment: payload.executionEnvironment,
+              paper_initial_balance: payload.paperInitialBalance || 0,
+              paper_asset: payload.paperAsset || 'USDT',
+              paper_fee_bps: payload.paperFeeBps ?? 5.5,
+              paper_slippage_bps: payload.paperSlippageBps ?? 0,
+              paper_funding_enabled: payload.paperFundingEnabled,
+              paper_liquidation_enabled: payload.paperLiquidationEnabled,
+              hyperliquid_wallet_addr: payload.hyperliquidWalletAddr || '',
+              aster_user: payload.asterUser || '',
+              aster_signer: payload.asterSigner || '',
+              aster_private_key: payload.asterPrivateKey || '',
+              lighter_wallet_addr: payload.lighterWalletAddr || '',
+              lighter_private_key: payload.lighterPrivateKey || '',
+              lighter_api_key_private_key: payload.lighterApiKeyPrivateKey || '',
+              lighter_api_key_index: payload.lighterApiKeyIndex || 0,
             },
           },
         }
@@ -331,21 +323,28 @@ export function SettingsPage() {
         )
       } else {
         const createRequest = {
-          exchange_type: exchangeType,
-          account_name: accountName,
+          exchange_type: payload.exchangeType,
+          account_name: payload.accountName,
           enabled: true,
-          api_key: apiKey || '',
-          secret_key: secretKey || '',
-          passphrase: passphrase || '',
-          testnet: testnet || false,
-          hyperliquid_wallet_addr: hyperliquidWalletAddr || '',
-          aster_user: asterUser || '',
-          aster_signer: asterSigner || '',
-          aster_private_key: asterPrivateKey || '',
-          lighter_wallet_addr: lighterWalletAddr || '',
-          lighter_private_key: lighterPrivateKey || '',
-          lighter_api_key_private_key: lighterApiKeyPrivateKey || '',
-          lighter_api_key_index: lighterApiKeyIndex || 0,
+          api_key: payload.apiKey || '',
+          secret_key: payload.secretKey || '',
+          passphrase: payload.passphrase || '',
+          testnet: payload.testnet || false,
+          execution_environment: payload.executionEnvironment,
+          paper_initial_balance: payload.paperInitialBalance || 0,
+          paper_asset: payload.paperAsset || 'USDT',
+          paper_fee_bps: payload.paperFeeBps ?? 5.5,
+          paper_slippage_bps: payload.paperSlippageBps ?? 0,
+          paper_funding_enabled: payload.paperFundingEnabled,
+          paper_liquidation_enabled: payload.paperLiquidationEnabled,
+          hyperliquid_wallet_addr: payload.hyperliquidWalletAddr || '',
+          aster_user: payload.asterUser || '',
+          aster_signer: payload.asterSigner || '',
+          aster_private_key: payload.asterPrivateKey || '',
+          lighter_wallet_addr: payload.lighterWalletAddr || '',
+          lighter_private_key: payload.lighterPrivateKey || '',
+          lighter_api_key_private_key: payload.lighterApiKeyPrivateKey || '',
+          lighter_api_key_index: payload.lighterApiKeyIndex || 0,
         }
         await api.createExchangeEncrypted(createRequest)
         toast.success(
@@ -838,7 +837,23 @@ export function SettingsPage() {
                         </div>
                         <div className="text-left">
                           <p className="text-sm font-medium text-white">{exchange.account_name || exchange.name}</p>
-                          <p className="text-xs text-zinc-500 capitalize">{exchange.exchange_type || exchange.type}</p>
+                          <div className="flex items-center gap-2 mt-0.5">
+                            <p className="text-xs text-zinc-500 capitalize">{exchange.exchange_type || exchange.type}</p>
+                            <span className={`text-[10px] px-1.5 py-0.5 rounded-full ${
+                              exchange.execution_environment === 'paper'
+                                ? 'bg-sky-500/10 text-sky-300'
+                                : exchange.execution_environment === 'testnet'
+                                  ? 'bg-amber-500/10 text-amber-300'
+                                  : 'bg-emerald-500/10 text-emerald-300'
+                            }`}>
+                              {exchange.execution_environment || (exchange.testnet ? 'testnet' : 'live')}
+                            </span>
+                            {exchange.execution_environment === 'paper' && typeof exchange.paper_initial_balance === 'number' && (
+                              <span className="text-[10px] text-zinc-500">
+                                {exchange.paper_initial_balance.toFixed(2)} {exchange.paper_asset || 'USDT'}
+                              </span>
+                            )}
+                          </div>
                         </div>
                       </div>
                       <ChevronRight size={14} className="text-zinc-600 group-hover:text-zinc-400 transition-colors" />

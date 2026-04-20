@@ -38,8 +38,9 @@ type AutoTraderConfig struct {
 	AIModel string // AI model: "qwen" or "deepseek"
 
 	// Trading platform selection
-	Exchange   string // Exchange type: "binance", "bybit", "okx", "bitget", "gate", "hyperliquid", "aster" or "lighter"
-	ExchangeID string // Exchange account UUID (for multi-account support)
+	Exchange             string // Exchange type: "binance", "bybit", "okx", "bitget", "gate", "hyperliquid", "aster" or "lighter"
+	ExchangeID           string // Exchange account UUID (for multi-account support)
+	ExecutionEnvironment string // "live", "testnet", or "paper"
 
 	// Binance API configuration
 	BinanceAPIKey    string
@@ -239,6 +240,12 @@ func NewAutoTrader(config AutoTraderConfig, st *store.Store, userID string) (*Au
 	// Set default trading platform
 	if config.Exchange == "" {
 		config.Exchange = "binance"
+	}
+	if strings.TrimSpace(config.ExecutionEnvironment) == "" {
+		config.ExecutionEnvironment = store.ExecutionEnvironmentLive
+	}
+	if config.ExecutionEnvironment == store.ExecutionEnvironmentPaper {
+		return nil, fmt.Errorf("paper trading runtime is not implemented yet for %s", config.Exchange)
 	}
 
 	// Create corresponding trader based on configuration

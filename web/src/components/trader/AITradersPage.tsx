@@ -14,7 +14,10 @@ import { t } from '../../i18n/translations'
 import { useAuth } from '../../contexts/AuthContext'
 import { TraderConfigModal } from './TraderConfigModal'
 import { DeepVoidBackground } from '../common/DeepVoidBackground'
-import { ExchangeConfigModal } from './ExchangeConfigModal'
+import {
+  ExchangeConfigModal,
+  type ExchangeSavePayload,
+} from './ExchangeConfigModal'
 import { TelegramConfigModal } from './TelegramConfigModal'
 import { ModelConfigModal } from './ModelConfigModal'
 import { ConfigStatusGrid } from './ConfigStatusGrid'
@@ -939,20 +942,7 @@ export function AITradersPage({ onTraderSelect }: AITradersPageProps) {
 
   const handleSaveExchangeConfig = async (
     exchangeId: string | null,
-    exchangeType: string,
-    accountName: string,
-    apiKey: string,
-    secretKey?: string,
-    passphrase?: string,
-    testnet?: boolean,
-    hyperliquidWalletAddr?: string,
-    asterUser?: string,
-    asterSigner?: string,
-    asterPrivateKey?: string,
-    lighterWalletAddr?: string,
-    lighterPrivateKey?: string,
-    lighterApiKeyPrivateKey?: string,
-    lighterApiKeyIndex?: number
+    payload: ExchangeSavePayload
   ) => {
     try {
       if (exchangeId) {
@@ -966,45 +956,59 @@ export function AITradersPage({ onTraderSelect }: AITradersPageProps) {
           exchanges: {
             [exchangeId]: {
               enabled: true,
-              api_key: apiKey || '',
-              secret_key: secretKey || '',
-              passphrase: passphrase || '',
-              testnet: testnet || false,
-              hyperliquid_wallet_addr: hyperliquidWalletAddr || '',
-              aster_user: asterUser || '',
-              aster_signer: asterSigner || '',
-              aster_private_key: asterPrivateKey || '',
-              lighter_wallet_addr: lighterWalletAddr || '',
-              lighter_private_key: lighterPrivateKey || '',
-              lighter_api_key_private_key: lighterApiKeyPrivateKey || '',
-              lighter_api_key_index: lighterApiKeyIndex || 0,
+              api_key: payload.apiKey || '',
+              secret_key: payload.secretKey || '',
+              passphrase: payload.passphrase || '',
+              testnet: payload.testnet || false,
+              execution_environment: payload.executionEnvironment,
+              paper_initial_balance: payload.paperInitialBalance || 0,
+              paper_asset: payload.paperAsset || 'USDT',
+              paper_fee_bps: payload.paperFeeBps ?? 5.5,
+              paper_slippage_bps: payload.paperSlippageBps ?? 0,
+              paper_funding_enabled: payload.paperFundingEnabled ?? true,
+              paper_liquidation_enabled: payload.paperLiquidationEnabled ?? true,
+              hyperliquid_wallet_addr: payload.hyperliquidWalletAddr || '',
+              aster_user: payload.asterUser || '',
+              aster_signer: payload.asterSigner || '',
+              aster_private_key: payload.asterPrivateKey || '',
+              lighter_wallet_addr: payload.lighterWalletAddr || '',
+              lighter_private_key: payload.lighterPrivateKey || '',
+              lighter_api_key_private_key: payload.lighterApiKeyPrivateKey || '',
+              lighter_api_key_index: payload.lighterApiKeyIndex || 0,
             },
           },
         }
 
         await api.updateExchangeConfigsEncrypted(request)
-      toast.success(t('aiTradersToast.exchangeConfigUpdated', language))
+        toast.success(t('aiTradersToast.exchangeConfigUpdated', language))
       } else {
         const createRequest = {
-          exchange_type: exchangeType,
-          account_name: accountName,
+          exchange_type: payload.exchangeType,
+          account_name: payload.accountName,
           enabled: true,
-          api_key: apiKey || '',
-          secret_key: secretKey || '',
-          passphrase: passphrase || '',
-          testnet: testnet || false,
-          hyperliquid_wallet_addr: hyperliquidWalletAddr || '',
-          aster_user: asterUser || '',
-          aster_signer: asterSigner || '',
-          aster_private_key: asterPrivateKey || '',
-          lighter_wallet_addr: lighterWalletAddr || '',
-          lighter_private_key: lighterPrivateKey || '',
-          lighter_api_key_private_key: lighterApiKeyPrivateKey || '',
-          lighter_api_key_index: lighterApiKeyIndex || 0,
+          api_key: payload.apiKey || '',
+          secret_key: payload.secretKey || '',
+          passphrase: payload.passphrase || '',
+          testnet: payload.testnet || false,
+          execution_environment: payload.executionEnvironment,
+          paper_initial_balance: payload.paperInitialBalance || 0,
+          paper_asset: payload.paperAsset || 'USDT',
+          paper_fee_bps: payload.paperFeeBps ?? 5.5,
+          paper_slippage_bps: payload.paperSlippageBps ?? 0,
+          paper_funding_enabled: payload.paperFundingEnabled ?? true,
+          paper_liquidation_enabled: payload.paperLiquidationEnabled ?? true,
+          hyperliquid_wallet_addr: payload.hyperliquidWalletAddr || '',
+          aster_user: payload.asterUser || '',
+          aster_signer: payload.asterSigner || '',
+          aster_private_key: payload.asterPrivateKey || '',
+          lighter_wallet_addr: payload.lighterWalletAddr || '',
+          lighter_private_key: payload.lighterPrivateKey || '',
+          lighter_api_key_private_key: payload.lighterApiKeyPrivateKey || '',
+          lighter_api_key_index: payload.lighterApiKeyIndex || 0,
         }
 
         await api.createExchangeEncrypted(createRequest)
-      toast.success(t('aiTradersToast.exchangeCreated', language))
+        toast.success(t('aiTradersToast.exchangeCreated', language))
       }
 
       const refreshedExchanges = await api.getExchangeConfigs()

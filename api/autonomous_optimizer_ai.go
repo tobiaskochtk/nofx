@@ -647,6 +647,7 @@ func buildAutonomousOptimizerTrailingStopTelemetry(strategyCfg *store.StrategyCo
 			profitBand := autonomousOptimizerTrailingStopProfitBand(audit.PreUpdateUnrealizedPnLPct)
 			exitWithinOneCycle := autonomousOptimizerTrailingStopExitWithinOneCycle(caseRec.ExitTimeMs, audit.UpdateTimeMs, trailingCfg.CheckIntervalSec)
 			earlyTightening := hasMinutesToFirstUpdate && minutesToFirstUpdate <= autonomousOptimizerEarlyTighteningMinutes
+			lossSideOfEntry := entryProtectionState == "below_entry"
 
 			item := autonomousOptimizerTrailingStopUpdateAuditItem{
 				PositionID:                caseRec.PositionID,
@@ -654,6 +655,7 @@ func buildAutonomousOptimizerTrailingStopTelemetry(strategyCfg *store.StrategyCo
 				Side:                      strings.TrimSpace(caseRec.Side),
 				CloseReason:               closeReason,
 				UpdateSource:              audit.UpdateSource,
+				TriggerSource:             audit.TriggerSource,
 				TrailingMode:              strings.TrimSpace(audit.TrailingMode),
 				UpdateTimeMs:              audit.UpdateTimeMs,
 				PreUpdateUnrealizedPnL:    roundAutonomousOptimizerFloat(audit.PreUpdateUnrealizedPnL, 4),
@@ -661,6 +663,7 @@ func buildAutonomousOptimizerTrailingStopTelemetry(strategyCfg *store.StrategyCo
 				PreUpdateProfitBand:       profitBand,
 				StopProfitPct:             roundAutonomousOptimizerFloat(audit.StopProfitPct, 2),
 				ProtectsBreakeven:         audit.ProtectsBreakeven,
+				LossSideOfEntry:           lossSideOfEntry,
 				EntryProtectionState:      entryProtectionState,
 				ExitWithinOneCycle:        exitWithinOneCycle,
 				RealizedPnLPct:            roundAutonomousOptimizerFloat(caseRec.RealizedPnLPct, 2),
@@ -880,6 +883,7 @@ func buildAutonomousOptimizerTrailingStopTelemetry(strategyCfg *store.StrategyCo
 
 type autonomousOptimizerTrailingStopAuditContext struct {
 	UpdateSource              string
+	TriggerSource             string
 	UpdateTimeMs              int64
 	PreUpdateUnrealizedPnL    float64
 	PreUpdateUnrealizedPnLPct float64
@@ -897,9 +901,14 @@ func autonomousOptimizerTrailingStopAuditContextForCase(caseRec *store.DealRevie
 	if caseRec == nil {
 		return autonomousOptimizerTrailingStopAuditContext{}, false
 	}
+	triggerSource := ""
+	if caseRec.ExitEvidence != nil {
+		triggerSource = strings.TrimSpace(caseRec.ExitEvidence.TriggerSource)
+	}
 	if record, ok := firstTrailingUpdates[caseRec.PositionID]; ok && record.TimestampMs > 0 {
 		return autonomousOptimizerTrailingStopAuditContext{
 			UpdateSource:              "trailing_update_record",
+			TriggerSource:             triggerSource,
 			UpdateTimeMs:              record.TimestampMs,
 			PreUpdateUnrealizedPnL:    record.UnrealizedPnL,
 			PreUpdateUnrealizedPnLPct: record.UnrealizedPnLPct,
@@ -913,9 +922,10 @@ func autonomousOptimizerTrailingStopAuditContextForCase(caseRec *store.DealRevie
 			MarkPrice:                 record.MarkPrice,
 		}, true
 	}
-	if caseRec.ExitEvidence != nil && caseRec.ExitEvidence.TrailingUpdatedAtMs > 0 {
+	if autonomousOptimizerTrailingStopHasExitEvidenceAudit(caseRec.ExitEvidence) {
 		return autonomousOptimizerTrailingStopAuditContext{
 			UpdateSource:              "exit_evidence",
+			TriggerSource:             strings.TrimSpace(caseRec.ExitEvidence.TriggerSource),
 			UpdateTimeMs:              caseRec.ExitEvidence.TrailingUpdatedAtMs,
 			PreUpdateUnrealizedPnL:    caseRec.ExitEvidence.TrailingUnrealizedPnL,
 			PreUpdateUnrealizedPnLPct: caseRec.ExitEvidence.TrailingUnrealizedPnLPct,
@@ -929,6 +939,22 @@ func autonomousOptimizerTrailingStopAuditContextForCase(caseRec *store.DealRevie
 		}, true
 	}
 	return autonomousOptimizerTrailingStopAuditContext{}, false
+}
+
+func autonomousOptimizerTrailingStopHasExitEvidenceAudit(evidence *store.DealReviewExitEvidence) bool {
+	if evidence == nil {
+		return false
+	}
+	if evidence.TrailingUpdatedAtMs > 0 || evidence.NewStopPrice > 0 || evidence.PreviousStopPrice > 0 {
+		return true
+	}
+	if strings.TrimSpace(evidence.TrailingMode) != "" || evidence.TrailingTriggerProfitPct != 0 || evidence.TrailingStopProfitPct != 0 {
+		return true
+	}
+	if evidence.TrailingProtectsBreakeven || strings.TrimSpace(evidence.TriggerSource) != "" {
+		return true
+	}
+	return strings.Contains(strings.ToLower(strings.TrimSpace(evidence.MatchedBy)), "trailing")
 }
 
 func autonomousOptimizerTrailingStopEntryProtectionState(side string, entryPrice, newStopPrice float64, protectsBreakeven bool) string {

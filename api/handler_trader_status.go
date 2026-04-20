@@ -58,6 +58,41 @@ func (s *Server) handleSyncBalance(c *gin.Context) {
 		return
 	}
 
+	if exchangeCfg.IsPaper() {
+		wallet, err := s.store.PaperWallet().EnsureForExchange(exchangeCfg)
+		if err != nil {
+			logger.Infof("❌ Failed to resolve paper wallet: %v", err)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to resolve paper wallet"})
+			return
+		}
+		actualBalance := wallet.Equity
+		oldBalance := traderConfig.InitialBalance
+		changePercent := 0.0
+		if oldBalance != 0 {
+			changePercent = ((actualBalance - oldBalance) / oldBalance) * 100
+		}
+		changeType := "increase"
+		if changePercent < 0 {
+			changeType = "decrease"
+		}
+
+		if err := s.store.Trader().UpdateInitialBalance(userID, traderID, actualBalance); err != nil {
+			logger.Infof("❌ Failed to update initial_balance: %v", err)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update balance"})
+			return
+		}
+		s.exchangeAccountStateCache.Invalidate(userID)
+
+		c.JSON(http.StatusOK, gin.H{
+			"message":        "Paper balance synced successfully",
+			"old_balance":    oldBalance,
+			"new_balance":    actualBalance,
+			"change_percent": changePercent,
+			"change_type":    changeType,
+		})
+		return
+	}
+
 	tempTrader, createErr := buildExchangeProbeTrader(exchangeCfg, userID)
 	if createErr != nil {
 		logger.Infof("⚠️ Failed to create temporary trader: %v", createErr)

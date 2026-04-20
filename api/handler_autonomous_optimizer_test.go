@@ -1312,6 +1312,54 @@ func TestBuildAutonomousOptimizerTrailingStopTelemetry(t *testing.T) {
 	}
 }
 
+func TestBuildAutonomousOptimizerTrailingStopTelemetryIncludesPartialExitEvidenceAudit(t *testing.T) {
+	base := time.Now().UTC().Add(-90 * time.Minute)
+	strategyCfg := store.GetDefaultStrategyConfig("en")
+	cases := []store.DealReviewCaseDetail{
+		{
+			Case: store.DealReviewCase{
+				Status:         store.DealReviewCaseStatusClosed,
+				Symbol:         "OMEGAUSDT",
+				Side:           "LONG",
+				EntryPrice:     100,
+				PositionID:     44,
+				EntryTimeMs:    base.UnixMilli(),
+				ExitTimeMs:     base.Add(12 * time.Minute).UnixMilli(),
+				CloseReason:    "trailing_stop",
+				RealizedPnLPct: -0.6,
+				ExitEvidence: &store.DealReviewExitEvidence{
+					MatchedBy:         "trailing_stop_update_match",
+					TriggerSource:     "LastPrice",
+					PreviousStopPrice: 98.7,
+					NewStopPrice:      99.8,
+					TrailingMode:      "lock_profit",
+				},
+			},
+		},
+	}
+
+	telemetry := buildAutonomousOptimizerTrailingStopTelemetry(&strategyCfg, cases, nil)
+	if telemetry == nil {
+		t.Fatal("telemetry = nil, want partial trailing-stop audit summary")
+	}
+	if telemetry.FirstUpdateAuditCount != 1 {
+		t.Fatalf("FirstUpdateAuditCount = %d, want 1", telemetry.FirstUpdateAuditCount)
+	}
+	if len(telemetry.SampleUpdates) != 1 {
+		t.Fatalf("SampleUpdates len = %d, want 1", len(telemetry.SampleUpdates))
+	}
+	item := telemetry.SampleUpdates[0]
+	if item.UpdateSource != "exit_evidence" || item.TriggerSource != "LastPrice" {
+		t.Fatalf("sample update = %#v, want exit_evidence with LastPrice trigger", item)
+	}
+	if !item.LossSideOfEntry || item.EntryProtectionState != "below_entry" {
+		t.Fatalf("sample update = %#v, want loss-side-of-entry audit", item)
+	}
+	if item.UpdateTimeMs != 0 || item.MinutesToFirstUpdate != 0 {
+		t.Fatalf("sample update = %#v, want partial audit without timing fields", item)
+	}
+}
+
 func TestBuildAutonomousOptimizerLearnedPatternBacklogProposalsSynthesizesActionableFindings(t *testing.T) {
 	payload := &autonomousOptimizerLearnedPatternPayload{
 		Items: []autonomousOptimizerLearnedPatternEvidence{

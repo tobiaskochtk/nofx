@@ -33,26 +33,36 @@ const SUPPORTED_EXCHANGE_TEMPLATES = [
   { exchange_type: 'indodax', name: 'Indodax', type: 'cex' as const },
 ]
 
+export type ExecutionEnvironment = 'live' | 'testnet' | 'paper'
+
+export interface ExchangeSavePayload {
+  exchangeType: string
+  accountName: string
+  apiKey: string
+  secretKey?: string
+  passphrase?: string
+  executionEnvironment: ExecutionEnvironment
+  testnet: boolean
+  paperInitialBalance: number
+  paperAsset: string
+  paperFeeBps: number
+  paperSlippageBps: number
+  paperFundingEnabled: boolean
+  paperLiquidationEnabled: boolean
+  hyperliquidWalletAddr?: string
+  asterUser?: string
+  asterSigner?: string
+  asterPrivateKey?: string
+  lighterWalletAddr?: string
+  lighterPrivateKey?: string
+  lighterApiKeyPrivateKey?: string
+  lighterApiKeyIndex?: number
+}
+
 interface ExchangeConfigModalProps {
   allExchanges: Exchange[]
   editingExchangeId: string | null
-  onSave: (
-    exchangeId: string | null,
-    exchangeType: string,
-    accountName: string,
-    apiKey: string,
-    secretKey?: string,
-    passphrase?: string,
-    testnet?: boolean,
-    hyperliquidWalletAddr?: string,
-    asterUser?: string,
-    asterSigner?: string,
-    asterPrivateKey?: string,
-    lighterWalletAddr?: string,
-    lighterPrivateKey?: string,
-    lighterApiKeyPrivateKey?: string,
-    lighterApiKeyIndex?: number
-  ) => Promise<void>
+  onSave: (exchangeId: string | null, payload: ExchangeSavePayload) => Promise<void>
   onDelete: (exchangeId: string) => void
   onClose: () => void
   language: Language
@@ -157,7 +167,7 @@ export function ExchangeConfigModal({
   const [apiKey, setApiKey] = useState('')
   const [secretKey, setSecretKey] = useState('')
   const [passphrase, setPassphrase] = useState('')
-  const [testnet, setTestnet] = useState(false)
+  const [executionEnvironment, setExecutionEnvironment] = useState<ExecutionEnvironment>('live')
   const [showGuide, setShowGuide] = useState(false)
   const [serverIP, setServerIP] = useState<{ public_ip: string; message: string } | null>(null)
   const [loadingIP, setLoadingIP] = useState(false)
@@ -182,6 +192,12 @@ export function ExchangeConfigModal({
   const [secureInputTarget, setSecureInputTarget] = useState<null | 'hyperliquid' | 'aster' | 'lighter'>(null)
   const [isSaving, setIsSaving] = useState(false)
   const [accountName, setAccountName] = useState('')
+  const [paperInitialBalance, setPaperInitialBalance] = useState(10000)
+  const [paperAsset, setPaperAsset] = useState('USDT')
+  const [paperFeeBps, setPaperFeeBps] = useState(5.5)
+  const [paperSlippageBps, setPaperSlippageBps] = useState(0)
+  const [paperFundingEnabled, setPaperFundingEnabled] = useState(true)
+  const [paperLiquidationEnabled, setPaperLiquidationEnabled] = useState(true)
 
   const selectedExchange = editingExchangeId
     ? allExchanges?.find((e) => e.id === editingExchangeId)
@@ -194,6 +210,10 @@ export function ExchangeConfigModal({
   const currentExchangeType = editingExchangeId
     ? selectedExchange?.exchange_type
     : selectedExchangeType
+  const supportsPaperEnvironment = currentExchangeType === 'bybit'
+  const supportsTestnetEnvironment = currentExchangeType === 'bybit' || currentExchangeType === 'hyperliquid' || currentExchangeType === 'lighter'
+  const isPaperEnvironment = executionEnvironment === 'paper'
+  const effectiveTestnet = executionEnvironment === 'testnet'
 
   const exchangeRegistrationLinks: Record<string, { url: string; hasReferral?: boolean }> = {
     binance: { url: 'https://www.binance.com/join?ref=NOFXENG', hasReferral: true },
@@ -215,7 +235,7 @@ export function ExchangeConfigModal({
       setApiKey(selectedExchange.apiKey || '')
       setSecretKey(selectedExchange.secretKey || '')
       setPassphrase('')
-      setTestnet(selectedExchange.testnet || false)
+      setExecutionEnvironment((selectedExchange.execution_environment || (selectedExchange.testnet ? 'testnet' : 'live')) as ExecutionEnvironment)
       setAsterUser(selectedExchange.asterUser || '')
       setAsterSigner(selectedExchange.asterSigner || '')
       setAsterPrivateKey('')
@@ -223,8 +243,24 @@ export function ExchangeConfigModal({
       setLighterWalletAddr(selectedExchange.lighterWalletAddr || '')
       setLighterApiKeyPrivateKey('')
       setLighterApiKeyIndex(selectedExchange.lighterApiKeyIndex || 0)
+      setPaperInitialBalance(selectedExchange.paper_initial_balance || 10000)
+      setPaperAsset(selectedExchange.paper_asset || 'USDT')
+      setPaperFeeBps(selectedExchange.paper_fee_bps ?? 5.5)
+      setPaperSlippageBps(selectedExchange.paper_slippage_bps ?? 0)
+      setPaperFundingEnabled(selectedExchange.paper_funding_enabled ?? true)
+      setPaperLiquidationEnabled(selectedExchange.paper_liquidation_enabled ?? true)
     }
   }, [editingExchangeId, selectedExchange])
+
+  useEffect(() => {
+    if (executionEnvironment === 'paper' && !supportsPaperEnvironment) {
+      setExecutionEnvironment(supportsTestnetEnvironment ? 'testnet' : 'live')
+      return
+    }
+    if (executionEnvironment === 'testnet' && !supportsTestnetEnvironment) {
+      setExecutionEnvironment('live')
+    }
+  }, [executionEnvironment, supportsPaperEnvironment, supportsTestnetEnvironment])
 
   // Load server IP for Binance
   useEffect(() => {
@@ -311,27 +347,67 @@ export function ExchangeConfigModal({
 
     const exchangeId = editingExchangeId || null
     const exchangeType = currentExchangeType || ''
+    const payload: ExchangeSavePayload = {
+      exchangeType,
+      accountName: trimmedAccountName,
+      apiKey: '',
+      secretKey: '',
+      passphrase: '',
+      executionEnvironment,
+      testnet: effectiveTestnet,
+      paperInitialBalance,
+      paperAsset,
+      paperFeeBps,
+      paperSlippageBps,
+      paperFundingEnabled,
+      paperLiquidationEnabled,
+      hyperliquidWalletAddr: hyperliquidWalletAddr.trim(),
+      asterUser: asterUser.trim(),
+      asterSigner: asterSigner.trim(),
+      asterPrivateKey: asterPrivateKey.trim(),
+      lighterWalletAddr: lighterWalletAddr.trim(),
+      lighterPrivateKey: '',
+      lighterApiKeyPrivateKey: lighterApiKeyPrivateKey.trim(),
+      lighterApiKeyIndex,
+    }
 
     setIsSaving(true)
     try {
+      if (isPaperEnvironment) {
+        if (paperInitialBalance <= 0) {
+          toast.error('Paper start capital must be greater than 0')
+          return
+        }
+        await onSave(exchangeId, payload)
+        return
+      }
+
       if (currentExchangeType === 'binance' || currentExchangeType === 'bybit' || currentExchangeType === 'indodax') {
         if (!apiKey.trim() || !secretKey.trim()) return
-        await onSave(exchangeId, exchangeType, trimmedAccountName, apiKey.trim(), secretKey.trim(), '', testnet)
+        payload.apiKey = apiKey.trim()
+        payload.secretKey = secretKey.trim()
+        await onSave(exchangeId, payload)
       } else if (currentExchangeType === 'okx' || currentExchangeType === 'bitget' || currentExchangeType === 'kucoin') {
         if (!apiKey.trim() || !secretKey.trim() || !passphrase.trim()) return
-        await onSave(exchangeId, exchangeType, trimmedAccountName, apiKey.trim(), secretKey.trim(), passphrase.trim(), testnet)
+        payload.apiKey = apiKey.trim()
+        payload.secretKey = secretKey.trim()
+        payload.passphrase = passphrase.trim()
+        await onSave(exchangeId, payload)
       } else if (currentExchangeType === 'hyperliquid') {
         if (!apiKey.trim() || !hyperliquidWalletAddr.trim()) return
-        await onSave(exchangeId, exchangeType, trimmedAccountName, apiKey.trim(), '', '', testnet, hyperliquidWalletAddr.trim())
+        payload.apiKey = apiKey.trim()
+        await onSave(exchangeId, payload)
       } else if (currentExchangeType === 'aster') {
         if (!asterUser.trim() || !asterSigner.trim() || !asterPrivateKey.trim()) return
-        await onSave(exchangeId, exchangeType, trimmedAccountName, '', '', '', testnet, undefined, asterUser.trim(), asterSigner.trim(), asterPrivateKey.trim())
+        await onSave(exchangeId, payload)
       } else if (currentExchangeType === 'lighter') {
         if (!lighterWalletAddr.trim() || !lighterApiKeyPrivateKey.trim()) return
-        await onSave(exchangeId, exchangeType, trimmedAccountName, '', '', '', testnet, undefined, undefined, undefined, undefined, lighterWalletAddr.trim(), '', lighterApiKeyPrivateKey.trim(), lighterApiKeyIndex)
+        await onSave(exchangeId, payload)
       } else {
         if (!apiKey.trim() || !secretKey.trim()) return
-        await onSave(exchangeId, exchangeType, trimmedAccountName, apiKey.trim(), secretKey.trim(), '', testnet)
+        payload.apiKey = apiKey.trim()
+        payload.secretKey = secretKey.trim()
+        await onSave(exchangeId, payload)
       }
     } finally {
       setIsSaving(false)
@@ -468,23 +544,25 @@ export function ExchangeConfigModal({
                     {selectedTemplate.type.toUpperCase()} • {selectedTemplate.exchange_type}
                   </div>
                 </div>
-                <a
-                  href={exchangeRegistrationLinks[currentExchangeType || '']?.url || '#'}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="flex items-center gap-2 px-4 py-2 rounded-lg transition-all hover:scale-105"
-                  style={{ background: 'rgba(240, 185, 11, 0.1)', border: '1px solid rgba(240, 185, 11, 0.3)' }}
-                >
-                  <UserPlus className="w-4 h-4" style={{ color: '#F0B90B' }} />
-                  <span className="text-sm font-medium" style={{ color: '#F0B90B' }}>
-                    {t('exchangeConfig.register', language)}
-                  </span>
-                  {exchangeRegistrationLinks[currentExchangeType || '']?.hasReferral && (
-                    <span className="text-xs px-1.5 py-0.5 rounded" style={{ background: 'rgba(14, 203, 129, 0.2)', color: '#0ECB81' }}>
-                      {t('exchangeConfig.bonus', language)}
+                {!isPaperEnvironment && (
+                  <a
+                    href={exchangeRegistrationLinks[currentExchangeType || '']?.url || '#'}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="flex items-center gap-2 px-4 py-2 rounded-lg transition-all hover:scale-105"
+                    style={{ background: 'rgba(240, 185, 11, 0.1)', border: '1px solid rgba(240, 185, 11, 0.3)' }}
+                  >
+                    <UserPlus className="w-4 h-4" style={{ color: '#F0B90B' }} />
+                    <span className="text-sm font-medium" style={{ color: '#F0B90B' }}>
+                      {t('exchangeConfig.register', language)}
                     </span>
-                  )}
-                </a>
+                    {exchangeRegistrationLinks[currentExchangeType || '']?.hasReferral && (
+                      <span className="text-xs px-1.5 py-0.5 rounded" style={{ background: 'rgba(14, 203, 129, 0.2)', color: '#0ECB81' }}>
+                        {t('exchangeConfig.bonus', language)}
+                      </span>
+                    )}
+                  </a>
+                )}
               </div>
 
               {/* Account Name */}
@@ -504,8 +582,151 @@ export function ExchangeConfigModal({
                 />
               </div>
 
+              <div className="space-y-2">
+                <label className="flex items-center gap-2 text-sm font-semibold" style={{ color: '#EAECEF' }}>
+                  <Shield className="w-4 h-4" style={{ color: '#F0B90B' }} />
+                  {language === 'de' ? 'Umgebung' : language === 'zh' ? '环境' : 'Environment'}
+                </label>
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setExecutionEnvironment('live')}
+                    className="px-3 py-2 rounded-lg text-sm transition-colors"
+                    style={{
+                      background: executionEnvironment === 'live' ? '#F0B90B' : '#0B0E11',
+                      color: executionEnvironment === 'live' ? '#000' : '#EAECEF',
+                      border: executionEnvironment === 'live' ? '1px solid #F0B90B' : '1px solid #2B3139',
+                    }}
+                  >
+                    Live
+                  </button>
+                  {supportsTestnetEnvironment && (
+                    <button
+                      type="button"
+                      onClick={() => setExecutionEnvironment('testnet')}
+                      className="px-3 py-2 rounded-lg text-sm transition-colors"
+                      style={{
+                        background: executionEnvironment === 'testnet' ? '#F0B90B' : '#0B0E11',
+                        color: executionEnvironment === 'testnet' ? '#000' : '#EAECEF',
+                        border: executionEnvironment === 'testnet' ? '1px solid #F0B90B' : '1px solid #2B3139',
+                      }}
+                    >
+                      Testnet
+                    </button>
+                  )}
+                  {supportsPaperEnvironment && (
+                    <button
+                      type="button"
+                      onClick={() => setExecutionEnvironment('paper')}
+                      className="px-3 py-2 rounded-lg text-sm transition-colors"
+                      style={{
+                        background: executionEnvironment === 'paper' ? '#F0B90B' : '#0B0E11',
+                        color: executionEnvironment === 'paper' ? '#000' : '#EAECEF',
+                        border: executionEnvironment === 'paper' ? '1px solid #F0B90B' : '1px solid #2B3139',
+                      }}
+                    >
+                      {language === 'de' ? 'Paper' : language === 'zh' ? '模拟盘' : 'Paper'}
+                    </button>
+                  )}
+                </div>
+                <p className="text-xs" style={{ color: '#848E9C' }}>
+                  {isPaperEnvironment
+                    ? (language === 'de'
+                      ? 'Keine echten Orders. Startkapital, Fees und Slippage kommen aus der lokalen Paper-Konfiguration.'
+                      : language === 'zh'
+                        ? '不会发送真实订单。起始资金、手续费和滑点来自本地模拟配置。'
+                        : 'No real orders will be sent. Start capital, fees, and slippage come from the local paper configuration.')
+                    : executionEnvironment === 'testnet'
+                      ? (language === 'de'
+                        ? 'Testnet nutzt weiterhin echte Testnet-Zugangsdaten der Boerse.'
+                        : language === 'zh'
+                          ? '测试网仍然使用交易所的真实测试网凭证。'
+                          : 'Testnet still uses real exchange testnet credentials.')
+                      : (language === 'de'
+                        ? 'Live nutzt echte Börsen-Credentials und echtes Kapital.'
+                        : language === 'zh'
+                          ? '实盘会使用真实交易所凭证和真实资金。'
+                          : 'Live uses real exchange credentials and real capital.')}
+                </p>
+              </div>
+
+              {isPaperEnvironment && (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 p-4 rounded-xl" style={{ background: '#0B0E11', border: '1px solid #2B3139' }}>
+                  <div className="space-y-2">
+                    <label className="text-sm font-semibold" style={{ color: '#EAECEF' }}>
+                      {language === 'de' ? 'Startkapital' : language === 'zh' ? '初始资金' : 'Start Capital'}
+                    </label>
+                    <input
+                      type="number"
+                      min="0.01"
+                      step="0.01"
+                      value={paperInitialBalance}
+                      onChange={(e) => setPaperInitialBalance(Number(e.target.value))}
+                      className="w-full px-4 py-3 rounded-xl"
+                      style={{ background: '#11151A', border: '1px solid #2B3139', color: '#EAECEF' }}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-sm font-semibold" style={{ color: '#EAECEF' }}>
+                      Asset
+                    </label>
+                    <input
+                      type="text"
+                      value={paperAsset}
+                      onChange={(e) => setPaperAsset(e.target.value.toUpperCase())}
+                      className="w-full px-4 py-3 rounded-xl"
+                      style={{ background: '#11151A', border: '1px solid #2B3139', color: '#EAECEF' }}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-sm font-semibold" style={{ color: '#EAECEF' }}>
+                      {language === 'de' ? 'Fee (bps)' : language === 'zh' ? '手续费 (bps)' : 'Fee (bps)'}
+                    </label>
+                    <input
+                      type="number"
+                      min="0"
+                      step="0.1"
+                      value={paperFeeBps}
+                      onChange={(e) => setPaperFeeBps(Number(e.target.value))}
+                      className="w-full px-4 py-3 rounded-xl"
+                      style={{ background: '#11151A', border: '1px solid #2B3139', color: '#EAECEF' }}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-sm font-semibold" style={{ color: '#EAECEF' }}>
+                      {language === 'de' ? 'Slippage (bps)' : language === 'zh' ? '滑点 (bps)' : 'Slippage (bps)'}
+                    </label>
+                    <input
+                      type="number"
+                      min="0"
+                      step="0.1"
+                      value={paperSlippageBps}
+                      onChange={(e) => setPaperSlippageBps(Number(e.target.value))}
+                      className="w-full px-4 py-3 rounded-xl"
+                      style={{ background: '#11151A', border: '1px solid #2B3139', color: '#EAECEF' }}
+                    />
+                  </div>
+                  <label className="flex items-center gap-3 text-sm" style={{ color: '#EAECEF' }}>
+                    <input
+                      type="checkbox"
+                      checked={paperFundingEnabled}
+                      onChange={(e) => setPaperFundingEnabled(e.target.checked)}
+                    />
+                    {language === 'de' ? 'Funding beruecksichtigen' : language === 'zh' ? '计入 Funding' : 'Include funding'}
+                  </label>
+                  <label className="flex items-center gap-3 text-sm" style={{ color: '#EAECEF' }}>
+                    <input
+                      type="checkbox"
+                      checked={paperLiquidationEnabled}
+                      onChange={(e) => setPaperLiquidationEnabled(e.target.checked)}
+                    />
+                    {language === 'de' ? 'Liquidation simulieren' : language === 'zh' ? '模拟强平' : 'Simulate liquidation'}
+                  </label>
+                </div>
+              )}
+
               {/* CEX Fields */}
-              {(currentExchangeType === 'binance' || currentExchangeType === 'bybit' || currentExchangeType === 'okx' || currentExchangeType === 'bitget' || currentExchangeType === 'gate' || currentExchangeType === 'kucoin' || currentExchangeType === 'indodax') && (
+              {!isPaperEnvironment && (currentExchangeType === 'binance' || currentExchangeType === 'bybit' || currentExchangeType === 'okx' || currentExchangeType === 'bitget' || currentExchangeType === 'gate' || currentExchangeType === 'kucoin' || currentExchangeType === 'indodax') && (
                 <>
                   {currentExchangeType === 'binance' && (
                     <div

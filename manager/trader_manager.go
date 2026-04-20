@@ -694,6 +694,7 @@ func (tm *TraderManager) addTraderFromStore(traderCfg *store.Trader, aiModelCfg 
 		AIModel:               aiModelCfg.Provider,
 		Exchange:              exchangeCfg.ExchangeType, // Exchange type: binance/bybit/okx/etc
 		ExchangeID:            exchangeCfg.ID,           // Exchange account UUID (for multi-account)
+		ExecutionEnvironment:  exchangeCfg.ResolvedExecutionEnvironment(),
 		BinanceAPIKey:         "",
 		BinanceSecretKey:      "",
 		HyperliquidPrivateKey: "",

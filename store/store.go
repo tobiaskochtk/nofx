@@ -22,6 +22,7 @@ type Store struct {
 	user                *UserStore
 	aiModel             *AIModelStore
 	exchange            *ExchangeStore
+	paperWallet         *PaperWalletStore
 	trader              *TraderStore
 	decision            *DecisionStore
 	position            *PositionStore
@@ -146,6 +147,9 @@ func (s *Store) initTables() error {
 	if err := s.Exchange().initTables(); err != nil {
 		return fmt.Errorf("failed to initialize exchange tables: %w", err)
 	}
+	if err := s.PaperWallet().initTables(); err != nil {
+		return fmt.Errorf("failed to initialize paper wallet tables: %w", err)
+	}
 	if err := s.Trader().initTables(); err != nil {
 		return fmt.Errorf("failed to initialize trader tables: %w", err)
 	}
@@ -239,6 +243,16 @@ func (s *Store) Exchange() *ExchangeStore {
 		s.exchange = NewExchangeStore(s.gdb)
 	}
 	return s.exchange
+}
+
+// PaperWallet gets paper wallet storage.
+func (s *Store) PaperWallet() *PaperWalletStore {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.paperWallet == nil {
+		s.paperWallet = NewPaperWalletStore(s.gdb)
+	}
+	return s.paperWallet
 }
 
 // Trader gets trader storage

@@ -21,6 +21,8 @@ type trailingStopPositionState struct {
 	HasActivated     bool
 }
 
+const trailingStopNetProtectionExtraBps = 7.0
+
 func newTrailingStopPositionState() *trailingStopPositionState {
 	return &trailingStopPositionState{HighestTierIndex: -1}
 }
@@ -83,6 +85,7 @@ func (at *AutoTrader) updateTrailingStopsWithPositions(positions []map[string]in
 	if checkTime.IsZero() {
 		checkTime = time.Now().UTC()
 	}
+	checkTime = time.UnixMilli((checkTime.UTC().UnixMilli() / 1000) * 1000).UTC()
 	nowMs := checkTime.UTC().UnixMilli()
 	if nowMs <= 0 {
 		nowMs = time.Now().UTC().UnixMilli()
@@ -159,12 +162,21 @@ func (at *AutoTrader) updateTrailingStopsWithPositions(positions []map[string]in
 			}
 		}
 		targetStopProfitPct := calculateTargetStopProfitPct(activeTier, profitPct)
+		minProtectiveStopProfitPct := at.minimumNetProtectiveStopProfitPct(leverage)
+		if targetStopProfitPct < minProtectiveStopProfitPct {
+			targetStopProfitPct = minProtectiveStopProfitPct
+		}
 		newStopPrice := calculateTrailingStopPrice(side, entryPrice, markPrice, leverage, targetStopProfitPct)
 		if newStopPrice <= 0 {
+			at.saveTrailingStopPositionState(symbol, side, state)
 			continue
 		}
 		unrealizedPnL, unrealizedPnLPct := resolveTrailingUpdateUnrealizedPnL(pos, side, entryPrice, markPrice, quantity)
 		protectsBreakeven := trailingStopProtectsBreakeven(side, entryPrice, newStopPrice)
+		if !protectsBreakeven || !trailingStopProtectsMinNetProfit(side, entryPrice, newStopPrice, leverage, minProtectiveStopProfitPct) {
+			at.saveTrailingStopPositionState(symbol, side, state)
+			continue
+		}
 
 		if at.trailingStopUpdateRequiresTakeProfitRestore() && !state.HasTakeProfit {
 			logger.Warnf("⚠️ Trailing stop skipped for %s %s: exchange %s cannot preserve TP automatically and no TP target is known",
@@ -189,7 +201,7 @@ func (at *AutoTrader) updateTrailingStopsWithPositions(positions []map[string]in
 		state.HasLastStopPrice = true
 		state.HasActivated = true
 		at.saveTrailingStopPositionState(symbol, side, state)
-		at.recordTrailingStopUpdate(symbol, side, previousStopPrice, newStopPrice, state, quantity, entryPrice, markPrice, int(leverage), profitPct, unrealizedPnL, unrealizedPnLPct, targetStopProfitPct, protectsBreakeven, activeTierIndex, activeTier)
+		at.recordTrailingStopUpdate(symbol, side, previousStopPrice, newStopPrice, state, quantity, entryPrice, markPrice, int(leverage), profitPct, unrealizedPnL, unrealizedPnLPct, targetStopProfitPct, protectsBreakeven, activeTierIndex, activeTier, checkTime)
 
 		logger.Infof("🎯 Trailing stop updated: %s %s -> %.8f (profit %.2f%%, tier %.2f%%)",
 			symbol, side, newStopPrice, profitPct, activeTier.TriggerProfitPct)
@@ -225,7 +237,7 @@ func (at *AutoTrader) applyTrailingStopUpdate(symbol, side string, quantity, new
 	return nil
 }
 
-func (at *AutoTrader) recordTrailingStopUpdate(symbol, side string, previousStopPrice, newStopPrice float64, state *trailingStopPositionState, quantity, entryPrice, markPrice float64, leverage int, profitPct, unrealizedPnL, unrealizedPnLPct, stopProfitPct float64, protectsBreakeven bool, tierIndex int, tier store.TrailingStopTier) {
+func (at *AutoTrader) recordTrailingStopUpdate(symbol, side string, previousStopPrice, newStopPrice float64, state *trailingStopPositionState, quantity, entryPrice, markPrice float64, leverage int, profitPct, unrealizedPnL, unrealizedPnLPct, stopProfitPct float64, protectsBreakeven bool, tierIndex int, tier store.TrailingStopTier, checkTime time.Time) {
 	if at == nil || at.store == nil || newStopPrice <= 0 {
 		return
 	}
@@ -236,7 +248,7 @@ func (at *AutoTrader) recordTrailingStopUpdate(symbol, side string, previousStop
 		ExchangeID:           at.exchangeID,
 		Symbol:               symbol,
 		Side:                 side,
-		Timestamp:            time.Now().UTC(),
+		Timestamp:            checkTime.UTC(),
 		PreviousStopPrice:    previousStopPrice,
 		NewStopPrice:         newStopPrice,
 		Quantity:             quantity,
@@ -519,25 +531,57 @@ func calculateTargetStopProfitPct(tier store.TrailingStopTier, profitPct float64
 	}
 }
 
-func calculateTrailingStopPrice(side string, entryPrice, markPrice, leverage, targetStopProfitPct float64) float64 {
+func trailingStopPriceForProfitPct(side string, entryPrice, leverage, targetStopProfitPct float64) float64 {
 	if entryPrice <= 0 || leverage <= 0 {
 		return 0
 	}
-
 	stopProfitRatio := targetStopProfitPct / (leverage * 100)
-	newStopPrice := 0.0
 	if side == "long" {
-		newStopPrice = entryPrice * (1 + stopProfitRatio)
+		return entryPrice * (1 + stopProfitRatio)
+	}
+	return entryPrice * (1 - stopProfitRatio)
+}
+
+func calculateTrailingStopPrice(side string, entryPrice, markPrice, leverage, targetStopProfitPct float64) float64 {
+	newStopPrice := trailingStopPriceForProfitPct(side, entryPrice, leverage, targetStopProfitPct)
+	if newStopPrice <= 0 {
+		return 0
+	}
+	if side == "long" {
 		if markPrice > 0 && newStopPrice >= markPrice {
-			newStopPrice = markPrice * 0.999
+			return 0
 		}
 	} else {
-		newStopPrice = entryPrice * (1 - stopProfitRatio)
 		if markPrice > 0 && newStopPrice <= markPrice {
-			newStopPrice = markPrice * 1.001
+			return 0
 		}
 	}
 	return newStopPrice
+}
+
+func (at *AutoTrader) minimumNetProtectiveStopProfitPct(leverage float64) float64 {
+	if leverage <= 0 {
+		return 0
+	}
+	return (trailingStopEstimatedRoundTripCostBps() * leverage) / 100.0
+}
+
+func trailingStopEstimatedRoundTripCostBps() float64 {
+	return 2*store.DefaultBybitPaperFeeBps + trailingStopNetProtectionExtraBps
+}
+
+func trailingStopProtectsMinNetProfit(side string, entryPrice, stopPrice, leverage, minStopProfitPct float64) bool {
+	if minStopProfitPct <= 0 {
+		return trailingStopProtectsBreakeven(side, entryPrice, stopPrice)
+	}
+	requiredStopPrice := trailingStopPriceForProfitPct(side, entryPrice, leverage, minStopProfitPct)
+	if requiredStopPrice <= 0 {
+		return false
+	}
+	if side == "short" {
+		return stopPrice <= requiredStopPrice
+	}
+	return stopPrice >= requiredStopPrice
 }
 
 func shouldUpdateTrailingStop(side string, newStopPrice, lastStopPrice float64, hasLastStop bool, updateThresholdPct float64) bool {

@@ -8,72 +8,114 @@ import (
 	"nofx/config"
 	"nofx/crypto"
 	"nofx/logger"
+	"nofx/store"
 
 	"github.com/gin-gonic/gin"
 )
 
 type ExchangeConfig struct {
-	ID        string `json:"id"`
-	Name      string `json:"name"`
-	Type      string `json:"type"` // "cex" or "dex"
-	Enabled   bool   `json:"enabled"`
-	APIKey    string `json:"apiKey,omitempty"`
-	SecretKey string `json:"secretKey,omitempty"`
-	Testnet   bool   `json:"testnet,omitempty"`
+	ID                      string  `json:"id"`
+	Name                    string  `json:"name"`
+	Type                    string  `json:"type"` // "cex" or "dex"
+	Enabled                 bool    `json:"enabled"`
+	APIKey                  string  `json:"apiKey,omitempty"`
+	SecretKey               string  `json:"secretKey,omitempty"`
+	Testnet                 bool    `json:"testnet,omitempty"`
+	ExecutionEnvironment    string  `json:"execution_environment,omitempty"`
+	PaperInitialBalance     float64 `json:"paper_initial_balance,omitempty"`
+	PaperAsset              string  `json:"paper_asset,omitempty"`
+	PaperFeeBps             float64 `json:"paper_fee_bps,omitempty"`
+	PaperSlippageBps        float64 `json:"paper_slippage_bps,omitempty"`
+	PaperFundingEnabled     bool    `json:"paper_funding_enabled,omitempty"`
+	PaperLiquidationEnabled bool    `json:"paper_liquidation_enabled,omitempty"`
 }
 
 // SafeExchangeConfig Safe exchange configuration structure (does not contain sensitive information)
 type SafeExchangeConfig struct {
-	ID                    string `json:"id"`            // UUID
-	ExchangeType          string `json:"exchange_type"` // "binance", "bybit", "okx", "hyperliquid", "aster", "lighter"
-	AccountName           string `json:"account_name"`  // User-defined account name
-	Name                  string `json:"name"`          // Display name
-	Type                  string `json:"type"`          // "cex" or "dex"
-	Enabled               bool   `json:"enabled"`
-	Testnet               bool   `json:"testnet,omitempty"`
-	HyperliquidWalletAddr string `json:"hyperliquidWalletAddr"` // Hyperliquid wallet address (not sensitive)
-	AsterUser             string `json:"asterUser"`             // Aster username (not sensitive)
-	AsterSigner           string `json:"asterSigner"`           // Aster signer (not sensitive)
-	LighterWalletAddr     string `json:"lighterWalletAddr"`     // LIGHTER wallet address (not sensitive)
+	ID                      string  `json:"id"`            // UUID
+	ExchangeType            string  `json:"exchange_type"` // "binance", "bybit", "okx", "hyperliquid", "aster", "lighter"
+	AccountName             string  `json:"account_name"`  // User-defined account name
+	Name                    string  `json:"name"`          // Display name
+	Type                    string  `json:"type"`          // "cex" or "dex"
+	Enabled                 bool    `json:"enabled"`
+	Testnet                 bool    `json:"testnet,omitempty"`
+	ExecutionEnvironment    string  `json:"execution_environment,omitempty"`
+	PaperInitialBalance     float64 `json:"paper_initial_balance,omitempty"`
+	PaperAsset              string  `json:"paper_asset,omitempty"`
+	PaperFeeBps             float64 `json:"paper_fee_bps,omitempty"`
+	PaperSlippageBps        float64 `json:"paper_slippage_bps,omitempty"`
+	PaperFundingEnabled     bool    `json:"paper_funding_enabled,omitempty"`
+	PaperLiquidationEnabled bool    `json:"paper_liquidation_enabled,omitempty"`
+	HyperliquidWalletAddr   string  `json:"hyperliquidWalletAddr"` // Hyperliquid wallet address (not sensitive)
+	AsterUser               string  `json:"asterUser"`             // Aster username (not sensitive)
+	AsterSigner             string  `json:"asterSigner"`           // Aster signer (not sensitive)
+	LighterWalletAddr       string  `json:"lighterWalletAddr"`     // LIGHTER wallet address (not sensitive)
 }
 
 type UpdateExchangeConfigRequest struct {
 	Exchanges map[string]struct {
-		Enabled                 bool   `json:"enabled"`
-		APIKey                  string `json:"api_key"`
-		SecretKey               string `json:"secret_key"`
-		Passphrase              string `json:"passphrase"` // OKX specific
-		Testnet                 bool   `json:"testnet"`
-		HyperliquidWalletAddr   string `json:"hyperliquid_wallet_addr"`
-		HyperliquidUnifiedAcct  bool   `json:"hyperliquid_unified_account"` // Unified Account mode
-		AsterUser               string `json:"aster_user"`
-		AsterSigner             string `json:"aster_signer"`
-		AsterPrivateKey         string `json:"aster_private_key"`
-		LighterWalletAddr       string `json:"lighter_wallet_addr"`
-		LighterPrivateKey       string `json:"lighter_private_key"`
-		LighterAPIKeyPrivateKey string `json:"lighter_api_key_private_key"`
-		LighterAPIKeyIndex      int    `json:"lighter_api_key_index"`
+		Enabled                 bool    `json:"enabled"`
+		APIKey                  string  `json:"api_key"`
+		SecretKey               string  `json:"secret_key"`
+		Passphrase              string  `json:"passphrase"` // OKX specific
+		Testnet                 bool    `json:"testnet"`
+		ExecutionEnvironment    string  `json:"execution_environment"`
+		PaperInitialBalance     float64 `json:"paper_initial_balance"`
+		PaperAsset              string  `json:"paper_asset"`
+		PaperFeeBps             float64 `json:"paper_fee_bps"`
+		PaperSlippageBps        float64 `json:"paper_slippage_bps"`
+		PaperFundingEnabled     bool    `json:"paper_funding_enabled"`
+		PaperLiquidationEnabled bool    `json:"paper_liquidation_enabled"`
+		HyperliquidWalletAddr   string  `json:"hyperliquid_wallet_addr"`
+		HyperliquidUnifiedAcct  bool    `json:"hyperliquid_unified_account"` // Unified Account mode
+		AsterUser               string  `json:"aster_user"`
+		AsterSigner             string  `json:"aster_signer"`
+		AsterPrivateKey         string  `json:"aster_private_key"`
+		LighterWalletAddr       string  `json:"lighter_wallet_addr"`
+		LighterPrivateKey       string  `json:"lighter_private_key"`
+		LighterAPIKeyPrivateKey string  `json:"lighter_api_key_private_key"`
+		LighterAPIKeyIndex      int     `json:"lighter_api_key_index"`
 	} `json:"exchanges"`
 }
 
 // CreateExchangeRequest request structure for creating a new exchange account
 type CreateExchangeRequest struct {
-	ExchangeType            string `json:"exchange_type" binding:"required"` // "binance", "bybit", "okx", "hyperliquid", "aster", "lighter"
-	AccountName             string `json:"account_name"`                     // User-defined account name
-	Enabled                 bool   `json:"enabled"`
-	APIKey                  string `json:"api_key"`
-	SecretKey               string `json:"secret_key"`
-	Passphrase              string `json:"passphrase"`
-	Testnet                 bool   `json:"testnet"`
-	HyperliquidWalletAddr   string `json:"hyperliquid_wallet_addr"`
-	HyperliquidUnifiedAcct  bool   `json:"hyperliquid_unified_account"` // Unified Account mode: Spot as Perp collateral
-	AsterUser               string `json:"aster_user"`
-	AsterSigner             string `json:"aster_signer"`
-	AsterPrivateKey         string `json:"aster_private_key"`
-	LighterWalletAddr       string `json:"lighter_wallet_addr"`
-	LighterPrivateKey       string `json:"lighter_private_key"`
-	LighterAPIKeyPrivateKey string `json:"lighter_api_key_private_key"`
-	LighterAPIKeyIndex      int    `json:"lighter_api_key_index"`
+	ExchangeType            string  `json:"exchange_type" binding:"required"` // "binance", "bybit", "okx", "hyperliquid", "aster", "lighter"
+	AccountName             string  `json:"account_name"`                     // User-defined account name
+	Enabled                 bool    `json:"enabled"`
+	APIKey                  string  `json:"api_key"`
+	SecretKey               string  `json:"secret_key"`
+	Passphrase              string  `json:"passphrase"`
+	Testnet                 bool    `json:"testnet"`
+	ExecutionEnvironment    string  `json:"execution_environment"`
+	PaperInitialBalance     float64 `json:"paper_initial_balance"`
+	PaperAsset              string  `json:"paper_asset"`
+	PaperFeeBps             float64 `json:"paper_fee_bps"`
+	PaperSlippageBps        float64 `json:"paper_slippage_bps"`
+	PaperFundingEnabled     bool    `json:"paper_funding_enabled"`
+	PaperLiquidationEnabled bool    `json:"paper_liquidation_enabled"`
+	HyperliquidWalletAddr   string  `json:"hyperliquid_wallet_addr"`
+	HyperliquidUnifiedAcct  bool    `json:"hyperliquid_unified_account"` // Unified Account mode: Spot as Perp collateral
+	AsterUser               string  `json:"aster_user"`
+	AsterSigner             string  `json:"aster_signer"`
+	AsterPrivateKey         string  `json:"aster_private_key"`
+	LighterWalletAddr       string  `json:"lighter_wallet_addr"`
+	LighterPrivateKey       string  `json:"lighter_private_key"`
+	LighterAPIKeyPrivateKey string  `json:"lighter_api_key_private_key"`
+	LighterAPIKeyIndex      int     `json:"lighter_api_key_index"`
+}
+
+func validateExchangeEnvironmentConfig(exchangeType, executionEnvironment string, testnet bool, paperInitialBalance float64) error {
+	normalizedEnvironment := store.NormalizeExecutionEnvironment(executionEnvironment, testnet)
+	if normalizedEnvironment == store.ExecutionEnvironmentPaper {
+		if exchangeType != "bybit" {
+			return fmt.Errorf("paper trading accounts are currently only supported for bybit")
+		}
+		if paperInitialBalance <= 0 {
+			return fmt.Errorf("paper trading accounts require a positive start capital")
+		}
+	}
+	return nil
 }
 
 // handleGetExchangeConfigs Get exchange configurations
@@ -99,17 +141,24 @@ func (s *Server) handleGetExchangeConfigs(c *gin.Context) {
 	safeExchanges := make([]SafeExchangeConfig, len(exchanges))
 	for i, exchange := range exchanges {
 		safeExchanges[i] = SafeExchangeConfig{
-			ID:                    exchange.ID,
-			ExchangeType:          exchange.ExchangeType,
-			AccountName:           exchange.AccountName,
-			Name:                  exchange.Name,
-			Type:                  exchange.Type,
-			Enabled:               exchange.Enabled,
-			Testnet:               exchange.Testnet,
-			HyperliquidWalletAddr: exchange.HyperliquidWalletAddr,
-			AsterUser:             exchange.AsterUser,
-			AsterSigner:           exchange.AsterSigner,
-			LighterWalletAddr:     exchange.LighterWalletAddr,
+			ID:                      exchange.ID,
+			ExchangeType:            exchange.ExchangeType,
+			AccountName:             exchange.AccountName,
+			Name:                    exchange.Name,
+			Type:                    exchange.Type,
+			Enabled:                 exchange.Enabled,
+			Testnet:                 exchange.Testnet,
+			ExecutionEnvironment:    exchange.ResolvedExecutionEnvironment(),
+			PaperInitialBalance:     exchange.PaperInitialBalance,
+			PaperAsset:              exchange.PaperAsset,
+			PaperFeeBps:             exchange.PaperFeeBps,
+			PaperSlippageBps:        exchange.PaperSlippageBps,
+			PaperFundingEnabled:     exchange.PaperFundingEnabled,
+			PaperLiquidationEnabled: exchange.PaperLiquidationEnabled,
+			HyperliquidWalletAddr:   exchange.HyperliquidWalletAddr,
+			AsterUser:               exchange.AsterUser,
+			AsterSigner:             exchange.AsterSigner,
+			LighterWalletAddr:       exchange.LighterWalletAddr,
 		}
 	}
 
@@ -179,13 +228,49 @@ func (s *Server) handleUpdateExchangeConfigs(c *gin.Context) {
 	// Update each exchange's configuration and track traders that need reload
 	tradersToReload := make(map[string]bool)
 	for exchangeID, exchangeData := range req.Exchanges {
+		existingExchange, err := s.store.Exchange().GetByID(userID, exchangeID)
+		if err != nil {
+			SafeInternalError(c, fmt.Sprintf("Get exchange %s", exchangeID), err)
+			return
+		}
+		if err := validateExchangeEnvironmentConfig(existingExchange.ExchangeType, exchangeData.ExecutionEnvironment, exchangeData.Testnet, exchangeData.PaperInitialBalance); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+
 		// Find traders using this exchange BEFORE updating
 		traders, _ := s.store.Trader().ListByExchangeID(userID, exchangeID)
 		for _, t := range traders {
 			tradersToReload[t.ID] = true
 		}
 
-		err := s.store.Exchange().Update(userID, exchangeID, exchangeData.Enabled, exchangeData.APIKey, exchangeData.SecretKey, exchangeData.Passphrase, exchangeData.Testnet, exchangeData.HyperliquidWalletAddr, exchangeData.HyperliquidUnifiedAcct, exchangeData.AsterUser, exchangeData.AsterSigner, exchangeData.AsterPrivateKey, exchangeData.LighterWalletAddr, exchangeData.LighterPrivateKey, exchangeData.LighterAPIKeyPrivateKey, exchangeData.LighterAPIKeyIndex)
+		clearCredentials := store.NormalizeExecutionEnvironment(exchangeData.ExecutionEnvironment, exchangeData.Testnet) == store.ExecutionEnvironmentPaper
+		err = s.store.Exchange().Update(
+			userID,
+			exchangeID,
+			exchangeData.Enabled,
+			exchangeData.APIKey,
+			exchangeData.SecretKey,
+			exchangeData.Passphrase,
+			exchangeData.Testnet,
+			exchangeData.ExecutionEnvironment,
+			exchangeData.PaperInitialBalance,
+			exchangeData.PaperAsset,
+			exchangeData.PaperFeeBps,
+			exchangeData.PaperSlippageBps,
+			exchangeData.PaperFundingEnabled,
+			exchangeData.PaperLiquidationEnabled,
+			clearCredentials,
+			exchangeData.HyperliquidWalletAddr,
+			exchangeData.HyperliquidUnifiedAcct,
+			exchangeData.AsterUser,
+			exchangeData.AsterSigner,
+			exchangeData.AsterPrivateKey,
+			exchangeData.LighterWalletAddr,
+			exchangeData.LighterPrivateKey,
+			exchangeData.LighterAPIKeyPrivateKey,
+			exchangeData.LighterAPIKeyIndex,
+		)
 		if err != nil {
 			SafeInternalError(c, fmt.Sprintf("Update exchange %s", exchangeID), err)
 			return
@@ -271,11 +356,17 @@ func (s *Server) handleCreateExchange(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("Invalid exchange type: %s", req.ExchangeType)})
 		return
 	}
+	if err := validateExchangeEnvironmentConfig(req.ExchangeType, req.ExecutionEnvironment, req.Testnet, req.PaperInitialBalance); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
 
 	// Create new exchange account
 	id, err := s.store.Exchange().Create(
 		userID, req.ExchangeType, req.AccountName, req.Enabled,
-		req.APIKey, req.SecretKey, req.Passphrase, req.Testnet,
+		req.APIKey, req.SecretKey, req.Passphrase, req.Testnet, req.ExecutionEnvironment,
+		req.PaperInitialBalance, req.PaperAsset, req.PaperFeeBps, req.PaperSlippageBps,
+		req.PaperFundingEnabled, req.PaperLiquidationEnabled,
 		req.HyperliquidWalletAddr, req.HyperliquidUnifiedAcct,
 		req.AsterUser, req.AsterSigner, req.AsterPrivateKey,
 		req.LighterWalletAddr, req.LighterPrivateKey, req.LighterAPIKeyPrivateKey, req.LighterAPIKeyIndex,

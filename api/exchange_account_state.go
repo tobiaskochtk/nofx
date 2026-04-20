@@ -37,15 +37,16 @@ const (
 )
 
 type ExchangeAccountState struct {
-	ExchangeID       string    `json:"exchange_id"`
-	Status           string    `json:"status"`
-	DisplayBalance   string    `json:"display_balance,omitempty"`
-	Asset            string    `json:"asset,omitempty"`
-	TotalEquity      float64   `json:"total_equity,omitempty"`
-	AvailableBalance float64   `json:"available_balance,omitempty"`
-	CheckedAt        time.Time `json:"checked_at"`
-	ErrorCode        string    `json:"error_code,omitempty"`
-	ErrorMessage     string    `json:"error_message,omitempty"`
+	ExchangeID           string    `json:"exchange_id"`
+	Status               string    `json:"status"`
+	ExecutionEnvironment string    `json:"execution_environment,omitempty"`
+	DisplayBalance       string    `json:"display_balance,omitempty"`
+	Asset                string    `json:"asset,omitempty"`
+	TotalEquity          float64   `json:"total_equity,omitempty"`
+	AvailableBalance     float64   `json:"available_balance,omitempty"`
+	CheckedAt            time.Time `json:"checked_at"`
+	ErrorCode            string    `json:"error_code,omitempty"`
+	ErrorMessage         string    `json:"error_message,omitempty"`
 }
 
 type cachedExchangeAccountStates struct {
@@ -132,7 +133,7 @@ func (s *Server) getExchangeAccountStates(userID string) (map[string]ExchangeAcc
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			state := probeExchangeAccountState(exchangeCfg, userID)
+			state := probeExchangeAccountState(s.store, exchangeCfg, userID)
 			mu.Lock()
 			states[exchangeCfg.ID] = state
 			mu.Unlock()
@@ -145,17 +146,34 @@ func (s *Server) getExchangeAccountStates(userID string) (map[string]ExchangeAcc
 	return cloneExchangeAccountStates(states), nil
 }
 
-func probeExchangeAccountState(exchangeCfg *store.Exchange, userID string) ExchangeAccountState {
+func probeExchangeAccountState(root *store.Store, exchangeCfg *store.Exchange, userID string) ExchangeAccountState {
 	state := ExchangeAccountState{
-		ExchangeID: exchangeCfg.ID,
-		CheckedAt:  time.Now().UTC(),
-		Asset:      accountAssetForExchange(exchangeCfg.ExchangeType),
+		ExchangeID:           exchangeCfg.ID,
+		CheckedAt:            time.Now().UTC(),
+		ExecutionEnvironment: exchangeCfg.ResolvedExecutionEnvironment(),
+		Asset:                accountAssetForExchangeConfig(exchangeCfg),
 	}
 
 	if !exchangeCfg.Enabled {
 		state.Status = exchangeAccountStatusDisabled
 		state.ErrorCode = "EXCHANGE_DISABLED"
 		state.ErrorMessage = "Exchange account is disabled"
+		return state
+	}
+
+	if exchangeCfg.IsPaper() {
+		wallet, err := root.PaperWallet().EnsureForExchange(exchangeCfg)
+		if err != nil {
+			state.Status = exchangeAccountStatusUnavailable
+			state.ErrorCode = "PAPER_WALLET_UNAVAILABLE"
+			state.ErrorMessage = err.Error()
+			return state
+		}
+		state.Status = exchangeAccountStatusOK
+		state.Asset = wallet.Asset
+		state.TotalEquity = wallet.Equity
+		state.AvailableBalance = wallet.AvailableBalance
+		state.DisplayBalance = formatDisplayBalance(wallet.Equity, state.Asset)
 		return state
 	}
 
@@ -318,7 +336,23 @@ func accountAssetForExchange(exchangeType string) string {
 	}
 }
 
+func accountAssetForExchangeConfig(exchangeCfg *store.Exchange) string {
+	if exchangeCfg != nil && exchangeCfg.IsPaper() {
+		if asset := strings.TrimSpace(exchangeCfg.PaperAsset); asset != "" {
+			return asset
+		}
+	}
+	if exchangeCfg == nil {
+		return ""
+	}
+	return accountAssetForExchange(exchangeCfg.ExchangeType)
+}
+
 func missingExchangeCredentials(exchangeCfg *store.Exchange) (status string, code string, message string, missing bool) {
+	if exchangeCfg != nil && exchangeCfg.IsPaper() {
+		return "", "", "", false
+	}
+
 	switch exchangeCfg.ExchangeType {
 	case "binance", "bybit", "gate", "indodax":
 		if exchangeCfg.APIKey == "" || exchangeCfg.SecretKey == "" {

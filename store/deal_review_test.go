@@ -2720,7 +2720,7 @@ func TestSyncPositionReclassifiesManualExitWhenTriggerOrderArrives(t *testing.T)
 	}
 }
 
-func TestSyncPositionClassifiesGenericTriggerOrderAsTrailingStopWhenStopHasTightened(t *testing.T) {
+func TestSyncPositionClassifiesGenericTriggerOrderAsStopLossWhenNetOutcomeIsNegative(t *testing.T) {
 	sqlDB, err := sql.Open("sqlite", filepath.Join(t.TempDir(), "deal-review-trigger-unknown.db"))
 	if err != nil {
 		t.Fatalf("sql.Open() error = %v", err)
@@ -2846,8 +2846,8 @@ func TestSyncPositionClassifiesGenericTriggerOrderAsTrailingStopWhenStopHasTight
 	if total != 1 || len(items) != 1 {
 		t.Fatalf("total/items = %d/%d, want 1/1", total, len(items))
 	}
-	if items[0].Case.CloseReason != "trailing_stop" {
-		t.Fatalf("close reason = %q, want trailing_stop", items[0].Case.CloseReason)
+	if items[0].Case.CloseReason != "stop_loss" {
+		t.Fatalf("close reason = %q, want stop_loss", items[0].Case.CloseReason)
 	}
 	if items[0].Case.ExitOrigin != DealReviewExitOriginTrailingEngine {
 		t.Fatalf("exit origin = %q, want %q", items[0].Case.ExitOrigin, DealReviewExitOriginTrailingEngine)
@@ -2872,8 +2872,8 @@ func TestSyncPositionClassifiesGenericTriggerOrderAsTrailingStopWhenStopHasTight
 	if err != nil {
 		t.Fatalf("Position().GetByID(refresh) error = %v", err)
 	}
-	if refreshedPosition.CloseReason != "trailing_stop" {
-		t.Fatalf("position close reason = %q, want trailing_stop", refreshedPosition.CloseReason)
+	if refreshedPosition.CloseReason != "stop_loss" {
+		t.Fatalf("position close reason = %q, want stop_loss", refreshedPosition.CloseReason)
 	}
 }
 
@@ -3486,6 +3486,64 @@ func TestSyncPositionClassifiesTrailingStopFromMovedStopOrderWithoutPersistedUpd
 	}
 	if refreshedPosition.CloseReason != "trailing_stop" {
 		t.Fatalf("position close reason = %q, want trailing_stop", refreshedPosition.CloseReason)
+	}
+}
+
+func TestInferCloseReasonFromMovedStopOrderTreatsNegativeNetExitAsStopLoss(t *testing.T) {
+	caseRec := &DealReviewCase{
+		Side:           "LONG",
+		EntryPrice:     100,
+		OpenStopLoss:   96,
+		OpenTakeProfit: 108,
+		RealizedPnLPct: -0.25,
+	}
+	ctx := &dealReviewExitExecutionContext{
+		Order: &TraderOrder{
+			Type:         "Stop",
+			StopPrice:    100.4,
+			AvgFillPrice: 100.35,
+		},
+		Fill: &TraderFill{Price: 100.35},
+	}
+
+	result := inferCloseReasonFromMovedStopOrder(caseRec, ctx, "Stop")
+	if result.Reason != "stop_loss" {
+		t.Fatalf("reason = %q, want stop_loss", result.Reason)
+	}
+	if result.ExitOrigin != DealReviewExitOriginTrailingEngine {
+		t.Fatalf("exit origin = %q, want %q", result.ExitOrigin, DealReviewExitOriginTrailingEngine)
+	}
+	if !strings.Contains(result.ExitEvidenceSummary, "Net realized PnL still finished negative") {
+		t.Fatalf("exit evidence summary = %q, want negative-net note", result.ExitEvidenceSummary)
+	}
+}
+
+func TestInferCloseReasonFromGenericStopOrderTreatsNegativeNetProtectiveFillAsStopLoss(t *testing.T) {
+	caseRec := &DealReviewCase{
+		Side:           "LONG",
+		EntryPrice:     100,
+		OpenStopLoss:   96,
+		OpenTakeProfit: 108,
+		RealizedPnLPct: -0.4,
+	}
+	ctx := &dealReviewExitExecutionContext{
+		Order: &TraderOrder{
+			Type:         "Stop",
+			StopPrice:    100.2,
+			AvgFillPrice: 100.2,
+		},
+		Fill: &TraderFill{Price: 100.2},
+	}
+
+	result := inferCloseReasonFromGenericStopOrder(caseRec, ctx, "Stop")
+	if result.Reason != "stop_loss" {
+		t.Fatalf("reason = %q, want stop_loss", result.Reason)
+	}
+	if result.ExitOrigin != DealReviewExitOriginTrailingEngine {
+		t.Fatalf("exit origin = %q, want %q", result.ExitOrigin, DealReviewExitOriginTrailingEngine)
+	}
+	if !strings.Contains(result.ExitEvidenceSummary, "net realized PnL still finished negative") {
+		t.Fatalf("exit evidence summary = %q, want negative-net note", result.ExitEvidenceSummary)
 	}
 }
 

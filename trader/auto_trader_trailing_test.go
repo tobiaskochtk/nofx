@@ -145,7 +145,7 @@ func TestUpdateTrailingStopsShortMovesStopLossUsingStrategyTiers(t *testing.T) {
 		t.Fatalf("SetTakeProfit calls = %d, want 0 on binance-style exchanges", mockTrader.takeProfitCalls)
 	}
 
-	wantStop := 99.92
+	wantStop := 99.82
 	if math.Abs(mockTrader.lastStopLossPrice-wantStop) > 0.000001 {
 		t.Fatalf("new stop loss = %.8f, want %.8f", mockTrader.lastStopLossPrice, wantStop)
 	}
@@ -380,6 +380,102 @@ func TestUpdateTrailingStopsIgnoresFirstUpdateGuardsAfterActivation(t *testing.T
 	}
 }
 
+func TestUpdateTrailingStopsSkipsFirstActivationWhenNetProtectiveFloorCannotBePlaced(t *testing.T) {
+	strategyConfig := store.GetDefaultStrategyConfig("en")
+	strategyConfig.RiskControl.TrailingStop.Enabled = true
+	strategyConfig.RiskControl.TrailingStop.UpdateThresholdPct = 0.05
+	strategyConfig.RiskControl.TrailingStop.Tiers = []store.TrailingStopTier{
+		{
+			TriggerProfitPct: 0.5,
+			Mode:             store.TrailingStopModeLockProfit,
+			LockProfitPct:    0.2,
+		},
+	}
+
+	mockTrader := &mockTrailingTrader{
+		positions: []map[string]interface{}{
+			{
+				"symbol":      "ALPHAUSDT",
+				"side":        "long",
+				"entryPrice":  100.0,
+				"markPrice":   100.1,
+				"positionAmt": 1.0,
+				"leverage":    5.0,
+			},
+		},
+	}
+
+	at := &AutoTrader{
+		exchange:            "bybit",
+		config:              AutoTraderConfig{StrategyConfig: &strategyConfig},
+		trader:              mockTrader,
+		trailingStopState:   make(map[string]*trailingStopPositionState),
+		trailingStopStateMu: sync.RWMutex{},
+	}
+	at.seedTrailingStopState("ALPHAUSDT", "long", 96.0, 110.0)
+
+	at.updateTrailingStops()
+
+	if mockTrader.stopLossCalls != 0 {
+		t.Fatalf("SetStopLoss calls = %d, want 0 when mark price cannot support the net-protective floor", mockTrader.stopLossCalls)
+	}
+	state, ok := at.getTrailingStopPositionState("ALPHAUSDT", "long")
+	if !ok || state == nil {
+		t.Fatal("expected trailing stop state to be present")
+	}
+	if state.HasActivated {
+		t.Fatal("expected trailing stop to remain inactive when the net-protective floor cannot be placed")
+	}
+}
+
+func TestUpdateTrailingStopsSkipsLateLossSideFirstActivationAfterTierWasReached(t *testing.T) {
+	strategyConfig := store.GetDefaultStrategyConfig("en")
+	strategyConfig.RiskControl.TrailingStop.Enabled = true
+	strategyConfig.RiskControl.TrailingStop.UpdateThresholdPct = 0.05
+	strategyConfig.RiskControl.TrailingStop.Tiers = []store.TrailingStopTier{
+		{
+			TriggerProfitPct: 0.5,
+			Mode:             store.TrailingStopModeLockProfit,
+			LockProfitPct:    0.2,
+		},
+	}
+
+	mockTrader := &mockTrailingTrader{
+		positions: []map[string]interface{}{
+			{
+				"symbol":      "BETAUSDT",
+				"side":        "long",
+				"entryPrice":  100.0,
+				"markPrice":   99.8,
+				"positionAmt": 1.0,
+				"leverage":    5.0,
+			},
+		},
+	}
+
+	at := &AutoTrader{
+		exchange:            "bybit",
+		config:              AutoTraderConfig{StrategyConfig: &strategyConfig},
+		trader:              mockTrader,
+		trailingStopState:   make(map[string]*trailingStopPositionState),
+		trailingStopStateMu: sync.RWMutex{},
+	}
+	at.saveTrailingStopPositionState("BETAUSDT", "long", &trailingStopPositionState{
+		LastStopPrice:    96.0,
+		HasLastStopPrice: true,
+		TakeProfitPrice:  110.0,
+		HasTakeProfit:    true,
+		HighestTierIndex: 0,
+		HasActivated:     false,
+	})
+
+	at.updateTrailingStops()
+
+	if mockTrader.stopLossCalls != 0 {
+		t.Fatalf("SetStopLoss calls = %d, want 0 when a stale tier would only allow a loss-side first tighten", mockTrader.stopLossCalls)
+	}
+}
+
 func TestUpdateTrailingStopsPersistsDealReviewTrailingUpdate(t *testing.T) {
 	sqlDB, err := sql.Open("sqlite", filepath.Join(t.TempDir(), "trailing-deal-review.db"))
 	if err != nil {
@@ -502,8 +598,8 @@ func TestUpdateTrailingStopsPersistsDealReviewTrailingUpdate(t *testing.T) {
 	if updates[0].PreviousStopPrice != 102.0 {
 		t.Fatalf("previous_stop_price = %.2f, want 102.00", updates[0].PreviousStopPrice)
 	}
-	if math.Abs(updates[0].NewStopPrice-99.92) > 0.000001 {
-		t.Fatalf("new_stop_price = %.8f, want 99.92000000", updates[0].NewStopPrice)
+	if math.Abs(updates[0].NewStopPrice-99.82) > 0.000001 {
+		t.Fatalf("new_stop_price = %.8f, want 99.82000000", updates[0].NewStopPrice)
 	}
 	if updates[0].TrailingMode != store.TrailingStopModeLockProfit {
 		t.Fatalf("trailing_mode = %q, want %q", updates[0].TrailingMode, store.TrailingStopModeLockProfit)
@@ -514,8 +610,8 @@ func TestUpdateTrailingStopsPersistsDealReviewTrailingUpdate(t *testing.T) {
 	if updates[0].UnrealizedPnLPct != 2.0 {
 		t.Fatalf("unrealized_pnl_pct = %.2f, want 2.00", updates[0].UnrealizedPnLPct)
 	}
-	if updates[0].StopProfitPct != 0.4 {
-		t.Fatalf("stop_profit_pct = %.2f, want 0.40", updates[0].StopProfitPct)
+	if updates[0].StopProfitPct != 0.9 {
+		t.Fatalf("stop_profit_pct = %.2f, want 0.90", updates[0].StopProfitPct)
 	}
 	if !updates[0].ProtectsBreakeven {
 		t.Fatal("expected trailing update to protect breakeven for the tightened short stop")
@@ -666,7 +762,10 @@ func TestCaptureDealReviewPricePointsAlsoEvaluatesTrailingStops(t *testing.T) {
 	if updates[0].PreviousStopPrice != 0 {
 		t.Fatalf("previous_stop_price = %.2f, want 0.00 for a sync-style open case without stored SL/TP", updates[0].PreviousStopPrice)
 	}
-	if math.Abs(updates[0].NewStopPrice-100.08) > 0.000001 {
-		t.Fatalf("new_stop_price = %.8f, want 100.08000000", updates[0].NewStopPrice)
+	if math.Abs(updates[0].NewStopPrice-100.18) > 0.000001 {
+		t.Fatalf("new_stop_price = %.8f, want 100.18000000", updates[0].NewStopPrice)
+	}
+	if updates[0].TimestampMs != marketPoints[0].TimestampMs {
+		t.Fatalf("trailing update timestamp = %d, want same snapshot timestamp as market point %d", updates[0].TimestampMs, marketPoints[0].TimestampMs)
 	}
 }

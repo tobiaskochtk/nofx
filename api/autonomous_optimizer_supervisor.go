@@ -132,6 +132,7 @@ type autonomousOptimizerTrailingStopUpdateAuditItem struct {
 	Side                      string  `json:"side,omitempty"`
 	CloseReason               string  `json:"close_reason,omitempty"`
 	UpdateSource              string  `json:"update_source,omitempty"`
+	TriggerSource             string  `json:"trigger_source,omitempty"`
 	TrailingMode              string  `json:"trailing_mode,omitempty"`
 	UpdateTimeMs              int64   `json:"update_time_ms,omitempty"`
 	MinutesToFirstUpdate      float64 `json:"minutes_to_first_update,omitempty"`
@@ -141,6 +142,7 @@ type autonomousOptimizerTrailingStopUpdateAuditItem struct {
 	PreUpdateProfitBand       string  `json:"pre_update_profit_band,omitempty"`
 	StopProfitPct             float64 `json:"stop_profit_pct,omitempty"`
 	ProtectsBreakeven         bool    `json:"protects_breakeven,omitempty"`
+	LossSideOfEntry           bool    `json:"loss_side_of_entry,omitempty"`
 	EntryProtectionState      string  `json:"entry_protection_state,omitempty"`
 	ExitWithinOneCycle        bool    `json:"exit_within_one_cycle,omitempty"`
 	RealizedPnLPct            float64 `json:"realized_pnl_pct,omitempty"`
